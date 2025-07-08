@@ -1,0 +1,10 @@
+<Project>
+	<Import Project="../Directory.Build.Props"/>
+	<PropertyGroup>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>annotations</Nullable>
+		<PublishAot>true</PublishAot>
+
+		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+	</PropertyGroup>
+</Project>
