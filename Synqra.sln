@@ -27,6 +27,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Storage.Mongo", "Syn
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Storage.EfSqlite", "Synqra.Storage.EfSqlite\Synqra.Storage.EfSqlite.csproj", "{E427D7EE-11FA-490B-B8AB-79E49BC5F6D5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Store.InMemory", "Synqra.Store.InMemory\Synqra.Store.InMemory.csproj", "{58DCD1FC-CCB1-4EB4-9790-F0CE6B622D03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Store.Mongo", "Synqra.Store.Mongo\Synqra.Store.Mongo.csproj", "{D37BB66E-80A6-468C-8F53-5DAF86108391}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.CodeGeneration", "Synqra.CodeGeneration\Synqra.CodeGeneration.csproj", "{BCCE03CF-C78F-4A80-909C-475BE3F6FE15}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +63,18 @@ Global
 		{E427D7EE-11FA-490B-B8AB-79E49BC5F6D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E427D7EE-11FA-490B-B8AB-79E49BC5F6D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E427D7EE-11FA-490B-B8AB-79E49BC5F6D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{58DCD1FC-CCB1-4EB4-9790-F0CE6B622D03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{58DCD1FC-CCB1-4EB4-9790-F0CE6B622D03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{58DCD1FC-CCB1-4EB4-9790-F0CE6B622D03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{58DCD1FC-CCB1-4EB4-9790-F0CE6B622D03}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D37BB66E-80A6-468C-8F53-5DAF86108391}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D37BB66E-80A6-468C-8F53-5DAF86108391}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D37BB66E-80A6-468C-8F53-5DAF86108391}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D37BB66E-80A6-468C-8F53-5DAF86108391}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BCCE03CF-C78F-4A80-909C-475BE3F6FE15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BCCE03CF-C78F-4A80-909C-475BE3F6FE15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BCCE03CF-C78F-4A80-909C-475BE3F6FE15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BCCE03CF-C78F-4A80-909C-475BE3F6FE15}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -3,5 +3,7 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<NoWarn>$(NoWarn);1998</NoWarn> <!-- no await in async -->
+		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+		<LangVersion>latest</LangVersion>
 	</PropertyGroup>
 </Project>

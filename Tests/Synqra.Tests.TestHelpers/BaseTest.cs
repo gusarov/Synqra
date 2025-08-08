@@ -6,7 +6,7 @@ using Microsoft.Extensions.Hosting.Internal;
 
 namespace Synqra.Tests.TestHelpers;
 
-public abstract class BaseTest
+public abstract class BaseTest : PerformanceTestUtils
 {
 	public IServiceCollection ServiceCollection => HostBuilder.Services;
 
@@ -21,8 +21,8 @@ public abstract class BaseTest
 		{
 			if (_hostBuilder is null)
 			{
-				Console.Write("AppContext.BaseDirectory = ");
-				Console.WriteLine(AppContext.BaseDirectory);
+				// Console.Write("AppContext.BaseDirectory = ");
+				// Console.WriteLine(AppContext.BaseDirectory);
 				_hostBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 				{
 					ContentRootPath = AppContext.BaseDirectory,

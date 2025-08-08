@@ -1,0 +1,326 @@
+﻿using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Synqra;
+
+/// <summary>
+/// StoreContext is a replayer, it is StateProcessor that also holds all processed objects in memory and reacts on any new events.
+/// It can be used to replay events from scratch
+/// It can also be treated like EF DataContext
+/// </summary>
+class StoreContext : IStoreContext, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+{
+	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
+	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
+
+	internal Dictionary<Type, IStoreCollectionInternal> _collections = new();
+
+	public StoreContext(JsonSerializerContext jsonSerializerContext, IStorage storage)
+	{
+		_jsonSerializerContext = jsonSerializerContext;
+		_storage = storage;
+		foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x=>x.AttributeType == typeof(JsonSerializableAttribute)))
+		{
+			var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
+			GetTypeMetadata(type);
+		}
+	}
+
+	public IStoreCollection Get(Type type)
+	{
+		return GetInternal(type);
+	}
+
+	internal IStoreCollectionInternal GetInternal(Type type)
+	{
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, type, out var exists);
+		if (!exists)
+		{
+			var gtype = typeof(StoreCollection<>).MakeGenericType(type);
+			slot = Activator.CreateInstance(gtype, [this, _jsonSerializerContext]) as IStoreCollectionInternal;
+		}
+		return slot;
+	}
+
+	public IStoreCollection<T> Get<T>() where T : class
+	{
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, typeof(T), out var exists);
+		if (!exists)
+		{
+			slot = new StoreCollection<T>(this, _jsonSerializerContext);
+		}
+		return (IStoreCollection<T>)slot;
+	}
+
+	public Task SubmitCommandAsync(Command newCommand)
+	{
+		return ProcessCommandAsync(newCommand);
+	}
+
+	public void SubmitCommand(Command newCommand)
+	{
+		ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
+	}
+
+	/// <summary>
+	/// Process and apply it locally
+	/// </summary>
+	private async Task ProcessCommandAsync(Command newCommand)
+	{
+		var commandHandlingContext = new CommandHandlerContext();
+		await newCommand.AcceptAsync(this, commandHandlingContext);
+		foreach (var @event in commandHandlingContext.Events)
+		{
+			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
+			await _storage.AppendAsync(@event); // store event in storage
+		}
+	}
+
+	/// <summary>
+	/// Process and apply it locally
+	/// </summary>
+	private async Task ProcessEventAsync(Event newEvent)
+	{
+		await newEvent.AcceptAsync(this, null);
+	}
+
+	Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
+	Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
+	internal readonly JsonSerializerContext _jsonSerializerContext;
+	private readonly IStorage _storage;
+
+	internal TypeMetadata GetTypeMetadata(Type type)
+	{
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
+		if (!exists)
+		{
+			slot = new TypeMetadata
+			{
+				Type = type,
+				TypeId = GuidExtensions.CreateVersion5(type.FullName),
+			};
+			_typeMetadataByTypeId[slot.TypeId] = slot;
+		}
+		return slot;
+	}
+
+	internal TypeMetadata GetTypeMetadata(Guid typeId)
+	{
+		if (typeId == default)
+		{
+			throw new ArgumentException("typeId is empty", nameof(typeId));
+		}
+		if (_typeMetadataByTypeId.TryGetValue(typeId, out var metadata))
+		{
+			return metadata;
+		}
+		throw new Exception("Type id is unknown");
+	}
+
+	#region Command Handler
+
+	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
+	{
+		return Task.CompletedTask;
+	}
+
+	public Task AfterVisitAsync(Command cmd, CommandHandlerContext ctx)
+	{
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(CreateObjectCommand cmd, CommandHandlerContext ctx)
+	{
+		var type = GetTypeMetadata(cmd.TargetTypeId);
+		if (type is null)
+		{
+			throw new Exception("Unknown TypeId");
+		}
+
+		// ParentId is allowed for PostObject as speciaCase but is not allowed for ObjectCreated
+		/*
+		Id parentId = default;
+		if (typeof(IHierarchy).IsAssignableFrom(type) || typeof(IMHierarchy).IsAssignableFrom(type)) // even though NH does not have field 'parentId' we can use same convention to allow specify first parent
+		{
+			var parentIdKey = nameof(IHierarchy.ParentId).ToCamel();
+			if (data.TryGetValue(parentIdKey, out var parentIdValue))
+			{
+				parentId = parentIdValue is null ? default : Convert.ToString(parentIdValue).ToId();
+				data.Remove(parentIdKey);
+			}
+		}
+		*/
+
+		var created = new ObjectCreatedEvent
+		{
+			EventId = Guid.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+			Data = cmd.Data,
+			DataString	= cmd.DataJson, // if json is cached here, let's use it to save on serialization
+			DataObject = cmd.DataObject, // or may be entire object
+		};
+		ctx.Events.Add(created);
+		/*
+		foreach (var kvp in data)
+		{
+			ctx.Events.Add(new ObjectPropertyChangedEvent
+			{
+				
+			});
+		}
+		*/
+		/*
+		if (parentId != default)
+		{
+			ctx.Events.Add(new NodeMoved
+			{
+				Discriminator = cmd.Discriminator,
+				UserId = cmd.UserId,
+				TargetId = cmd.TargetId,
+				NewValue = parentId,
+			});
+		}
+		*/
+
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(DeleteObjectCommand cmd, CommandHandlerContext ctx)
+	{
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx)
+	{
+		var created = new ObjectPropertyChangedEvent
+		{
+			EventId = Guid.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+
+			PropertyName = cmd.PropertyName,
+			OldValue = cmd.OldValue,
+			NewValue = cmd.NewValue,
+
+			// Data = cmd.Data,
+			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
+			// DataObject = cmd.DataObject, // or may be entire object
+		};
+		ctx.Events.Add(created);
+
+		return Task.CompletedTask;
+	}
+
+	#endregion
+
+	#region Event Handler
+
+	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx)
+	{
+		if (ev.EventId == default)
+		{
+			throw new Exception("Event id is not set");
+		}
+		if (ev is SingleObjectEvent sev)
+		{
+			if (sev.TargetTypeId == default)
+			{
+				throw new Exception("TargetTypeId is not set");
+			}
+			if (sev.TargetId == default)
+			{
+				throw new Exception("TargetId is not set");
+			}
+		}
+		return Task.CompletedTask;
+	}
+
+	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx)
+	{
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
+	{
+		var typeMetadata = GetTypeMetadata(ev.TargetTypeId);
+		var collection = GetInternal(GetTypeMetadata(ev.TargetTypeId).Type);
+
+		object newItem;
+		if (ev.DataObject != null)
+		{
+			newItem = ev.DataObject;
+		}
+		else if (collection.TryGetAttached(ev.TargetId, out var attached))
+		{
+			newItem = attached;
+		}
+		else if (ev.DataString != null)
+		{
+			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerContext.Options);
+		}
+		else if (ev.Data != null)
+		{
+			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerContext.Options), typeMetadata.Type, _jsonSerializerContext.Options);
+		}
+		else
+		{
+			newItem = Activator.CreateInstance(typeMetadata.Type);
+		}
+		collection.AddByEvent(newItem);
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
+	{
+		try
+		{
+			var tm = GetTypeMetadata(ev.TargetTypeId);
+			var col = GetInternal(tm.Type);
+			var so = new JsonSerializerOptions(_jsonSerializerContext.Options);
+			var ti = so.GetTypeInfo(tm.Type);
+
+#if DEBUG
+			var so2 = new JsonSerializerOptions(_jsonSerializerContext.Options);
+			var ti2 = so.GetTypeInfo(tm.Type);
+			if (ReferenceEquals(ti2, ti))
+			{
+				throw new Exception($"Can't get isolated type info");
+			}
+#endif
+
+			col.TryGetAttached(ev.TargetId, out var attached);
+			if (!ReferenceEquals(attached, null))
+			{
+				ti.CreateObject = () => attached;
+			}
+			IDictionary<string, object> dic = new Dictionary<string, object>
+			{
+				[ev.PropertyName] = ev.NewValue,
+			};
+			var json = JsonSerializer.Serialize(dic, _jsonSerializerContext.Options);
+			var patched = JsonSerializer.Deserialize(json, ti);
+			if (!ReferenceEquals(attached, null))
+			{
+				if (!ReferenceEquals(patched, attached))
+				{
+					throw new Exception("Failed to patch existing object");
+				}
+			}
+			return Task.CompletedTask;
+		}
+		catch (Exception ex)
+		{
+			throw;
+			return Task.CompletedTask;
+		}
+	}
+
+	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
+	{
+		throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
+	}
+
+	#endregion
+}

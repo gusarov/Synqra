@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Synqra.Tests.DemoTodo;
 using Synqra.Tests.TestHelpers;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -18,23 +19,69 @@ public class SerializationTests
 		{
 			Subject = subject,
 		};
-		var json = JsonSerializer.Serialize(obj, DemoTodoJsonSerializerContext.Default.TodoTask);
-		var deserializedObj = JsonSerializer.Deserialize(json, DemoTodoJsonSerializerContext.Default.TodoTask);
+		var jsonOptions = new JsonSerializerOptions(TestJsonSerializerContext.Default.Options)
+		{
+			IndentCharacter = '\t',
+			IndentSize = 1,
+			WriteIndented = true,
+		};
+		var json = JsonSerializer.Serialize(obj, jsonOptions);
+		await Assert.That(json).IsEqualTo($$"""
+{
+	"subject": "{{subject}}"
+}
+""");
+		var deserializedObj = JsonSerializer.Deserialize(json, TestJsonSerializerContext.Default.TodoTask);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
 }
 
-public class StateManagementTests : BaseTest
+public class AotTests
 {
+	/*
 	[Test]
-	public async Task Should_reflect_store_state_by_events()
+	public async Task Should_aot1()
 	{
 		// ServiceCollection.AddSingleton<IEventStore, FakeStorage>();
-
-
-		Assert.Fail("Inconclusive test, needs to be implemented");
+		Console.WriteLine();
+		GetType().GetMethod(nameof(Should_)).Invoke(this, []);
 	}
+
+	[Test]
+	public async Task Should_()
+	{
+		throw new Exception("Success");
+		Assert.Fail("Success");
+	}
+	*/
+
+	[Test]
+	public async Task Should_aot2()
+	{
+		await Assert.That(RuntimeFeature.IsDynamicCodeSupported).IsFalse();
+	}
+
+	/*
+	[Test]
+	public async Task Should_aot3()
+	{
+		var ex = await Assert.ThrowsAsync(async () => System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(new System.Reflection.AssemblyName("TestAssembly"), System.Reflection.Emit.AssemblyBuilderAccess.Run));
+		await Assert.That(ex).IsTypeOf<PlatformNotSupportedException>();
+	}
+
+	[Test]
+	public async Task Should_aot4()
+	{
+		var r = System.Reflection.Assembly.LoadFile(Path.GetFullPath("Synqra.Storage.Jsonl.dll"));
+	}
+	*/
+}
+
+public record Person(string Name, int Age, int Height)
+{
+	public string Name { get; set; } = Name;
+	public int Age { get; init; } = Age;
 }
 
 public class BaseTestTests : BaseTest

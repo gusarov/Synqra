@@ -14,8 +14,30 @@ public class TodoTask
 	public string Subject { get; set; }
 }
 
+[JsonSourceGenerationOptions(
+	PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+#if DEBUG
+	WriteIndented = true,
+#endif
+	GenerationMode = JsonSourceGenerationMode.Default,
+	DefaultBufferSize = 16384,
+	IgnoreReadOnlyFields = false,
+	IgnoreReadOnlyProperties = false,
+	IncludeFields = false,
+	AllowTrailingCommas = true,
+	ReadCommentHandling = JsonCommentHandling.Skip,
+	DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
+)]
+[JsonSerializable(typeof(DemoObject))]
 [JsonSerializable(typeof(TodoTask))]
-public partial class DemoTodoJsonSerializerContext : JsonSerializerContext
+[JsonSerializable(typeof(TestItem))]
+[JsonSerializable(typeof(MyTask))]
+[JsonSerializable(typeof(Dictionary<string, object?>))]
+[JsonSerializable(typeof(IDictionary<string, object?>))]
+[JsonSerializable(typeof(JsonElement))]
+// [JsonSerializable(typeof(Command))]
+// [JsonSerializable(typeof(Event))]
+public partial class TestJsonSerializerContext : JsonSerializerContext
 {
 	/*
 	public static JsonSerializerOptions Options = new JsonSerializerOptions
