@@ -9,7 +9,7 @@ using TUnit.Assertions.AssertConditions.Operators;
 
 namespace Synqra.Tests.BindingPerformance;
 
-partial class SamplePublicModel : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
+partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
 	public partial string TestProperty { get; set; }
 
@@ -23,12 +23,18 @@ partial class SamplePublicModel : INotifyPropertyChanging, INotifyPropertyChange
 	partial void OnTestPropertyChanged(string newValue);
 	partial void OnTestPropertyChanged(string oldValue, string newValue);
 
+	ISynqraStoreContext IBindableModel.Store
+	{
+		get => field;
+		set => field = value;
+	}
+
 	void IBindableModel.Set(string propertyName, object? value)
 	{
 		switch (propertyName)
 		{
-			case nameof(Name):
-				Name = value as string;
+			case nameof(TestProperty):
+				TestProperty = value as string;
 				break;
 		}
 	}
@@ -61,9 +67,6 @@ partial class SamplePublicModel : INotifyPropertyChanging, INotifyPropertyChange
 
 	public void CustomCommand1_Reset()
 	{
-		this.Name = "Value 0";
-		this.Property2 = "Value 0";
-		this.Property3 = "Value 0";
 		this.TestProperty = "Value 0";
 	}
 }

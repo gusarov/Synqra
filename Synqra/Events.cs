@@ -71,7 +71,7 @@ public class ObjectCreatedEvent : SingleObjectEvent
 
 public class ObjectPropertyChangedEvent : SingleObjectEvent
 {
-	public string PropertyName { get; set; }
+	public required string PropertyName { get; init; }
 	public object? OldValue { get; set; }
 	public object? NewValue { get; set; }
 

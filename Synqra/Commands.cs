@@ -55,7 +55,7 @@ public class DeleteObjectCommand : Command
 
 public class ChangeObjectPropertyCommand : SingleObjectCommand
 {
-	public string PropertyName { get; set; }
+	public required string PropertyName { get; init; }
 
 	public object? OldValue { get; set; }
 
@@ -63,4 +63,3 @@ public class ChangeObjectPropertyCommand : SingleObjectCommand
 
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }
-

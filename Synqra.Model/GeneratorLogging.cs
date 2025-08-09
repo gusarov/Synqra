@@ -17,6 +17,10 @@ public class GeneratorLogging
 	public static void SetLogFilePath(string path)
 	{
 		_logFilePath = path;
+		if (File.Exists(_logFilePath))
+		{
+			File.Delete(_logFilePath);
+		}
 	}
 
 	public static LoggingLevel GetLoggingLevel()

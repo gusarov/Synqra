@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Synqra.Tests" />
+    <InternalsVisibleTo Include="Synqra.CodeGeneration" />
   </ItemGroup>
 
   <Target Name="Test_TFM" AfterTargets="CoreCompile">

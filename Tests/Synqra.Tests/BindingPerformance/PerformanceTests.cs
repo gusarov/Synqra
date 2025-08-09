@@ -28,7 +28,7 @@ public partial class SamplePublicModel
 	public partial string Property3 { get; set; }
 }
 
-public partial class CommunityMVVMModel : ObservableObject
+public partial class CommunityMVVMTest : ObservableObject
 {
 	[ObservableProperty]
 	string _roperty2;
@@ -44,10 +44,12 @@ public partial class CommunityMVVMModel : ObservableObject
 
 public class PerformanceTests : BaseTest
 {
+	/*
 	private partial class SamplePrivateModel
 	{
 		public string Name { get; set; }
 	}
+	*/
 
 	[Test]
 	public async Task Should_Bind_01_BR_RSet_property()
@@ -103,7 +105,7 @@ public class PerformanceTests : BaseTest
 	[Test]
 	public async Task Should_Bind_01_BR_RSet_quickly()
 	{
-		var model = new SamplePrivateModel();
+		var model = new SamplePublicModel();
 		model.RSetReflection("Name", "abc");
 		await Assert.That(model.Name).IsEqualTo("abc");
 
@@ -312,7 +314,7 @@ public class PerformanceTests : BaseTest
 	[Test]
 	public async Task Should_00_allow_set_model_properties()
 	{
-		var model = new SamplePrivateModel
+		var model = new SamplePublicModel
 		{
 			Name = "Test Model",
 		};

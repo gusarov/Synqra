@@ -6,6 +6,8 @@
 		
 		<NoWarn>$(NoWarn);1998</NoWarn> <!-- no await in async -->
 		<NoWarn>$(NoWarn);IL2026;IL3050;</NoWarn> <!-- STJ Gen -->
+
+		<WarningsAsErrors>$(WarningsAsErrors);8785</WarningsAsErrors> <!-- generator failed -->
 		
 		<EnableMicrosoftExtensionsConfigurationBinderSourceGenerator>true</EnableMicrosoftExtensionsConfigurationBinderSourceGenerator> <!-- Preview 3 -->
 		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->

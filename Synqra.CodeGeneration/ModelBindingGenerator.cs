@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Synqra.Model;
+using System.ComponentModel;
 using System.Text;
 
 namespace Synqra.CodeGeneration;
@@ -9,14 +10,31 @@ namespace Synqra.CodeGeneration;
 [Generator]
 public class ModelBindingGenerator : IIncrementalGenerator
 {
+	public ModelBindingGenerator()
+	{
+#if DEBUG
+		GeneratorLogging.SetLogFilePath($"C:\\Temp\\GenLog.txt");
+#endif
+	}
+
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
 		var calculatorClassesProvider = context.SyntaxProvider.CreateSyntaxProvider(
 		  predicate: (SyntaxNode node, CancellationToken cancelToken) =>
 		  {
 			  //the predicate should be super lightweight to filter out items that are not of interest quickly
-			  return node is ClassDeclarationSyntax classDeclaration && classDeclaration.Identifier.ToString().EndsWith("Model") &&
-					 classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword);
+			  try
+			  {
+				  var exp = node is ClassDeclarationSyntax classDeclaration && classDeclaration.Identifier.ToString().EndsWith("Model") && classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword);
+				  // GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
+
+				  return exp;
+			  }
+			  catch (Exception ex)
+			  {
+				  GeneratorLogging.LogMessage($"[-] {ex}");
+				  throw;
+			  }
 		  },
 		  transform: (GeneratorSyntaxContext ctx, CancellationToken cancelToken) =>
 		  {
@@ -37,9 +55,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	/// <param name="context"></param>
 	public void Execute(ClassDeclarationSyntax calculatorClass, SourceProductionContext context)
 	{
-#if DEBUG
-		GeneratorLogging.SetLogFilePath("C:\\Temp\\GenLog.txt");
-#endif
 		try
 		{
 			var calculatorClassMembers = calculatorClass.Members;
@@ -76,10 +91,14 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			GeneratorLogging.LogMessage($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
-			body.AppendLine($"// Qynqra Model Target: {Synqra.Model.SynqraRuntimeInfo.SynqraModelTarget}");
+			body.AppendLine($"// Synqra Model Target: {Synqra.Model.SynqraModelRuntimeInfo.TargetFramework}");
 			body.AppendLine();
-			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::Synqra.Model.IBindableModel");
+			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::{typeof(IBindableModel).FullName}, global::{typeof(INotifyPropertyChanging).FullName}, global::{typeof(INotifyPropertyChanged).FullName}");
 			body.AppendLine("{");
+			body.AppendLine();
+			body.AppendLine("\tpublic event PropertyChangedEventHandler? PropertyChanged;");
+			body.AppendLine("\tpublic event PropertyChangingEventHandler? PropertyChanging;");
+			body.AppendLine();
 
 			//if the methods do not exist, we will add them
 			if (setMethod is null)
@@ -87,7 +106,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				//when using a raw string the first " is the far left margin in the file
 				//if you want the proper indention on the methods you will want to tab the string content at least once
 				body.AppendLine(
-"""
+$$"""
+	global::{{typeof(ISynqraStoreContext).FullName}} IBindableModel.Store
+	{
+		get => field;
+		set => field = value;
+	}
+
 	void IBindableModel.Set(string name, object? value)
 	{
 		switch (name)
@@ -128,23 +153,12 @@ $$"""
             {
                 On{{pro.Identifier}}Changing(value);
                 On{{pro.Identifier}}Changing(default, value);
-                OnPropertyChanging(new PropertyChanging);
+                // OnPropertyChanging(new PropertyChanging);
                 field = value;
                 OnProperty3Changed(value);
                 OnProperty3Changed(default, value);
-                OnPropertyChanged(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangedArgs.Property3);
+                // OnPropertyChanged(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangedArgs.Property3);
             }
-            if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
-            {
-                OnProperty3Changing(value);
-                OnProperty3Changing(default, value);
-                OnPropertyChanging(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangingArgs.Property3);
-                field = value;
-                OnProperty3Changed(value);
-                OnProperty3Changed(default, value);
-                OnPropertyChanged(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangedArgs.Property3);
-            }
-
 		}
 	}
 """);
@@ -158,7 +172,7 @@ $$"""
 
 			//to write our source file we can use the context object that was passed in
 			//this will automatically use the path we provided in the target projects csproj file
-			context.AddSource("SamplePublicModel.Generated.cs", body.ToString());
+			context.AddSource($"{Path.GetFileNameWithoutExtension(calculatorClass.SyntaxTree.FilePath)}_{calculatorClass.Identifier}.Generated.cs", body.ToString());
 			GeneratorLogging.LogMessage("[+] Added source to context");
 		}
 		catch (Exception e)

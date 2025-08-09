@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Synqra.Model;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,7 +12,7 @@ internal class CheckModelTargets
 	[Test]
 	public async Task CheckModelTargetsAsync()
 	{
-		var actual = SynqraRuntimeInfo.SynqraModelTarget;
+		var actual = SynqraModelRuntimeInfo.TargetFramework;
 		await Assert.That(actual).IsEqualTo("net9.0");
 	}
 }
