@@ -126,7 +126,7 @@ public class GuidExtensionsTests
 
 public class StateManagementTests : BaseTest
 {
-	IStoreContext _sut => ServiceProvider.GetRequiredService<IStoreContext>();
+	ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 	FakeStorage _fakeStorage => ServiceProvider.GetRequiredService<FakeStorage>();
 	IStoreCollection<MyTask> _tasks => _sut.Get<MyTask>();
 
@@ -164,7 +164,7 @@ public class StateManagementTests : BaseTest
 		var bt = new StateManagementTests();
 		bt.ServiceCollection.AddSingleton<FakeStorage>(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<IStoreContext>();
+		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 
 		var tasks = _sut.Get<MyTask>();
 		await Assert.That(tasks).HasCount(1);
@@ -193,7 +193,7 @@ public class StateManagementTests : BaseTest
 		var bt = new StateManagementTests();
 		bt.ServiceCollection.AddSingleton<FakeStorage>(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<IStoreContext>();
+		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 
 		var tasks = _sut.Get<MyTask>();
 		await Assert.That(tasks).HasCount(1);

@@ -9,7 +9,7 @@ namespace Synqra;
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-class StoreContext : IStoreContext, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
@@ -53,7 +53,7 @@ class StoreContext : IStoreContext, ICommandVisitor<CommandHandlerContext>, IEve
 		return (IStoreCollection<T>)slot;
 	}
 
-	public Task SubmitCommandAsync(Command newCommand)
+	public Task SubmitCommandAsync(ISynqraCommand newCommand)
 	{
 		return ProcessCommandAsync(newCommand);
 	}
@@ -66,10 +66,14 @@ class StoreContext : IStoreContext, ICommandVisitor<CommandHandlerContext>, IEve
 	/// <summary>
 	/// Process and apply it locally
 	/// </summary>
-	private async Task ProcessCommandAsync(Command newCommand)
+	private async Task ProcessCommandAsync(ISynqraCommand newCommand)
 	{
 		var commandHandlingContext = new CommandHandlerContext();
-		await newCommand.AcceptAsync(this, commandHandlingContext);
+		if (newCommand is not Command cmd)
+		{
+			throw new Exception("Only internal Syncra.Command can be an implementation of ICommand");
+		}
+		await cmd.AcceptAsync(this, commandHandlingContext);
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?

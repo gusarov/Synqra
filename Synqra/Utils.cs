@@ -15,6 +15,35 @@ internal class GuidExtensions
 	static Encoding _encoding = new UnicodeEncoding(true, false, false);
 	// static SHA1 sha1 = SHA1.Create();
 
+	public static Guid CreateVersion7()
+	{
+#if NET9_0_OR_GREATER
+		return Guid.CreateVersion7();
+#else
+		var g = Guid.NewGuid();
+		/*
+		if ((g.Variant | 0b0111) == 0) // 0 .. 7
+		{
+			// Apollo NCS variant 1980
+		}
+		else if ((g.Variant | 0b1011) == 0b1011) // 8..11 (8,9,a,b)
+		{
+			// OSF DCE RFC 4122 "Leach–Salz" UUIDs
+		}
+		else if ((g.Variant & 0b1101) == 0b1101) // 12..13
+		{
+			// Microsoft Legacy COM
+		}
+		else
+		{
+			throw new Exception($"Unknown variant: {g.Variant}");
+		}
+		g = g.WithVersion(7);
+		*/
+		return g;
+#endif
+	}
+
 	public static unsafe Guid CreateVersion3(string input)
 	{
 		return CreateVersion3(_encoding.GetBytes(input));
@@ -26,6 +55,7 @@ internal class GuidExtensions
 		var hash = md5.ComputeHash(input);
 		hash[8] = (byte)((hash[8] & 0x3F) | 0xA0); // Set Variant to 0b10xx
 		hash[7] = (byte)((hash[7] & 0x0F) | 0x30); // Set version to 3
+#if NET9_0_OR_GREATER
 		var g = new Guid(hash[..16]);
 		if (g.Variant < 8 || g.Variant > 11)
 		{
@@ -37,6 +67,9 @@ internal class GuidExtensions
 			throw new Exception($"vErsion is not set: {g.Version}");
 		}
 		return g;
+#else
+		throw new Exception($"Standard Target Not Supported");
+#endif
 	}
 
 	public static unsafe Guid CreateVersion5(string input)

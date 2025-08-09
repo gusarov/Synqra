@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Synqra;
 
-public abstract class Command
+public abstract class Command : ISynqraCommand
 {
 	public Guid CommandId { get; set; } = Guid.CreateVersion7();
 

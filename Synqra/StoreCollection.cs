@@ -22,7 +22,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	private byte _attachedMaintain;
 	private readonly List<T> _list = new List<T>();
 
-	public IStoreContext Store => _storeContext;
+	ISynqraStoreContext IStoreCollectionInternal.Store => _storeContext;
 	public Type Type => typeof(T);
 
 	public StoreCollection(StoreContext ctx, JsonSerializerContext jsonSerializerContext)
@@ -133,7 +133,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	{
 		var o = ((ICollection)this).Count;
 		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
-		var data = JsonSerializer.Deserialize<Dictionary<string, object>>(dataJson, _jsonSerializerContext.Options);
+		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
 		var targetId = Guid.CreateVersion7(); // This is a new object, so we generate a new object ID
 		lock (_attachedObjects)
 		{

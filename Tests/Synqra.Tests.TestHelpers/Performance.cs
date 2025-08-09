@@ -270,6 +270,7 @@ public class PerformanceTestUtils
 				}
 			}
 
+			/*
 			try
 			{
 				GC.EndNoGCRegion();
@@ -277,6 +278,7 @@ public class PerformanceTestUtils
 			catch (Exception ex)
 			{
 			}
+			*/
 
 			batchIndex++;
 		}

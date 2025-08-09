@@ -1,12 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Data.Common;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -28,48 +26,6 @@ public interface IStorage : IDisposable, IAsyncDisposable
 	Task FlushAsync() => Task.CompletedTask;
 }
 
-public interface IStoreContext
-{
-	IStoreCollection Get(Type type);
-
-	IStoreCollection<T> Get<T>()
-		where T : class
-	{
-		return (IStoreCollection<T>)Get(typeof(T));
-	}
-
-	/// <summary>
-	/// Submit command both locally and to the other participants.
-	/// </summary>
-	Task SubmitCommandAsync(Command newCommand);
-}
-
-public interface IStoreCollection : IList, ICollection//, IQueryable, INotifyCollectionChanged
-{
-}
-
-public interface IStoreCollection<T> : IStoreCollection, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
-	where T : class
-{
-	new T this[int index]
-	{
-		get => ((IReadOnlyList<T>)this)[index];
-		set => throw new NotSupportedException("StoreCollection is read-only, use Add() to add new items");
-	}
-}
-
-public interface IStoreCollectionInternal : IStoreCollection
-{
-	IStoreContext Store { get; }
-
-	Type Type { get; }
-
-	void AddByEvent(object item);
-
-	bool TryGetAttached(Guid id, [NotNullWhen(true)] out object? item);
-	Guid GetId(object item);
-}
-
 class AttachedData
 {
 	public string? TrackingSinceJsonSnapshot { get; set; }
@@ -82,7 +38,7 @@ public static class SynqraExtensions
 	{
 		// builder.Services.AddSingleton<StoreContext>();
 		// builder.Services.AddSingleton<IStoreContext>(sp => sp.GetRequiredService<StoreContext>());
-		builder.Services.AddSingleton<IStoreContext, StoreContext>();
+		builder.Services.AddSingleton<ISynqraStoreContext, StoreContext>();
 		// builder.Services.AddSingleton(typeof(IStoreCollection<>), (sp, s) => sp.GetRequiredService<IStoreContext>().Get<>); // Example storage implementation
 		return builder;
 	}
@@ -204,7 +160,7 @@ public interface ICommandVisitor<T>
 
 	Task VisitAsync(CreateObjectCommand cmd, T ctx);
 	Task VisitAsync(DeleteObjectCommand cmd, T ctx);
-	Task VisitAsync(ChangeObjectPropertyCommand cmd, T? ctx);
+	Task VisitAsync(ChangeObjectPropertyCommand cmd, T ctx);
 
 	/*
 	Task VisitAsync(MoveNode cmd, T ctx);

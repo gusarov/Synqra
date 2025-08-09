@@ -2,19 +2,24 @@
 
   <PropertyGroup>
     <PublishAot>true</PublishAot>
+    <TrimMode>partial</TrimMode>
     <IsAotCompatible>true</IsAotCompatible>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    <ProjectReference Include="..\..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\..\Synqra.Storage.Jsonl\Synqra.Storage.Jsonl.csproj" />
     <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\Synqra.Tests.TestHelpers\Synqra.Tests.TestHelpers.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="TUnit" Version="0.24.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.7" />
   </ItemGroup>
 
 </Project>

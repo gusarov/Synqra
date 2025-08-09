@@ -1,9 +1,17 @@
 <Project>
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
+		<TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+
 		<Nullable>enable</Nullable>
+		
 		<NoWarn>$(NoWarn);1998</NoWarn> <!-- no await in async -->
-		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
-		<LangVersion>latest</LangVersion>
+		<NoWarn>$(NoWarn);IL2026;IL3050;</NoWarn> <!-- STJ Gen -->
+		
+		<EnableMicrosoftExtensionsConfigurationBinderSourceGenerator>true</EnableMicrosoftExtensionsConfigurationBinderSourceGenerator> <!-- Preview 3 -->
+		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->
+		<LangVersion>preview</LangVersion>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+
+		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
 	</PropertyGroup>
 </Project>
