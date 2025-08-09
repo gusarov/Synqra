@@ -123,7 +123,7 @@ $$"""
 					body.AppendLine(
 $$"""
 			case "{{pro.Identifier}}":
-				this.{{pro.Identifier}} = value as string;
+				this.__{{pro.Identifier}} = value as string;
 				break;
 """);
 				}
@@ -139,6 +139,8 @@ $$"""
 			{
 				body.AppendLine(
 $$"""
+	private {{pro.Type}} __{{pro.Identifier}};
+
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} oldValue, {{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changed({{pro.Type}} value);
