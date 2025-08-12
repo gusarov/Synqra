@@ -6,13 +6,15 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
-class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadOnlyList<T>
+class StoreCollection<T> : ISynqraCollection<T>, ISynqraCollectionInternal, IReadOnlyList<T>
 	where T : class
 {
 	// Remember - this is always client request, not a synchronization!
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
 	private readonly StoreContext _storeContext;
 	private readonly JsonSerializerContext _jsonSerializerContext;
+	private readonly Guid _containerId;
+	private readonly Guid _collectionId;
 
 	/// <summary>
 	/// Additional objects that are attached to this collection but not yet added to the list. Eg inserting new item.
@@ -22,14 +24,18 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	private byte _attachedMaintain;
 	private readonly List<T> _list = new List<T>();
 
-	ISynqraStoreContext IStoreCollectionInternal.Store => _storeContext;
+	ISynqraStoreContext ISynqraCollectionInternal.Store => _storeContext;
 	public Type Type => typeof(T);
 
-	public StoreCollection(StoreContext ctx, JsonSerializerContext jsonSerializerContext)
+	public StoreCollection(StoreContext ctx, JsonSerializerContext jsonSerializerContext, Guid containerId, Guid collectionId)
 	{
 		_storeContext = ctx;
-		_jsonSerializerContext = jsonSerializerContext;
+		_jsonSerializerContext = jsonSerializerContext ?? throw new ArgumentNullException(nameof(jsonSerializerContext));
+		_containerId = containerId;
+		_collectionId = collectionId;
 	}
+
+	public Guid ContainerId => _containerId;
 
 	public bool TryGetAttached(Guid id, [NotNullWhen(true)] out object? attached)
 	{
@@ -70,6 +76,12 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	}
 
 	T IReadOnlyList<T>.this[int index] => _list[index];
+
+	T ISynqraCollection<T>.this[int index]
+	{
+		get => _list[index];
+		set => throw new NotImplementedException();
+	}
 
 	#endregion
 
@@ -134,7 +146,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		var o = ((ICollection)this).Count;
 		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
 		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
-		var targetId = Guid.CreateVersion7(); // This is a new object, so we generate a new object ID
+		var targetId = GuidExtensions.CreateVersion7(); // This is a new object, so we generate a new object ID
 		lock (_attachedObjects)
 		{
 			_attachedObjects[targetId] = new WeakReference<T>(item); // attach item to the collection, so it can be retrieved later if needed
@@ -153,8 +165,10 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		}
 		_storeContext.SubmitCommandAsync(new CreateObjectCommand
 		{
+			ContainerId = _containerId,
+			CollectionId = _collectionId,
 			TargetTypeId = _storeContext.GetTypeMetadata(typeof(T)).TypeId,
-			CommandId = Guid.CreateVersion7(), // This is a new object, so we generate a new command Id
+			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = targetId,
 			Data = data?.Count > 0 ? data : null,
 			DataJson = dataJson,
@@ -164,7 +178,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}
 
-	void IStoreCollectionInternal.AddByEvent(object item)
+	void ISynqraCollectionInternal.AddByEvent(object item)
 	{
 		if (item is not T typedItem)
 		{

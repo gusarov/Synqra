@@ -11,7 +11,7 @@ using System.Text.Unicode;
 using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
 
-namespace Synqra.Tests;
+namespace Synqra.Tests.Serialization;
 
 public class TestItem
 {
@@ -92,7 +92,7 @@ public class JsonlStorageTests : StorageTests
 
 		_storage.Dispose();
 		await Assert.That(FileReadAllText(_fileName)).IsEqualTo("""
-{"Synqra.Storage.Jsonl":"1.0.0","itemType":"Synqra.Tests.TestItem"}
+{"Synqra.Storage.Jsonl":"1.0.0","itemType":"Synqra.Tests.Serialization.TestItem"}
 {"id":1,"name":"Test Item 1"}
 {"id":2,"name":"Test Item 2"}
 
@@ -104,7 +104,7 @@ public class JsonlStorageTests : StorageTests
 	public async Task Should_write_quickly()
 	{
 		int id = 0;
-		var perf = PerformanceTestUtils.MeasurePerformance(async () => {
+		var perf = MeasurePerformance(async () => {
 			await _storage.AppendAsync(new TestItem { Id = ++id, Name = "Test Item " + id });
 		});
 
@@ -117,7 +117,7 @@ public class JsonlStorageTests : StorageTests
 	public async Task Should_write_quickly2()
 	{
 		var item = new TestItem { Id = 1, Name = "Test Item 1" };
-		var perf = PerformanceTestUtils.MeasurePerformance(async () => {
+		var perf = MeasurePerformance(async () => {
 			await _storage.AppendAsync(item);
 		});
 

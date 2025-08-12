@@ -4,6 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<TargetFrameworks>net9.0;net10.0</TargetFrameworks>
 		-->
+		<TargetFrameworks>net8.0;net9.0$(PreviewTarget)</TargetFrameworks>
+		<TargetFrameworks Condition="'$(UsePreview)'=='True'">$(TargetFrameworks);net10.0</TargetFrameworks>
 
 		<Nullable>enable</Nullable>
 		
@@ -17,6 +19,5 @@
 		<LangVersion>preview</LangVersion>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 
-		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
 	</PropertyGroup>
 </Project>

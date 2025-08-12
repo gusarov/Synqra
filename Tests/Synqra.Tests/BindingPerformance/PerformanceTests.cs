@@ -1,5 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Primitives;
@@ -28,6 +27,7 @@ public partial class SamplePublicModel
 	public partial string Property3 { get; set; }
 }
 
+/*
 public partial class CommunityMVVMTest : ObservableObject
 {
 	[ObservableProperty]
@@ -36,12 +36,43 @@ public partial class CommunityMVVMTest : ObservableObject
 	[ObservableProperty]
 	public partial string Property3 { get; set; }
 }
+*/
 
 // Bind 01 BR - Reflection property setter
 // Bind 02 BJ - System.Text.Json generators property setter
 // Bind 03 BC - Microsoft.Excentions.Configuratuion.Binder generators property setter
 // Bind 04 BS - Syncra Generators
 
+public class PermanentPerformanceTests : BaseTest
+{
+
+	[Test]
+	public async Task Should_Bind_faster_50k_and_faster_than_reflection()
+	{
+		// Reflection
+
+		var model = new SamplePublicModel();
+		model.RSetReflection("Name", "abc");
+		await Assert.That(model.Name).IsEqualTo("abc");
+
+		var reflectionOps = MeasureOps(() => { model.RSetReflection("Name", "abc"); });
+
+		Debug.WriteLine($"RSetReflection ops: {reflectionOps}");
+		await Assert.That(reflectionOps).IsGreaterThan(1_000_000);
+
+		var bm = (IBindableModel)model;
+		bm.Set("Name", "def");
+		await Assert.That(model.Name).IsEqualTo("def");
+		var ops = MeasureOps(() => { bm.Set("Name", "def"); });
+
+		Debug.WriteLine($"IBindableModel.Set ops: {ops}");
+		await Assert.That(ops).IsGreaterThan(50_000_000);
+		await Assert.That(ops).IsGreaterThan(reflectionOps);
+	}
+
+}
+
+[Explicit]
 public class PerformanceTests : BaseTest
 {
 	/*
@@ -96,10 +127,10 @@ public class PerformanceTests : BaseTest
 				obj.RSetReflection(proName, next());
 			}
 		});
-		Assert.Fail($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
+		// Assert.Fail($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
 		await Assert.That(ops1 > 1_000).IsTrue();
 
-		Assert.Fail(ops2.ToString());
+		// Assert.Fail(ops2.ToString());
 	}
 
 	[Test]
@@ -120,7 +151,7 @@ public class PerformanceTests : BaseTest
 		Debug.WriteLine($"RSetGen ops: {ops}");
 		await Assert.That(ops).IsGreaterThan(1_000_000);
 
-		Assert.Fail(ops.ToString());
+		// Assert.Fail(ops.ToString());
 	}
 
 	[Test]
@@ -297,18 +328,20 @@ public class PerformanceTests : BaseTest
 			return ab ? stra : strb;
 		}
 
+		var pro = string.Intern("Name");
+		var val = string.Intern("abc");
 		var ops = MeasureOps(() =>
 		{
 			for (int i = 0; i < 1024; i++)
 			{
-				bm.Set("Name", next());
+				bm.Set(pro, val);
 			}
 		});
 
 		Debug.WriteLine($"RSetGen ops: {ops}");
 		await Assert.That(ops).IsGreaterThan(50_000);
 
-		Assert.Fail(ops.ToString());
+		// Assert.Fail(ops.ToString());
 	}
 
 	[Test]

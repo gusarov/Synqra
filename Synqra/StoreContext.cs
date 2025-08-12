@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -14,43 +15,49 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
 
-	internal Dictionary<Type, IStoreCollectionInternal> _collections = new();
+	internal Dictionary<Guid, ISynqraCollectionInternal> _collections = new();
 
-	public StoreContext(JsonSerializerContext jsonSerializerContext, IStorage storage)
+	public StoreContext(IStorage storage, JsonSerializerContext jsonSerializerContext)
 	{
-		_jsonSerializerContext = jsonSerializerContext;
 		_storage = storage;
+		_jsonSerializerContext = jsonSerializerContext;
+		/*
 		foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x=>x.AttributeType == typeof(JsonSerializableAttribute)))
 		{
 			var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
 			GetTypeMetadata(type);
 		}
+		*/
 	}
 
-	public IStoreCollection Get(Type type)
+	public ISynqraCollection Get(Type type)
 	{
 		return GetInternal(type);
 	}
 
-	internal IStoreCollectionInternal GetInternal(Type type)
+	static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
+
+	Guid GetCollectionId(Type rootType, string? name = null)
 	{
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, type, out var exists);
+		var typeId = GetTypeMetadata(rootType).TypeId;
+		return GuidExtensions.CreateVersion5(typeId, name);
+	}
+
+	internal ISynqraCollectionInternal GetInternal(Type type, string? collectionName = null)
+	{
+		var collectionId = GetCollectionId(type, collectionName);
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
 		if (!exists)
 		{
 			var gtype = typeof(StoreCollection<>).MakeGenericType(type);
-			slot = Activator.CreateInstance(gtype, [this, _jsonSerializerContext]) as IStoreCollectionInternal;
+			slot = (ISynqraCollectionInternal)Activator.CreateInstance(gtype, [this, _jsonSerializerContext]);
 		}
 		return slot;
 	}
 
-	public IStoreCollection<T> Get<T>() where T : class
+	public ISynqraCollection<T> Get<T>() where T : class
 	{
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, typeof(T), out var exists);
-		if (!exists)
-		{
-			slot = new StoreCollection<T>(this, _jsonSerializerContext);
-		}
-		return (IStoreCollection<T>)slot;
+		return (ISynqraCollection<T>)GetInternal(typeof(T));
 	}
 
 	public Task SubmitCommandAsync(ISynqraCommand newCommand)
@@ -126,6 +133,25 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
 	{
+		var created = new CommandCreatedEvent
+		{
+			EventId = GuidExtensions.CreateVersion7(),
+			Data = cmd,
+			CommandId = cmd.CommandId,
+			ContainerId = cmd.ContainerId,
+		};
+		ctx.Events.Add(created);
+		/*
+		var created = new ObjectCreatedEvent
+		{
+			EventId = Guid.CreateVersion7(),
+			DataObject = cmd,
+			CommandId = cmd.CommandId,
+			TargetTypeId = GetTypeMetadata(),
+			TargetId = cmd.CommandId,
+		};
+		ctx.Events.Add(created);
+		*/
 		return Task.CompletedTask;
 	}
 
@@ -158,7 +184,10 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 		var created = new ObjectCreatedEvent
 		{
-			EventId = Guid.CreateVersion7(),
+			ContainerId = cmd.ContainerId,
+			EventId = GuidExtensions.CreateVersion7(),
+			CollectionId = cmd.CollectionId,
+			CommandId = cmd.CommandId,
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			Data = cmd.Data,
@@ -200,7 +229,11 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 	{
 		var created = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.CreateVersion7(),
+			ContainerId = cmd.ContainerId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+
+			EventId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -322,6 +355,11 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 	}
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
+	{
+		throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
+	}
+
+	public async Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 	{
 		throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
 	}

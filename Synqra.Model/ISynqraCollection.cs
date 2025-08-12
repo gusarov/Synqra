@@ -3,11 +3,11 @@ using System.Collections;
 
 namespace Synqra;
 
-public interface IStoreCollection : IList, ICollection//, IQueryable, INotifyCollectionChanged
+public interface ISynqraCollection : IList, ICollection//, IQueryable, INotifyCollectionChanged
 {
 }
 
-public interface IStoreCollection<T> : IStoreCollection, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
+public interface ISynqraCollection<T> : ISynqraCollection, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
 	where T : class
 {
 #if NET8_0_OR_GREATER
@@ -21,7 +21,7 @@ public interface IStoreCollection<T> : IStoreCollection, ICollection<T>//, IQuer
 #endif
 }
 
-public interface IStoreCollectionInternal : IStoreCollection
+public interface ISynqraCollectionInternal : ISynqraCollection
 {
 	ISynqraStoreContext Store { get; }
 
@@ -34,4 +34,6 @@ public interface IStoreCollectionInternal : IStoreCollection
 	bool TryGetAttached(Guid id, [NotNullWhen(true)] out object? item);
 #endif
 	Guid GetId(object item);
+
+	Guid ContainerId { get; }
 }

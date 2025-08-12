@@ -5,54 +5,51 @@ using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using TUnit.Assertions.AssertConditions.Operators;
 
 namespace Synqra.Tests.BindingPerformance;
 
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
-	public partial string TestProperty { get; set; }
+	public partial string Name { get; set; }
 
 	/* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
 
-	public event PropertyChangedEventHandler? PropertyChanged;
-	public event PropertyChangingEventHandler? PropertyChanging;
+	public event global::System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+	public event global::System.ComponentModel.PropertyChangingEventHandler? PropertyChanging;
 
-	partial void OnTestPropertyChanging(string newValue);
-	partial void OnTestPropertyChanging(string oldValue, string newValue);
-	partial void OnTestPropertyChanged(string newValue);
-	partial void OnTestPropertyChanged(string oldValue, string newValue);
+	global::Synqra.ISynqraStoreContext? IBindableModel.Store { get; set; }
 
-	ISynqraStoreContext IBindableModel.Store
+	void IBindableModel.Set(string name, object? value)
 	{
-		get => field;
-		set => field = value;
-	}
-
-	void IBindableModel.Set(string propertyName, object? value)
-	{
-		switch (propertyName)
+		switch (name)
 		{
-			case nameof(TestProperty):
-				TestProperty = value as string;
+			case "Name":
+				Name = (string)value;
 				break;
 		}
 	}
+	partial void OnNameChanging(string value);
+	partial void OnNameChanging(string oldValue, string value);
+	partial void OnNameChanged(string value);
+	partial void OnNameChanged(string oldValue, string value);
 
-	public partial string TestProperty
+	public partial string Name
 	{
 		get => field;
 		set
 		{
+
 			if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
 			{
-				OnTestPropertyChanging(value);
-				OnTestPropertyChanging(field, value);
-				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(TestProperty)));
+				OnNameChanging(value);
+				OnNameChanging(default, value);
+				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
 				field = value;
-				OnTestPropertyChanged(value);
-				OnTestPropertyChanged(field, value);
-				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TestProperty)));
+				OnNameChanged(value);
+				OnNameChanged(default, value);
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
 			}
 		}
 	}
@@ -67,6 +64,6 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 
 	public void CustomCommand1_Reset()
 	{
-		this.TestProperty = "Value 0";
+		this.Name = "Value 0";
 	}
 }

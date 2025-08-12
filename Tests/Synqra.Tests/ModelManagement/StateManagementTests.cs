@@ -1,140 +1,28 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra;
 using Synqra.Storage;
 using Synqra.Tests.DemoTodo;
 using Synqra.Tests.TestHelpers;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
-using System.Diagnostics;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace Synqra.Tests;
-
-// [NotInParallel]
-public class GuidExtensionsTests
-{
-	[Test]
-	public async Task Should_01_Create_Version5_Guid()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion5("Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsNotEqualTo(default);
-	}
-
-	[Test]
-	public async Task Should_01_Create_Version3_Guid()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion3("Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsNotEqualTo(default);
-	}
-
-	[Test]
-	public async Task Should_02_Create_Version5_Guid2()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion5("Test");
-		var guid2 = Synqra.GuidExtensions.CreateVersion5("Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsEqualTo(guid2);
-		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion3("Test"));
-	}
-
-	[Test]
-	public async Task Should_02_Create_Version3_Guid2()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion3("Test");
-		var guid2 = Synqra.GuidExtensions.CreateVersion3("Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsEqualTo(guid2);
-		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion5("Test"));
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v5_Guid_quickly()
-	{
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
-		{
-			GuidExtensions.CreateVersion5("Test");
-		})).IsGreaterThan(500_000);
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v3_Guid_quickly()
-	{
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
-		{
-			GuidExtensions.CreateVersion3("Test");
-		})).IsGreaterThan(500_000);
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v5_Guid_random_quickly()
-	{
-		var buf = new byte[16];
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
-		{
-			Random.Shared.NextBytes(buf);
-			GuidExtensions.CreateVersion5(buf);
-		})).IsGreaterThan(300_000);
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v3_Guid_random_quickly()
-	{
-		var buf = new byte[16];
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
-		{
-			Random.Shared.NextBytes(buf);
-			GuidExtensions.CreateVersion3(buf);
-		})).IsGreaterThan(300_000);
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v5_Guid_super_long()
-	{
-		var buf = new byte[16 * 1024];
-		Random.Shared.NextBytes(buf);
-		var perf = PerformanceTestUtils.MeasurePerformance(async () =>
-		{
-			GuidExtensions.CreateVersion5(buf);
-		});
-		await Assert.That(perf.OperationsPerSecond).IsGreaterThan(10_000);
-	}
-
-	[Test]
-	[Explicit]
-	public async Task Should_create_v3_Guid_super_long()
-	{
-		var buf = new byte[16 * 1024];
-		Random.Shared.NextBytes(buf);
-		var perf = PerformanceTestUtils.MeasurePerformance(async () =>
-		{
-			GuidExtensions.CreateVersion3(buf);
-		});
-		await Assert.That(perf.OperationsPerSecond).IsGreaterThan(10_000);
-	}
-}
+namespace Synqra.Tests.ModelManagement;
 
 public class StateManagementTests : BaseTest
 {
 	ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 	FakeStorage _fakeStorage => ServiceProvider.GetRequiredService<FakeStorage>();
-	IStoreCollection<MyTask> _tasks => _sut.Get<MyTask>();
+	ISynqraCollection<MyTask> _tasks => _sut.Get<MyTask>();
 
 	public StateManagementTests()
 	{
 		HostBuilder.AddSynqraStoreContext();
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default); // im not sure yet, context or options
-		HostBuilder.Services.AddSingleton<JsonSerializerOptions>(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
+		HostBuilder.Services.AddSingleton(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton<FakeStorage>();
 		HostBuilder.Services.AddSingleton<IStorage>(sp => sp.GetRequiredService<FakeStorage>());
 		// HostBuilder.AddJsonLinesStorage();
@@ -162,7 +50,7 @@ public class StateManagementTests : BaseTest
 
 		// reopen
 		var bt = new StateManagementTests();
-		bt.ServiceCollection.AddSingleton<FakeStorage>(_fakeStorage);
+		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 
@@ -191,7 +79,7 @@ public class StateManagementTests : BaseTest
 
 		// reopen
 		var bt = new StateManagementTests();
-		bt.ServiceCollection.AddSingleton<FakeStorage>(_fakeStorage);
+		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 

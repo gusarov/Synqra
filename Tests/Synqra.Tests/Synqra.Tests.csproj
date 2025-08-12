@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
     <PublishAot>true</PublishAot>
     <TrimMode>partial</TrimMode>
     <IsAotCompatible>true</IsAotCompatible>
@@ -18,9 +17,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="TUnit" Version="0.24.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.7" />
+    -->
+    <PackageReference Include="TUnit" Version="0.55.6" />
   </ItemGroup>
 
 </Project>

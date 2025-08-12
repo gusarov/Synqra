@@ -1,4 +1,6 @@
 ﻿using Synqra.Tests.BindingPerformance;
+using Synqra.Tests.ModelManagement;
+using Synqra.Tests.Serialization;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,10 +31,13 @@ public class TodoTask
 	ReadCommentHandling = JsonCommentHandling.Skip,
 	DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 )]
+[JsonSerializable(typeof(DemoMdl))]
 [JsonSerializable(typeof(DemoObject))]
 [JsonSerializable(typeof(TodoTask))]
 [JsonSerializable(typeof(TestItem))]
 [JsonSerializable(typeof(MyTask))]
+[JsonSerializable(typeof(Synqra.Event))]
+[JsonSerializable(typeof(Synqra.Command))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
 [JsonSerializable(typeof(JsonElement))]

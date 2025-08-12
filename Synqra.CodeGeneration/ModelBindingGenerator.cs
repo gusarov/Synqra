@@ -72,6 +72,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
+			body.AppendLine("using Synqra;");
+			body.AppendLine("using System.ComponentModel;");
 			foreach (var usingStatement in calculatorClass.SyntaxTree.GetCompilationUnitRoot().Usings)
 			{
 				body.AppendLine(usingStatement.ToString());
@@ -96,8 +98,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::{typeof(IBindableModel).FullName}, global::{typeof(INotifyPropertyChanging).FullName}, global::{typeof(INotifyPropertyChanged).FullName}");
 			body.AppendLine("{");
 			body.AppendLine();
-			body.AppendLine("\tpublic event PropertyChangedEventHandler? PropertyChanged;");
-			body.AppendLine("\tpublic event PropertyChangingEventHandler? PropertyChanging;");
+			body.AppendLine($"\tpublic event global::{typeof(PropertyChangedEventHandler).FullName}? PropertyChanged;");
+			body.AppendLine($"\tpublic event global::{typeof(PropertyChangingEventHandler).FullName}? PropertyChanging;");
 			body.AppendLine();
 
 			//if the methods do not exist, we will add them
@@ -107,11 +109,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				//if you want the proper indention on the methods you will want to tab the string content at least once
 				body.AppendLine(
 $$"""
-	global::{{typeof(ISynqraStoreContext).FullName}} IBindableModel.Store
-	{
-		get => field;
-		set => field = value;
-	}
+	global::{{typeof(ISynqraStoreContext).FullName}}? IBindableModel.Store { get; set; }
 
 	void IBindableModel.Set(string name, object? value)
 	{
@@ -123,7 +121,7 @@ $$"""
 					body.AppendLine(
 $$"""
 			case "{{pro.Identifier}}":
-				this.__{{pro.Identifier}} = value as string;
+				{{pro.Identifier}} = ({{pro.Type}})value;
 				break;
 """);
 				}
@@ -138,9 +136,8 @@ $$"""
 			foreach (var pro in calculatorClass.Members.OfType<PropertyDeclarationSyntax>())
 			{
 				body.AppendLine(
+	//private {{pro.Type}} __{{pro.Identifier}};
 $$"""
-	private {{pro.Type}} __{{pro.Identifier}};
-
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} oldValue, {{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changed({{pro.Type}} value);
@@ -151,16 +148,16 @@ $$"""
 		get => field;
 		set
 		{
-            if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
-            {
-                On{{pro.Identifier}}Changing(value);
-                On{{pro.Identifier}}Changing(default, value);
-                // OnPropertyChanging(new PropertyChanging);
-                field = value;
-                OnProperty3Changed(value);
-                OnProperty3Changed(default, value);
-                // OnPropertyChanged(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangedArgs.Property3);
-            }
+			if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
+			{
+				On{{pro.Identifier}}Changing(value);
+				On{{pro.Identifier}}Changing(default, value);
+				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof({{pro.Identifier}})));
+				field = value;
+				On{{pro.Identifier}}Changed(value);
+				On{{pro.Identifier}}Changed(default, value);
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof({{pro.Identifier}})));
+			}
 		}
 	}
 """);

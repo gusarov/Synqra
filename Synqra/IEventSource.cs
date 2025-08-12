@@ -59,11 +59,11 @@ public static class SynqraPocoTrackingExtensions
 
 	private sealed class TrackingSessionImplementation : ITrackingSession
 	{
-		private readonly IStoreCollectionInternal _storeCollection;
+		private readonly ISynqraCollectionInternal _storeCollection;
 
 		Dictionary<object, string> _originalsSerialized = new();
 
-		public TrackingSessionImplementation(IStoreCollectionInternal storeCollection, IEnumerable<object> items)
+		public TrackingSessionImplementation(ISynqraCollectionInternal storeCollection, IEnumerable<object> items)
 		{
 			_storeCollection = storeCollection;
 
@@ -116,7 +116,8 @@ public static class SynqraPocoTrackingExtensions
 							{
 								_storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 								{
-									CommandId = Guid.CreateVersion7(),
+									ContainerId = _storeCollection.ContainerId,
+									CommandId = GuidExtensions.CreateVersion7(),
 									TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
 									PropertyName = item,
 									OldValue = oldValue,
@@ -138,7 +139,7 @@ public static class SynqraPocoTrackingExtensions
 
 	// private static readonly ConditionalWeakTable<object, ExtendingEntry> _attachedProperties = new();
 
-	public static ITrackingSession PocoTracker(this IStoreCollection collection, params IEnumerable<object> items)
+	public static ITrackingSession PocoTracker(this ISynqraCollection collection, params IEnumerable<object> items)
 	{
 		/*
 		var attached = _attachedProperties.GetOrCreateValue(collection);
@@ -148,7 +149,7 @@ public static class SynqraPocoTrackingExtensions
 		}
 		*/
 		// ((IStoreCollectionInternal)collection).Store.
-		return new TrackingSessionImplementation((IStoreCollectionInternal)collection, items);
+		return new TrackingSessionImplementation((ISynqraCollectionInternal)collection, items);
 		// CollectionsMarshal.GetValueRefOrAddDefault(((IStoreCollectionInternal)collection)._attachedObjects, q.GetId(), out var exists);
 	}
 }

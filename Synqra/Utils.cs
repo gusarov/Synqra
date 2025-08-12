@@ -2,6 +2,7 @@
 using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Runtime.Intrinsics.Arm;
 using System.Security.Cryptography;
@@ -12,7 +13,8 @@ namespace Synqra;
 
 internal class GuidExtensions
 {
-	static Encoding _encoding = new UnicodeEncoding(true, false, false);
+	static Encoding _utf16 = new UnicodeEncoding(true, false, false);
+	static Encoding _utf8NoBom = new UTF8Encoding(false, true);
 	// static SHA1 sha1 = SHA1.Create();
 
 	public static Guid CreateVersion7()
@@ -46,7 +48,7 @@ internal class GuidExtensions
 
 	public static unsafe Guid CreateVersion3(string input)
 	{
-		return CreateVersion3(_encoding.GetBytes(input));
+		return CreateVersion3(_utf16.GetBytes(input));
 	}
 
 	public static unsafe Guid CreateVersion3(byte[] input)
@@ -55,8 +57,8 @@ internal class GuidExtensions
 		var hash = md5.ComputeHash(input);
 		hash[8] = (byte)((hash[8] & 0x3F) | 0xA0); // Set Variant to 0b10xx
 		hash[7] = (byte)((hash[7] & 0x0F) | 0x30); // Set version to 3
-#if NET9_0_OR_GREATER
 		var g = new Guid(hash[..16]);
+#if NET9_0_OR_GREATER
 		if (g.Variant < 8 || g.Variant > 11)
 		{
 			throw new Exception($"vAriant is not set: {g.Variant}");
@@ -66,15 +68,13 @@ internal class GuidExtensions
 		{
 			throw new Exception($"vErsion is not set: {g.Version}");
 		}
-		return g;
-#else
-		throw new Exception($"Standard Target Not Supported");
 #endif
+		return g;
 	}
 
 	public static unsafe Guid CreateVersion5(string input)
 	{
-		return CreateVersion5(_encoding.GetBytes(input));
+		return CreateVersion5(_utf16.GetBytes(input));
 	}
 
 	public static unsafe Guid CreateVersion5(byte[] input)
@@ -131,23 +131,23 @@ internal class GuidExtensions
 		hash[8] = (byte)((hash[8] & 0x3F) | 0xA0); // Set Variant to 0b10xx
 		hash[7] = (byte)((hash[7] & 0x0F) | 0x50); // Set version to 5
 
-		var g3 = new Guid(hash[..16]);
+		var g = new Guid(hash[..16]);
 
 		/*
 		Console.WriteLine("NVar={0} {0:B}", g3.Variant);
 		Console.WriteLine("NVer={0} {0:B}", g3.Version);
 		Console.WriteLine(g3);
 		*/
-
-		if (g3.Variant < 8 || g3.Variant > 11)
+#if NET9_0_OR_GREATER
+		if (g.Variant < 8 || g.Variant > 11)
 		{
-			throw new Exception($"vAriant is not set: {g3.Variant}");
+			throw new Exception($"Variant is not set correctly: {g.Variant}");
 		}
-
-		if (g3.Version != 5)
+		if (g.Version != 5)
 		{
-			throw new Exception($"vErsion is not set: {g3.Version}");
+			throw new Exception($"Version is not set correctly: {g.Version}");
 		}
+#endif
 
 		/*
 		var maxBytes = _encoding.GetMaxByteCount(input.Length);
@@ -171,6 +171,50 @@ internal class GuidExtensions
 		*/
 
 
-		return g3;
+		return g;
+	}
+
+	public static unsafe Guid CreateVersion5(Span<byte> input)
+	{
+		using var sha1 = SHA1.Create();
+		Span<byte> hash = stackalloc byte[20];
+		if (!sha1.TryComputeHash(input, hash, out var bytes))
+		{
+			throw new Exception("TryComputeHash failed");
+		}
+		if (bytes != 20)
+		{
+			throw new Exception("SHA1 returned invalid length");
+		}
+
+		hash[8] = (byte)((hash[8] & 0x3F) | 0xA0); // Set Variant to 0b10xx
+		hash[7] = (byte)((hash[7] & 0x0F) | 0x50); // Set version to 5
+
+		var g = new Guid(hash[..16]);
+
+#if NET9_0_OR_GREATER
+		if (g.Variant < 8 || g.Variant > 11)
+		{
+			throw new Exception($"Variant is not set correctly: {g.Variant}");
+		}
+		if (g.Version != 5)
+		{
+			throw new Exception($"Version is not set correctly: {g.Version}");
+		}
+#endif
+		return g;
+	}
+
+	internal static Guid CreateVersion5(Guid guid, string? name)
+	{
+		Span<byte> dataBytes = stackalloc byte[16 + _utf8NoBom.GetByteCount(name ?? "")];
+		MemoryMarshal.Write(dataBytes, in guid);
+
+		if (dataBytes.Length > 16)
+		{
+			_utf8NoBom.GetBytes(name, dataBytes[16..]);
+		}
+
+		return CreateVersion5(dataBytes);
 	}
 }
