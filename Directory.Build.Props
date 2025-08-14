@@ -18,6 +18,8 @@
 		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->
 		<LangVersion>preview</LangVersion>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-
+		<!--
+		<CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+		-->
 	</PropertyGroup>
 </Project>

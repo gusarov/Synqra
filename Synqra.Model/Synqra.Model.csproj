@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Synqra" />
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
   </ItemGroup>

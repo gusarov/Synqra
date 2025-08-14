@@ -100,6 +100,7 @@ public class JsonlStorageTests : StorageTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_write_quickly()
 	{
@@ -112,7 +113,7 @@ public class JsonlStorageTests : StorageTests
 		Console.WriteLine(perf.OperationsPerSecond);
 	}
 
-	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_write_quickly2()
 	{

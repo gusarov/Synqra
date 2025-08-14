@@ -31,8 +31,9 @@ public class TodoTask
 	ReadCommentHandling = JsonCommentHandling.Skip,
 	DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 )]
-[JsonSerializable(typeof(DemoMdl))]
-[JsonSerializable(typeof(DemoObject))]
+[JsonSerializable(typeof(DemoModel))]
+[JsonSerializable(typeof(ISynqraCommand))]
+// [JsonSerializable(typeof(DemoObject))]
 [JsonSerializable(typeof(TodoTask))]
 [JsonSerializable(typeof(TestItem))]
 [JsonSerializable(typeof(MyTask))]

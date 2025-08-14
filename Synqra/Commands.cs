@@ -9,8 +9,8 @@ namespace Synqra;
 
 public abstract class Command : ISynqraCommand
 {
-	public required Guid CommandId { get; init; }
-	public required Guid ContainerId { get; init; }
+	public Guid CommandId { get; set; }
+	public Guid ContainerId { get; set; }
 
 	protected abstract Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx);
 
@@ -29,11 +29,14 @@ public abstract class Command : ISynqraCommand
 
 public abstract class SingleObjectCommand : Command
 {
-	public required Guid TargetTypeId { get; init; }
+	public Guid TargetTypeId { get; set; }
 
 	public Guid CollectionId { get; set; }
 
-	public required Guid TargetId { get; init; }
+	public Guid TargetId { get; set; }
+
+	[JsonIgnore]
+	public object? Target { get; set; }
 }
 
 public class CreateObjectCommand : SingleObjectCommand

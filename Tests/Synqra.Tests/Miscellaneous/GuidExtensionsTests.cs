@@ -43,6 +43,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v5_Guid_quickly()
 	{
@@ -53,6 +54,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v3_Guid_quickly()
 	{
@@ -63,6 +65,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v5_Guid_random_quickly()
 	{
@@ -75,6 +78,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v3_Guid_random_quickly()
 	{
@@ -87,6 +91,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v5_Guid_super_long()
 	{
@@ -100,6 +105,7 @@ public class GuidExtensionsTests
 	}
 
 	[Test]
+	[Skip("performance")]
 	[Explicit]
 	public async Task Should_create_v3_Guid_super_long()
 	{

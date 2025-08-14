@@ -26,7 +26,7 @@ public interface IStorage : IDisposable, IAsyncDisposable
 	Task FlushAsync() => Task.CompletedTask;
 }
 
-class AttachedData
+internal class AttachedData
 {
 	public string? TrackingSinceJsonSnapshot { get; set; }
 }
@@ -59,11 +59,11 @@ public static class SynqraPocoTrackingExtensions
 
 	private sealed class TrackingSessionImplementation : ITrackingSession
 	{
-		private readonly ISynqraCollectionInternal _storeCollection;
+		private readonly StoreCollection _storeCollection;
 
 		Dictionary<object, string> _originalsSerialized = new();
 
-		public TrackingSessionImplementation(ISynqraCollectionInternal storeCollection, IEnumerable<object> items)
+		public TrackingSessionImplementation(StoreCollection storeCollection, IEnumerable<object> items)
 		{
 			_storeCollection = storeCollection;
 
@@ -86,12 +86,8 @@ public static class SynqraPocoTrackingExtensions
 
 		void AddCore(object item)
 		{
-			if (_storeCollection.GetId(item) == default)
-			{
-				throw new Exception("Object is not attached");
-			}
-			var store = (StoreContext)_storeCollection.Store;
-			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type, store._jsonSerializerContext.Options);
+			_storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
+			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type, _storeCollection.Store._jsonSerializerContext.Options);
 		}
 
 		public void Dispose()
@@ -122,8 +118,8 @@ public static class SynqraPocoTrackingExtensions
 									PropertyName = item,
 									OldValue = oldValue,
 									NewValue = newValue,
-									TargetId = _storeCollection.GetId(kvp.Key),
-								});
+									TargetId = _storeCollection.Store.GetId(kvp.Key, null, GetMode.RequiredId),
+								}).GetAwaiter().GetResult();
 							}
 						}
 					}
@@ -149,7 +145,7 @@ public static class SynqraPocoTrackingExtensions
 		}
 		*/
 		// ((IStoreCollectionInternal)collection).Store.
-		return new TrackingSessionImplementation((ISynqraCollectionInternal)collection, items);
+		return new TrackingSessionImplementation((StoreCollection)collection, items);
 		// CollectionsMarshal.GetValueRefOrAddDefault(((IStoreCollectionInternal)collection)._attachedObjects, q.GetId(), out var exists);
 	}
 }

@@ -21,6 +21,7 @@ public interface ISynqraCollection<T> : ISynqraCollection, ICollection<T>//, IQu
 #endif
 }
 
+/*
 public interface ISynqraCollectionInternal : ISynqraCollection
 {
 	ISynqraStoreContext Store { get; }
@@ -37,3 +38,4 @@ public interface ISynqraCollectionInternal : ISynqraCollection
 
 	Guid ContainerId { get; }
 }
+*/

@@ -35,21 +35,42 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	partial void OnNameChanged(string value);
 	partial void OnNameChanged(string oldValue, string value);
 
+	[ThreadStatic]
+	static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
+
 	public partial string Name
 	{
 		get => field;
 		set
 		{
-
-			if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
+			var bm = (IBindableModel)this;
+			if (_assigning || bm.Store is null)
 			{
-				OnNameChanging(value);
-				OnNameChanging(default, value);
-				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
-				field = value;
-				OnNameChanged(value);
-				OnNameChanged(default, value);
-				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+				var oldValue = field;
+				if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(oldValue, value))
+				{
+					OnNameChanging(value);
+					OnNameChanging(oldValue, value);
+					PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
+					field = value;
+					OnNameChanged(value);
+					OnNameChanged(oldValue, value);
+					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+				}
+			}
+			else
+			{
+				bm.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					ContainerId = default,
+					CollectionId = default,
+					TargetTypeId = bm.Store.GetId(this, null, GetMode.RequiredId),
+					TargetId = bm.Store.GetId(this, null, GetMode.RequiredId),
+					PropertyName = nameof(Name),
+					OldValue = field,
+					NewValue = value
+				}).GetAwaiter().GetResult();
 			}
 		}
 	}

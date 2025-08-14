@@ -1,11 +1,12 @@
 ﻿using Synqra.Model;
-using TUnit;
-using TUnit.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using TUnit;
+using TUnit.Core;
 
 namespace Synqra.Tests.Miscellaneous;
 
@@ -24,5 +25,11 @@ internal class CheckModelTargets
 #else
 #error "Unsupported target framework"
 #endif
+	}
+
+	[Test]
+	public async Task Should_aot2()
+	{
+		await Assert.That(RuntimeFeature.IsDynamicCodeSupported).IsFalse();
 	}
 }
