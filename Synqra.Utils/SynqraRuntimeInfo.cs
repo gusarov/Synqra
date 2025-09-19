@@ -1,4 +1,6 @@
-﻿namespace Synqra.Model;
+﻿using System.ComponentModel;
+
+namespace Synqra;
 
 internal static class SynqraModelRuntimeInfo
 {

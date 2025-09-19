@@ -9,7 +9,7 @@ namespace Synqra;
 
 public abstract class Command : ISynqraCommand
 {
-	public Guid CommandId { get; set; } = Guid.CreateVersion7();
+	public Guid CommandId { get; set; } = GuidExtensions.CreateVersion7();
 
 	protected abstract Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx);
 

@@ -31,5 +31,9 @@ Events:
 	Are simpler, lower-level, e.g. property changed. Commands can do something that will generate bunch of events.
 
 Problem:
-	It feels more reliable and easier to maintain to use events in a storage. If CommandHandler would be changed, that might be devastating for the system. Events feels more reliable and easier. And it does not matter too much what to store, events or commands. But what matters is: what to sync... From virtual synchrony standpoint it is easier to sync commands, less comminucaiton for live updates.
+	It feels more reliable and easier to maintain to use events in a storage. If CommandHandler would be changed, that might be devastating for the system. Events feels more reliable and easier. And it does not matter too much what to store, events or commands. But what matters is: what to sync... From virtual synchrony standpoint it is easier to sync commands, less comminucaiton for live updates and both system will generate seme events from it by EventHandler (reducer of commands to events).
+
+Solution:
+	1. Events are primary and mandatory
+
 
