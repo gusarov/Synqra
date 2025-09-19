@@ -1,20 +1,30 @@
 ﻿namespace Synqra;
 
-public class GeneratorLogging
+/// <summary>
+/// This logger can be used in any circumstance where normal logging is not available. E.g. in source generators.
+/// </summary>
+public class SyncraEmergencyLog
 {
-	private static readonly List<string> _logMessages = new List<string>();
-	private static string? _logFilePath = null;
-	private static readonly object _lock = new();
+	public SyncraEmergencyLog Default { get; } = new SyncraEmergencyLog();
 
-	private static string _logInitMessage = "[+] Generated Log File this file contains log messages from the source generator\n\n";
-	private static LoggingLevel _loggingLevel = LoggingLevel.Info;
+	private SyncraEmergencyLog()
+	{
+		
+	}
 
-	public static void SetLoggingLevel(LoggingLevel level)
+	private readonly List<string> _logMessages = new List<string>();
+	private string? _logFilePath = null;
+	private readonly object _lock = new();
+
+	private string _logInitMessage = "[+] Generated Log File this file contains log messages from the source generator\n\n";
+	private LoggingLevel _loggingLevel = LoggingLevel.Info;
+
+	public void SetLoggingLevel(LoggingLevel level)
 	{
 		_loggingLevel = level;
 	}
 
-	public static void SetLogFilePath(string path)
+	public void SetLogFilePath(string path)
 	{
 		_logFilePath = path;
 		if (File.Exists(_logFilePath))
@@ -23,12 +33,12 @@ public class GeneratorLogging
 		}
 	}
 
-	public static LoggingLevel GetLoggingLevel()
+	public LoggingLevel GetLoggingLevel()
 	{
 		return _loggingLevel;
 	}
 
-	public static void LogMessage(string message, LoggingLevel messageLogLevel = LoggingLevel.Info)
+	public void LogMessage(string message, LoggingLevel messageLogLevel = LoggingLevel.Info)
 	{
 		lock (_lock)
 		{
@@ -64,12 +74,12 @@ public class GeneratorLogging
 				{
 					return;
 				}
-				File.AppendAllText(_logFilePath, $"[-] Exception occurred in logging: {ex.Message} \n");
+				File.AppendAllText(_logFilePath, $"[-] Exception occurred in emergency logging: {ex.Message} \n");
 			}
 		}
 	}
 
-	public static void EndLogging()
+	public void EndLogging()
 	{
 		if (_logFilePath is null)
 		{
