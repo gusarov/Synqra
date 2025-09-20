@@ -363,7 +363,7 @@ public static class GuidExtensions
 
 	public static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
 	{
-		var g = Guid.NewGuid();
+		var g = Guid.NewGuid(); 
 
 		long ticks = timestamp.ToUniversalTime().Ticks;
 		long unix_ticks = ticks - _unixEpochTicks;
