@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
@@ -14,6 +15,30 @@ namespace Synqra;
 public static class GuidExtensions
 {
 	static Encoding _utf8 = new UTF8Encoding(false, false);
+
+	static long _unixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
+	static long _gregUnixOffset = 0x01b21dd213814000;
+
+	public static unsafe int GetVariant(this Guid guid)
+	{
+		byte variantByte;
+		byte* bytes = (byte*)&guid;
+		variantByte = bytes[8];
+
+		// The variant is determined by the pattern of the most significant bits:
+		// 0xxxxxxx - 0 (Apollo NCS Legacy)
+		// 10xxxxxx - 1 (RFC 4122)
+		// 110xxxxx - 2 (Microsoft Legacy)
+		// 111xxxxx - 3 (Future/reserved)
+		if ((variantByte & 0x80) == 0x00) // 0b0xx
+			return 0;
+		else if ((variantByte & 0xC0) == 0x80) // 0b10x
+			return 1;
+		else if ((variantByte & 0xE0) == 0xC0) // 0b110x
+			return 2;
+		else
+			return 3; // Reserved
+	}
 
 	public static unsafe int GetVersion(this Guid guid, bool zeroForDefault = true)
 	{
@@ -38,59 +63,6 @@ public static class GuidExtensions
 #endif
 	}
 
-	public static unsafe int GetVariant(this Guid guid)
-	{
-		byte variantByte;
-		byte* bytes = (byte*)&guid;
-		variantByte = bytes[8];
-
-		// The variant is determined by the pattern of the most significant bits:
-		// 0xxxxxxx - 0 (Apollo NCS Legacy)
-		// 10xxxxxx - 1 (RFC 4122)
-		// 110xxxxx - 2 (Microsoft Legacy)
-		// 111xxxxx - 3 (Future/reserved)
-		int variant;
-		if ((variantByte & 0x80) == 0x00) // 0b0xx
-			variant = 0;
-		else if ((variantByte & 0xC0) == 0x80) // 0b10x
-			variant = 1;
-		else if ((variantByte & 0xE0) == 0xC0) // 0b110x
-			variant = 2;
-		else
-			variant = 3; // Reserved
-		return variant;
-	}
-
-	public static Guid CreateVersion7() => CreateVersion7(DateTimeOffset.UtcNow);
-
-	public static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
-	{
-#if NET9_0_OR_GREATER
-		return Guid.CreateVersion7();
-#else
-		var g = Guid.NewGuid();
-
-		long unix_ts_ms = timestamp.ToUnixTimeMilliseconds();
-		if (unix_ts_ms < 0)
-		{
-			throw new ArgumentOutOfRangeException(nameof(timestamp), "Timestamp must be after Unix epoch (1970-01-01T00:00:00Z)");
-		}
-
-		byte* bytes = (byte*)&g;
-		uint a = (uint)((unix_ts_ms >> 16) & 0xFFFFFFFF);
-		ushort b = (ushort)((unix_ts_ms >> 0) & 0xFFFF);
-		ushort c = (ushort)((((unix_ts_ms >> 48) & 0x0FFF) | (0x7 << 12))); // version 7 in high nibble
-
-		*(uint*)bytes = a;
-		*(ushort*)(bytes + 4) = b;
-		*(ushort*)(bytes + 6) = c;
-
-		bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
-
-		return g;
-#endif
-	}
-
 	public static unsafe DateTime GetTimestamp(this Guid guid, bool zeroForDefault = true)
 	{
 		if (zeroForDefault && guid == Guid.Empty)
@@ -112,11 +84,10 @@ public static class GuidExtensions
 				long tsHigh = shorts[1] & 0x0FFF;
 
 				var greg_100_ns = (tsHigh << 48) | (tsMid << 32) | tsLow;
-				long greg_Unix_offset = 0x01b21dd213814000;
-				long unix_64_bit_100ns = greg_100_ns - greg_Unix_offset;
+				long unix_64_bit_100ns = greg_100_ns - _gregUnixOffset;
 
-				var timestamp = 0x89F7FF5F7B58000 + unix_64_bit_100ns;
-				return new DateTime(timestamp, DateTimeKind.Utc);
+				var ticks = _unixEpochTicks + unix_64_bit_100ns;
+				return new DateTime(ticks, DateTimeKind.Utc);
 			}
 			/*
 			case 2:
@@ -154,14 +125,99 @@ public static class GuidExtensions
 	static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 	static readonly Guid _namespaceUrl = new Guid("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
 
+	[Obsolete("Use CreateVersion7 instead")]
+	public static unsafe Guid CreateVersion1(ushort clockSeq, long node)
+	{
+		return CreateVersion1(DateTime.UtcNow, clockSeq, node);
+	}
+
+	[Obsolete("Use CreateVersion7 instead")]
+	public static unsafe Guid CreateVersion1(DateTimeOffset dateTime, ushort clockSeq, long node)
+	{
+		var unix_64_bit_100ns = dateTime.ToUniversalTime().Ticks - _unixEpochTicks;
+		var greg_100_ns = unix_64_bit_100ns + _gregUnixOffset;
+
+		Guid g = default;
+		byte* bytes = (byte*)&g;
+
+		*(uint*)&g = (uint)greg_100_ns; // write time_low
+		*(ushort*)(bytes + 4) = (ushort)(greg_100_ns >> 32); // write time_mid
+		*(ushort*)(bytes + 6) = (ushort)((ushort)(greg_100_ns >> 48) | (ushort)(1 << 12)); // write time_high & version 1
+
+		clockSeq = (ushort)(clockSeq & 0x3FFF | 0x8000); // variant 1, 0x10: RFC 4122
+		if (BitConverter.IsLittleEndian)
+		{
+			clockSeq = (ushort)((clockSeq << 8) | (clockSeq >> 8));
+		}
+		*(ushort*)(bytes + 8) = clockSeq;
+
+		byte* nodeBytes = (byte*)&node;
+		if (BitConverter.IsLittleEndian)
+		{
+			for (byte i = 0; i < 6; i++)
+			{
+				bytes[10 + i] = nodeBytes[5 - i];
+			}
+		}
+		else
+		{
+			for (byte i = 0; i < 6; i++)
+			{
+				bytes[10 + i] = nodeBytes[i];
+			}
+		}
+		return g;
+	}
+
+	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
 	public static unsafe Guid CreateVersion3Dns(string name)
 	{
 		return CreateVersion3(_namespaceDns, name);
 	}
 
+	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
 	public static unsafe Guid CreateVersion3Url(string url)
 	{
 		return CreateVersion3(_namespaceUrl, url);
+	}
+
+	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	public static unsafe Guid CreateVersion3(Guid namespaceId, string name)
+	{
+		// var max = _utf8.GetMaxByteCount(name.Length);
+		return CreateVersion3(namespaceId, _utf8.GetBytes(name));
+	}
+
+	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	public static unsafe Guid CreateVersion3(Guid namespaceId, byte[] raw)
+	{
+		using var md5 = MD5.Create();
+
+		var nsBuf = namespaceId.ToByteArray();
+		if (BitConverter.IsLittleEndian)
+		{
+			// Guid is mixed-endian
+			Array.Reverse(nsBuf, 0, 4);
+			Array.Reverse(nsBuf, 4, 2);
+			Array.Reverse(nsBuf, 6, 2);
+		}
+
+		md5.TransformBlock(nsBuf, 0, 16, null, 0);
+		md5.TransformFinalBlock(raw, 0, raw.Length);
+		var hash = md5.Hash;
+
+		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
+		hash[6] = (byte)((hash[6] & 0x0F) | 0x30); // Set version to 3
+
+		if (BitConverter.IsLittleEndian)
+		{
+			// Guid is mixed-endian
+			Array.Reverse(hash, 0, 4);
+			Array.Reverse(hash, 4, 2);
+			Array.Reverse(hash, 6, 2);
+		}
+
+		return new Guid(hash[..16]); // back to ram
 	}
 
 	public static unsafe Guid CreateVersion5Dns(string name)
@@ -172,53 +228,6 @@ public static class GuidExtensions
 	public static unsafe Guid CreateVersion5Url(string url)
 	{
 		return CreateVersion5(_namespaceUrl, url);
-	}
-
-	public static unsafe Guid CreateVersion3(Guid namespaceId, string name)
-	{
-		// var max = _utf8.GetMaxByteCount(name.Length);
-		return CreateVersion3(namespaceId, _utf8.GetBytes(name));
-	}
-
-	public static unsafe Guid CreateVersion3(Guid namespaceId, byte[] raw)
-	{
-		using var md5 = MD5.Create();
-
-		var nsBuf = namespaceId.ToByteArray();
-		if (BitConverter.IsLittleEndian)
-		{
-			// Guid is mixed-endian, but RFC wants big-endian
-			Array.Reverse(nsBuf, 0, 4);
-			Array.Reverse(nsBuf, 4, 2);
-			Array.Reverse(nsBuf, 6, 2);
-		}
-
-		md5.TransformBlock(nsBuf, 0, 16, null, 0);
-		md5.TransformFinalBlock(raw, 0, raw.Length);
-		var hash = md5.Hash;
-
-#if DEBUG && NET9_0
-		var hex = new Guid(Convert.ToHexString(hash));
-#endif
-
-		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
-#if DEBUG && NET9_0
-		var hex2 = new Guid(Convert.ToHexString(hash));
-#endif
-		hash[6] = (byte)((hash[6] & 0x0F) | 0x30); // Set version to 3 (4-2-2 long-short-short Microsoft historical layout for mixed Endian means byte 6 is actually byte 7 before casting, because 2nd short is LittleEndian and it's bytes are swapped)
-#if DEBUG && NET9_0
-		var hex3 = new Guid(Convert.ToHexString(hash));
-#endif
-
-		if (BitConverter.IsLittleEndian)
-		{
-			// Guid is mixed-endian, but RFC wants big-endian
-			Array.Reverse(hash, 0, 4);
-			Array.Reverse(hash, 4, 2);
-			Array.Reverse(hash, 6, 2);
-		}
-
-		return new Guid(hash[..16]); // we can set 6-th byte directly, but that requires to pass bigendian: true. And that's not available in .Net Standard 2.0. Instead, we just select proper byte manually.
 	}
 
 	public static unsafe Guid CreateVersion5(Guid namespaceId, string name)
@@ -255,4 +264,295 @@ public static class GuidExtensions
 		return new Guid(hash[..16]);
 
 	}
+
+	[Obsolete("Use CreateVersion7 instead")]
+	public static unsafe Guid CreateVersion6(ushort clockSeq, long node)
+	{
+		return CreateVersion6(DateTime.UtcNow, clockSeq, node);
+	}
+
+	[Obsolete("Use CreateVersion7 instead")]
+	public static unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, long node)
+	{
+		var unix_64_bit_100ns = dateTime.ToUniversalTime().Ticks - _unixEpochTicks;
+		var greg_100_ns = unix_64_bit_100ns + _gregUnixOffset;
+
+		Guid g = default;
+		byte* bytes = (byte*)&g;
+
+		*(uint*)&g = (uint)(greg_100_ns >> 28); // write time_high
+		*(ushort*)(bytes + 4) = (ushort)(greg_100_ns >> 12); // write time_mid
+		*(ushort*)(bytes + 6) = (ushort)((ushort)(greg_100_ns & 0x0FFF) | (ushort)(6 << 12)); // write time_low & version 6
+
+		clockSeq = (ushort)(clockSeq & 0x3FFF | 0x8000); // variant 1, 0x10: RFC 4122
+		if (BitConverter.IsLittleEndian)
+		{
+			clockSeq = (ushort)((clockSeq << 8) | (clockSeq >> 8));
+		}
+		*(ushort*)(bytes + 8) = clockSeq;
+
+		byte* nodeBytes = (byte*)&node;
+		if (BitConverter.IsLittleEndian)
+		{
+			for (byte i = 0; i < 6; i++)
+			{
+				bytes[10 + i] = nodeBytes[5 - i];
+			}
+		}
+		else
+		{
+			for (byte i = 0; i < 6; i++)
+			{
+				bytes[10 + i] = nodeBytes[i];
+			}
+		}
+		return g;
+	}
+
+	public static Guid CreateVersion7() => CreateVersion7(DateTimeOffset.UtcNow);
+
+	//static volatile nint _state = 0;
+	static long _prevUnixTsMs = 0;
+	static int _prevSubMs = 0;
+
+#if DEBUG
+	static Guid _prevGuid;
+#endif
+
+	/*
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	static (long tick4, int sub) NextTick4AndSub(long unixTicks)
+	{
+		long now4 = unixTicks >> 2;                 // ticks / 4 (100ns*4)
+		int seed = (int)((unixTicks % 10_000) >> 2); // 0..2499 (your initial sub from ticks>>2)
+
+		while (true)
+		{
+			Interlocked.MemoryBarrier();
+			long cur = Volatile.Read(ref _state);
+			long cur4 = cur >> 12;
+			int curSub = (int)(cur & 0xFFF);
+
+			long new4; int newSub;
+
+			if (now4 > cur4)
+			{
+				// New 4-tick window: seed from actual time remainder
+				new4 = now4;
+				newSub = seed;
+			}
+			else
+			{
+				// Same or past window: monotonic bump
+				new4 = cur4;
+				newSub = curSub + 1;
+			}
+
+			// If we’ve consumed the 12-bit lane, roll by +1ms (== +2500 in tick4 units)
+			if (newSub > 0xFFF)
+			{
+				new4 = new4 + 2500; // +1 ms because 10_000 ticks / 4 = 2500
+				newSub = 0;
+			}
+
+			long next = (new4 << 12) | (uint)newSub;
+			if (Interlocked.CompareExchange(ref _state, next, cur) == cur)
+				return (new4, newSub);
+		}
+	}
+
+	public static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
+	{
+		var g = Guid.NewGuid();
+
+		long ticks = timestamp.ToUniversalTime().Ticks;
+		long unix_ticks = ticks - _unixEpochTicks;
+
+		var (tick4, sub) = NextTick4AndSub(unix_ticks);
+
+		long unix_ts_ms = (tick4 << 2) / 10000;
+
+		byte* bytes = (byte*)&g;
+		uint a = (uint)((unix_ts_ms >> 16) & 0xFFFFFFFF);
+		ushort b = (ushort)unix_ts_ms;
+
+		ushort c = (ushort)((((ushort)(sub)) | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
+
+		*(uint*)bytes = a;
+		*(ushort*)(bytes + 4) = b;
+		*(ushort*)(bytes + 6) = c;
+
+		bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
+		return g;
+	}
+	*/
+
+
+	public static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
+	{
+		// Interlocked.MemoryBarrier();
+		var g = Guid.NewGuid();
+
+		long ticks = timestamp.ToUniversalTime().Ticks;
+		long unix_ticks = ticks - _unixEpochTicks;
+		long unix_ts_ms = unix_ticks / 10000;
+		int subMs = (int)((unix_ticks % 10000) >> 2); // available space is 12 bits 0..4095 but we have extra 0..9999, so we drop 2 LSBs and get 4 ticks precision (0..2499). That gives extra 39% space for intra-ms overflows and that's faster than floating point extrapolation.
+
+		var prevUnixTsMs = _prevUnixTsMs;
+		var prevSubMs = _prevSubMs;
+		if (unix_ts_ms <= prevUnixTsMs)
+		{
+			unix_ts_ms = prevUnixTsMs;
+			if (subMs <= prevSubMs)
+			{
+				subMs = Interlocked.Increment(ref _prevSubMs);
+				if (subMs > 0xfff)
+				{
+					// overflow of sub-ms part, need to spin ms forward
+					unix_ts_ms = Interlocked.Increment(ref _prevUnixTsMs);
+					Interlocked.Exchange(ref _prevSubMs, subMs = 0);
+				}
+				else
+				{
+					unix_ts_ms = prevUnixTsMs;
+				}
+			}
+			else
+			{
+				Interlocked.Exchange(ref _prevSubMs, subMs);
+			}
+		}
+		else
+		{
+			Interlocked.Exchange(ref _prevUnixTsMs, unix_ts_ms);
+			Interlocked.Exchange(ref _prevSubMs, subMs);
+		}
+
+		byte* bytes = (byte*)&g;
+		uint a = (uint)((unix_ts_ms >> 16) & 0xFFFFFFFF);
+		ushort b = (ushort)unix_ts_ms;
+
+		// ushort maxRandB = 0x0FFF; // 12 bits
+		// ushort c = (ushort)((((ushort)(maxRandB * (unix_100ns / 10000.0)) | (0x7 << 12)))); // version 7 in high nibble and 12 bits of sub-ms time
+		ushort c = (ushort)((((ushort)(subMs)) | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
+		// The change from 3 ticks increment to 4 ticks increment:
+		// 1) Allows to avoid floating arythmetics and just do x>>2
+		// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
+		// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
+
+		*(uint*)bytes = a;
+		*(ushort*)(bytes + 4) = b;
+		*(ushort*)(bytes + 6) = c;
+
+		bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
+
+		// Monotonicy
+		// Option 0: artificially bump ts to counter if input ts repeats (limited velocity, 1 GUID per 1 ms)
+		// Option 1: intra-ms counter in rand_a short (empty bytes in normal case, but can be randomly seeded except 1 bit, guessable in 1 ms space)
+		//       a) start from 0 and count if repeated ms
+		//       b) start from random and reset MSB to get 50% space
+		// Option 2: random_b is random first time in ms, but after that it increments like bigint or BigEndian Long (guessable in 1 ms space)
+		// Option 3: use rand_a for high precision time (DateTime already has 100ns precision) This can be combined with other options. E.g. very good combo with option 0.
+
+		// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds.
+
+#if DEBUG
+		if (_prevGuid.CompareTo(g) >= 0)
+		{
+			throw null;
+		}
+		else
+		{
+			_prevGuid = g;
+		}
+#endif
+
+		return g;
+	}
+
+	public static unsafe Guid CreateVersion8_Sha256_Dns(string name)
+	{
+		return CreateVersion8_Sha256(_namespaceDns, name);
+	}
+
+	public static unsafe Guid CreateVersion8_Sha256_Url(string url)
+	{
+		return CreateVersion8_Sha256(_namespaceUrl, url);
+	}
+
+	public static unsafe Guid CreateVersion8_Sha256(Guid namespaceId, string name)
+	{
+		return CreateVersion8_Sha256(namespaceId, _utf8.GetBytes(name));
+	}
+
+	public static unsafe Guid CreateVersion8_Sha256(Guid namespaceId, byte[] input)
+	{
+		using var sha256 = SHA256.Create();
+
+		var nsBuf = namespaceId.ToByteArray();
+		if (BitConverter.IsLittleEndian)
+		{
+			Array.Reverse(nsBuf, 0, 4);
+			Array.Reverse(nsBuf, 4, 2);
+			Array.Reverse(nsBuf, 6, 2);
+		}
+
+		sha256.TransformBlock(nsBuf, 0, 16, null, 0);
+		sha256.TransformFinalBlock(input, 0, input.Length);
+		var hash = sha256.Hash;
+
+		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
+		hash[6] = (byte)((hash[6] & 0x0F) | 0x80); // Set version to 8
+
+		if (BitConverter.IsLittleEndian)
+		{
+			Array.Reverse(hash, 0, 4);
+			Array.Reverse(hash, 4, 2);
+			Array.Reverse(hash, 6, 2);
+		}
+
+		return new Guid(hash[..16]);
+
+	}
+
+	static long InterlockedStamp(ref long location, long newValue)
+	{
+		if (newValue > location)
+		{
+			location = newValue;
+			return newValue;
+		}
+		location += 4;
+		return location;
+		/*
+		long cur = Interlocked.Read(ref location);
+		while (true)
+		{
+			long next;
+			if (newValue > cur)
+			{
+				next = newValue;
+			}
+			else if (newValue == cur)
+			{
+				// v1: ceil(10000 / 4096) = 3
+				// v2: x >> 2, so + 4
+				next = cur + 4; 
+			}
+			else
+			{
+				// candidate < cur: no change, monotonicity preserved.
+				return cur;
+			}
+
+			long prev = Interlocked.CompareExchange(ref location, next, cur);
+			if (prev == cur)
+			{
+				return next;
+			}
+			cur = prev; // retry with fresher value
+		}
+		*/
+	}
+
 }

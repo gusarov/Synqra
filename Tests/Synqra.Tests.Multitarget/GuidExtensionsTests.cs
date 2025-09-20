@@ -1,6 +1,9 @@
-﻿namespace Synqra.Tests.Multitarget;
+﻿using Synqra.Tests.TestHelpers;
+using System.Runtime.InteropServices;
 
-public class GuidExtensionsTests3
+namespace Synqra.Tests.Multitarget;
+
+public class GuidExtensionsTests3 : BaseTest
 {
 	[SetUp]
 	public void Setup()
@@ -33,6 +36,14 @@ public class GuidExtensionsTests3
 		var timestamp = guid.GetTimestamp();
 		Console.WriteLine(timestamp);
 		Assert.That(timestamp, Is.EqualTo(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)).ToUniversalTime().DateTime));
+	}
+
+	[Test]
+	[Obsolete]
+	public void Should_handle_v1_test_vector_create()
+	{
+		var guid = GuidExtensions.CreateVersion1(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)), clockSeq: 0x33C8, node: 0x9F6BDECED846);
+		Assert.That(guid, Is.EqualTo(new Guid("C232AB00-9414-11EC-B3C8-9F6BDECED846")));
 	}
 
 	[Test]
@@ -89,6 +100,14 @@ public class GuidExtensionsTests3
 	}
 
 	[Test]
+	[Obsolete]
+	public void Should_handle_v6_test_vector_create()
+	{
+		var guid = GuidExtensions.CreateVersion6(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)), 0x33C8, 0x9F6BDECED846);
+		Assert.That(guid, Is.EqualTo(new Guid("1EC9414C-232A-6B00-B3C8-9F6BDECED846")));
+	}
+
+	[Test]
 	public void Should_handle_v7_test_vector()
 	{
 		var guid = new Guid("017F22E2-79B0-7CC3-98C4-DC0C0C07398F");
@@ -98,5 +117,139 @@ public class GuidExtensionsTests3
 		var timestamp = guid.GetTimestamp();
 		Console.WriteLine(timestamp);
 		Assert.That(timestamp, Is.EqualTo(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)).ToUniversalTime().DateTime));
+	}
+
+	[Test]
+	public void Should_create_v7()
+	{
+		var guid = GuidExtensions.CreateVersion7(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)));
+		Console.WriteLine(guid);
+		Assert.That(guid.GetVariant(), Is.EqualTo(1));
+		Assert.That(guid.GetVersion(), Is.EqualTo(7));
+
+		var timestamp = guid.GetTimestamp();
+		Console.WriteLine(timestamp);
+		Assert.That(timestamp, Is.EqualTo(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)).ToUniversalTime().DateTime));
+	}
+
+	[Test]
+	public void Should_handle_v8_example_vector()
+	{
+		var guid = GuidExtensions.CreateVersion8_Sha256_Dns("www.example.com");
+		Assert.That(guid.GetVariant(), Is.EqualTo(1));
+		Assert.That(guid.GetVersion(), Is.EqualTo(8));
+
+		var expected = new Guid("5c146b14-3c52-8afd-938a-375d0df1fbf6");
+		Assert.That(guid, Is.EqualTo(expected));
+	}
+
+	[Test]
+	public void Should_compare_guids()
+	{
+		Span<byte> arr = stackalloc byte[16];
+		for (byte i = 0; i < 16; i++)
+		{
+			arr[i] = i;
+		}
+		Guid prev = FromNetworkOrder(arr);
+		Console.WriteLine(prev);
+		Assert.AreEqual(prev, new Guid("00010203-0405-0607-0809-0a0b0c0d0e0f"));
+		for (int i = 0; i < 16; i++)
+		{
+			arr[i]++;
+			Guid newGuid = FromNetworkOrder(arr);
+			Console.WriteLine(newGuid);
+			Assert.IsTrue(newGuid.CompareTo(prev) > 0, "GUIDs are not sequential");
+			Assert.IsTrue(prev.CompareTo(newGuid) < 0, "GUIDs are not sequential");
+			prev = newGuid;
+		}
+	}
+
+	Guid FromNetworkOrder([In] ReadOnlySpan<byte> span)
+	{
+		var arr = span.ToArray();
+		if (BitConverter.IsLittleEndian)
+		{
+			Array.Reverse(arr, 0, 4);
+			Array.Reverse(arr, 4, 2);
+			Array.Reverse(arr, 6, 2);
+		}
+		return new Guid(arr);
+	}
+
+#if NET9_0_OR_GREATER
+	[Test]
+	public void Should_create_v7_near_net()
+	{
+		Console.WriteLine(GuidExtensions.CreateVersion7());
+		Console.WriteLine(Guid.CreateVersion7());
+	}
+#endif
+
+	[Test]
+	public void Should_create_v7_same_ms_sequence()
+	{
+		Guid prev = GuidExtensions.CreateVersion7();
+		Console.WriteLine(prev);
+		for (int i = 0; i < 24; i++)
+		{
+			var newGuid = GuidExtensions.CreateVersion7();
+			Console.WriteLine(newGuid);
+			Assert.IsTrue(newGuid.CompareTo(prev) > 0, "GUIDs are not sequential");
+			prev = newGuid;
+		}
+	}
+
+	[Test]
+	public void Should_create_v7_manual_time_sequence()
+	{
+		var now = new DateTime(638939296991929998, DateTimeKind.Utc);
+		Guid prev = GuidExtensions.CreateVersion7(now);
+		Console.WriteLine(prev);
+		for (int i = 0; i < 24; i++)
+		{
+			var newGuid = GuidExtensions.CreateVersion7(now);
+			Console.WriteLine(newGuid);
+			Assert.IsTrue(newGuid.CompareTo(prev) > 0, "GUIDs are not sequential");
+			prev = newGuid;
+		}
+	}
+
+	[Test]
+	public void Should_create_v7_fast()
+	{
+		var perf = MeasureOps(() => GuidExtensions.CreateVersion7());
+		Assert.IsTrue(perf > 100_000, "Too slow");
+	}
+
+#if NET9_0_OR_GREATER
+	[Test]
+	public void Should_create_v7_net9()
+	{
+		var perf = MeasureOps(() => Guid.CreateVersion7());
+		Assert.IsTrue(perf > 100_000, "Too slow");
+	}
+#endif
+
+	[Test]
+	public void Should_create_v7_monotonic()
+	{
+		Guid prev = GuidExtensions.CreateVersion7();
+		// Console.WriteLine(prev);
+		bool allGood = true;
+		for (int i = 0; i < 1_000_000; i++)
+		{
+			var newGuid = GuidExtensions.CreateVersion7();
+			// Console.WriteLine(newGuid);
+			if (newGuid.CompareTo(prev) <= 0)
+			{
+				allGood = false;
+				Console.WriteLine("#" + i);
+				Console.WriteLine(prev);
+				Console.WriteLine(newGuid);
+			}
+			prev = newGuid;
+		}
+		Assert.IsTrue(allGood, "GUIDs are not sequential");
 	}
 }

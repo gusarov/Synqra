@@ -148,7 +148,13 @@ public class PerformanceTestUtils
 		double deviationMax2Ops = 0;
 
 		var sw = new Stopwatch();
+#if NETSTANDARD
+		var tst = actualParameters.TotalTargetTime?.Ticks / actualParameters.DeviationMeasurementBatches;
+		var ts = tst == null ? default(TimeSpan?) : TimeSpan.FromTicks(tst.Value);
+		var targetBatchDuration = actualParameters.BatchTime ?? ts ?? TimeSpan.FromMilliseconds(250);
+#else
 		var targetBatchDuration = actualParameters.BatchTime ?? (actualParameters.TotalTargetTime / actualParameters.DeviationMeasurementBatches) ?? TimeSpan.FromMilliseconds(250);
+#endif
 		while (deviationTotalBatches < actualParameters.DeviationMeasurementBatches || ignoreConsecutiveOptimizations == true)
 		{
 			// 
@@ -159,7 +165,11 @@ public class PerformanceTestUtils
 			var batchStart = sw.Elapsed;
 
 			// We can't get reliable deviation if competing with GC too much
+#if NETSTANDARD
+			GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, true, true);
+#else
 			GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+#endif
 			GC.WaitForPendingFinalizers();
 			// GC.TryStartNoGCRegion(int.MaxValue / 2, int.MaxValue / 2, true); // Allow 2GB (1GB SOH and 1GB LOH)
 			Thread.Sleep(0); // Yield the remaining time slot back to scheuler and try to get fresh and full time slot.
