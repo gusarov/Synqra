@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
+    <ProjectReference Include="..\Synqra.Tests.TestHelpers\Synqra.Tests.TestHelpers.csproj" />
   </ItemGroup>
 
   <ItemGroup>
