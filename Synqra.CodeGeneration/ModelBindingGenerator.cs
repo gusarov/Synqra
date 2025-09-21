@@ -170,9 +170,9 @@ $$"""
 			context.AddSource($"{Path.GetFileNameWithoutExtension(calculatorClass.SyntaxTree.FilePath)}_{calculatorClass.Identifier}.Generated.cs", body.ToString());
 			SynqraEmergencyLog.Default.Debug("[+] Added source to context");
 		}
-		catch (Exception e)
+		catch (Exception ex)
 		{
-			SynqraEmergencyLog.Default.LogMessage($"[-] Exception occurred in generator: {e}");
+			SynqraEmergencyLog.Default.LogMessage($"[-] Exception occurred in generator: {ex}");
 		}
 	}
 }
