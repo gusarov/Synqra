@@ -485,19 +485,31 @@ public static class GuidExtensions
 		return CreateVersion8_Sha256(namespaceId, _utf8.GetBytes(name));
 	}
 
+	// static readonly Guid _hashspaceSha256 = new Guid("3fb32780-953c-4464-9cfd-e85dbbe9843d"); // Hashspaces did not survived from the draft
 	public static unsafe Guid CreateVersion8_Sha256(Guid namespaceId, byte[] input)
 	{
 		using var sha256 = SHA256.Create();
 
-		var nsBuf = namespaceId.ToByteArray();
+		/* Hashspaces did not survived from the draft
+		var hashSpaceBuf = _hashspaceSha256.ToByteArray();
 		if (BitConverter.IsLittleEndian)
 		{
-			Array.Reverse(nsBuf, 0, 4);
-			Array.Reverse(nsBuf, 4, 2);
-			Array.Reverse(nsBuf, 6, 2);
+			Array.Reverse(hashSpaceBuf, 0, 4);
+			Array.Reverse(hashSpaceBuf, 4, 2);
+			Array.Reverse(hashSpaceBuf, 6, 2);
+		}
+		sha256.TransformBlock(hashSpaceBuf, 0, 16, null, 0);
+		*/
+
+		var namespaceBuf = namespaceId.ToByteArray();
+		if (BitConverter.IsLittleEndian)
+		{
+			Array.Reverse(namespaceBuf, 0, 4);
+			Array.Reverse(namespaceBuf, 4, 2);
+			Array.Reverse(namespaceBuf, 6, 2);
 		}
 
-		sha256.TransformBlock(nsBuf, 0, 16, null, 0);
+		sha256.TransformBlock(namespaceBuf, 0, 16, null, 0);
 		sha256.TransformFinalBlock(input, 0, input.Length);
 		var hash = sha256.Hash;
 
