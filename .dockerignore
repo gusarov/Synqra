@@ -1,0 +1,16 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/Dockerfile*
+**/.dockerignore
+#**/docker-compose
+**/docker-compose*.yml
+**/*.*proj.user
+
+#!.git/HEAD
+!.git/config
+#!.git/packed-refs
+#!.git/refs/heads/**
+

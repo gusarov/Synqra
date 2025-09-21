@@ -1,7 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Synqra.Model;
+using Synqra;
 using System.ComponentModel;
 using System.Text;
 
@@ -10,13 +10,6 @@ namespace Synqra.CodeGeneration;
 [Generator]
 public class ModelBindingGenerator : IIncrementalGenerator
 {
-	public ModelBindingGenerator()
-	{
-#if DEBUG
-		GeneratorLogging.SetLogFilePath($"C:\\Temp\\GenLog.txt");
-#endif
-	}
-
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
 		var calculatorClassesProvider = context.SyntaxProvider.CreateSyntaxProvider(
@@ -32,7 +25,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			  }
 			  catch (Exception ex)
 			  {
-				  GeneratorLogging.LogMessage($"[-] {ex}");
+				  SynqraEmergencyLog.Default.LogMessage($"[-] {ex}");
 				  throw;
 			  }
 		  },
@@ -58,17 +51,17 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		try
 		{
 			var calculatorClassMembers = calculatorClass.Members;
-			GeneratorLogging.LogMessage($"[+] Found {calculatorClassMembers.Count} members in the Calculator class");
+			SynqraEmergencyLog.Default.Debug($"[+] Found {calculatorClassMembers.Count} members in the Calculator class");
 
 			foreach (var item in calculatorClassMembers)
 			{
-				GeneratorLogging.LogMessage($" {item.GetType().Name} {item} {item.AttributeLists} [{item.FullSpan}] {item.Kind()}");
+				SynqraEmergencyLog.Default.Debug($" {item.GetType().Name} {item} {item.AttributeLists} [{item.FullSpan}] {item.Kind()}");
 			}
 
 			// check if the methods we want to add exist already 
 			var setMethod = calculatorClassMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
 
-			GeneratorLogging.LogMessage("[+] Checked if methods exist in Calculator class");
+			SynqraEmergencyLog.Default.Debug("[+] Checked if methods exist in Calculator class");
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
@@ -76,7 +69,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				body.AppendLine(usingStatement.ToString());
 			}
-			GeneratorLogging.LogMessage("[+] Added using statements to generated class");
+			SynqraEmergencyLog.Default.Debug("[+] Added using statements to generated class");
 
 			body.AppendLine();
 
@@ -86,12 +79,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 			if (calcClassNamespace is null)
 			{
-				GeneratorLogging.LogMessage("[-] Could not find namespace for Calculator class", LoggingLevel.Error);
+				SynqraEmergencyLog.Default.Debug("[-] Could not find namespace for Calculator class");
 			}
-			GeneratorLogging.LogMessage($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
+			SynqraEmergencyLog.Default.Debug($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
-			body.AppendLine($"// Synqra Model Target: {Synqra.Model.SynqraModelRuntimeInfo.TargetFramework}");
+			body.AppendLine($"// Synqra Model Target: {Synqra.SynqraModelTargetInfo.TargetFramework}");
 			body.AppendLine();
 			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::{typeof(IBindableModel).FullName}, global::{typeof(INotifyPropertyChanging).FullName}, global::{typeof(INotifyPropertyChanged).FullName}");
 			body.AppendLine("{");
@@ -170,16 +163,16 @@ $$"""
 			body.AppendLine("}");
 			//while a bit crude it is a simple way to add the methods to the class
 
-			GeneratorLogging.LogMessage("[+] Added methods to generated class");
+			SynqraEmergencyLog.Default.Debug("[+] Added methods to generated class");
 
 			//to write our source file we can use the context object that was passed in
 			//this will automatically use the path we provided in the target projects csproj file
 			context.AddSource($"{Path.GetFileNameWithoutExtension(calculatorClass.SyntaxTree.FilePath)}_{calculatorClass.Identifier}.Generated.cs", body.ToString());
-			GeneratorLogging.LogMessage("[+] Added source to context");
+			SynqraEmergencyLog.Default.Debug("[+] Added source to context");
 		}
 		catch (Exception e)
 		{
-			GeneratorLogging.LogMessage($"[-] Exception occurred in generator: {e}", LoggingLevel.Error);
+			SynqraEmergencyLog.Default.LogMessage($"[-] Exception occurred in generator: {e}");
 		}
 	}
 }
