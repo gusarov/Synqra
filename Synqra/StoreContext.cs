@@ -120,8 +120,6 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 #endif
 	private readonly IStorage _storage;
 
-	static Guid _synqraTypeNamespaceId = new ("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76");
-
 	internal TypeMetadata GetTypeMetadata(Type type)
 	{
 #if NET7_0_OR_GREATER
@@ -131,7 +129,7 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 			slot = new TypeMetadata
 			{
 				Type = type,
-				TypeId = GuidExtensions.CreateVersion5(_synqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
+				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
 			};
 			_typeMetadataByTypeId[slot.TypeId] = slot;
 		}
