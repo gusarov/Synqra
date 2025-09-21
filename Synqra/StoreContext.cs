@@ -16,15 +16,22 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 	internal Dictionary<Type, IStoreCollectionInternal> _collections = new();
 
-	public StoreContext(JsonSerializerContext jsonSerializerContext, IStorage storage)
+	public StoreContext(
+		IStorage storage
+#if NET8_0_OR_GREATER
+		, JsonSerializerContext jsonSerializerContext
+#endif
+		)
 	{
-		_jsonSerializerContext = jsonSerializerContext;
 		_storage = storage;
+#if NET8_0_OR_GREATER
+		_jsonSerializerContext = jsonSerializerContext;
 		foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x=>x.AttributeType == typeof(JsonSerializableAttribute)))
 		{
 			var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
 			GetTypeMetadata(type);
 		}
+#endif
 	}
 
 	public IStoreCollection Get(Type type)
@@ -34,23 +41,39 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 	internal IStoreCollectionInternal GetInternal(Type type)
 	{
+#if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, type, out var exists);
 		if (!exists)
 		{
 			var gtype = typeof(StoreCollection<>).MakeGenericType(type);
-			slot = Activator.CreateInstance(gtype, [this, _jsonSerializerContext]) as IStoreCollectionInternal;
+			slot = Activator.CreateInstance(gtype, [this
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext
+#endif
+				]) as IStoreCollectionInternal;
 		}
 		return slot;
+#else
+		throw new NotSupportedException("Generic Get<T> is only supported in .NET 7 or greater");
+#endif
 	}
 
 	public IStoreCollection<T> Get<T>() where T : class
 	{
+#if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, typeof(T), out var exists);
 		if (!exists)
 		{
-			slot = new StoreCollection<T>(this, _jsonSerializerContext);
+			slot = new StoreCollection<T>(this
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext
+#endif
+				);
 		}
 		return (IStoreCollection<T>)slot;
+#else
+		throw new NotSupportedException("Generic Get<T> is only supported in .NET 7 or greater");
+#endif
 	}
 
 	public Task SubmitCommandAsync(ISynqraCommand newCommand)
@@ -91,22 +114,31 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 	Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
 	Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
+
+#if NET8_0_OR_GREATER
 	internal readonly JsonSerializerContext _jsonSerializerContext;
+#endif
 	private readonly IStorage _storage;
+
+	static Guid _synqraTypeNamespaceId = new ("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76");
 
 	internal TypeMetadata GetTypeMetadata(Type type)
 	{
+#if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
 		if (!exists)
 		{
 			slot = new TypeMetadata
 			{
 				Type = type,
-				TypeId = GuidExtensions.CreateVersion5(type.FullName),
+				TypeId = GuidExtensions.CreateVersion5(_synqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
 			};
 			_typeMetadataByTypeId[slot.TypeId] = slot;
 		}
 		return slot;
+#else
+		throw new NotSupportedException("Type metadata is only supported in .NET 8 or greater");
+#endif
 	}
 
 	internal TypeMetadata GetTypeMetadata(Guid typeId)
@@ -158,7 +190,7 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 		var created = new ObjectCreatedEvent
 		{
-			EventId = Guid.CreateVersion7(),
+			EventId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			Data = cmd.Data,
@@ -200,7 +232,7 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 	{
 		var created = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.CreateVersion7(),
+			EventId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -262,11 +294,23 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 		}
 		else if (ev.DataString != null)
 		{
-			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerContext.Options);
+			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext.Options
+#endif
+				);
 		}
 		else if (ev.Data != null)
 		{
-			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerContext.Options), typeMetadata.Type, _jsonSerializerContext.Options);
+			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext.Options
+#endif
+				), typeMetadata.Type
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext.Options
+#endif
+				);
 		}
 		else
 		{
@@ -282,11 +326,19 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 		{
 			var tm = GetTypeMetadata(ev.TargetTypeId);
 			var col = GetInternal(tm.Type);
-			var so = new JsonSerializerOptions(_jsonSerializerContext.Options);
+			var so = new JsonSerializerOptions(
+#if NET8_0_OR_GREATER
+				_jsonSerializerContext.Options
+#endif
+				);
 			var ti = so.GetTypeInfo(tm.Type);
 
 #if DEBUG
-			var so2 = new JsonSerializerOptions(_jsonSerializerContext.Options);
+			var so2 = new JsonSerializerOptions(
+#if NET8_0_OR_GREATER
+				_jsonSerializerContext.Options
+#endif
+				);
 			var ti2 = so.GetTypeInfo(tm.Type);
 			if (ReferenceEquals(ti2, ti))
 			{
@@ -303,7 +355,11 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 			{
 				[ev.PropertyName] = ev.NewValue,
 			};
-			var json = JsonSerializer.Serialize(dic, _jsonSerializerContext.Options);
+			var json = JsonSerializer.Serialize(dic
+#if NET8_0_OR_GREATER
+				, _jsonSerializerContext.Options
+#endif
+				);
 			var patched = JsonSerializer.Deserialize(json, ti);
 			if (!ReferenceEquals(attached, null))
 			{
@@ -326,5 +382,5 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 		throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
 	}
 
-	#endregion
+#endregion
 }

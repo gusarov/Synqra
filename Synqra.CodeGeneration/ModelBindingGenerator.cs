@@ -84,7 +84,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			SynqraEmergencyLog.Default.Debug($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
-			body.AppendLine($"// Synqra Model Target: {Synqra.SynqraModelTargetInfo.TargetFramework}");
+			body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
 			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::{typeof(IBindableModel).FullName}, global::{typeof(INotifyPropertyChanging).FullName}, global::{typeof(INotifyPropertyChanged).FullName}");
 			body.AppendLine("{");

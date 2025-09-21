@@ -1,4 +1,4 @@
-﻿using Synqra.Model;
+﻿using Synqra;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;

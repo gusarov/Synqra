@@ -169,26 +169,26 @@ public static class GuidExtensions
 		return g;
 	}
 
-	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	[Obsolete("Use v5 with SHA1 or v8 with current best hash function")]
 	public static unsafe Guid CreateVersion3Dns(string name)
 	{
 		return CreateVersion3(_namespaceDns, name);
 	}
 
-	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	[Obsolete("Use v5 with SHA1 or v8 with current best hash function")]
 	public static unsafe Guid CreateVersion3Url(string url)
 	{
 		return CreateVersion3(_namespaceUrl, url);
 	}
 
-	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	[Obsolete("Use v5 with SHA1 or v8 with current best hash function")]
 	public static unsafe Guid CreateVersion3(Guid namespaceId, string name)
 	{
 		// var max = _utf8.GetMaxByteCount(name.Length);
 		return CreateVersion3(namespaceId, _utf8.GetBytes(name));
 	}
 
-	[Obsolete("Use V5 with SHA1 or V8 with current best hash function")]
+	[Obsolete("Use v5 with SHA1 or v8 with current best hash function")]
 	public static unsafe Guid CreateVersion3(Guid namespaceId, byte[] raw)
 	{
 		using var md5 = MD5.Create();

@@ -12,7 +12,9 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	// Remember - this is always client request, not a synchronization!
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
 	private readonly StoreContext _storeContext;
+#if NET8_0_OR_GREATER
 	private readonly JsonSerializerContext _jsonSerializerContext;
+#endif
 
 	/// <summary>
 	/// Additional objects that are attached to this collection but not yet added to the list. Eg inserting new item.
@@ -25,13 +27,33 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	ISynqraStoreContext IStoreCollectionInternal.Store => _storeContext;
 	public Type Type => typeof(T);
 
-	public StoreCollection(StoreContext ctx, JsonSerializerContext jsonSerializerContext)
+	public StoreCollection(StoreContext ctx
+#if NET8_0_OR_GREATER
+		, JsonSerializerContext jsonSerializerContext
+#endif
+		)
 	{
 		_storeContext = ctx;
+#if NET8_0_OR_GREATER
 		_jsonSerializerContext = jsonSerializerContext;
+#endif
 	}
 
-	public bool TryGetAttached(Guid id, [NotNullWhen(true)] out object? attached)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+#else
+	public T this[int index]
+	{
+		get => ((IReadOnlyList<T>)this)[index];
+		set => throw new NotSupportedException("StoreCollection is read-only, use Add() to add new items");
+	}
+#endif
+
+	public bool TryGetAttached(Guid id,
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		[NotNullWhen(true)]
+#endif
+		out object? attached
+		)
 	{
 		lock (_attachedObjects)
 		{
@@ -132,9 +154,17 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	private int Add(T item)
 	{
 		var o = ((ICollection)this).Count;
-		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
-		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
-		var targetId = Guid.CreateVersion7(); // This is a new object, so we generate a new object ID
+		var dataJson = JsonSerializer.Serialize(item
+#if NET8_0_OR_GREATER
+			, _jsonSerializerContext.Options
+#endif
+			);
+		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson
+#if NET8_0_OR_GREATER
+			, _jsonSerializerContext.Options
+#endif
+			);
+		var targetId = GuidExtensions.CreateVersion7(); // This is a new object, so we generate a new object ID
 		lock (_attachedObjects)
 		{
 			_attachedObjects[targetId] = new WeakReference<T>(item); // attach item to the collection, so it can be retrieved later if needed
@@ -154,7 +184,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		_storeContext.SubmitCommandAsync(new CreateObjectCommand
 		{
 			TargetTypeId = _storeContext.GetTypeMetadata(typeof(T)).TypeId,
-			CommandId = Guid.CreateVersion7(), // This is a new object, so we generate a new command Id
+			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = targetId,
 			Data = data?.Count > 0 ? data : null,
 			DataJson = dataJson,
@@ -173,7 +203,7 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		_list.Add(typedItem);
 	}
 
-	#endregion
+#endregion
 
 	#region Remove
 

@@ -20,6 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" OutputItemType="Analyzer" />
-    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
+    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" OutputItemType="Analyzer" />
   </ItemGroup>
 </Project>

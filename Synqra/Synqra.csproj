@@ -1,17 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net9.0;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net9.0;net8.0;netstandard2.1;netstandard2.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Synqra.Utils\_Polyfill.cs" Link="_Polyfill.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="9.0.7" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.7" />
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
+    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
 
 </Project>

@@ -10,7 +10,7 @@ public interface IStoreCollection : IList, ICollection//, IQueryable, INotifyCol
 public interface IStoreCollection<T> : IStoreCollection, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
 	where T : class
 {
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	new T this[int index]
 	{
 		get => ((IReadOnlyList<T>)this)[index];
@@ -28,10 +28,11 @@ public interface IStoreCollectionInternal : IStoreCollection
 	Type Type { get; }
 
 	void AddByEvent(object item);
-#if NETSTANDARD
-	bool TryGetAttached(Guid id, out object? item);
-#else
-	bool TryGetAttached(Guid id, [NotNullWhen(true)] out object? item);
+	bool TryGetAttached(Guid id,
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		[NotNullWhen(true)]
 #endif
+		 out object? item
+		);
 	Guid GetId(object item);
 }
