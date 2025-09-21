@@ -23,7 +23,11 @@ public interface IStorage : IDisposable, IAsyncDisposable
 	IAsyncEnumerable<T> GetAll<T>();
 
 	[EditorBrowsable(EditorBrowsableState.Advanced)]
-	Task FlushAsync() => Task.CompletedTask;
+	Task FlushAsync()
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> Task.CompletedTask
+#endif
+		;
 }
 
 class AttachedData
@@ -91,7 +95,11 @@ public static class SynqraPocoTrackingExtensions
 				throw new Exception("Object is not attached");
 			}
 			var store = (StoreContext)_storeCollection.Store;
-			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type, store._jsonSerializerContext.Options);
+			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type
+#if NET8_0_OR_GREATER
+				, store._jsonSerializerContext.Options
+#endif
+				);
 		}
 
 		public void Dispose()
@@ -102,12 +110,24 @@ public static class SynqraPocoTrackingExtensions
 				foreach (var kvp in _originalsSerialized)
 				{
 					// serialzie again
-					var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options);
+					var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type
+#if NET8_0_OR_GREATER
+						, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+						);
 					if (json != kvp.Value)
 					{
 						// changed!!
-						var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options);
-						var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options);
+						var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value
+#if NET8_0_OR_GREATER
+							, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+							);
+						var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json
+#if NET8_0_OR_GREATER
+							, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+							);
 						foreach (var item in original.Keys.Union(updated.Keys))
 						{
 							var oldValue = original.TryGetValue(item, out var ov) ? ov : null;
@@ -116,7 +136,7 @@ public static class SynqraPocoTrackingExtensions
 							{
 								_storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 								{
-									CommandId = Guid.CreateVersion7(),
+									CommandId = GuidExtensions.CreateVersion7(),
 									TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
 									PropertyName = item,
 									OldValue = oldValue,
