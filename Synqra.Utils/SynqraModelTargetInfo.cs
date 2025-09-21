@@ -2,7 +2,7 @@
 
 namespace Synqra;
 
-internal static class SynqraModelRuntimeInfo
+public static class SynqraModelTargetInfo
 {
 	public static string TargetFramework =>
 #if NETSTANDARD2_0
