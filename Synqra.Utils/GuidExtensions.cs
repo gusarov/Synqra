@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -503,14 +504,31 @@ public static class GuidExtensions
 		return CreateVersion8_Sha256(namespaceId, _utf8.GetBytes(name));
 	}
 
+	const string SwitchValidateNamespaceIdKey = "Synqra.GuidExtensions.ValidateNamespaceId";
+
+#if NET9_0_OR_GREATER
+	[FeatureSwitchDefinition(SwitchValidateNamespaceIdKey)] // hint for AOT trimmer
+#endif
+	internal static bool SwitchValidateNamespaceId => AppContext.TryGetSwitch(SwitchValidateNamespaceIdKey, out var v) ? v : true;
+
 	static unsafe void ValidateNamespaceId(Guid namespaceId)
 	{
+		if (!AppContext.TryGetSwitch(SwitchValidateNamespaceIdKey, out var isValidationEnabled))
+		{
+			isValidationEnabled = true;
+		}
+		if (!isValidationEnabled)
+		{
+			return;
+		}
+
+		const string disclaimer = $". If you believe that this is not a mistake, you know what you are doing and you have legitimate case, you can disabled this validation with AppContext.SetSwitch(\"{SwitchValidateNamespaceIdKey}\", false).";
 		// generating a UUIDv4 or UUIDv7 Namespace ID value is RECOMMENDED according to the spec.
 		// I also discourage using default or empty namespace IDs, as they can lead to collisions. no point to use v1-v6 except allocated values
 
 		if (namespaceId == default)
 		{
-			throw new ArgumentException("Empty namespace ID", nameof(namespaceId));
+			throw new ArgumentException("Empty namespace ID" + disclaimer, nameof(namespaceId));
 		}
 		/*
 		if (namespaceId == Guid.AllBitsSet) // all bits set is not portable, but there is variant check below, so fine...
@@ -521,7 +539,7 @@ public static class GuidExtensions
 		if (namespaceId.GetVariant() != 1)
 		{
 			// technically I should allow 3+ (other variants), but practically they will never be used and spec evolved to get proper versioning.
-			throw new ArgumentException("Do not use variant 0x0 or 0x110 as namespace ID", nameof(namespaceId));
+			throw new ArgumentException("Do not use variant 0x0 or 0x110 as namespace ID" + disclaimer, nameof(namespaceId));
 		}
 		switch (namespaceId.GetVersion())
 		{
@@ -529,7 +547,7 @@ public static class GuidExtensions
 			case 2: // not recommended
 			case 3: // hashbased for ns? no...
 			case 5: // hashbased for ns? no...
-				throw new ArgumentException("Do not use version 0, 2, 3, 5", nameof(namespaceId));
+				throw new ArgumentException("Do not use version 0, 2, 3, 5 as namespace ID" + disclaimer, nameof(namespaceId));
 			case 1: // only legal list, others are not recommended (use v4 or v7 instead)
 			{
 				// RFC pattern: xxxxxxxx-9dad-11d1-80b4-00c04fd430c8
@@ -537,7 +555,7 @@ public static class GuidExtensions
 				ulong* ulongs = (ulong*)&namespaceId;
 				if (uints[1] != (BitConverter.IsLittleEndian ? 0x11d19dad : 0xad9dd111) || ulongs[1] != (BitConverter.IsLittleEndian ? 0xc830d44fc000b480 : 0x80b400c04fd430c8))
 				{
-					throw new ArgumentException("Do not use custom v1 namespace IDs, only RFC allocated ones", nameof(namespaceId));
+					throw new ArgumentException("Do not use custom v1 namespace IDs, only RFC allocated ones" + disclaimer, nameof(namespaceId));
 				}
 				break;
 			}

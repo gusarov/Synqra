@@ -6,6 +6,11 @@ using Microsoft.Extensions.Hosting.Internal;
 
 namespace Synqra.Tests.TestHelpers;
 
+public abstract class BaseTest<T> : BaseTest where T : notnull
+{
+	public T _sut => ServiceProvider.GetRequiredService<T>();
+}
+
 public abstract class BaseTest : PerformanceTestUtils
 {
 	public IServiceCollection ServiceCollection => HostBuilder.Services;

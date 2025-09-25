@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
@@ -31,7 +31,7 @@ public interface IStorage : IDisposable, IAsyncDisposable
 		;
 }
 
-class AttachedData
+internal class AttachedData
 {
 	public string? TrackingSinceJsonSnapshot { get; set; }
 }
@@ -64,11 +64,11 @@ public static class SynqraPocoTrackingExtensions
 
 	private sealed class TrackingSessionImplementation : ITrackingSession
 	{
-		private readonly IStoreCollectionInternal _storeCollection;
+		private readonly StoreCollection _storeCollection;
 
 		ConcurrentDictionary<object, string> _originalsSerialized = new();
 
-		public TrackingSessionImplementation(IStoreCollectionInternal storeCollection, IEnumerable<object> items)
+		public TrackingSessionImplementation(StoreCollection storeCollection, IEnumerable<object> items)
 		{
 			_storeCollection = storeCollection;
 
@@ -88,14 +88,10 @@ public static class SynqraPocoTrackingExtensions
 
 		void AddCore(object item)
 		{
-			if (_storeCollection.GetId(item) == default)
-			{
-				throw new Exception("Object is not attached");
-			}
-			var store = (StoreContext)_storeCollection.Store;
+			_storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
 			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type
 #if NET8_0_OR_GREATER
-				, store._jsonSerializerContext.Options
+				, _storeCollection.Store._jsonSerializerContext.Options
 #endif
 				);
 		}
@@ -138,11 +134,12 @@ public static class SynqraPocoTrackingExtensions
 							await _storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 							{
 								CommandId = GuidExtensions.CreateVersion7(),
+								ContainerId = _storeCollection.ContainerId,
 								TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
 								PropertyName = item,
 								OldValue = oldValue,
 								NewValue = newValue,
-								TargetId = _storeCollection.GetId(kvp.Key),
+								TargetId = _storeCollection.Store.GetId(kvp.Key, null, GetMode.RequiredId),
 							});
 						}
 					}
@@ -153,7 +150,7 @@ public static class SynqraPocoTrackingExtensions
 
 	// private static readonly ConditionalWeakTable<object, ExtendingEntry> _attachedProperties = new();
 
-	public static ITrackingSession PocoTracker(this IStoreCollection collection, params IEnumerable<object> items)
+	public static ITrackingSession PocoTracker(this ISynqraCollection collection, params IEnumerable<object> items)
 	{
 		/*
 		var attached = _attachedProperties.GetOrCreateValue(collection);
@@ -163,7 +160,7 @@ public static class SynqraPocoTrackingExtensions
 		}
 		*/
 		// ((IStoreCollectionInternal)collection).Store.
-		return new TrackingSessionImplementation((IStoreCollectionInternal)collection, items);
+		return new TrackingSessionImplementation((StoreCollection)collection, items);
 		// CollectionsMarshal.GetValueRefOrAddDefault(((IStoreCollectionInternal)collection)._attachedObjects, q.GetId(), out var exists);
 	}
 }

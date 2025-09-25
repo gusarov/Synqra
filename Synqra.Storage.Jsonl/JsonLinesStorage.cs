@@ -24,7 +24,7 @@ public static class StorageExtensions
 		hostBuilder.Services.Configure<JsonLinesStorageConfig>(hostBuilder.Configuration.GetSection("JsonLinesStorage"));
 	}
 
-	private class JsonLinesStorageConfig
+	internal class JsonLinesStorageConfig // it is internal only because of AOT bindings
 	{
 		public string FileName { get; set; } = "[TypeName].jsonl";
 	}
