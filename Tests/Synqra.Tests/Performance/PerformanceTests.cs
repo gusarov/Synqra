@@ -34,6 +34,30 @@ public class PerformanceTests : BaseTest
 	*/
 
 	[Test]
+	public async Task Should_Bind_faster_than_reflection_and_faster_than_minimum_expectations()
+	{
+		// Reflection
+
+		var model = new SamplePublicModel();
+		model.RSetReflection("Name", "abc");
+		await Assert.That(model.Name).IsEqualTo("abc");
+
+		var reflectionOps = MeasureOps(() => { model.RSetReflection("Name", "abc"); });
+
+		Debug.WriteLine($"RSetReflection ops: {reflectionOps}");
+		await Assert.That(reflectionOps).IsGreaterThan(1_000_000);
+
+		var bm = (IBindableModel)model;
+		bm.Set("Name", "def");
+		await Assert.That(model.Name).IsEqualTo("def");
+		var ops = MeasureOps(() => { bm.Set("Name", "def"); });
+
+		Debug.WriteLine($"IBindableModel.Set ops: {ops}");
+		await Assert.That(ops).IsGreaterThan(20_000_000);
+		await Assert.That(ops).IsGreaterThan(reflectionOps);
+	}
+
+	[Test]
 	public async Task Should_Bind_01_BR_RSet_property()
 	{
 		int b;

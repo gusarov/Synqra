@@ -6,92 +6,70 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
-class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadOnlyList<T>
-	where T : class
+abstract class StoreCollection
 {
 	// Remember - this is always client request, not a synchronization!
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
-	private readonly StoreContext _storeContext;
-#if NET8_0_OR_GREATER
-	private readonly JsonSerializerContext _jsonSerializerContext;
-#endif
+	private protected readonly JsonSerializerContext _jsonSerializerContext;
 
-	/// <summary>
-	/// Additional objects that are attached to this collection but not yet added to the list. Eg inserting new item.
-	/// </summary>
-	private readonly Dictionary<Guid, WeakReference<T>> _attachedObjects = new();
-	private readonly ConditionalWeakTable<object, Tuple<Guid>> _attachedIds = new();
-	private byte _attachedMaintain;
+	internal StoreContext Store { get; private init; }
+	internal Guid ContainerId { get; private init; }
+	internal Guid CollectionId { get; private init; }
+
+	public abstract Type Type { get; }
+	protected abstract IList IList { get; }
+	protected abstract ICollection ICollection { get; }
+
+	public StoreCollection(StoreContext storeContext, JsonSerializerContext jsonSerializerContext, Guid containerId, Guid collectionId)
+	{
+		Store = storeContext ?? throw new ArgumentNullException(nameof(storeContext));
+		_jsonSerializerContext = jsonSerializerContext ?? throw new ArgumentNullException(nameof(jsonSerializerContext));
+		ContainerId = containerId;
+		CollectionId = collectionId;
+	}
+
+	#region COUNT
+
+	public int Count => IList.Count;
+
+	#endregion
+
+	#region Add
+
+	internal abstract void AddByEvent(object item);
+
+	#endregion
+}
+
+class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
+	where T : class
+{
 	private readonly List<T> _list = new List<T>();
 
-	ISynqraStoreContext IStoreCollectionInternal.Store => _storeContext;
-	public Type Type => typeof(T);
+	public override Type Type => typeof(T);
+	protected override IList IList => _list;
+	protected override ICollection ICollection => _list;
 
-	public StoreCollection(StoreContext ctx
-#if NET8_0_OR_GREATER
-		, JsonSerializerContext jsonSerializerContext
-#endif
-		)
+	public StoreCollection(StoreContext storeContext, JsonSerializerContext jsonSerializerContext, Guid containerId, Guid collectionId)
+		: base(storeContext, jsonSerializerContext, containerId, collectionId)
 	{
-		_storeContext = ctx;
-#if NET8_0_OR_GREATER
-		_jsonSerializerContext = jsonSerializerContext;
-#endif
-	}
-
-#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-#else
-	public T this[int index]
-	{
-		get => ((IReadOnlyList<T>)this)[index];
-		set => throw new NotSupportedException("StoreCollection is read-only, use Add() to add new items");
-	}
-#endif
-
-	public bool TryGetAttached(Guid id,
-#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-		[NotNullWhen(true)]
-#endif
-		out object? attached
-		)
-	{
-		lock (_attachedObjects)
-		{
-			if (_attachedObjects.TryGetValue(id, out var weakRef) && weakRef.TryGetTarget(out var target))
-			{
-				attached = target;
-				return true;
-			}
-			attached = null;
-		}
-		return false;
-	}
-
-	public Guid GetId(object attached)
-	{
-		if (attached == null)
-		{
-			throw new ArgumentNullException(nameof(attached), "Attached object cannot be null.");
-		}
-		lock (_attachedObjects) // this is a root lock
-		{
-			if (_attachedIds.TryGetValue(attached, out var tuple))
-			{
-				return tuple.Item1;
-			}
-		}
-		return default;
 	}
 
 	#region BY INDEX
 
 	object? IList.this[int index]
 	{
-		get => ((IList)_list)[index];
+		get => IList[index];
 		set => throw new NotImplementedException();
 	}
 
 	T IReadOnlyList<T>.this[int index] => _list[index];
+
+	T ISynqraCollection<T>.this[int index]
+	{
+		get => _list[index];
+		set => throw new NotImplementedException();
+	}
 
 	#endregion
 
@@ -101,31 +79,11 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 
 	bool IList.IsReadOnly => throw new NotImplementedException(); // this actually depends on a model, do we allow primitive automatic commands or not
 
-	bool ICollection<T>.IsReadOnly => throw new NotImplementedException();
-
 	bool ICollection.IsSynchronized => throw new NotImplementedException();
 
-	object ICollection.SyncRoot => _list;
+	object ICollection.SyncRoot => ICollection;
 
-	/*
-	Type IQueryable.ElementType => typeof(T);
-
-	Expression IQueryable.Expression => throw new NotImplementedException();
-
-	IQueryProvider IQueryable.Provider => throw new NotImplementedException();
-	*/
-
-	#endregion
-
-	#region COUNT
-
-	/*
-	int ICollection<T>.Count => _list.Count;
-	int ICollection.Count => _list.Count;
-	int IReadOnlyCollection<T>.Count => _list.Count;
-	*/
-
-	public int Count => _list.Count;
+	bool ICollection<T>.IsReadOnly => throw new NotImplementedException();
 
 	#endregion
 
@@ -154,38 +112,18 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	private int Add(T item)
 	{
 		var o = ((ICollection)this).Count;
-		var dataJson = JsonSerializer.Serialize(item
-#if NET8_0_OR_GREATER
-			, _jsonSerializerContext.Options
-#endif
-			);
-		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson
-#if NET8_0_OR_GREATER
-			, _jsonSerializerContext.Options
-#endif
-			);
-		var targetId = GuidExtensions.CreateVersion7(); // This is a new object, so we generate a new object ID
-		lock (_attachedObjects)
+		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
+		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
+
+		var attachedData = Store.Attach(item, this);
+
+		Store.SubmitCommandAsync(new CreateObjectCommand
 		{
-			_attachedObjects[targetId] = new WeakReference<T>(item); // attach item to the collection, so it can be retrieved later if needed
-			_attachedIds.Add(item, Tuple.Create(targetId));
-			if (++_attachedMaintain == 0)
-			{
-				// clean up weak references
-				foreach (var key in _attachedObjects.Keys.ToArray())
-				{
-					if (!_attachedObjects[key].TryGetTarget(out _))
-					{
-						_attachedObjects.Remove(key);
-					}
-				}
-			}
-		}
-		_storeContext.SubmitCommandAsync(new CreateObjectCommand
-		{
-			TargetTypeId = _storeContext.GetTypeMetadata(typeof(T)).TypeId,
+			ContainerId = ContainerId,
+			CollectionId = CollectionId,
+			TargetTypeId = Store.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
-			TargetId = targetId,
+			TargetId = attachedData.Id,
 			Data = data?.Count > 0 ? data : null,
 			DataJson = dataJson,
 			DataObject = item,
@@ -194,16 +132,17 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}
 
-	void IStoreCollectionInternal.AddByEvent(object item)
+	internal override void AddByEvent(object item)
 	{
 		if (item is not T typedItem)
 		{
 			throw new ArgumentException($"Item must be of type {typeof(T).Name}", nameof(item));
 		}
+		Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
 		_list.Add(typedItem);
 	}
 
-#endregion
+	#endregion
 
 	#region Remove
 
@@ -250,14 +189,28 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 
 	#region Iterate
 
-	void ICollection.CopyTo(Array array, int index)
+	void ICollection.CopyTo(Array array, int arrayIndex)
 	{
-		throw new NotImplementedException();
+		if (array.Length < _list.Count + arrayIndex)
+		{
+			throw new ArgumentException("Array is too small to copy the collection.", nameof(array));
+		}
+		for (int i = 0, m = Count; i < m; i++)
+		{
+			array.SetValue(_list[i], arrayIndex + i);
+		}
 	}
 
 	void ICollection<T>.CopyTo(T[] array, int arrayIndex)
 	{
-		throw new NotImplementedException();
+		if (array.Length < _list.Count + arrayIndex)
+		{
+			throw new ArgumentException("Array is too small to copy the collection.", nameof(array));
+		}
+		for (int i = 0, m = Count; i < m; i++)
+		{
+			array[arrayIndex + i] = _list[i];
+		}
 	}
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
@@ -276,19 +229,25 @@ class StoreCollection<T> : IStoreCollection<T>, IStoreCollectionInternal, IReadO
 	}
 
 	#endregion
+}
 
-	/*
-	event NotifyCollectionChangedEventHandler? INotifyCollectionChanged.CollectionChanged
+internal static class SynqraCollectionInternalExtensions
+{
+	public static StoreContext GetStore(this ISynqraCollection collection)
 	{
-		add
+		if (collection is StoreCollection internalCollection)
 		{
-			throw new NotImplementedException();
+			return internalCollection.Store;
 		}
-
-		remove
-		{
-			throw new NotImplementedException();
-		}
+		throw new InvalidOperationException("Collection does not implement StoreCollection");
 	}
-	*/
+
+	public static Type GetType(this ISynqraCollection collection)
+	{
+		if (collection is StoreCollection internalCollection)
+		{
+			return internalCollection.Type;
+		}
+		throw new InvalidOperationException("Collection does not implement StoreCollection");
+	}
 }

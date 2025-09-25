@@ -9,13 +9,17 @@ namespace Synqra;
 
 public abstract class SingleObjectEvent : Event
 {
-	public required Guid TargetId { get; init; }
-	public required Guid TargetTypeId { get; init; }
+	public required Guid TargetId { get; init; } // like row id
+	public required Guid TargetTypeId { get; init; } // like descriminator
+	public required Guid CollectionId { get; init; } // like table name (can be derrived from root type id)
 }
 
 public abstract class Event
 {
 	public required Guid EventId { get; init; }
+	public required Guid CommandId { get; set; }
+	// public required Guid UserId { get; set; }
+	public required Guid ContainerId { get; set; } // like layer id
 
 	public async Task AcceptAsync(IEventVisitor<object?> visitor)
 	{
@@ -42,17 +46,21 @@ public interface IEventVisitor<in T>
 	Task VisitAsync(ObjectCreatedEvent ev, T ctx);
 	Task VisitAsync(ObjectPropertyChangedEvent ev, T ctx);
 	Task VisitAsync(ObjectDeletedEvent ev, T ctx);
+	Task VisitAsync(CommandCreatedEvent ev, T ctx);
 
 	/*
-	Task VisitAsync(NodeMoved ev, T ctx);
-	Task VisitAsync(CommandPatched ev, T ctx);
-	Task VisitAsync(DependencyChanged ev, T ctx);
-	Task VisitAsync(SettingChanged ev, T ctx);
 	Task VisitAsync(CommandCreated ev, T ctx);
+	Task VisitAsync(CommandPatched ev, T ctx);
+
 	Task VisitAsync(ComponentAdded ev, T ctx);
 	Task VisitAsync(ComponentPropertyChanged ev, T ctx);
 	Task VisitAsync(ComponentDeleted ev, T ctx);
+
 	Task VisitAsync(WorldStateProvided ev, T ctx);
+
+	Task VisitAsync(NodeMoved ev, T ctx);
+	Task VisitAsync(DependencyChanged ev, T ctx);
+	Task VisitAsync(SettingChanged ev, T ctx);
 	*/
 }
 
@@ -80,5 +88,12 @@ public class ObjectPropertyChangedEvent : SingleObjectEvent
 
 public class ObjectDeletedEvent : SingleObjectEvent
 {
+	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
+}
+
+public class CommandCreatedEvent : Event
+{
+	public required Command Data { get; init; }
+
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

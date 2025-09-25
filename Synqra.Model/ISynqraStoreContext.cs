@@ -2,13 +2,13 @@
 
 public interface ISynqraStoreContext
 {
-	IStoreCollection Get(Type type);
+	ISynqraCollection GetCollection(Type type);
 
-	IStoreCollection<T> Get<T>()
+	ISynqraCollection<T> GetCollection<T>()
 		where T : class
 #if NET8_0_OR_GREATER
 	{
-		return (IStoreCollection<T>)Get(typeof(T));
+		return (ISynqraCollection<T>)GetCollection(typeof(T));
 	}
 #else
 	;

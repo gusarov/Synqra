@@ -10,17 +10,17 @@ namespace Synqra.Tests.DemoTodo;
 
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
-	public partial string TestProperty { get; set; }
+	public partial string Name { get; set; }
 
 	/* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 	public event PropertyChangingEventHandler? PropertyChanging;
 
-	partial void OnTestPropertyChanging(string newValue);
-	partial void OnTestPropertyChanging(string oldValue, string newValue);
-	partial void OnTestPropertyChanged(string newValue);
-	partial void OnTestPropertyChanged(string oldValue, string newValue);
+	partial void OnNameChanging(string newValue);
+	partial void OnNameChanging(string oldValue, string newValue);
+	partial void OnNameChanged(string newValue);
+	partial void OnNameChanged(string oldValue, string newValue);
 
 	ISynqraStoreContext IBindableModel.Store
 	{
@@ -32,26 +32,49 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	{
 		switch (propertyName)
 		{
-			case nameof(TestProperty):
-				TestProperty = value as string;
+			case nameof(Name):
+				Name = value as string;
 				break;
 		}
 	}
 
-	public partial string TestProperty
+
+	[ThreadStatic]
+	static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
+
+	public partial string Name
 	{
 		get => field;
 		set
 		{
-			if (!EqualityComparer<string>.Default.Equals(field, value))
+			var bm = (IBindableModel)this;
+			if (_assigning || bm.Store is null)
 			{
-				OnTestPropertyChanging(value);
-				OnTestPropertyChanging(field, value);
-				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(TestProperty)));
-				field = value;
-				OnTestPropertyChanged(value);
-				OnTestPropertyChanged(field, value);
-				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TestProperty)));
+				var oldValue = field;
+				if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(oldValue, value))
+				{
+					OnNameChanging(value);
+					OnNameChanging(oldValue, value);
+					PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
+					field = value;
+					OnNameChanged(value);
+					OnNameChanged(oldValue, value);
+					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+				}
+			}
+			else
+			{
+				bm.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					ContainerId = default,
+					CollectionId = default,
+					TargetTypeId = bm.Store.GetId(this, null, GetMode.RequiredId),
+					TargetId = bm.Store.GetId(this, null, GetMode.RequiredId),
+					PropertyName = nameof(Name),
+					OldValue = field,
+					NewValue = value
+				}).GetAwaiter().GetResult();
 			}
 		}
 	}
@@ -66,6 +89,6 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 
 	public void CustomCommand1_Reset()
 	{
-		TestProperty = "Value 0";
+		Name = "Value 0";
 	}
 }

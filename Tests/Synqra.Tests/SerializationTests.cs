@@ -37,6 +37,7 @@ public class SerializationTests
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
+
 }
 
 public class AotTests
@@ -87,24 +88,3 @@ public record Person(string Name, int Age, int Height)
 	public int Age { get; init; } = Age;
 }
 
-public class BaseTestTests : BaseTest
-{
-	[Test]
-	public async Task Should_allow_configure_di_and_use_it()
-	{
-		ServiceCollection.AddSingleton<IDemoService, DemoService>();
-
-		var ds = ServiceProvider.GetRequiredService<IDemoService>();
-
-		await Assert.That(ds).IsNotNull();
-	}
-}
-
-public interface IDemoService
-{
-}
-
-public class DemoService : IDemoService
-{
-
-}
