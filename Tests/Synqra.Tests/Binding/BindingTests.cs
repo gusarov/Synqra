@@ -62,10 +62,11 @@ public class BindingTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_Bind_01_BR_RSet_quickly()
+	public async Task Should_Bind_01_BR_RSet()
 	{
 		var model = new SamplePublicModel();
 		model.RSetReflection("Name", "abc");
+		// model.RSetReflection("Name", "abc", dynType: typeof(SamplePublicModel));
 		await Assert.That(model.Name).IsEqualTo("abc");
 	}
 
