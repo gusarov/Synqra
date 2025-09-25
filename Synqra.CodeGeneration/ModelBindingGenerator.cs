@@ -3,14 +3,29 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Synqra;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Synqra.CodeGeneration;
-
+ 
 [Generator]
 public class ModelBindingGenerator : IIncrementalGenerator
 {
 	public void Initialize(IncrementalGeneratorInitializationContext context)
+	{
+		// AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve;
+		// AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
+		InitializeCore(context);
+	}
+
+	private System.Reflection.Assembly? CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
+	{
+		// SynqraEmergencyLog.Default.LogMessage($"[Asm Resolve] {args.Name}");
+		return null;
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private void InitializeCore(IncrementalGeneratorInitializationContext context)
 	{
 		var calculatorClassesProvider = context.SyntaxProvider.CreateSyntaxProvider(
 		  predicate: (SyntaxNode node, CancellationToken cancelToken) =>
@@ -39,6 +54,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		context.RegisterSourceOutput(calculatorClassesProvider, (sourceProductionContext, calculatorClass)
 			=> Execute(calculatorClass, sourceProductionContext));
 	}
+
 	/// <summary>
 	/// This method is where the real work of the generator is done
 	/// This ensures optimal performance by only executing the generator when needed
@@ -82,9 +98,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				SynqraEmergencyLog.Default.Debug("[-] Could not find namespace for Calculator class");
 			}
 			SynqraEmergencyLog.Default.Debug($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
+			body.AppendLine($"using System.ComponentModel;");
+			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
-			body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
+			// body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
 			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : global::{typeof(IBindableModel).FullName}, global::{typeof(INotifyPropertyChanging).FullName}, global::{typeof(INotifyPropertyChanged).FullName}");
 			body.AppendLine("{");
@@ -141,7 +159,7 @@ $$"""
 
 	public partial {{pro.Type}} {{pro.Identifier}}
 	{
-		get => field;
+		get => __{{pro.Identifier}};
 		set
 		{
             if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
@@ -149,7 +167,7 @@ $$"""
                 On{{pro.Identifier}}Changing(value);
                 On{{pro.Identifier}}Changing(default, value);
                 // OnPropertyChanging(new PropertyChanging);
-                field = value;
+                __{{pro.Identifier}} = value;
                 OnProperty3Changed(value);
                 OnProperty3Changed(default, value);
                 // OnPropertyChanged(global::CommunityToolkit.Mvvm.ComponentModel.__Internals.__KnownINotifyPropertyChangedArgs.Property3);

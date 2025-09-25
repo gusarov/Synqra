@@ -11,11 +11,15 @@
 		<NoWarn>$(NoWarn);IL2026;IL3050;</NoWarn> <!-- STJ Gen -->
 
 		<WarningsAsErrors>$(WarningsAsErrors);8785</WarningsAsErrors> <!-- generator failed -->
-		
+
+		<ImplicitUsings>enable</ImplicitUsings>
 		<LangVersion>preview</LangVersion>
 		<EnableMicrosoftExtensionsConfigurationBinderSourceGenerator>true</EnableMicrosoftExtensionsConfigurationBinderSourceGenerator> <!-- Preview 3 -->
 		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<!--
+		<CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+		-->
 
 		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsAotCompatible>
 		<!--

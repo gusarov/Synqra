@@ -91,20 +91,22 @@ public class JsonlStorageTests : StorageTests
 		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2" });
 
 		_storage.Dispose();
-		await Assert.That(FileReadAllText(_fileName)).IsEqualTo("""
+		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
 {"Synqra.Storage.Jsonl":"1.0.0","itemType":"Synqra.Tests.TestItem"}
 {"id":1,"name":"Test Item 1"}
 {"id":2,"name":"Test Item 2"}
 
-""");
+""".Replace("\r\n", "\n"));
 	}
 
 	[Test]
-	[Explicit]
+	// [Explicit]
+	[Category("Performance")]
+	[Property("CI", "false")]
 	public async Task Should_write_quickly()
 	{
 		int id = 0;
-		var perf = PerformanceTestUtils.MeasurePerformance(async () => {
+		var perf = MeasurePerformance(async () => {
 			await _storage.AppendAsync(new TestItem { Id = ++id, Name = "Test Item " + id });
 		});
 
@@ -113,11 +115,13 @@ public class JsonlStorageTests : StorageTests
 	}
 
 	[Test]
-	[Explicit]
+	// [Explicit]
+	[Category("Performance")]
+	[Property("CI", "false")]
 	public async Task Should_write_quickly2()
 	{
 		var item = new TestItem { Id = 1, Name = "Test Item 1" };
-		var perf = PerformanceTestUtils.MeasurePerformance(async () => {
+		var perf = MeasurePerformance(async () => {
 			await _storage.AppendAsync(item);
 		});
 

@@ -67,7 +67,7 @@ public static class StorageExtensions
 			{
 				if (_fileName == null)
 				{
-					_fileName = _options.Value.FileName.Replace("[TypeName]", _itemType?.Name ?? "data", StringComparison.OrdinalIgnoreCase);
+					_fileName = _options.Value.FileName.Replace("[TypeName]", _itemType?.Name ?? "data");
 				}
 				return _fileName;
 			}

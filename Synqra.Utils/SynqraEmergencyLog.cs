@@ -1,4 +1,7 @@
 ﻿using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Threading;
 
 namespace Synqra;
 
@@ -29,23 +32,55 @@ public class SynqraEmergencyLog
 
 	public void LogMessage(string message)
 	{
-		// TODO use \\global and ACL on windows (or don't... TMP is session specific anyway)
+		// TODO use \\global and ACL on windows (or don't... TMP is session specific anyway. UPD: No, I just set both system and user tmp to C:\Dev\Temp and now I have services vs user going to same file. Mutext needs to be global on Windows)
 		// TODO do something for browser
-		using var mutex = new Mutex(false, "SynqraEmergencyLog");
-		try
+		var line = $"[{DateTime.UtcNow:o}] {message}{Environment.NewLine}";
+
+		Mutex mutex = null;
+#if NET8_0_OR_GREATER
+		if (OperatingSystem.IsWindows())
 		{
-			mutex.WaitOne();
-			var fi = new FileInfo(_logFilePath);
-			if (fi.Exists && fi.Length > 1024 * 1024)
-			{
-				fi.Delete();
-				LogMessage("[System] Previous log file exceeded 1MiB and deleted");
-			}
-			File.AppendAllText(_logFilePath, $"[{DateTime.UtcNow:o}] {message}{Environment.NewLine}");
+			var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+			var rule = new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow);
+
+			var security = new MutexSecurity();
+			security.AddAccessRule(rule);
+
+			bool createdNew;
+			mutex = MutexAcl.Create(
+				initiallyOwned: false,
+				name: "Global\\SynqraEmergencyLog",
+				createdNew: out createdNew,
+				mutexSecurity: security);
+
 		}
-		finally
+		else if (OperatingSystem.IsBrowser())
 		{
-			mutex.ReleaseMutex();
+			Console.WriteLine("⚠️🚨 SynqraEmergencyLog: " + line);
+			return;
+		}
+#endif
+		if (mutex == null)
+		{
+			mutex = new Mutex(false, "SynqraEmergencyLog");
+		}
+		using (mutex)
+		{
+			try
+			{
+				mutex.WaitOne();
+				var fi = new FileInfo(_logFilePath);
+				if (fi.Exists && fi.Length > 1024 * 1024)
+				{
+					fi.Delete();
+					LogMessage("[System] Previous log file exceeded 1MiB and deleted");
+				}
+				File.AppendAllText(_logFilePath, line);
+			}
+			finally
+			{
+				mutex.ReleaseMutex();
+			}
 		}
 	}
 }

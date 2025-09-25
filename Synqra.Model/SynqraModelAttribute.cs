@@ -18,3 +18,4 @@ sealed class SynqraModelAttribute : Attribute
 	{
 	}
 }
+ 
