@@ -4,6 +4,8 @@
 *.user
 bin/
 obj/
+TestResults/
+
 
 # for local docker build outputs
 build_output
