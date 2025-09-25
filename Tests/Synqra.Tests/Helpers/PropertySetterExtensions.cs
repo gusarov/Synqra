@@ -70,14 +70,24 @@ static class PropertySetterExtensions
 	}
 
 	[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-	public static object RSetReflection(
-#if NET8_0_OR_GREATER
-		[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
-#endif
-	this object obj, string property, object value, bool autoConvert = false)
+	public static object RSetReflection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(this T obj, string property, object value, bool autoConvert = false)
 	{
-		// check for target type
-		var pi = obj.GetType().GetProperty(property);
+		if (obj == null)
+		{
+			throw new ArgumentNullException(nameof(obj));
+		}
+
+		var pi = typeof(T).GetProperty(property, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+		if (pi == null)
+		{
+			var type = obj.GetType();
+			pi = type.GetProperty(property, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public); // this will help to discover a concrete type member in runtime, but not in NativeAOT!
+			if (pi == null)
+			{
+				throw new SettingPropertyException($"No property {property} found on type {type.Name}");
+			}
+		}
+
 		if (value != null)
 		{
 			var proType = pi.PropertyType;
@@ -105,15 +115,8 @@ static class PropertySetterExtensions
 					else if (autoConvert)
 					{
 						var cvt = Convert.ChangeType(value, proType, CultureInfo.InvariantCulture);
-						/*
-						// Decimal 2 not object.equal to Int32 2
-						if (!Equals(cvt, value))
-						{
-							throw new Exception($"Failed to convert {valType.Name} {value} to {proType.Name} (got {cvt} and this is not equal)");
-						}
-						*/
 						var cvtTestLoss = Convert.ChangeType(cvt, valType, CultureInfo.InvariantCulture);
-						if (!Equals(cvtTestLoss, value) /*|| !Equals(cvtTestLoss, cvt)*/)
+						if (!Equals(cvtTestLoss, value))
 						{
 							throw new SettingPropertyException($"Failed to convert {valType.Name} {value} to {proType.Name} (got {cvt} and reverse conversion failed, probably data loss)");
 						}
