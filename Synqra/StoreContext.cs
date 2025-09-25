@@ -26,7 +26,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 
 	static StoreContext()
 	{
-		AppContext.SetSwitch("Synqra_GuidExtensions_ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
+		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
 	public StoreContext(IStorage storage, JsonSerializerContext jsonSerializerContext)
