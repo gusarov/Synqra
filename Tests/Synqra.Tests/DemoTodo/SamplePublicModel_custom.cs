@@ -1,5 +1,4 @@
-﻿using Synqra;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -7,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TUnit.Assertions.AssertConditions.Operators;
 
-namespace Synqra.Tests.BindingPerformance;
+namespace Synqra.Tests.DemoTodo;
 
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
@@ -44,7 +43,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 		get => field;
 		set
 		{
-			if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(field, value))
+			if (!EqualityComparer<string>.Default.Equals(field, value))
 			{
 				OnTestPropertyChanging(value);
 				OnTestPropertyChanging(field, value);
@@ -67,6 +66,6 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 
 	public void CustomCommand1_Reset()
 	{
-		this.TestProperty = "Value 0";
+		TestProperty = "Value 0";
 	}
 }

@@ -1,10 +1,9 @@
-﻿################################################################################
-# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
-################################################################################
-
-.vs/
+﻿.vs/
 .idea/
 .vscode/
 *.user
 bin/
 obj/
+
+# for local docker build outputs
+build_output

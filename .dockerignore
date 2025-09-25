@@ -9,6 +9,9 @@
 **/docker-compose*.yml
 **/*.*proj.user
 
+# for local docker build outputs
+**/build_output
+
 #!.git/HEAD
 !.git/config
 #!.git/packed-refs

@@ -31,7 +31,7 @@ public class StateManagementTests : BaseTest
 		// var _fileName = string.Empty;
 		// Configuration["JsonLinesStorage:FileName"] = _fileName = $"TestData/data_{Guid.NewGuid():N}_[TypeName].jsonl";
 		// Directory.CreateDirectory(Path.GetDirectoryName(_fileName));
-	}
+	} 
 
 	[Test]
 	public async Task Should_create_object()
@@ -66,7 +66,7 @@ public class StateManagementTests : BaseTest
 		var t = new MyTask { Subject = "Test Task" };
 		_tasks.Add(t);
 
-		using (_tasks.PocoTracker(t))
+		await using (_tasks.PocoTracker(t))
 		{
 			t.Subject = "123"; // There should be event driven mode that helps to track the changes, but POCO also must work, so need snapshotting
 		}
@@ -125,7 +125,16 @@ public class FakeStorage : IStorage
 
 	public ValueTask DisposeAsync()
 	{
+#if NETFRAMEWORK
+		return default;
+#else
 		return ValueTask.CompletedTask;
+#endif
+	}
+
+	public Task FlushAsync()
+	{
+		return Task.CompletedTask;
 	}
 
 	public async IAsyncEnumerable<T> GetAll<T>()

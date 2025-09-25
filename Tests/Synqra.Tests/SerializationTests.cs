@@ -12,7 +12,9 @@ public class SerializationTests
 	[Test]
 	public async Task TestSerialization()
 	{
+#if NET8_0_OR_GREATER
 		await Assert.That(JsonSerializer.IsReflectionEnabledByDefault).IsFalse();
+#endif
 
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		var obj = new TodoTask
@@ -26,11 +28,11 @@ public class SerializationTests
 			WriteIndented = true,
 		};
 		var json = JsonSerializer.Serialize(obj, jsonOptions);
-		await Assert.That(json).IsEqualTo($$"""
+		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 {
 	"subject": "{{subject}}"
 }
-""");
+""".NormalizeNewLines());
 		var deserializedObj = JsonSerializer.Deserialize(json, TestJsonSerializerContext.Default.TodoTask);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
@@ -56,12 +58,13 @@ public class AotTests
 	}
 	*/
 
+#if NET8_0_OR_GREATER
 	[Test]
 	public async Task Should_aot2()
 	{
 		await Assert.That(RuntimeFeature.IsDynamicCodeSupported).IsFalse();
 	}
-
+#endif
 	/*
 	[Test]
 	public async Task Should_aot3()

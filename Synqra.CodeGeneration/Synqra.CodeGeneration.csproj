@@ -7,6 +7,7 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <OutputItemType>Analyzer</OutputItemType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,11 +16,38 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Visibility="false" />
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" IsVisible="false" Visibility="false" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" OutputItemType="Analyzer" />
-    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" OutputItemType="Analyzer" />
+    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
+    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
+
+    <!-- TODO Pack the dependencies!
+    <None Include="$(PkgNewtonsoft_Json)\lib\netstandard2.0\Synqra.Model.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="$(PkgNewtonsoft_Json)\lib\netstandard2.0\Synqra.Utils.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    -->
   </ItemGroup>
+
+  <PropertyGroup>
+    <GetTargetPathDependsOn>
+      $(GetTargetPathDependsOn);_Synqra_GetDependencyTargetPaths
+    </GetTargetPathDependsOn>
+  </PropertyGroup>
+
+  <Target Name="_Synqra_GetDependencyTargetPaths">
+    <ItemGroup>
+      <!--
+      <TargetPathWithTargetPlatformMoniker
+         Include="C:\Users\xkip\source\repos\Quotaly\external\Synqra\Synqra.Model\bin\Debug\netstandard2.0\Synqra.Model.dll"
+         IncludeRuntimeDependency="false" />
+      -->
+      <TargetPathWithTargetPlatformMoniker
+         Include="$(TargetDir)\Synqra.Model.dll"
+         IncludeRuntimeDependency="false" />
+      <TargetPathWithTargetPlatformMoniker
+         Include="$(TargetDir)\Synqra.Utils.dll"
+         IncludeRuntimeDependency="false" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -41,20 +41,24 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 
 	internal IStoreCollectionInternal GetInternal(Type type)
 	{
+		var gtype = typeof(StoreCollection<>).MakeGenericType(type);
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, type, out var exists);
 		if (!exists)
 		{
-			var gtype = typeof(StoreCollection<>).MakeGenericType(type);
-			slot = Activator.CreateInstance(gtype, [this
+			slot = (IStoreCollectionInternal)Activator.CreateInstance(gtype, [this
 #if NET8_0_OR_GREATER
 				, _jsonSerializerContext
 #endif
-				]) as IStoreCollectionInternal;
+				])!;
 		}
 		return slot;
 #else
-		throw new NotSupportedException("Generic Get<T> is only supported in .NET 7 or greater");
+		if (!_collections.TryGetValue(type, out var collection))
+		{
+			_collections[type] = collection = (IStoreCollectionInternal)Activator.CreateInstance(gtype, [this]);
+		}
+		return collection;
 #endif
 	}
 
@@ -72,7 +76,11 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 		}
 		return (IStoreCollection<T>)slot;
 #else
-		throw new NotSupportedException("Generic Get<T> is only supported in .NET 7 or greater");
+		if(!_collections.TryGetValue(typeof(T), out var collection))
+		{
+			_collections[typeof(T)] = collection = new StoreCollection<T>(this);
+		}
+		return (IStoreCollection<T>)collection;
 #endif
 	}
 
@@ -131,11 +139,22 @@ class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>
 				Type = type,
 				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
 			};
+			_typeMetadataByType[type] = slot;
 			_typeMetadataByTypeId[slot.TypeId] = slot;
 		}
 		return slot;
 #else
-		throw new NotSupportedException("Type metadata is only supported in .NET 8 or greater");
+		if (!_typeMetadataByType.TryGetValue(type, out var metadata))
+		{
+			metadata = new TypeMetadata
+			{
+				Type = type,
+				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
+			};
+			_typeMetadataByType[type] = metadata;
+			_typeMetadataByTypeId[metadata.TypeId] = metadata;
+		}
+		return metadata;
 #endif
 	}
 

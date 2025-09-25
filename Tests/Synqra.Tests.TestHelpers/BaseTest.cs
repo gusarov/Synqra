@@ -51,4 +51,11 @@ public abstract class BaseTest : PerformanceTestUtils
 	}
 
 	public IServiceProvider ServiceProvider => ApplicationHost.Services;
+
+
+	#region TestHelpers
+
+	public Random RandomShared = new Random();
+
+	#endregion
 }

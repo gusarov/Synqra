@@ -8,4 +8,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks> <!-- GUID Manipulation -->
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Threading.AccessControl" Version="9.0.9" />
+  </ItemGroup>
+
 </Project>

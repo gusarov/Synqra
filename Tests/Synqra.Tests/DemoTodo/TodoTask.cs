@@ -1,4 +1,4 @@
-﻿using Synqra.Tests.BindingPerformance;
+﻿using Synqra.Tests.Performance;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,7 +40,7 @@ public class TodoTask
 // [JsonSerializable(typeof(Event))]
 public partial class TestJsonSerializerContext : JsonSerializerContext
 {
-	/*
+	/*    
 	public static JsonSerializerOptions Options = new JsonSerializerOptions
 	{
 	};

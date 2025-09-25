@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Data.Common;
@@ -65,18 +66,15 @@ public static class SynqraPocoTrackingExtensions
 	{
 		private readonly IStoreCollectionInternal _storeCollection;
 
-		Dictionary<object, string> _originalsSerialized = new();
+		ConcurrentDictionary<object, string> _originalsSerialized = new();
 
 		public TrackingSessionImplementation(IStoreCollectionInternal storeCollection, IEnumerable<object> items)
 		{
 			_storeCollection = storeCollection;
 
-			lock (_originalsSerialized)
+			foreach (var item in items)
 			{
-				foreach (var item in items)
-				{
-					AddCore(item);
-				}
+				AddCore(item);
 			}
 		}
 
@@ -104,55 +102,52 @@ public static class SynqraPocoTrackingExtensions
 
 		public void Dispose()
 		{
-			// compare and submit changes
-			lock (_originalsSerialized)
-			{
-				foreach (var kvp in _originalsSerialized)
-				{
-					// serialzie again
-					var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type
-#if NET8_0_OR_GREATER
-						, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
-#endif
-						);
-					if (json != kvp.Value)
-					{
-						// changed!!
-						var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value
-#if NET8_0_OR_GREATER
-							, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
-#endif
-							);
-						var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json
-#if NET8_0_OR_GREATER
-							, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
-#endif
-							);
-						foreach (var item in original.Keys.Union(updated.Keys))
-						{
-							var oldValue = original.TryGetValue(item, out var ov) ? ov : null;
-							var newValue = updated.TryGetValue(item, out var nv) ? nv : null;
-							if (oldValue != newValue)
-							{
-								_storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
-								{
-									CommandId = GuidExtensions.CreateVersion7(),
-									TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
-									PropertyName = item,
-									OldValue = oldValue,
-									NewValue = newValue,
-									TargetId = _storeCollection.GetId(kvp.Key),
-								});
-							}
-						}
-					}
-				}
-			}
+			DisposeAsync().GetAwaiter().GetResult();
 		}
 
 		public async ValueTask DisposeAsync()
 		{
-			Dispose();
+			// compare and submit changes
+			foreach (var kvp in _originalsSerialized)
+			{
+				// serialzie again
+				var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type
+#if NET8_0_OR_GREATER
+					, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+					);
+				if (json != kvp.Value)
+				{
+					// changed!!
+					var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value
+#if NET8_0_OR_GREATER
+						, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+						);
+					var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json
+#if NET8_0_OR_GREATER
+						, ((StoreContext)_storeCollection.Store)._jsonSerializerContext.Options
+#endif
+						);
+					foreach (var item in original.Keys.Union(updated.Keys))
+					{
+						var oldValue = original.TryGetValue(item, out var ov) ? ov : null;
+						var newValue = updated.TryGetValue(item, out var nv) ? nv : null;
+						if (oldValue != newValue)
+						{
+							await _storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+							{
+								CommandId = GuidExtensions.CreateVersion7(),
+								TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
+								PropertyName = item,
+								OldValue = oldValue,
+								NewValue = newValue,
+								TargetId = _storeCollection.GetId(kvp.Key),
+							});
+						}
+					}
+				}
+			}
 		}
 	}
 
