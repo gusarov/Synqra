@@ -159,16 +159,18 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				//if you want the proper indention on the methods you will want to tab the string content at least once
 				body.AppendLine(
 $$"""
+	global::Synqra.ISynqraStoreContext? __store;
+
 	global::Synqra.ISynqraStoreContext? IBindableModel.Store
 	{
-		get => field;
+		get => __store;
 		set
 		{
-			if (field is not null && field != value)
+			if (__store is not null && __store != value)
 			{
 				throw new global::System.InvalidOperationException("Store can only be set once.");
 			}
-			field = value;
+			__store = value;
 		}
 	}
 
@@ -221,26 +223,45 @@ $$"""
 		get => field;
 		set
 		{
-			var bm = (IBindableModel)this;
 			var oldValue = field;
-			if (_assigning || bm.Store is null)
+			if (_assigning || __store is null)
 			{
-				if (!global::System.Collections.Generic.EqualityComparer<{{pro.Type}}>.Default.Equals(oldValue, value))
+				var pci = PropertyChanging;
+				var pce = PropertyChanged;
+				if (pci is null && pce is null)
 				{
 					On{{pro.Identifier}}Changing(value);
 					On{{pro.Identifier}}Changing(oldValue, value);
-					PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof({{pro.Identifier}})));
 					field = value;
 					On{{pro.Identifier}}Changed(value);
 					On{{pro.Identifier}}Changed(oldValue, value);
-					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof({{pro.Identifier}})));
+				}
+				else if (!Equals(oldValue, value))
+				{
+					On{{pro.Identifier}}Changing(value);
+					On{{pro.Identifier}}Changing(oldValue, value);
+					pci?.Invoke(this, new PropertyChangingEventArgs(nameof({{pro.Identifier}})));
+					field = value;
+					On{{pro.Identifier}}Changed(value);
+					On{{pro.Identifier}}Changed(oldValue, value);
+					pce?.Invoke(this, new PropertyChangedEventArgs(nameof({{pro.Identifier}})));
 				}
 			}
 			else
 			{
-				bm.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				On{{pro.Identifier}}Changing(value);
+				On{{pro.Identifier}}Changing(oldValue, value);
+				__store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					ContainerId = default,
+					CollectionId = default,
+
 					Target = this,
+					TargetId = __store.GetId(this, null, GetMode.RequiredId),
+					TargetTypeId = default,
+					// TargetTypeId = __store.GetId(this, null, GetMode.RequiredId),
+
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
 					NewValue = value

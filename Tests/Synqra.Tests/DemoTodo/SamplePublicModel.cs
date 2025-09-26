@@ -1,4 +1,6 @@
-﻿namespace Synqra.Tests.DemoTodo;
+﻿// This is a primary test model with generated code
+
+namespace Synqra.Tests.DemoTodo;
 
 public partial class SamplePublicModel
 {

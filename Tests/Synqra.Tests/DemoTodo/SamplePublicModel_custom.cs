@@ -1,4 +1,7 @@
-﻿using System;
+﻿// NOTE! this is a different class name - for experiments with manual code instead of generator
+/* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -10,71 +13,96 @@ namespace Synqra.Tests.DemoTodo;
 
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
-	public partial string Name { get; set; }
-
-	/* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
+	public partial string? Name { get; set; }
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 	public event PropertyChangingEventHandler? PropertyChanging;
 
-	partial void OnNameChanging(string newValue);
-	partial void OnNameChanging(string oldValue, string newValue);
-	partial void OnNameChanged(string newValue);
-	partial void OnNameChanged(string oldValue, string newValue);
+	partial void OnNameChanging(string? newValue);
+	partial void OnNameChanging(string? oldValue, string? newValue);
+	partial void OnNameChanged(string? newValue);
+	partial void OnNameChanged(string? oldValue, string? newValue);
+
+	ISynqraStoreContext __store;
 
 	ISynqraStoreContext IBindableModel.Store
 	{
-		get => field;
-		set => field = value;
+		get => __store;
+		set => __store = value;
 	}
 
 	void IBindableModel.Set(string propertyName, object? value)
 	{
-		switch (propertyName)
+		//var previous = _assigning;
+		_assigning = true;
+		//try
 		{
-			case nameof(Name):
-				Name = value as string;
-				break;
+			switch (propertyName)
+			{
+				case nameof(Name):
+					Name = (string?)value;
+					break;
+			}
+		}
+		//finally
+		{
+			//_assigning = previous;
+			_assigning = false;
 		}
 	}
-
 
 	[ThreadStatic]
 	static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
 
-	public partial string Name
+	public partial string? Name
 	{
 		get => field;
 		set
 		{
-			var bm = (IBindableModel)this;
-			if (_assigning || bm.Store is null)
+			var oldValue = field;
+			if (_assigning || __store is null)
 			{
-				var oldValue = field;
-				if (!global::System.Collections.Generic.EqualityComparer<string>.Default.Equals(oldValue, value))
+				var pci = PropertyChanging;
+				var pce = PropertyChanged;
+				if (pci is null && pce is null)
 				{
 					OnNameChanging(value);
 					OnNameChanging(oldValue, value);
-					PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
 					field = value;
 					OnNameChanged(value);
 					OnNameChanged(oldValue, value);
-					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+				}
+				else if (!Equals(oldValue, value))
+				{
+					// throw null;
+					OnNameChanging(value);
+					OnNameChanging(oldValue, value);
+					pci?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
+					field = value;
+					OnNameChanged(value);
+					OnNameChanged(oldValue, value);
+					pce?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
 				}
 			}
 			else
 			{
-				bm.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				OnNameChanging(value);
+				OnNameChanging(oldValue, value);
+				__store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
 					ContainerId = default,
 					CollectionId = default,
-					TargetTypeId = bm.Store.GetId(this, null, GetMode.RequiredId),
-					TargetId = bm.Store.GetId(this, null, GetMode.RequiredId),
+
+					Target = this,
+					TargetId = __store.GetId(this, null, GetMode.RequiredId),
+					TargetTypeId = default,
+					// TargetTypeId = __store.GetId(this, null, GetMode.RequiredId),
+
 					PropertyName = nameof(Name),
-					OldValue = field,
+					OldValue = oldValue,
 					NewValue = value
-				}).GetAwaiter().GetResult();
+				}).GetAwaiter().GetResult(); // properties are never async
 			}
 		}
 	}

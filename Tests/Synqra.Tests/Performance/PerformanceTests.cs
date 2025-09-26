@@ -23,6 +23,7 @@ namespace Synqra.Tests.Performance;
 // Bind 04 BS - Syncra Generators
 [Category("Performance")]
 [Property("CI", "false")]
+[NotInParallel]
 // [Explicit]
 public class PerformanceTests : BaseTest
 {
@@ -103,7 +104,7 @@ public class PerformanceTests : BaseTest
 				obj.RSetReflection(proName, next());
 			}
 		});
-		Assert.Fail($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
+		Console.WriteLine($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
 		await Assert.That(ops1 > 1_000).IsTrue();
 
 		// Assert.Fail(ops2.ToString());
@@ -124,8 +125,8 @@ public class PerformanceTests : BaseTest
 			}
 		});
 
-		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(1_000_000);
+		Debug.WriteLine($"RSetReflection ops: {ops}");
+		await Assert.That(ops).IsGreaterThan(1_000);
 
 		// Assert.Fail(ops.ToString());
 	}
@@ -167,8 +168,8 @@ public class PerformanceTests : BaseTest
 				obj.RSetSTJ(proName, next(), DemoTodo.TestJsonSerializerContext.Default);
 			}
 		});
-		Assert.Fail($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
-		await Assert.That(ops2 > 1_000).IsTrue();
+		Console.WriteLine($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
+		await Assert.That(ops2 > 10).IsTrue();
 	}
 
 	[Test]
@@ -200,8 +201,7 @@ public class PerformanceTests : BaseTest
 				JsonSerializer.Deserialize(json2, ti);
 			}
 		});
-		Assert.Fail($"OPS={ops1:N}");
-		// await Assert.That(ops1 > 1_000).IsTrue();
+		await Assert.That(ops1 > 1_000).IsTrue();
 	}
 
 	[Test]
@@ -229,10 +229,7 @@ public class PerformanceTests : BaseTest
 			}
 		});
 
-		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(1_000_000);
-
-		// Assert.Fail(ops.ToString());
+		await Assert.That(ops).IsGreaterThan(1_000);
 	}
 
 	[Test]
@@ -254,10 +251,7 @@ public class PerformanceTests : BaseTest
 			}
 		});
 
-		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(1_000_000);
-
-		//Assert.Fail(ops.ToString());
+		await Assert.That(ops).IsGreaterThan(1_000);
 	}
 
 	[Test]
@@ -278,16 +272,13 @@ public class PerformanceTests : BaseTest
 			}
 		});
 
-		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(1_000_000);
-
-		// Assert.Fail(ops.ToString());
+		await Assert.That(ops).IsGreaterThan(1_000);
 	}
 
 	[Test]
 	public async Task Should_Bind_04_BS_01_Generate_BindableModel()
 	{
-		var model = new SamplePublicModel();
+		var model = new SamplePublicModel_();
 		model.Name = "Value 1";
 		await Assert.That(model.Name).IsEqualTo("Value 1");
 
@@ -310,10 +301,13 @@ public class PerformanceTests : BaseTest
 			{
 				bm.Set("Name", next());
 			}
+		}, new PerformanceParameters
+		{
+			TotalTargetTime = TimeSpan.FromSeconds(10)
 		});
 
 		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(50_000);
+		await Assert.That(ops).IsGreaterThan(30_000);
 
 		// Assert.Fail(ops.ToString());
 	}

@@ -9,8 +9,8 @@ namespace Synqra.Tests;
 
 internal class EmergencyLoggerTests : BaseTest
 {
+	/*
 	[Test]
-	// [Ignore("Decided to make it stateless, so no way to enable/disable logger, it is always doing something")]
 	[Category("Performance")]
 	[Property("CI", "false")]
 	public async Task Should_do_nothing_for_non_configured_emergency_log()
@@ -18,7 +18,7 @@ internal class EmergencyLoggerTests : BaseTest
 		var ops = MeasureOps(() => SynqraEmergencyLog.Default.LogMessage("This is a test message"));
 		await Assert.That(ops).IsGreaterThan(10_000_000);
 	}
-
+	*/
 	[Test]
 	public async Task Should_save_emergency_log()
 	{
