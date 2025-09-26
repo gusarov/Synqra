@@ -3,46 +3,11 @@ using System.Diagnostics;
 
 namespace Synqra.Tests;
 
-// [NotInParallel]
-public class GuidExtensionsTests2 : BaseTest
+[NotInParallel]
+[Category("Performance")]
+public class GuidExtensionsTests2Performance : BaseTest
 {
 	Guid _namespaceId = Guid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"); // DNS namespace
-
-	[Test]
-	public async Task Should_01_Create_Version5_Guid()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsNotEqualTo(default);
-	}
-
-	[Test]
-	public async Task Should_01_Create_Version3_Guid()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsNotEqualTo(default);
-	}
-
-	[Test]
-	public async Task Should_02_Create_Version5_Guid2()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
-		var guid2 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsEqualTo(guid2);
-		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion3(_namespaceId, "Test"));
-	}
-
-	[Test]
-	public async Task Should_02_Create_Version3_Guid2()
-	{
-		var guid1 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
-		var guid2 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
-		Trace.WriteLine(guid1);
-		await Assert.That(guid1).IsEqualTo(guid2);
-		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion5(_namespaceId, "Test"));
-	}
 
 	[Test]
 	[Category("Performance")]
@@ -119,4 +84,46 @@ public class GuidExtensionsTests2 : BaseTest
 		});
 		await Assert.That(perf.OperationsPerSecond).IsGreaterThan(10_000);
 	}
+}
+
+public class GuidExtensionsTests2 : BaseTest
+{
+	Guid _namespaceId = Guid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"); // DNS namespace
+
+	[Test]
+	public async Task Should_01_Create_Version5_Guid()
+	{
+		var guid1 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
+		Trace.WriteLine(guid1);
+		await Assert.That(guid1).IsNotEqualTo(default);
+	}
+
+	[Test]
+	public async Task Should_01_Create_Version3_Guid()
+	{
+		var guid1 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
+		Trace.WriteLine(guid1);
+		await Assert.That(guid1).IsNotEqualTo(default);
+	}
+
+	[Test]
+	public async Task Should_02_Create_Version5_Guid2()
+	{
+		var guid1 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
+		var guid2 = Synqra.GuidExtensions.CreateVersion5(_namespaceId, "Test");
+		Trace.WriteLine(guid1);
+		await Assert.That(guid1).IsEqualTo(guid2);
+		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion3(_namespaceId, "Test"));
+	}
+
+	[Test]
+	public async Task Should_02_Create_Version3_Guid2()
+	{
+		var guid1 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
+		var guid2 = Synqra.GuidExtensions.CreateVersion3(_namespaceId, "Test");
+		Trace.WriteLine(guid1);
+		await Assert.That(guid1).IsEqualTo(guid2);
+		await Assert.That(guid1).IsNotEqualTo(GuidExtensions.CreateVersion5(_namespaceId, "Test"));
+	}
+
 }

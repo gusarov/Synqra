@@ -1,4 +1,6 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿// This is to experiment with CommunityMVVM as well proven source generator around properties
+
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Synqra.Tests.DemoTodo;
 

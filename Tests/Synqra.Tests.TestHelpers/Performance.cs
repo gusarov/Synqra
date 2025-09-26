@@ -24,7 +24,7 @@ public class PerformanceParameters
 	/// <summary>
 	/// How many batch execution is required to calculate deviation factor.
 	/// </summary>
-	public int DeviationMeasurementBatches { get; set; } = 7; // we throw away 2 outsiders
+	public int DeviationMeasurementBatches { get; set; } = 5; // we throw away 2 outsiders
 
 	/// <summary>
 	/// This is a time that we allow test to take after batch size determined.
@@ -35,7 +35,7 @@ public class PerformanceParameters
 	/// <summary>
 	/// This is a time that we want for one batch.
 	/// </summary>
-	public TimeSpan? BatchTime { get; set; } = TimeSpan.FromMilliseconds(250);
+	public TimeSpan? BatchTime { get; set; } = TimeSpan.FromMilliseconds(750);
 
 	/// <summary>
 	/// When deviation factor is calculated, it is not necessary to consume it. Instead, we can set the acceptable boundary here.
