@@ -47,9 +47,6 @@ public class CreateObjectCommand : SingleObjectCommand
 
 	[JsonIgnore]
 	public string? DataJson { get; set; }
-
-	[JsonIgnore]
-	public object? DataObject { get; set; }
 }
 
 public class DeleteObjectCommand : Command

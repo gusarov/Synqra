@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -14,12 +15,22 @@ public abstract class SingleObjectEvent : Event
 	public required Guid CollectionId { get; init; } // like table name (can be derrived from root type id)
 }
 
+[JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = "_t", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
+// [KnownType(typeof(ObjectCreatedEvent))]
+// [KnownType(typeof(ObjectPropertyChangedEvent))]
+// [JsonSerializable(typeof(ObjectCreatedEvent))]
+// [JsonSerializable(typeof(ObjectPropertyChangedEvent))]
+[JsonDerivedType(typeof(ObjectCreatedEvent), "ObjectCreatedEvent")]
+[JsonDerivedType(typeof(ObjectPropertyChangedEvent), "ObjectPropertyChangedEvent")]
+[JsonDerivedType(typeof(ObjectDeletedEvent), "ObjectDeletedEvent")]
+[JsonDerivedType(typeof(CommandCreatedEvent), "CommandCreatedEvent")]
 public abstract class Event
 {
 	public required Guid EventId { get; init; }
 	public required Guid CommandId { get; set; }
 	// public required Guid UserId { get; set; }
-	public required Guid ContainerId { get; set; } // like layer id
+	[JsonIgnore] // too verbose, containerId (streamId) should be handled outside of event stream
+	public Guid ContainerId { get; set; } // like layer id
 
 	public async Task AcceptAsync(IEventVisitor<object?> visitor)
 	{

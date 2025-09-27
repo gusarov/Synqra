@@ -35,7 +35,7 @@ public class PerformanceParameters
 	/// <summary>
 	/// This is a time that we want for one batch.
 	/// </summary>
-	public TimeSpan? BatchTime { get; set; } = TimeSpan.FromMilliseconds(750);
+	public TimeSpan? BatchTime { get; set; } = TimeSpan.FromMilliseconds(300);
 
 	/// <summary>
 	/// When deviation factor is calculated, it is not necessary to consume it. Instead, we can set the acceptable boundary here.
@@ -312,7 +312,7 @@ public class PerformanceTestUtils
 		// Very useful in unit tests - just to see all results in console
 		// Console.WriteLine($"deviationMin2Ops={deviationMin2Ops} deviationMinOps={deviationMinOps}");
 		// Console.WriteLine($"deviationMax2Ops={deviationMax2Ops} deviationMaxOps={deviationMaxOps}");
-		var msg = $"ops={ops:N2} deviation={dev:P2} FinalBatchSize={batchSize} BatchCount={batchIndex} AutoBatchBumps={autoBatchBumps} ms={sw.ElapsedMilliseconds} count={operationsCount}";
+		var msg = $"ops={ops.ToString(ops > 2000 ? "N0" : "N2")} deviation={dev:P2} FinalBatchSize={batchSize} BatchCount={batchIndex} AutoBatchBumps={autoBatchBumps} ms={sw.ElapsedMilliseconds} count={operationsCount}";
 		if (actualParameters.Trace)
 		{
 			Trace.WriteLine(msg);

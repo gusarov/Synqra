@@ -11,7 +11,41 @@ public abstract class BaseTest<T> : BaseTest where T : notnull
 	public T _sut => ServiceProvider.GetRequiredService<T>();
 }
 
-public abstract class BaseTest : PerformanceTestUtils
+public class TestUtils : PerformanceTestUtils
+{
+	public Random RandomShared = new Random();
+
+	public string CreateTestFileName(string fileName)
+	{
+		return Path.Combine(CreateTestFolder(), fileName);
+	}
+
+	public string CreateTestFolder()
+	{
+		var synqraTestsPath = Path.Combine(Path.GetTempPath(), "SynqraTests");
+		Directory.CreateDirectory(synqraTestsPath);
+		// Clean up old test folders
+		var synqraNewTestPath = Path.Combine(synqraTestsPath, DateTime.Now.ToString("yyyy-MM-dd_HH-00")); // pattern stands for an hour
+		foreach (var item in Directory.GetDirectories(synqraTestsPath))
+		{
+			if (item != synqraNewTestPath)
+			{
+				try
+				{
+					Directory.Delete(item, true);
+				}
+				catch
+				{
+				}
+			}
+		}
+		synqraNewTestPath = Path.Combine(synqraNewTestPath, Guid.NewGuid().ToString());
+		Directory.CreateDirectory(synqraNewTestPath);
+		return synqraNewTestPath;
+	}
+}
+
+public class BaseTest : TestUtils
 {
 	public IServiceCollection ServiceCollection => HostBuilder.Services;
 
@@ -56,11 +90,4 @@ public abstract class BaseTest : PerformanceTestUtils
 	}
 
 	public IServiceProvider ServiceProvider => ApplicationHost.Services;
-
-
-	#region TestHelpers
-
-	public Random RandomShared = new Random();
-
-	#endregion
 }

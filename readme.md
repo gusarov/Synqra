@@ -18,6 +18,9 @@ Synqra
 
 ========================= REQUIREMENTS ======================
 1) A project should accept and fully support the System.Text.Json serialization. It might be used for storage, but it will be used for intermediate state processing thigns, like snapshoting before deletion.
+1.2) JSON should be easy, safe and reasonable for v1. But going forward it totally make sense to pass state by
+1.2.1) my own binary state for performance
+1.2.2) direct object to object mappers to allow deepclone via serialization API without extra data copy
 
 
 ========================= ARCHITECTURE ======================
@@ -45,3 +48,8 @@ It all starts from IMyStoreContext : IStoreContext
 0) All commands have a base types ICommand and BaseCommand
 1) There is CreateObject, DeleteObject, ChangeProperty
 2) Commands are collected in a special collection "Commands" where user can refer to a command by ID in order to undo or redo it
+
+========================= COMMUNICATION ==========================
+1) Protobuf over WebSocket
+2) JSON over WebSocket
+

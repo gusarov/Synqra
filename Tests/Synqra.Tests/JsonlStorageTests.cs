@@ -52,7 +52,6 @@ public abstract class StorageTests : BaseTest
 }
 
 [InheritsTests]
-[NotInParallel]
 public class JsonlStorageTests : StorageTests
 {
 	string _fileName;
@@ -60,7 +59,8 @@ public class JsonlStorageTests : StorageTests
 	public JsonlStorageTests()
 	{
 		HostBuilder.AddJsonLinesStorage();
-		ServiceCollection.AddSingleton(TestJsonSerializerContext.Default.Options);
+		var options = TestJsonSerializerContext.Default.Options;
+		ServiceCollection.AddSingleton(options);
 	}
 
 	protected override async Task ReopenAsync()
@@ -74,13 +74,7 @@ public class JsonlStorageTests : StorageTests
 	[Before(Test)]
 	public void Before()
 	{
-		Configuration["JsonLinesStorage:FileName"] = _fileName = $"TestData/data_{Guid.NewGuid():N}.jsonl";
-		Directory.CreateDirectory(Path.GetDirectoryName(_fileName));
-		// Ensure the file is deleted before each test
-		if (File.Exists(_fileName))
-		{
-			File.Delete(_fileName);
-		}
+		Configuration["JsonLinesStorage:FileName"] = _fileName = CreateTestFileName("data.jsonl");
 		_storage = ServiceProvider.GetRequiredService<IStorage>();
 	}
 
@@ -92,9 +86,29 @@ public class JsonlStorageTests : StorageTests
 
 		_storage.Dispose();
 		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
-{"Synqra.Storage.Jsonl":"1.0.0","itemType":"Synqra.Tests.TestItem"}
+{"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Tests.TestItem"}
 {"id":1,"name":"Test Item 1"}
 {"id":2,"name":"Test Item 2"}
+
+""".Replace("\r\n", "\n"));
+	}
+
+	[Test]
+	public async Task Should_store_polimorfic_as_jsonl()
+	{
+		await _storage.AppendAsync<Event>(new ObjectCreatedEvent
+		{
+			CollectionId = default,
+			CommandId = default,
+			EventId = default,
+			TargetId = default,
+			TargetTypeId = default,
+		});
+
+		_storage.Dispose();
+		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
+{"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
+{"_t":"ObjectCreatedEvent","targetId":"00000000-0000-0000-0000-000000000000","targetTypeId":"00000000-0000-0000-0000-000000000000","collectionId":"00000000-0000-0000-0000-000000000000","eventId":"00000000-0000-0000-0000-000000000000","commandId":"00000000-0000-0000-0000-000000000000"}
 
 """.Replace("\r\n", "\n"));
 	}
@@ -106,12 +120,9 @@ public class JsonlStorageTests : StorageTests
 	public async Task Should_write_quickly()
 	{
 		int id = 0;
-		var perf = MeasurePerformance(async () => {
+		MeasurePerformance(async () => {
 			await _storage.AppendAsync(new TestItem { Id = ++id, Name = "Test Item " + id });
 		});
-
-		Console.WriteLine(perf.DeviationFactor);
-		Console.WriteLine(perf.OperationsPerSecond);
 	}
 
 	[Test]
@@ -121,12 +132,9 @@ public class JsonlStorageTests : StorageTests
 	public async Task Should_write_quickly2()
 	{
 		var item = new TestItem { Id = 1, Name = "Test Item 1" };
-		var perf = MeasurePerformance(async () => {
+		MeasurePerformance(async () => {
 			await _storage.AppendAsync(item);
 		});
-
-		Console.WriteLine(perf.DeviationFactor);
-		Console.WriteLine(perf.OperationsPerSecond);
 	}
 
 	string FileReadAllText(string fileName)

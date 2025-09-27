@@ -18,7 +18,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 	FakeStorage _fakeStorage => ServiceProvider.GetRequiredService<FakeStorage>();
-	ISynqraCollection<MyTask> _tasks => _sut.GetCollection<MyTask>();
+	ISynqraCollection<MyPocoTask> _tasks => _sut.GetCollection<MyPocoTask>();
 
 	public StateManagementTests()
 	{
@@ -27,8 +27,6 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		HostBuilder.Services.AddSingleton(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton<FakeStorage>();
 		HostBuilder.Services.AddSingleton<IStorage>(sp => sp.GetRequiredService<FakeStorage>());
-		HostBuilder.Services.AddSingleton<JsonSerializerContext>(DemoTodo.TestJsonSerializerContext.Default);
-		HostBuilder.Services.AddSingleton(DemoTodo.TestJsonSerializerContext.Default.Options);
 
 		// HostBuilder.AddJsonLinesStorage();
 
@@ -45,6 +43,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 
 		var model = new DemoModel();
 		_sut.GetCollection<DemoModel>().Add(model);
+		await Assert.That(model.Name).IsNotEqualTo("TestName");
+
 		model.Name = "TestName"; // this should emit a command and broadcast it
 
 		var commands = _sut.GetCollection<Synqra.ISynqraCommand>().ToArray();
@@ -65,12 +65,15 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		await Assert.That(cop.PropertyName).IsEqualTo(nameof(model.Name));
 		await Assert.That(cop.OldValue).IsEqualTo(null);
 		await Assert.That(cop.NewValue).IsEqualTo("TestName");
+
+		// But it also needs to be applied
+		await Assert.That(model.Name).IsEqualTo("TestName");
 	}
 
 	[Test]
 	public async Task Should_10_create_object()
 	{
-		var t = new MyTask { Subject = "Test Task" };
+		var t = new MyPocoTask { Subject = "Test Task" };
 		_tasks.Add(t);
 
 		var events = _fakeStorage.Items.OfType<Event>().ToArray();
@@ -92,7 +95,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		var objectCreated = events[1];
 		await Assert.That(objectCreated).IsTypeOf<ObjectCreatedEvent>();
 
-		var tasks = _sut.GetCollection<MyTask>();
+		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
 		await Assert.That(tasks[0].Subject).IsEqualTo("Test Task");
 
@@ -102,7 +105,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 
-		tasks = _sut.GetCollection<MyTask>();
+		tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
 		await Assert.That(tasks[0].Subject).IsEqualTo("Test Task");
 	}
@@ -110,7 +113,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	[Test]
 	public async Task Should_20_change_object()
 	{
-		var t = new MyTask { Subject = "Test Task" };
+		var t = new MyPocoTask { Subject = "Test Task" };
 		_tasks.Add(t);
 
 		using (_tasks.PocoTracker(t))
@@ -135,7 +138,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 
-		var tasks = _sut.GetCollection<MyTask>();
+		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
 		await Assert.That(tasks[0].Subject).IsEqualTo("123");
 	}
@@ -143,21 +146,28 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	[Test]
 	public async Task Should_instantiate_collection_by_ctor()
 	{
-		var tasks = _sut.GetCollection<MyTask>();
+		var tasks = _sut.GetCollection<MyPocoTask>();
 	}
 
 	[Test]
 	public async Task Should_instantiate_collection_by_type()
 	{
-		var tasks = _sut.GetCollection(typeof(MyTask));
+		var tasks = _sut.GetCollection(typeof(MyPocoTask));
 	}
 }
 
 /// <summary>
 /// THIS IS POCO, NOT GENERATED, do not make it partial
 /// </summary>
-public class MyTask
+public class MyPocoTask
 {
+	/// <summary>
+	/// THIS IS POCO, NOT GENERATED, do not make it partial
+	/// </summary>
+	public MyPocoTask()
+	{
+		
+	}
 	public string Subject { get; set; }
 }
 

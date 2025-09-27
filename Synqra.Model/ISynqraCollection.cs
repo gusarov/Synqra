@@ -3,7 +3,7 @@ using System.Collections;
 
 namespace Synqra;
 
-public interface ISynqraCollection : IList, ICollection//, IQueryable, INotifyCollectionChanged
+public interface ISynqraCollection //: IList //, ICollection//, IQueryable, INotifyCollectionChanged
 {
 }
 

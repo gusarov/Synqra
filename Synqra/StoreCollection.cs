@@ -57,11 +57,13 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	#region BY INDEX
 
+#if ILIST
 	object? IList.this[int index]
 	{
 		get => IList[index];
 		set => throw new NotImplementedException();
 	}
+#endif
 
 	T IReadOnlyList<T>.this[int index] => _list[index];
 
@@ -75,20 +77,30 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	#region Informational
 
+#if ILIST
 	bool IList.IsFixedSize => false;
 
 	bool IList.IsReadOnly => throw new NotImplementedException(); // this actually depends on a model, do we allow primitive automatic commands or not
+#endif
 
+#if ICOLLECTION
 	bool ICollection.IsSynchronized => throw new NotImplementedException();
 
 	object ICollection.SyncRoot => ICollection;
+#endif
 
 	bool ICollection<T>.IsReadOnly => throw new NotImplementedException();
 
-	#endregion
+#endregion
 
 	#region Add
 
+	void ICollection<T>.Add(T item)
+	{
+		Add(item);
+	}
+
+#if ILIST
 	int IList.Add(object? value)
 	{
 		if (value is not T item)
@@ -98,20 +110,16 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 		return Add(item);
 	}
 
-	void ICollection<T>.Add(T item)
-	{
-		Add(item);
-	}
-
 	void IList.Insert(int index, object? value)
 	{
 		throw new NotSupportedException();
 	}
+#endif
 
 	// Client request - generate command
 	private int Add(T item)
 	{
-		var o = ((ICollection)this).Count;
+		var o = _list.Count;
 		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
 		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
 
@@ -126,9 +134,9 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 			TargetId = attachedData.Id,
 			Data = data?.Count > 0 ? data : null,
 			DataJson = dataJson,
-			DataObject = item,
+			Target = item,
 		}).GetAwaiter().GetResult();
-		var n = ((ICollection)this).Count;
+		var n = _list.Count;
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}
 
@@ -146,12 +154,8 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	#region Remove
 
+#if ILIST
 	void IList.Clear()
-	{
-		throw new NotSupportedException();
-	}
-
-	void ICollection<T>.Clear()
 	{
 		throw new NotSupportedException();
 	}
@@ -161,12 +165,18 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 		throw new NotImplementedException();
 	}
 
-	bool ICollection<T>.Remove(T item)
+	void IList.RemoveAt(int index)
 	{
 		throw new NotImplementedException();
 	}
+#endif
 
-	void IList.RemoveAt(int index)
+	void ICollection<T>.Clear()
+	{
+		throw new NotSupportedException();
+	}
+
+	bool ICollection<T>.Remove(T item)
 	{
 		throw new NotImplementedException();
 	}
@@ -175,10 +185,12 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	#region Contains
 
+#if ILIST
 	bool IList.Contains(object? value)
 	{
 		throw new NotImplementedException();
 	}
+#endif
 
 	bool ICollection<T>.Contains(T item)
 	{
@@ -189,6 +201,7 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	#region Iterate
 
+#if ICOLLECTION
 	void ICollection.CopyTo(Array array, int arrayIndex)
 	{
 		if (array.Length < _list.Count + arrayIndex)
@@ -200,7 +213,7 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 			array.SetValue(_list[i], arrayIndex + i);
 		}
 	}
-
+#endif
 	void ICollection<T>.CopyTo(T[] array, int arrayIndex)
 	{
 		if (array.Length < _list.Count + arrayIndex)
@@ -215,18 +228,20 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		throw new NotImplementedException();
+		return _list.GetEnumerator();
 	}
 
 	IEnumerator IEnumerable.GetEnumerator()
 	{
-		throw new NotImplementedException();
+		return _list.GetEnumerator();
 	}
 
+#if ILIST
 	int IList.IndexOf(object? value)
 	{
 		throw new NotImplementedException();
 	}
+#endif
 
 	#endregion
 }

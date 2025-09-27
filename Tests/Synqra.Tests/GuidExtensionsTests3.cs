@@ -505,7 +505,7 @@ public class GuidExtensionsTests3 : BaseTest
 	public async Task Should_create_v7_fast()
 	{
 		var perf = MeasureOps(() => GuidExtensions.CreateVersion7());
-		await Assert.That(perf).IsGreaterThan(100_000);
+		await Assert.That(perf).IsGreaterThan(1_000_000);
 	}
 
 #if NET9_0_OR_GREATER
@@ -514,7 +514,7 @@ public class GuidExtensionsTests3 : BaseTest
 	public async Task Should_create_v7_net9()
 	{
 		var perf = MeasureOps(static () => Guid.CreateVersion7());
-		await Assert.That(perf).IsGreaterThan(100_000);
+		await Assert.That(perf).IsGreaterThan(1_000_000);
 	}
 #endif
 
