@@ -23,7 +23,7 @@ internal class EmergencyLoggerTests : BaseTest
 	public async Task Should_save_emergency_log()
 	{
 		var keyData = Guid.NewGuid().ToString();
-		SynqraEmergencyLog.Default.LogMessage("Should_save_emergency_log test " + keyData);
+		EmergencyLog.Default.Message("Should_save_emergency_log test " + keyData);
 		await Assert.That(File.ReadAllText(Path.Combine(Path.GetTempPath(), "SynqraEmergency.log"))).Contains(keyData);
 	}
 }

@@ -39,7 +39,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	private void InitializeCore(IncrementalGeneratorInitializationContext context)
 	{
-		var calculatorClassesProvider = context.SyntaxProvider.CreateSyntaxProvider<TheSource>(
+		var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<TheSource>(
 		  predicate: static (SyntaxNode node, CancellationToken cancelToken) =>
 		  {
 			  //the predicate should be super lightweight to filter out items that are not of interest quickly
@@ -52,7 +52,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			  }
 			  catch (Exception ex)
 			  {
-				  SynqraEmergencyLog.Default.LogMessage($"[-] {ex}");
+				  EmergencyLog.Default.Message($"[-] {ex}");
 				  throw;
 			  }
 		  },
@@ -78,7 +78,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		  });
 
 		context.RegisterSourceOutput(
-			  calculatorClassesProvider
+			  classesProvider
 			, static (SourceProductionContext sourceProductionContext, TheSource data) => Execute(data, sourceProductionContext)
 			);
 	}
@@ -96,56 +96,53 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	{
 		try
 		{
-			var calculatorClass = data.clazz;
-			var calculatorClassMembers = data.clazz.Members;
-			SynqraEmergencyLog.Default.LogMessage($"[+] Found {calculatorClassMembers.Count} members in the class. {data.data.GetType().Name}");
-			SynqraEmergencyLog.Default.LogMessage($"{data.pceh} pceh");
-			SynqraEmergencyLog.Default.LogMessage($"{data.pcgeh} pcgeh");
-			SynqraEmergencyLog.Default.LogMessage($"{data.ibm} ibm");
-			SynqraEmergencyLog.Default.LogMessage($"{data.ipc} ipc");
-			SynqraEmergencyLog.Default.LogMessage($"{data.ipcg} ipcg");
-			SynqraEmergencyLog.Default.Debug($"[+] Found {calculatorClassMembers.Count} members in the Calculator class");
+			var clazz = data.clazz;
+			var classMembers = data.clazz.Members;
+			EmergencyLog.Default.Message($"[+] Found {classMembers.Count} members in the class '{data.data.Name}'");
+			EmergencyLog.Default.Message($"{data.pceh} pceh");
+			EmergencyLog.Default.Message($"{data.pcgeh} pcgeh");
+			EmergencyLog.Default.Message($"{data.ibm} ibm");
+			EmergencyLog.Default.Message($"{data.ipc} ipc");
+			EmergencyLog.Default.Message($"{data.ipcg} ipcg");
 
-			/*
-			foreach (var item in calculatorClassMembers)
+			foreach (var item in classMembers)
 			{
-				SynqraEmergencyLog.Default.Debug($" {item.GetType().Name} {item} {item.AttributeLists} [{item.FullSpan}] {item.Kind()}");
+				EmergencyLog.Default.Debug($" {item.GetType().Name} {item} {item.AttributeLists} [{item.FullSpan}] {item.Kind()}");
 			}
-			*/
 
 			// check if the methods we want to add exist already 
-			var setMethod = calculatorClassMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
+			var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
 
-			SynqraEmergencyLog.Default.Debug("[+] Checked if methods exist in Calculator class");
+			// SynqraEmergencyLog.Default.Debug("[+] Checked if methods exist in class: " + setMethod);
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
 			body.AppendLine("using Synqra;");
 			body.AppendLine("using System.ComponentModel;");
-			foreach (var usingStatement in calculatorClass.SyntaxTree.GetCompilationUnitRoot().Usings)
+			foreach (var usingStatement in clazz.SyntaxTree.GetCompilationUnitRoot().Usings)
 			{
 				body.AppendLine(usingStatement.ToString());
 			}
-			SynqraEmergencyLog.Default.Debug("[+] Added using statements to generated class");
+			// SynqraEmergencyLog.Default.Debug("[+] Added using statements to generated class");
 
 			body.AppendLine();
 
 			// The previous Descendent Node check has been removed as it was only intended to help produce the error seen in logging
-			BaseNamespaceDeclarationSyntax? calcClassNamespace = calculatorClass.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
-			calcClassNamespace ??= calculatorClass.Ancestors().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
+			BaseNamespaceDeclarationSyntax? calcClassNamespace = clazz.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
+			calcClassNamespace ??= clazz.Ancestors().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
 
 			if (calcClassNamespace is null)
 			{
-				SynqraEmergencyLog.Default.Debug("[-] Could not find namespace for Calculator class");
+				EmergencyLog.Default.Debug("[-] Could not find namespace for Calculator class");
 			}
-			SynqraEmergencyLog.Default.Debug($"[+] Found namespace for Calculator class {calcClassNamespace?.Name}");
+			EmergencyLog.Default.Debug($"[+] Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"using System.ComponentModel;");
 			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
 			// body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
-			body.AppendLine($"{calculatorClass.Modifiers} class {calculatorClass.Identifier} : {FQN(data.ibm)}, {FQN(data.ipc)}, {FQN(data.ipcg)}");
+			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier} : {FQN(data.ibm)}, {FQN(data.ipc)}, {FQN(data.ipcg)}");
 			body.AppendLine("{");
 			body.AppendLine();
 			body.AppendLine($"\tpublic event PropertyChangedEventHandler? PropertyChanged;");
@@ -186,7 +183,7 @@ $$"""
 			switch (name)
 			{
 """);
-				foreach (var pro in calculatorClass.Members.OfType<PropertyDeclarationSyntax>())
+				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 				{
 						body.AppendLine($$"""
 				case "{{pro.Identifier}}":
@@ -207,7 +204,7 @@ $$"""
 			}
 
 
-			foreach (var pro in calculatorClass.Members.OfType<PropertyDeclarationSyntax>())
+			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
 				body.AppendLine(
 $$"""
@@ -276,16 +273,16 @@ $$"""
 			body.AppendLine("}");
 			//while a bit crude it is a simple way to add the methods to the class
 
-			SynqraEmergencyLog.Default.Debug("[+] Added methods to generated class");
+			EmergencyLog.Default.Debug("[+] Added methods to generated class");
 
 			//to write our source file we can use the context object that was passed in
 			//this will automatically use the path we provided in the target projects csproj file
-			context.AddSource($"{Path.GetFileNameWithoutExtension(calculatorClass.SyntaxTree.FilePath)}_{calculatorClass.Identifier}.Generated.cs", SourceText.From(body.ToString(), Encoding.UTF8));
-			SynqraEmergencyLog.Default.Debug("[+] Added source to context");
+			context.AddSource($"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs", SourceText.From(body.ToString(), Encoding.UTF8));
+			EmergencyLog.Default.Debug("[+] Added source to context");
 		}
 		catch (Exception ex)
 		{
-			SynqraEmergencyLog.Default.LogMessage($"[-] Exception occurred in generator: {ex}");
+			EmergencyLog.Default.Message($"[-] Exception occurred in generator: {ex}");
 		}
 	}
 }

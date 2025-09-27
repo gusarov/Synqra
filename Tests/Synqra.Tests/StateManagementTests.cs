@@ -27,6 +27,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		HostBuilder.Services.AddSingleton(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton<FakeStorage>();
 		HostBuilder.Services.AddSingleton<IStorage>(sp => sp.GetRequiredService<FakeStorage>());
+		HostBuilder.Services.AddSingleton<JsonSerializerContext>(DemoTodo.TestJsonSerializerContext.Default);
+		HostBuilder.Services.AddSingleton(DemoTodo.TestJsonSerializerContext.Default.Options);
 
 		// HostBuilder.AddJsonLinesStorage();
 
@@ -38,10 +40,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	[Test]
 	public async Task Should_emit_command_by_setting_property()
 	{
-		HostBuilder.Services.AddSingleton<JsonSerializerContext>(DemoTodo.TestJsonSerializerContext.Default);
-		HostBuilder.Services.AddSingleton(DemoTodo.TestJsonSerializerContext.Default.Options);
-		HostBuilder.AddJsonLinesStorage();
-		HostBuilder.AddSynqraStoreContext();
+		// HostBuilder.AddJsonLinesStorage();
+		// HostBuilder.AddSynqraStoreContext();
 
 		var model = new DemoModel();
 		_sut.GetCollection<DemoModel>().Add(model);
