@@ -13,25 +13,51 @@ namespace Synqra;
 /// No flushing, no caching, no batching.
 /// It is not performance efficient but reliable and always ready.
 /// </summary>
-public class SynqraEmergencyLog
+public class EmergencyLog
 {
-	public static SynqraEmergencyLog Default { get; } = new SynqraEmergencyLog();
+	public static EmergencyLog Default { get; } = new EmergencyLog();
 
-	private SynqraEmergencyLog()
+	private EmergencyLog()
 	{
 		_logFilePath = Path.Combine(Path.GetTempPath(), "SynqraEmergency.log");
+		// _logFilePath2 = Path.Combine(Path.GetTempPath(), "SynqraEmergency.bak");
+		if (!AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var isEnabled))
+		{
+			isEnabled = true;
+		}
+		if (!isEnabled)
+		{
+			_logFilePath = string.Empty;
+		}
 	}
 
 	private string _logFilePath;
+	// private string _logFilePath2;
 
+	/// <summary>
+	/// Conditional message - #if DEBUG
+	/// </summary>
 	[Conditional("DEBUG")]
 	public void Debug(string message)
 	{
-		LogMessage($"[Debug] {message}");
+		Message($"[Debug] {message}");
 	}
 
-	public void LogMessage(string message)
+	/// <summary>
+	/// Conditional message - #if TRACE
+	/// </summary>
+	[Conditional("TRACE")]
+	public void Trace(string message)
 	{
+		Message($"[Trace] {message}");
+	}
+
+	public void Message(string message)
+	{
+		if (_logFilePath == string.Empty)
+		{
+			return;
+		}
 		// TODO use \\global and ACL on windows (or don't... TMP is session specific anyway. UPD: No, I just set both system and user tmp to C:\Dev\Temp and now I have services vs user going to same file. Mutext needs to be global on Windows)
 		// TODO do something for browser
 		var line = $"[{DateTime.UtcNow:o}] {message}{Environment.NewLine}";
@@ -73,7 +99,15 @@ public class SynqraEmergencyLog
 				if (fi.Exists && fi.Length > 1024 * 1024)
 				{
 					fi.Delete();
-					LogMessage("[System] Previous log file exceeded 1MiB and deleted");
+					/*
+					Message("[System] Previous log file exceeded 1MiB and deleted");
+					var fi2 = new FileInfo(_logFilePath2);
+					if (fi2.Exists)
+					{
+						fi2.Delete();
+					}
+					fi.MoveTo(_logFilePath2);
+					*/
 				}
 				File.AppendAllText(_logFilePath, line);
 			}
