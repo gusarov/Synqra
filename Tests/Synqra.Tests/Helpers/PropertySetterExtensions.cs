@@ -23,10 +23,8 @@ static class PropertySetterExtensions
 	}
 	*/
 
-	public static object RSetSTJ(this object obj, string property, object value, JsonSerializerContext jsonSerializerContext)
+	public static void RSetSTJ<T>(this T obj, string json, JsonSerializerContext jsonSerializerContext)
 	{
-		// var tm = GetTypeMetadata(ev.TargetTypeId);
-		// var col = GetInternal(tm.Type);
 		var so = new JsonSerializerOptions(jsonSerializerContext.Options);
 		var ti = so.GetTypeInfo(obj.GetType());
 
@@ -35,17 +33,11 @@ static class PropertySetterExtensions
 		var ti2 = so.GetTypeInfo(obj.GetType());
 		if (ReferenceEquals(ti2, ti))
 		{
-			throw new Exception($"Can't get isolated type info");
+			throw new Exception($"Can't get isolated type info!");
 		}
 #endif
 
-		// col.TryGetAttached(ev.TargetId, out var attached);
 		ti.CreateObject = () => obj;
-		IDictionary<string, object> dic = new Dictionary<string, object>
-		{
-			[property] = value,
-		};
-		var json = JsonSerializer.Serialize(dic, jsonSerializerContext.Options);
 		var patched = JsonSerializer.Deserialize(json, ti);
 		if (!ReferenceEquals(obj, null))
 		{
@@ -54,7 +46,16 @@ static class PropertySetterExtensions
 				throw new Exception("Failed to patch existing object");
 			}
 		}
-		return Task.CompletedTask;
+	}
+
+	public static void RSetSTJ(this object obj, string property, object value, JsonSerializerContext jsonSerializerContext)
+	{
+		IDictionary<string, object> dic = new Dictionary<string, object>
+		{
+			[property] = value,
+		};
+		var json = JsonSerializer.Serialize(dic, jsonSerializerContext.Options);
+		obj.RSetSTJ(json, jsonSerializerContext);
 	}
 
 	public static void RSetConfigGen<TM, TV>(this TM model, string property, TV value)

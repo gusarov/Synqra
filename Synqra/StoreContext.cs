@@ -14,14 +14,19 @@ namespace Synqra;
 /// </summary>
 internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
-	// static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
+	static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
 
-	internal Dictionary<Guid, StoreCollection> _collections = new();
-	private ConcurrentDictionary<Guid, WeakReference> _attachedObjectsById = new();
-	private ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
+	internal readonly JsonSerializerContext? _jsonSerializerContext;
+	private readonly IStorage _storage;
+
+	private readonly Dictionary<Guid, StoreCollection> _collections = new();
+	private readonly ConcurrentDictionary<Guid, WeakReference> _attachedObjectsById = new();
+	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
+	private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
+	private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
 	private byte _attachedMaintain;
 
 	static StoreContext()
@@ -29,17 +34,22 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
-	public StoreContext(IStorage storage, JsonSerializerContext jsonSerializerContext)
+	public StoreContext(IStorage storage, JsonSerializerContext? jsonSerializerContext = null)
 	{
 		_storage = storage;
 		_jsonSerializerContext = jsonSerializerContext;
-		/*
-		foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x=>x.AttributeType == typeof(JsonSerializableAttribute)))
+		if (_jsonSerializerContext != null)
 		{
-			var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
-			GetTypeMetadata(type);
+			foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x => x.AttributeType == typeof(JsonSerializableAttribute)))
+			{
+				var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
+				GetTypeMetadata(type);
+			}
 		}
-		*/
+		else
+		{
+			throw new Exception("Something is wrong! We require JsonSerializerContext to be registered!");
+		}
 	}
 
 	internal AttachedObjectData Attach(object model, StoreCollection collection)
@@ -226,8 +236,6 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		return GetCollectionInternal(type);
 	}
 
-	static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
-
 	Guid GetCollectionId(Type rootType, string? name = null)
 	{
 		var typeId = GetTypeMetadata(rootType).TypeId;
@@ -334,7 +342,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
-			await _storage.AppendAsync(@event); // store event in storage
+			await _storage.AppendAsync(@event); // store event in storage and trigger replication
 		}
 	}
 
@@ -345,11 +353,6 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 	{
 		await newEvent.AcceptAsync(this, null);
 	}
-
-	Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
-	Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
-	internal readonly JsonSerializerContext _jsonSerializerContext;
-	private readonly IStorage _storage;
 
 	internal TypeMetadata GetTypeMetadata(Type type)
 	{
@@ -457,7 +460,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			TargetId = cmd.TargetId,
 			Data = cmd.Data,
 			DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
-			DataObject = cmd.DataObject, // or may be entire object
+			DataObject = cmd.Target, // or may be entire object
 		};
 		ctx.Events.Add(created);
 		/*
@@ -611,6 +614,8 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 	}
 
 	#endregion
+
+
 }
 
 internal class AttachedObjectData
@@ -643,7 +648,7 @@ internal static class SynqraStoreContextInternalExtensions
 		return ((StoreContext)ctx).GetId(model, collection, mode);
 	}
 
-	internal static AttachedObjectData Attach(this ISynqraStoreContext ctx, object model, StoreCollection? collection)
+	internal static AttachedObjectData Attach(this ISynqraStoreContext ctx, object model, StoreCollection collection)
 	{
 		return ((StoreContext)ctx).Attach(model, collection);
 	}

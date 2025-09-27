@@ -98,7 +98,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		{
 			var clazz = data.clazz;
 			var classMembers = data.clazz.Members;
-			EmergencyLog.Default.Message($"[+] Found {classMembers.Count} members in the class '{data.data.Name}'");
+			EmergencyLog.Default.Message($"[+] Analyze {clazz.Identifier}...");
 			EmergencyLog.Default.Message($"{data.pceh} pceh");
 			EmergencyLog.Default.Message($"{data.pcgeh} pcgeh");
 			EmergencyLog.Default.Message($"{data.ibm} ibm");
@@ -133,7 +133,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 			if (calcClassNamespace is null)
 			{
-				EmergencyLog.Default.Debug("[-] Could not find namespace for Calculator class");
+				EmergencyLog.Default.Debug($"[-] Could not find namespace for {clazz.Identifier}");
 			}
 			EmergencyLog.Default.Debug($"[+] Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"using System.ComponentModel;");
@@ -277,8 +277,9 @@ $$"""
 
 			//to write our source file we can use the context object that was passed in
 			//this will automatically use the path we provided in the target projects csproj file
-			context.AddSource($"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs", SourceText.From(body.ToString(), Encoding.UTF8));
-			EmergencyLog.Default.Debug("[+] Added source to context");
+			var fileName = $"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs";
+			context.AddSource(fileName, SourceText.From(body.ToString(), Encoding.UTF8));
+			EmergencyLog.Default.Debug($"[+] Added source to context {fileName}");
 		}
 		catch (Exception ex)
 		{

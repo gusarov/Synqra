@@ -1,5 +1,5 @@
 ﻿#define LOCK
-//#define SEMAPHORE
+// #define SEMAPHORE
 
 using Microsoft.Extensions;
 using Microsoft.Extensions.Configuration;
@@ -67,7 +67,7 @@ public static class StorageExtensions
 			{
 				if (_fileName == null)
 				{
-					_fileName = _options.Value.FileName.Replace("[TypeName]", _itemType?.Name ?? "data");
+					_fileName = _options.Value.FileName.Replace("[TypeName]", _itemType?.Name ?? "storage");
 				}
 				return _fileName;
 			}
@@ -110,7 +110,7 @@ public static class StorageExtensions
 				{
 					throw new Exception("Header line of Syncra.Storage.Jsonl is not valid");
 				}
-				if (header.Version != "1.0.0")
+				if (header.Version != new Version("0.1"))
 				{
 					throw new Exception("File version is newer than expected");
 				}
@@ -170,17 +170,25 @@ public static class StorageExtensions
 | FileOptions.Asynchronous
 #endif
 						);
-					_streamWriter = new StreamWriter(_stream, new UTF8Encoding(false, false), bufferSize: 1024 * 64);
+					_streamWriter = new StreamWriter(_stream)
+					{
+#if DEBUG
+						AutoFlush = true,
+#endif
+					};// , new UTF8Encoding(false, false), bufferSize: 1024 * 64);
 					// Header
 					var header = JsonSerializer.Serialize(new JsonLinesStorageHeader
 					{
-						Version = "1.0.0",
-						ItemType = item.GetType().FullName,
+						Version = new Version(0, 1),
+						RootItemType = typeof(T).FullName,
 					}, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
 					_streamWriter.WriteLine(header);
 				}
+#if LOCK
 				_streamWriter.WriteLine(json);
-				// await _streamWriter.WriteLineAsync(json);
+#elif SEMAPHORE
+				await _streamWriter.WriteLineAsync(json);
+#endif
 #if LOCK
 			}
 #elif SEMAPHORE
@@ -194,6 +202,7 @@ public static class StorageExtensions
 
 		public void Dispose()
 		{
+			GC.SuppressFinalize(this);
 #if LOCK
 			lock (_lock)
 			{
@@ -226,6 +235,7 @@ public static class StorageExtensions
 
 		public async ValueTask DisposeAsync()
 		{
+			GC.SuppressFinalize(this);
 #if LOCK
 			Dispose();
 #elif SEMAPHORE
@@ -236,7 +246,11 @@ public static class StorageExtensions
 				var sw = _streamWriter;
 				if (sw != null)
 				{
+#if NETSTANDARD2_0
+					sw.Dispose();
+#else
 					await sw.DisposeAsync();
+#endif
 				}
 				_streamWriter = null;
 
@@ -280,15 +294,19 @@ public static class StorageExtensions
 			}
 #endif
 		}
-	}
 
+		~JsonLinesStorage()
+		{
+			Dispose();
+		}
+	}
 }
 
 class JsonLinesStorageHeader
 {
 	[JsonPropertyName("Synqra.Storage.Jsonl")]
-	public string? Version { get; set; }
-	public string? ItemType { get; set; }
+	public Version? Version { get; set; } // do not assign default!! You need to read it from actual header!
+	public string? RootItemType { get; set; }
 }
 
 [JsonSourceGenerationOptions(
