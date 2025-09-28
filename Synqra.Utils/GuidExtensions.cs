@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
@@ -15,9 +16,51 @@ namespace Synqra;
 
 public static class GuidExtensions
 {
-	static Encoding _utf8 = new UTF8Encoding(false, false);
-	static long _unixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
-	static long _gregEpochTicks = 0x06ED6223E4344000; // new DateTime(1582, 10, 15, 0, 0, 0, DateTimeKind.Utc).Ticks;
+	private static Encoding _utf8 = new UTF8Encoding(false, false); // for name-based UUIDs
+	private const long _unixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
+	private const long _gregEpochTicks = 0x06ED6223E4344000; // new DateTime(1582, 10, 15, 0, 0, 0, DateTimeKind.Utc).Ticks;
+
+	// For v1 & v6: Same as Mongo ObjectID, it is reset on client start, not saved
+	private static readonly ulong _nodeId; // actually only 6 bytes (48 bit) is in use
+	private static int _clockSeq; // actually only 1.5 bytes (12 bits) is in use but Interlocked works with int
+
+	// For v7 monotonicy
+	private static long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
+
+	// https://www.rfc-editor.org/rfc/rfc9562.html?utm_source=chatgpt.com#name-namespace-id-usage-and-allo
+	private static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+	private static readonly Guid _namespaceUrl = new Guid("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+
+	unsafe static GuidExtensions()
+	{
+		try
+		{
+			var rng = RandomNumberGenerator.Create();
+			ulong nodeId = 0;
+#if NETSTANDARD2_0
+			var buffer = new byte[8];
+			rng.GetBytes(buffer);
+			nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+			var span = new Span<byte>((byte*)&nodeId, 8);
+			rng.GetBytes(span);
+#endif
+			_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000; // set multicast bit to avoid using real MAC address (See RFC spec)
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.Message(ex.ToString());
+			// fallback in case of crypto configuration problems
+#if NETSTANDARD
+			var buffer = new byte[8];
+			new Random().NextBytes(buffer);
+			var nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+			var nodeId = (ulong)Random.Shared.NextInt64();
+#endif
+			_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000;
+		}
+	}
 
 	public static unsafe int GetVariant(this Guid guid)
 	{
@@ -59,7 +102,7 @@ public static class GuidExtensions
 		}
 #if NET9_0_OR_GREATER
 		return guid.Version;
-#elif __NET8_0_OR_GREATER
+#elif __NET8_0_OR_GREATER // not efficient, no point in unsafe context
 		ref var guidMap = ref MemoryMarshal.AsRef<GuidMap>(MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref guid, 1))); // no copy, just reinterpret
 		return guidMap._c >> 12;
 #else
@@ -78,8 +121,8 @@ public static class GuidExtensions
 		var ver = guid.GetVersion(zeroForDefault: zeroForDefault);
 
 		var bytes = (byte*)&guid;
-		var ints = (uint*)&guid;
-		var shorts = (ushort*)(bytes + 4);
+		var ints = (uint*)&guid; // there is only one valid int at 0 index
+		var shorts = (ushort*)(bytes + 4); // there are 2 shorts at 0 & 1 index
 
 		switch (ver)
 		{
@@ -92,10 +135,8 @@ public static class GuidExtensions
 				var greg_100_ns = (tsHigh << 48) | (tsMid << 32) | tsLow;
 				return new DateTime(_gregEpochTicks + greg_100_ns, DateTimeKind.Utc);
 			}
-			/*
 			case 2:
 				throw new NotImplementedException();
-			*/
 			case 6:
 			{
 				long tsHigh = ints[0];
@@ -114,22 +155,18 @@ public static class GuidExtensions
 				return new DateTime(_unixEpochTicks).AddMilliseconds(unix_64_bit_ms);
 			}
 			default:
-				throw new Exception($"Cannot get timestamp of UUID v{ver}");
+				throw new NotSupportedException($"Cannot get timestamp of UUID v{ver}");
 		}
 	}
 
-	// https://www.rfc-editor.org/rfc/rfc9562.html?utm_source=chatgpt.com#name-namespace-id-usage-and-allo
-	static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-	static readonly Guid _namespaceUrl = new Guid("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
-
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion1(ushort clockSeq, long node)
+	public static unsafe Guid CreateVersion1()
 	{
-		return CreateVersion1(DateTime.UtcNow, clockSeq, node);
+		return CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
 	}
 
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion1(DateTimeOffset dateTime, ushort clockSeq, long node)
+	internal static unsafe Guid CreateVersion1(DateTimeOffset dateTime, ushort clockSeq, ulong node)
 	{
 		var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
 
@@ -185,36 +222,15 @@ public static class GuidExtensions
 	}
 
 	[Obsolete("Use v5 with SHA1 or v8 with current best hash function")]
-	public static unsafe Guid CreateVersion3(Guid namespaceId, byte[] raw)
+	public static unsafe Guid CreateVersion3(Guid namespaceId, byte[] input)
 	{
 		using var md5 = MD5.Create();
+		return CreateHashBased(md5, 3, namespaceId, input);
+	}
 
-		ValidateNamespaceId(namespaceId);
-		var nsBuf = namespaceId.ToByteArray();
-		if (BitConverter.IsLittleEndian)
-		{
-			// Guid is mixed-endian
-			Array.Reverse(nsBuf, 0, 4);
-			Array.Reverse(nsBuf, 4, 2);
-			Array.Reverse(nsBuf, 6, 2);
-		}
-
-		md5.TransformBlock(nsBuf, 0, 16, null, 0);
-		md5.TransformFinalBlock(raw, 0, raw.Length);
-		var hash = md5.Hash;
-
-		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
-		hash[6] = (byte)((hash[6] & 0x0F) | 0x30); // Set version to 3
-
-		if (BitConverter.IsLittleEndian)
-		{
-			// Guid is mixed-endian
-			Array.Reverse(hash, 0, 4);
-			Array.Reverse(hash, 4, 2);
-			Array.Reverse(hash, 6, 2);
-		}
-
-		return new Guid(hash[..16]); // back to ram
+	public static Guid CreateVersion4()
+	{
+		return Guid.NewGuid();
 	}
 
 	public static unsafe Guid CreateVersion5Dns(string name)
@@ -235,42 +251,17 @@ public static class GuidExtensions
 	public static unsafe Guid CreateVersion5(Guid namespaceId, byte[] input)
 	{
 		using var sha1 = SHA1.Create();
-
-		ValidateNamespaceId(namespaceId);
-		var nsBuf = namespaceId.ToByteArray();
-		if (BitConverter.IsLittleEndian)
-		{
-			Array.Reverse(nsBuf, 0, 4);
-			Array.Reverse(nsBuf, 4, 2);
-			Array.Reverse(nsBuf, 6, 2);
-		}
-
-		sha1.TransformBlock(nsBuf, 0, 16, null, 0);
-		sha1.TransformFinalBlock(input, 0, input.Length);
-		var hash = sha1.Hash;
-
-		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
-		hash[6] = (byte)((hash[6] & 0x0F) | 0x50); // Set version to 5
-
-		if (BitConverter.IsLittleEndian)
-		{
-			Array.Reverse(hash, 0, 4);
-			Array.Reverse(hash, 4, 2);
-			Array.Reverse(hash, 6, 2);
-		}
-
-		return new Guid(hash[..16]);
-
+		return CreateHashBased(sha1, 5, namespaceId, input);
 	}
 
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion6(ushort clockSeq, long node)
+	public static unsafe Guid CreateVersion6()
 	{
-		return CreateVersion6(DateTime.UtcNow, clockSeq, node);
+		return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
 	}
 
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, long node)
+	internal static unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, ulong node)
 	{
 		var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
 
@@ -308,80 +299,6 @@ public static class GuidExtensions
 
 	public static Guid CreateVersion7() => CreateVersion7(DateTime.UtcNow);
 
-	// static volatile nint _state = 0;
-	// static long _prevUnixTsMs = 0;
-	// static int _prevSubMs = 0;
-	private static long _prevOmniStamp;
-
-
-	/*
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	static (long tick4, int sub) NextTick4AndSub(long unixTicks)
-	{
-		long now4 = unixTicks >> 2;                 // ticks / 4 (100ns*4)
-		int seed = (int)((unixTicks % 10_000) >> 2); // 0..2499 (your initial sub from ticks>>2)
-
-		while (true)
-		{
-			Interlocked.MemoryBarrier();
-			long cur = Volatile.Read(ref _state);
-			long cur4 = cur >> 12;
-			int curSub = (int)(cur & 0xFFF);
-
-			long new4; int newSub;
-
-			if (now4 > cur4)
-			{
-				// New 4-tick window: seed from actual time remainder
-				new4 = now4;
-				newSub = seed;
-			}
-			else
-			{
-				// Same or past window: monotonic bump
-				new4 = cur4;
-				newSub = curSub + 1;
-			}
-
-			// If we’ve consumed the 12-bit lane, roll by +1ms (== +2500 in tick4 units)
-			if (newSub > 0xFFF)
-			{
-				new4 = new4 + 2500; // +1 ms because 10_000 ticks / 4 = 2500
-				newSub = 0;
-			}
-
-			long next = (new4 << 12) | (uint)newSub;
-			if (Interlocked.CompareExchange(ref _state, next, cur) == cur)
-				return (new4, newSub);
-		}
-	}
-
-	public static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
-	{
-		var g = Guid.NewGuid(); 
-
-		long ticks = timestamp.ToUniversalTime().Ticks;
-		long unix_ticks = ticks - _unixEpochTicks;
-
-		var (tick4, sub) = NextTick4AndSub(unix_ticks);
-
-		long unix_ts_ms = (tick4 << 2) / 10000;
-
-		byte* bytes = (byte*)&g;
-		uint a = (uint)((unix_ts_ms >> 16) & 0xFFFFFFFF);
-		ushort b = (ushort)unix_ts_ms;
-
-		ushort c = (ushort)((((ushort)(sub)) | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
-
-		*(uint*)bytes = a;
-		*(ushort*)(bytes + 4) = b;
-		*(ushort*)(bytes + 6) = c;
-
-		bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
-		return g;
-	}
-	*/
-
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
 	{
@@ -407,6 +324,11 @@ public static class GuidExtensions
 
 		// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds.
 
+		// The change from 3 ticks increment to 4 ticks increment:
+		// 1) Allows to avoid floating arithmetics and just do x>>2
+		// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
+		// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
+
 		var g = Guid.NewGuid();
 
 		ticks -= _unixEpochTicks;
@@ -428,56 +350,10 @@ public static class GuidExtensions
 			}
 		}
 
-		// long unix_ts_ms = unix_ticks / 10000;
-		// int subMs = (int)((unix_ticks % 10000) >> 2); // available space is 12 bits 0..4095 but we have extra 0..9999, so we drop 2 LSBs and get 4 ticks precision (0..2499). That gives extra 39% space for intra-ms overflows and that's faster than floating point extrapolation.
-
-		/*
-		var prevUnixTsMs = _prevUnixTsMs;
-		var prevSubMs = _prevSubMs;
-		var diff = unix_ts_ms - prevUnixTsMs;
-		if (diff < 100 && diff > -100)
-		{
-			unix_ts_ms = prevUnixTsMs;
-			if (subMs <= prevSubMs)
-			{
-				subMs = Interlocked.Increment(ref _prevSubMs);
-				if (subMs > 0xfff)
-				{
-					// overflow of sub-ms part, need to spin ms forward
-					unix_ts_ms = Interlocked.Increment(ref _prevUnixTsMs);
-					Interlocked.Exchange(ref _prevSubMs, subMs = 0);
-				}
-				else
-				{
-					unix_ts_ms = prevUnixTsMs;
-				}
-			}
-			else
-			{
-				Interlocked.Exchange(ref _prevSubMs, subMs);
-			}
-		}
-		else
-		{
-			Interlocked.Exchange(ref _prevUnixTsMs, unix_ts_ms);
-			Interlocked.Exchange(ref _prevSubMs, subMs);
-		}
-		uint a = (uint)((unix_ts_ms >> 16) & 0xFFFFFFFF);
-		ushort b = (ushort)unix_ts_ms;
-		*/
 		byte* bytes = (byte*)&g;
-
 		uint a = (uint)(omniStamp >> 28);
 		ushort b = (ushort)(omniStamp >> 12);
-
-
-		// ushort maxRandB = 0x0FFF; // 12 bits
-		// ushort c = (ushort)((((ushort)(maxRandB * (unix_100ns / 10000.0)) | (0x7 << 12)))); // version 7 in high nibble and 12 bits of sub-ms time
-		ushort c = (ushort)((((ushort)(omniStamp)) | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
-		// The change from 3 ticks increment to 4 ticks increment:
-		// 1) Allows to avoid floating arythmetics and just do x>>2
-		// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
-		// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
+		ushort c = (ushort)((((ushort)(omniStamp)) & 0xfff | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
 
 		*(uint*)bytes = a;
 		*(ushort*)(bytes + 4) = b;
@@ -584,6 +460,11 @@ public static class GuidExtensions
 		sha256.TransformBlock(hashSpaceBuf, 0, 16, null, 0);
 		*/
 
+		return CreateHashBased(sha256, 8, namespaceId, input);
+	}
+
+	public static Guid CreateHashBased(HashAlgorithm hashAlgorithm, byte version, Guid namespaceId, byte[] input)
+	{
 		ValidateNamespaceId(namespaceId);
 
 		var namespaceBuf = namespaceId.ToByteArray();
@@ -594,12 +475,12 @@ public static class GuidExtensions
 			Array.Reverse(namespaceBuf, 6, 2);
 		}
 
-		sha256.TransformBlock(namespaceBuf, 0, 16, null, 0);
-		sha256.TransformFinalBlock(input, 0, input.Length);
-		var hash = sha256.Hash;
+		hashAlgorithm.TransformBlock(namespaceBuf, 0, 16, null, 0);
+		hashAlgorithm.TransformFinalBlock(input, 0, input.Length);
+		var hash = hashAlgorithm.Hash;
 
 		hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
-		hash[6] = (byte)((hash[6] & 0x0F) | 0x80); // Set version to 8
+		hash[6] = (byte)((hash[6] & 0x0F) | (version << 4)); // Set version
 
 		if (BitConverter.IsLittleEndian)
 		{
@@ -611,44 +492,24 @@ public static class GuidExtensions
 		return new Guid(hash[..16]);
 	}
 
-	static long InterlockedStamp(ref long location, long newValue)
+	public static Guid Create(int version)
 	{
-		if (newValue > location)
+		switch (version)
 		{
-			location = newValue;
-			return newValue;
+			case 1:
+				return CreateVersion1();
+			case 3:
+				throw new NotSupportedException($"Use {nameof(CreateVersion3)}(...)");
+			case 4:
+				return CreateVersion4();
+			case 5:
+				throw new NotSupportedException($"Use {nameof(CreateVersion5)}(...)");
+			case 6:
+				return CreateVersion6();
+			case 7:
+				return CreateVersion7();
+			default:
+				throw new NotSupportedException();
 		}
-		location += 4;
-		return location;
-		/*
-		long cur = Interlocked.Read(ref location);
-		while (true)
-		{
-			long next;
-			if (newValue > cur)
-			{
-				next = newValue;
-			}
-			else if (newValue == cur)
-			{
-				// v1: ceil(10000 / 4096) = 3
-				// v2: x >> 2, so + 4
-				next = cur + 4; 
-			}
-			else
-			{
-				// candidate < cur: no change, monotonicity preserved.
-				return cur;
-			}
-
-			long prev = Interlocked.CompareExchange(ref location, next, cur);
-			if (prev == cur)
-			{
-				return next;
-			}
-			cur = prev; // retry with fresher value
-		}
-		*/
 	}
-
 }
