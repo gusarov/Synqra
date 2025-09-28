@@ -1,6 +1,8 @@
 ﻿using Synqra.Tests.TestHelpers;
+using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests;
 
@@ -101,8 +103,7 @@ public class GuidExtensionsTests3 : BaseTest
 	}
 
 #if NET8_0_OR_GREATER
-	/*
-
+	/* No Longer Possible
 	[Test]
 	[Arguments(7, "5236-03-31 21:21:00")]
 	public async Task Should_show_max_uuid_dto(byte version, string expected)
@@ -269,10 +270,10 @@ public class GuidExtensionsTests3 : BaseTest
 		await Assert.That(timestamp).IsEqualTo(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)).ToUniversalTime().DateTime);
 	}
 
-	// [Test]
-	public async Task Should_create_v7()
+	/* No Longer Possible
+	[Test]
+	public async Task Should_create_v7_fixed()
 	{
-		/*
 		var guid = GuidExtensions.CreateVersion7(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)));
 		Console.WriteLine(guid);
 		await Assert.That(guid.GetVariant()).IsEqualTo(1);
@@ -281,7 +282,20 @@ public class GuidExtensionsTests3 : BaseTest
 		var timestamp = guid.GetTimestamp();
 		Console.WriteLine(timestamp);
 		await Assert.That(timestamp).IsEqualTo(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)).ToUniversalTime().DateTime);
-		*/
+	}
+	*/
+
+	[Test]
+	public async Task Should_create_v7()
+	{
+		var guid = GuidExtensions.CreateVersion7();
+		Console.WriteLine(guid);
+		await Assert.That(guid.GetVariant()).IsEqualTo(1);
+		await Assert.That(guid.GetVersion()).IsEqualTo(7);
+
+		var timestamp = guid.GetTimestamp();
+		Console.WriteLine(timestamp);
+		await Assert.That((DateTime.UtcNow - timestamp).TotalSeconds).IsLessThan(1);
 	}
 
 	[Test]
@@ -310,6 +324,31 @@ public class GuidExtensionsTests3 : BaseTest
 		{
 			arr[i]++;
 			Guid newGuid = FromNetworkOrder(arr);
+			//Console.WriteLine(newGuid);
+			await Assert.That(newGuid.CompareTo(prev)).IsGreaterThan(0);
+			await Assert.That(prev.CompareTo(newGuid)).IsLessThan(0);
+			prev = newGuid;
+		}
+	}
+
+	[Test]
+	public async Task Should_compare_guids_2()
+	{
+		var arr = new byte[16];
+		for (byte i = 0; i < 16; i++)
+		{
+			arr[i] = i;
+		}
+		Guid prev = FromNetworkOrder(arr);
+		Console.WriteLine(prev);
+		await Assert.That(prev.ToString()).IsEqualTo(new Guid("00010203-0405-0607-0809-0a0b0c0d0e0f").ToString());
+
+		for (int i = 0; i < 15; i++)
+		{
+			arr[i]++;
+			arr[i + 1]--;
+			Guid newGuid = FromNetworkOrder(arr);
+			arr[i + 1]++;
 			Console.WriteLine(newGuid);
 			await Assert.That(newGuid.CompareTo(prev)).IsGreaterThan(0);
 			await Assert.That(prev.CompareTo(newGuid)).IsLessThan(0);
@@ -317,8 +356,100 @@ public class GuidExtensionsTests3 : BaseTest
 		}
 	}
 
+	[Test]
+	public async Task Should_compare_guids_3()
+	{
+		var arr = new byte[16];
+		for (byte i = 0; i < 16; i++)
+		{
+			arr[i] = (byte)(i + 16);
+		}
+		Guid prev = FromNetworkOrder(arr);
+		await Assert.That(prev.ToString()).IsEqualTo(new Guid("10111213-1415-1617-1819-1a1b1c1d1e1f").ToString());
+
+		for (int i = 0; i < 15; i++)
+		{
+			arr[i]++;
+			arr[i + 1]--;
+			Guid newGuid = FromNetworkOrder(arr);
+			arr[i + 1]++;
+			arr[i]--;
+			Console.WriteLine(prev);
+			Console.WriteLine(newGuid);
+			Console.WriteLine();
+			await Assert.That(newGuid.CompareTo(prev)).IsGreaterThan(0);
+			await Assert.That(prev.CompareTo(newGuid)).IsLessThan(0);
+		}
+	}
+
+	[Test]
+	public async Task Should_compare_guids_4()
+	{
+		var arr1 = new byte[16];
+		arr1[0] = 1;
+		Guid a = FromNetworkOrder(arr1);
+		var arr2 = new byte[16];
+		arr2[1] = 1;
+		Guid b = FromNetworkOrder(arr2);
+		Console.WriteLine(a);
+		Console.WriteLine(b);
+		await Assert.That(a.CompareTo(b)).IsGreaterThan(0);
+		await Assert.That(2.CompareTo(1)).IsGreaterThan(0); // assert our understanding of CompareTo
+	}
+
+	[Test]
+	public async Task Should_compare_guids_5()
+	{
+		var bytes = new byte[8];
+		var a = new Guid(0x00000100, 0, 0, bytes);
+		Console.WriteLine(a);
+		var b = new Guid(0x00000001, 0, 0, bytes);
+		Console.WriteLine(b);
+		await Assert.That(a.CompareTo(b)).IsGreaterThan(0);
+		await Assert.That(2.CompareTo(1)).IsGreaterThan(0); // assert our understanding of CompareTo
+
+		await Assert.That(new Guid(2, 0, 0, bytes).CompareTo(new Guid(1, 0, 0, bytes))).IsGreaterThan(0);
+	}
+
+	[Test]
+	public async Task Should_understand_guids_1()
+	{
+		var arr = new byte[16];
+		for (byte i = 0; i < 16; i++)
+		{
+			arr[i] = i;
+		}
+		Guid guid = FromNetworkOrder(arr);
+		// Network Byte Order ToString representation
+		await Assert.That(guid.ToString()).IsEqualTo("00010203-0405-0607-0809-0a0b0c0d0e0f");
+
+		// Network Byte Order ToByteArray representation
+		var arr1 = guid.ToByteArray(bigEndian: true);
+		await Assert.That(Convert.ToHexString(arr1).ToLowerInvariant()).IsEqualTo("00010203-0405-0607-0809-0a0b0c0d0e0f".Replace("-", ""));
+
+		// In Memory Representation
+		string hexRam;
+		unsafe
+		{
+			var span = new Span<byte>((byte*)&guid, sizeof(Guid));
+			hexRam = Convert.ToHexString(span).ToLowerInvariant();
+		}
+		await Assert.That(hexRam).IsEqualTo("03020100-0504-0706-0809-0a0b0c0d0e0f".Replace("-", ""));
+
+		// Integer
+		arr = guid.ToByteArray(); // CurrentEndian (Little)
+		int a = BitConverter.ToInt32(arr, 0); // Little
+		await Assert.That(a).IsEqualTo(0x00010203);
+
+		// Integer
+		arr = guid.ToByteArray(bigEndian: true);
+		a = BitConverter.ToInt32(arr, 0);
+		await Assert.That(a).IsEqualTo(0x03020100);
+	}
+
 	Guid FromNetworkOrder([In] ReadOnlySpan<byte> span)
 	{
+		return new Guid(span, bigEndian: true);
 		var arr = span.ToArray();
 		if (BitConverter.IsLittleEndian)
 		{
@@ -382,7 +513,7 @@ public class GuidExtensionsTests3 : BaseTest
 	[Property("CI", "false")]
 	public async Task Should_create_v7_net9()
 	{
-		var perf = MeasureOps(() => Guid.CreateVersion7());
+		var perf = MeasureOps(static () => Guid.CreateVersion7());
 		await Assert.That(perf).IsGreaterThan(100_000);
 	}
 #endif
@@ -396,6 +527,11 @@ public class GuidExtensionsTests3 : BaseTest
 		for (int i = 0; i < 1_000_000; i++)
 		{
 			var newGuid = GuidExtensions.CreateVersion7();
+			if (newGuid.ToString()[0] != '0')
+			{
+				Console.WriteLine("#" + i + " WTF!");
+				Console.WriteLine(newGuid);
+			}
 			//Console.WriteLine(newGuid);
 			if (newGuid.CompareTo(prev) <= 0)
 			{
@@ -407,5 +543,17 @@ public class GuidExtensionsTests3 : BaseTest
 			prev = newGuid;
 		}
 		await Assert.That(allGood).IsEqualTo(true);
+	}
+
+	[Test]
+	[Arguments(1)]
+	[Arguments(6)]
+	[Arguments(7)]
+	public async Task Should_create_programatic_version_with_adequate_time(int version)
+	{
+		Guid guid = GuidExtensions.Create(version: version);
+		DateTime time = guid.GetTimestamp();
+		DateTime now = DateTime.UtcNow;
+		await Assert.That((now - time).TotalSeconds).IsLessThan(1);
 	}
 }
