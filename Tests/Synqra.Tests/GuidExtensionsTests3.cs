@@ -504,7 +504,7 @@ public class GuidExtensionsTests3 : BaseTest
 	[Category("Performance")]
 	public async Task Should_create_v7_fast()
 	{
-		var perf = MeasureOps(() => GuidExtensions.CreateVersion7());
+		var perf = MeasureOps(static () => GuidExtensions.CreateVersion7());
 		await Assert.That(perf).IsGreaterThan(1_000_000);
 	}
 

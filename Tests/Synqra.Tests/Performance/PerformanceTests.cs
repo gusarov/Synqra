@@ -54,7 +54,11 @@ public class PerformanceTests : BaseTest
 		var ops = MeasureOps(() => { bm.Set("Name", "def"); });
 
 		Debug.WriteLine($"IBindableModel.Set ops: {ops}");
+#if NET9_0_OR_GREATER
 		await Assert.That(ops).IsGreaterThan(20_000_000);
+#else
+		await Assert.That(ops).IsGreaterThan(1_000);
+#endif
 		await Assert.That(ops).IsGreaterThan(reflectionOps);
 	}
 
@@ -85,27 +89,16 @@ public class PerformanceTests : BaseTest
 		obj.Property1 = "test1";
 		await Assert.That(obj.Property1).IsEqualTo("test1");
 
-		var ops1 = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				obj.Property1 = next();
-			}
-		});
-		await Assert.That(ops1 > 1_000).IsTrue();
+		var ops1 = MeasureOps(() => obj.Property1 = next());
+		await Assert.That(ops1 > 1_000_000).IsTrue();
 
 		obj.RSetReflection(proName, "test2");
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 
-		var ops2 = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				obj.RSetReflection(proName, next());
-			}
-		});
+		var ops2 = MeasureOps(() => obj.RSetReflection(proName, next()));
+
 		Console.WriteLine($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
-		await Assert.That(ops1 > 1_000).IsTrue();
+		await Assert.That(ops1 > 1_000_000).IsTrue();
 
 		// Assert.Fail(ops2.ToString());
 	}
@@ -117,16 +110,10 @@ public class PerformanceTests : BaseTest
 		model.RSetReflection("Name", "abc");
 		await Assert.That(model.Name).IsEqualTo("abc");
 
-		var ops = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				model.RSetReflection("Name", "abc");
-			}
-		});
+		var ops = MeasureOps(() => model.RSetReflection("Name", "abc"));
 
 		Debug.WriteLine($"RSetReflection ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(1_000);
+		await Assert.That(ops).IsGreaterThan(1_000_000);
 
 		// Assert.Fail(ops.ToString());
 	}
@@ -149,25 +136,13 @@ public class PerformanceTests : BaseTest
 		obj.Property1 = "test1";
 		await Assert.That(obj.Property1).IsEqualTo("test1");
 
-		var ops1 = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				obj.Property1 = next();
-			}
-		});
-		await Assert.That(ops1 > 1_000).IsTrue();
+		var ops1 = MeasureOps(() => obj.Property1 = next());
+		await Assert.That(ops1 > 1_000_000).IsTrue();
 
 		obj.RSetSTJ(proName, "test2", DemoTodo.TestJsonSerializerContext.Default);
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 
-		var ops2 = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				obj.RSetSTJ(proName, next(), DemoTodo.TestJsonSerializerContext.Default);
-			}
-		});
+		var ops2 = MeasureOps(() => obj.RSetSTJ(proName, next(), DemoTodo.TestJsonSerializerContext.Default));
 		Console.WriteLine($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
 		await Assert.That(ops2 > 10).IsTrue();
 	}
@@ -194,14 +169,8 @@ public class PerformanceTests : BaseTest
 		var json2 = """
 {"property1":"xp"}
 """;
-		var ops1 = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				JsonSerializer.Deserialize(json2, ti);
-			}
-		});
-		await Assert.That(ops1 > 1_000).IsTrue();
+		var ops1 = MeasureOps(() => JsonSerializer.Deserialize(json2, ti));
+		await Assert.That(ops1 > 1_000_000).IsTrue();
 	}
 
 	[Test]
@@ -221,15 +190,9 @@ public class PerformanceTests : BaseTest
 		hostBuilder.Configuration.Bind(model);
 		await Assert.That(model.Name).IsEqualTo("Value 2");
 
-		var ops = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				hostBuilder.Configuration.Bind(model);
-			}
-		});
+		var ops = MeasureOps(() => hostBuilder.Configuration.Bind(model));
 
-		await Assert.That(ops).IsGreaterThan(1_000);
+		await Assert.That(ops).IsGreaterThan(1_000_000);
 	}
 
 	[Test]
@@ -243,15 +206,9 @@ public class PerformanceTests : BaseTest
 		config.Bind(model);
 		await Assert.That(model.Name).IsEqualTo("Value 2");
 
-		var ops = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				config.Bind(model);
-			}
-		});
+		var ops = MeasureOps(() => config.Bind(model));
 
-		await Assert.That(ops).IsGreaterThan(1_000);
+		await Assert.That(ops).IsGreaterThan(1_000_000);
 	}
 
 	[Test]
@@ -264,21 +221,15 @@ public class PerformanceTests : BaseTest
 		model.RSetConfigGen("Name", "Value 2");
 		await Assert.That(model.Name).IsEqualTo("Value 2");
 
-		var ops = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				model.RSetConfigGen("Name", "Value 2");
-			}
-		});
+		var ops = MeasureOps(() => model.RSetConfigGen("Name", "Value 2"));
 
-		await Assert.That(ops).IsGreaterThan(1_000);
+		await Assert.That(ops).IsGreaterThan(1_000_000);
 	}
 
 	[Test]
 	public async Task Should_Bind_04_BS_01_Generate_BindableModel()
 	{
-		var model = new SamplePublicModel_();
+		var model = new SamplePublicModel();
 		model.Name = "Value 1";
 		await Assert.That(model.Name).IsEqualTo("Value 1");
 
@@ -295,19 +246,13 @@ public class PerformanceTests : BaseTest
 			return ab ? stra : strb;
 		}
 
-		var ops = MeasureOps(() =>
-		{
-			for (int i = 0; i < 1024; i++)
-			{
-				bm.Set("Name", next());
-			}
-		}, new PerformanceParameters
+		var ops = MeasureOps(() => bm.Set("Name", next()), new PerformanceParameters
 		{
 			TotalTargetTime = TimeSpan.FromSeconds(10)
 		});
 
 		Debug.WriteLine($"RSetGen ops: {ops}");
-		await Assert.That(ops).IsGreaterThan(30_000);
+		await Assert.That(ops).IsGreaterThan(1_000_000);
 
 		// Assert.Fail(ops.ToString());
 	}

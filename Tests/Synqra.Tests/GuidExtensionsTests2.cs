@@ -7,14 +7,14 @@ namespace Synqra.Tests;
 [Category("Performance")]
 public class GuidExtensionsTests2Performance : BaseTest
 {
-	Guid _namespaceId = Guid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"); // DNS namespace
+	static Guid _namespaceId = Guid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"); // DNS namespace
 
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
 	public async Task Should_create_v5_Guid_quickly()
 	{
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
+		await Assert.That(MeasureOps(static async () =>
 		{
 			GuidExtensions.CreateVersion5(_namespaceId, "Test");
 		})).IsGreaterThan(500_000);
@@ -25,7 +25,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Property("CI", "false")]
 	public async Task Should_create_v3_Guid_quickly()
 	{
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
+		await Assert.That(MeasureOps(static async () =>
 		{
 			GuidExtensions.CreateVersion3(_namespaceId, "Test");
 		})).IsGreaterThan(500_000);
@@ -37,7 +37,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	public async Task Should_create_v5_Guid_random_quickly()
 	{
 		var buf = new byte[16];
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
+		await Assert.That(MeasureOps(async () =>
 		{
 			RandomShared.NextBytes(buf);
 			GuidExtensions.CreateVersion5(_namespaceId, buf);
@@ -50,7 +50,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	public async Task Should_create_v3_Guid_random_quickly()
 	{
 		var buf = new byte[16];
-		await Assert.That(PerformanceTestUtils.MeasureOps(async () =>
+		await Assert.That(MeasureOps(async () =>
 		{
 			RandomShared.NextBytes(buf);
 			GuidExtensions.CreateVersion3(_namespaceId, buf);
@@ -64,7 +64,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	{
 		var buf = new byte[16 * 1024];
 		RandomShared.NextBytes(buf);
-		var perf = PerformanceTestUtils.MeasurePerformance(async () =>
+		var perf = MeasurePerformance(async () =>
 		{
 			GuidExtensions.CreateVersion5(_namespaceId, buf);
 		});
@@ -78,7 +78,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	{
 		var buf = new byte[16 * 1024];
 		RandomShared.NextBytes(buf);
-		var perf = PerformanceTestUtils.MeasurePerformance(async () =>
+		var perf = MeasurePerformance(async () =>
 		{
 			GuidExtensions.CreateVersion3(_namespaceId, buf);
 		});
