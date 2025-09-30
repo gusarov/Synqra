@@ -35,7 +35,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	{
 		//var previous = _assigning;
 		_assigning = true;
-		//try
+		try
 		{
 			switch (propertyName)
 			{
@@ -44,7 +44,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 					break;
 			}
 		}
-		//finally
+		finally
 		{
 			//_assigning = previous;
 			_assigning = false;
