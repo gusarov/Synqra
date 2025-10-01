@@ -54,12 +54,14 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	[ThreadStatic]
 	static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
 
+	string? __name;
+
 	public partial string? Name
 	{
-		get => field;
+		get => __name;
 		set
 		{
-			var oldValue = field;
+			var oldValue = __name;
 			if (_assigning || __store is null)
 			{
 				var pci = PropertyChanging;
@@ -68,7 +70,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 				{
 					OnNameChanging(value);
 					OnNameChanging(oldValue, value);
-					field = value;
+					__name = value;
 					OnNameChanged(value);
 					OnNameChanged(oldValue, value);
 				}
@@ -78,7 +80,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 					OnNameChanging(value);
 					OnNameChanging(oldValue, value);
 					pci?.Invoke(this, new PropertyChangingEventArgs(nameof(Name)));
-					field = value;
+					__name = value;
 					OnNameChanged(value);
 					OnNameChanged(oldValue, value);
 					pce?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));

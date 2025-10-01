@@ -13,11 +13,13 @@ using System.Threading.Tasks;
 
 namespace Synqra.Tests.ModelManagement;
 
+using IStorage = IStorage<Event, Guid>;
+
 public class StateManagementTests : BaseTest<ISynqraStoreContext>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
-	FakeStorage _fakeStorage => ServiceProvider.GetRequiredService<FakeStorage>();
+	FakeStorage _fakeStorage => ServiceProvider.GetService<FakeStorage>() ?? (FakeStorage)ServiceProvider.GetService<IStorage<Event, Guid>>() ?? (FakeStorage)ServiceProvider.GetService<IStorage>();
 	ISynqraCollection<MyPocoTask> _tasks => _sut.GetCollection<MyPocoTask>();
 
 	public StateManagementTests()
@@ -25,7 +27,11 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		HostBuilder.AddSynqraStoreContext();
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
+
 		HostBuilder.Services.AddSingleton<FakeStorage>();
+		// HostBuilder.Services.AddSingleton(typeof(IStorage<,>), typeof(FakeStorage<,>));
+		// HostBuilder.Services.AddSingleton<IStorage<Event, Guid>, FakeStorage<Event, Guid>>();
+		HostBuilder.Services.AddSingleton<IStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeStorage>());
 		HostBuilder.Services.AddSingleton<IStorage>(sp => sp.GetRequiredService<FakeStorage>());
 
 		// HostBuilder.AddJsonLinesStorage();
@@ -171,14 +177,17 @@ public class MyPocoTask
 	public string Subject { get; set; }
 }
 
-public class FakeStorage : IStorage
+public class FakeStorage : FakeStorage<Event, Guid>, IStorage
 {
-	public List<object> Items { get; } = new List<object>();
-	bool _appending = false;
+}
 
-	public Task AppendAsync<T>(T item)
+public class FakeStorage<T, TKey> : IStorage<T, TKey>
+	where T : IIdentifiable<TKey>
+{
+	public List<T> Items { get; } = new List<T>();
+
+	public Task AppendAsync(T item)
 	{
-		_appending = true;
 		Items.Add(item);
 		return Task.CompletedTask;
 	}
@@ -189,20 +198,25 @@ public class FakeStorage : IStorage
 
 	public ValueTask DisposeAsync()
 	{
-		return ValueTask.CompletedTask;
+		return default;
 	}
 
-	public async IAsyncEnumerable<T> GetAll<T>()
+	public Task FlushAsync()
 	{
-		if (_appending)
-		{
-			throw new Exception("Cannot read storage after it started writing into it");
-		}
+		return Task.CompletedTask;
+	}
+
+	public async IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken? cancellationToken = null)
+	{
 		foreach (T item in Items)
 		{
-			yield return item;
+			// if (from == null || item is IEvent e && e.Id > from)
+			{
+				yield return item;
+			}
 		}
 	}
+
 }
 
 public partial class DemoModel

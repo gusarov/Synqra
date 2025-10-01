@@ -9,9 +9,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Synqra.Utils\_Polyfill.cs" Link="_Polyfill.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Synqra" />
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
+    <PackageReference Include="System.Text.Json" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
 
   <!--

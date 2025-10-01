@@ -11,7 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 // INIT
-#if NETSTANDARD2_0 || NETSTANDARD2_1
+#if NETFRAMEWORK || NETSTANDARD2_0 || NETSTANDARD2_1
 
 namespace System.Runtime.CompilerServices
 {
