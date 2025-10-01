@@ -9,7 +9,9 @@ public partial class CommunityMVVMTest : ObservableObject
 	[ObservableProperty]
 	string _roperty2;
 
+#if CMVVM
 	[ObservableProperty]
 	public partial string Property3 { get; set; }
+#endif
 }
 

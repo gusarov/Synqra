@@ -1,54 +1,7 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
-using System.Collections.Specialized;
-using System.ComponentModel;
-using System.Data.Common;
-using System.Diagnostics;
-using System.Diagnostics.Tracing;
-using System.Linq.Expressions;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Synqra;
-
-/// <summary>
-/// Low-level storage interface for storyng and retrieving events
-/// </summary>
-public interface IStorage : IDisposable, IAsyncDisposable
-{
-	Task AppendAsync<T>(T item);
-
-	IAsyncEnumerable<T> GetAll<T>();
-
-	[EditorBrowsable(EditorBrowsableState.Advanced)]
-	Task FlushAsync()
-#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-		=> Task.CompletedTask
-#endif
-		;
-}
-
-internal class AttachedData
-{
-	public string? TrackingSinceJsonSnapshot { get; set; }
-}
-
-
-public static class SynqraExtensions
-{
-	public static IHostApplicationBuilder AddSynqraStoreContext(this IHostApplicationBuilder builder)
-	{
-		// builder.Services.AddSingleton<StoreContext>();
-		// builder.Services.AddSingleton<IStoreContext>(sp => sp.GetRequiredService<StoreContext>());
-		builder.Services.AddSingleton<ISynqraStoreContext, StoreContext>();
-		// builder.Services.AddSingleton(typeof(IStoreCollection<>), (sp, s) => sp.GetRequiredService<IStoreContext>().Get<>); // Example storage implementation
-		return builder;
-	}
-}
-
 
 public static class SynqraPocoTrackingExtensions
 {
@@ -162,48 +115,5 @@ public static class SynqraPocoTrackingExtensions
 		// ((IStoreCollectionInternal)collection).Store.
 		return new TrackingSessionImplementation((StoreCollection)collection, items);
 		// CollectionsMarshal.GetValueRefOrAddDefault(((IStoreCollectionInternal)collection)._attachedObjects, q.GetId(), out var exists);
-	}
-}
-
-public interface ICommandVisitor<T>
-{
-	Task BeforeVisitAsync(Command cmd, T ctx);
-	Task AfterVisitAsync(Command cmd, T ctx);
-
-	Task VisitAsync(CreateObjectCommand cmd, T ctx);
-	Task VisitAsync(DeleteObjectCommand cmd, T ctx);
-	Task VisitAsync(ChangeObjectPropertyCommand cmd, T ctx);
-
-	/*
-	Task VisitAsync(MoveNode cmd, T ctx);
-	Task VisitAsync(MarkAsDone cmd, T ctx);
-	Task VisitAsync(RevertCommand cmd, T ctx);
-	Task VisitAsync(PrePopulate cmd, T ctx);
-	Task VisitAsync(ChangeSetting cmd, T ctx);
-	Task VisitAsync(BatchCommand cmd, T ctx);
-	Task VisitAsync(ChangeDependantNode cmd, T ctx);
-	Task VisitAsync(AddComponent cmd, T ctx);
-	Task VisitAsync(ChangeComponentProperty cmd, T ctx);
-	Task VisitAsync(DeleteComponent cmd, T ctx);
-	*/
-}
-
-class CommandHandlerContext
-{
-	public List<Event> Events { get; internal set; } = new List<Event>();
-}
-
-class EventVisitorContext
-{
-}
-
-class TypeMetadata
-{
-	public Type Type { get; set; }
-	public Guid TypeId { get; set; }
-
-	public override string ToString()
-	{
-		return $"{TypeId.ToString("N")[..4]} {Type.Name}";
 	}
 }

@@ -1,6 +1,6 @@
 ﻿namespace Synqra;
 
-public interface ISynqraStoreContext
+public interface ISynqraStoreContext : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	ISynqraCollection GetCollection(Type type);
 

@@ -1,6 +1,7 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
+﻿#if NETFRAMEWORK
+#else
+using Microsoft.AspNetCore.Builder;
+#endif
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -24,9 +26,20 @@ namespace Synqra.Tests.Simulator;
 
 internal class SynqraTestNode
 {
-	public WebApplication Host { get; private set; }
+#if NETFRAMEWORK
+	public IHost Host { get; private set; }
+#else
+	public Microsoft.AspNetCore.Builder.WebApplication Host { get; private set; }
+#endif
+	ISynqraStoreContext __storeContext;
 
-	public ISynqraStoreContext StoreContext { get => field ??= Host.Services.GetRequiredService<ISynqraStoreContext>(); }
+	public ISynqraStoreContext StoreContext { get =>
+#if NETFRAMEWORK
+			throw new NotImplementedException();
+#else
+			__storeContext ??= Host.Services.GetRequiredService<ISynqraStoreContext>();
+#endif
+	}
 
 	public ushort Port { get; set; }
 
@@ -39,7 +52,43 @@ internal class SynqraTestNode
 
 		#endregion
 
-		var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+#if NETFRAMEWORK
+		throw new NotImplementedException();
+
+		var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+		{
+			ContentRootPath	= synqraTestsCurrentPath,
+			EnvironmentName = Environments.Development,
+		});
+		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+		{
+			["JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
+		});
+		builder.AddSynqraStoreContext();
+		builder.AddJsonLinesStorage<Event, Guid>();
+		builder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default);
+		builder.Services.AddSingleton(TestJsonSerializerContext.Default.Options);
+		// builder.Services.AddSignalR();
+		builder.Services.AddTransient(typeof(Lazy<>), typeof(Lazier<>));
+		if (masterHost)
+		{
+		}
+		else
+		{
+			builder.Services.AddHostedService<EventReplicationService>(x => x.GetRequiredService<EventReplicationService>());
+			builder.Services.AddSingleton<EventReplicationService>(); // x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
+			// builder.Services.AddSingleton<EventReplicationService>(x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
+			builder.Services.AddSingleton<EventReplicationState>();
+			// services.Configure<EventReplicationConfig>(hostContext.Configuration.GetSection(nameof(EventReplicationConfig)));
+			var port = Port = GetNextAvailablePort();
+			builder.Services.Configure<EventReplicationConfig>(x =>
+			{
+				x.Port = port;
+			});
+		}
+		Host = builder.Build();
+#else
+		var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(new Microsoft.AspNetCore.Builder.WebApplicationOptions
 		{
 			Args = Array.Empty<string>(),
 			EnvironmentName = Environments.Development,
@@ -53,18 +102,23 @@ internal class SynqraTestNode
 		});
 
 		builder.AddSynqraStoreContext();
-		builder.AddJsonLinesStorage();
+		builder.AddJsonLinesStorage<Event, Guid>();
 		builder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default);
 		builder.Services.AddSingleton(TestJsonSerializerContext.Default.Options);
 
 		builder.Services.AddSignalR();
+		builder.Services.AddTransient(typeof(Lazy<>), typeof(Lazier<>));
 
 		if (masterHost)
 		{
 		}
 		else
 		{
-			builder.Services.AddHostedService<EventReplicationService>();
+			builder.Services.AddHostedService<EventReplicationService>(x => x.GetRequiredService<EventReplicationService>());
+
+			builder.Services.AddSingleton<EventReplicationService>(); // x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
+			// builder.Services.AddSingleton<EventReplicationService>(x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
+
 			builder.Services.AddSingleton<EventReplicationState>();
 			// builder.Services.Configure<EventReplicationConfig>(builder.Configuration.GetSection(nameof(EventReplicationConfig)));
 			builder.Services.Configure<EventReplicationConfig>(x =>
@@ -83,6 +137,7 @@ internal class SynqraTestNode
 		}
 
 		_ = Host.StartAsync();
+#endif
 	}
 
 	private static ushort GetNextAvailablePort()
@@ -93,118 +148,17 @@ internal class SynqraTestNode
 		listener.Stop();
 		return port;
 	}
-}
 
-// [UniAuthorize]
-/// <summary>
-/// Server-side Service that accept WS connections from clients
-/// </summary>
-public class SynqraSignalerHub : Hub<IEventHubClient>
-{
-	private readonly ILogger _logger;
-
-	public SynqraSignalerHub(ILogger<SynqraSignalerHub> logger)
+	private class Lazier<
+#if !NETFRAMEWORK
+		[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+#endif
+		T> : Lazy<T>
+		where T : class
 	{
-		_logger = logger;
-	}
-
-	public override Task OnConnectedAsync()
-	{
-		var user = Context?.User;
-		Trace.WriteLine($"Connected SignalR: UserName= UserId= ConnectionId={Context.ConnectionId}");
-		_logger.LogWarning($"Connected SignalR: UserName= UserId= ConnectionId={Context.ConnectionId}");
-		return base.OnConnectedAsync();
-	}
-}
-
-/// <summary>
-/// This is SignalR client contract
-/// </summary>
-public interface IEventHubClient
-{
-	// DO NOT RENAME! Clients receive this method name
-	public Task NewEvent(Event eventObject);
-}
-
-public class EventReplicationConfig
-{
-	public ushort Port { get; set; }
-}
-
-// Persistent state with metadata about replication, e.g. known version vectors, node ids
-public class EventReplicationState
-{
-	string _fileName;
-	JsonSerializerContext _jsonSerializerContext;
-
-	public EventReplicationState(IHostEnvironment hostEnvironment, JsonSerializerContext jsonSerializerContext)
-	{
-		_jsonSerializerContext = jsonSerializerContext ?? throw new ArgumentNullException(nameof(jsonSerializerContext));
-		_fileName = Path.Combine(hostEnvironment.ContentRootPath, "EventReplicationState.json");
-
-		if (File.Exists(_fileName))
+		public Lazier(IServiceProvider serviceProvider)
+			: base(() => serviceProvider.GetRequiredService<T>())
 		{
-			this.RSetSTJ(File.ReadAllText(_fileName), jsonSerializerContext);
 		}
-		else
-		{
-			MyNodeId = Guid.NewGuid();
-			Save();
-		}
-	}
-
-	public void Save()
-	{
-		File.WriteAllText(_fileName, JsonSerializer.Serialize(this, _jsonSerializerContext.Options));
-	}
-
-	public Guid MyNodeId { get; set; }
-}
-
-/// <summary>
-/// Client-side service that connect to WS Master
-/// </summary>
-public class EventReplicationService : IHostedService
-{
-	private readonly IHubContext<SynqraSignalerHub, IEventHubClient> _hubContext;
-	private readonly IStorage _storage;
-	private readonly EventReplicationConfig _config;
-
-	public EventReplicationService(IHubContext<SynqraSignalerHub, IEventHubClient> hubContext, IOptions<EventReplicationConfig> options, IStorage storage)
-	{
-		_hubContext = hubContext;
-		_storage = storage;
-		_config = options.Value;
-	}
-
-	public Task BroadcastEvent(Event eventObject)
-	{
-		return _hubContext.Clients.All.NewEvent(eventObject);
-	}
-
-	public async Task StartAsync(CancellationToken cancellationToken)
-	{
-		await Task.Yield();
-		_ = StartWorker();
-	}
-
-	async Task StartWorker()
-	{
-		var connection = new HubConnectionBuilder()
-			.WithUrl($"http://localhost:{_config.Port}/api/synqra")
-			.WithAutomaticReconnect()
-			.Build();
-		connection.On<Event>("NewEvent", async (eventObject) =>
-		{
-			throw new NotImplementedException();
-			await _storage.AppendAsync(new[] { eventObject });
-		});
-		await connection.StartAsync();
-		connection.InvokeAsync("Hello1", Guid.NewGuid(), 0L); // client send hello message to server. Parameters are: client id (guid me), last known event id (long)
-	}
-
-	public Task StopAsync(CancellationToken cancellationToken)
-	{
-		return Task.CompletedTask;
 	}
 }

@@ -30,9 +30,9 @@ internal class BasicModelSyncronizationTests : BaseTest
 		}, masterHost: true);
 		_nodeA = new SynqraTestNode(sp => { }) { Port = _nodeMaster.Port, };
 		_nodeB = new SynqraTestNode(sp => { }) { Port = _nodeMaster.Port, };
-		Console.WriteLine("Master: "+ _nodeMaster.Host.Environment.ContentRootPath);
-		Console.WriteLine("_nodeA: " + _nodeA.Host.Environment.ContentRootPath);
-		Console.WriteLine("_nodeB: " + _nodeB.Host.Environment.ContentRootPath);
+		// Console.WriteLine("Master: "+ _nodeMaster.Host.Environment.ContentRootPath);
+		// Console.WriteLine("_nodeA: " + _nodeA.Host.Environment.ContentRootPath);
+		// Console.WriteLine("_nodeB: " + _nodeB.Host.Environment.ContentRootPath);
 	}
 
 	// [Test] // actually attach is internal method!!

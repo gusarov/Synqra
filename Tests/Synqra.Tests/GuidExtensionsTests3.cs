@@ -411,6 +411,7 @@ public class GuidExtensionsTests3 : BaseTest
 		await Assert.That(new Guid(2, 0, 0, bytes).CompareTo(new Guid(1, 0, 0, bytes))).IsGreaterThan(0);
 	}
 
+#if !NETFRAMEWORK
 	[Test]
 	public async Task Should_understand_guids_1()
 	{
@@ -446,10 +447,11 @@ public class GuidExtensionsTests3 : BaseTest
 		a = BitConverter.ToInt32(arr, 0);
 		await Assert.That(a).IsEqualTo(0x03020100);
 	}
+#endif
 
 	Guid FromNetworkOrder([In] ReadOnlySpan<byte> span)
 	{
-		return new Guid(span, bigEndian: true);
+#if NETFRAMEWORK
 		var arr = span.ToArray();
 		if (BitConverter.IsLittleEndian)
 		{
@@ -458,6 +460,9 @@ public class GuidExtensionsTests3 : BaseTest
 			Array.Reverse(arr, 6, 2);
 		}
 		return new Guid(arr);
+#else
+		return new Guid(span, bigEndian: true);
+#endif
 	}
 
 #if NET9_0_OR_GREATER

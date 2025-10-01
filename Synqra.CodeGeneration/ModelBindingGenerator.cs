@@ -19,7 +19,12 @@ using TheSource = (
 	);
 
 namespace Synqra.CodeGeneration;
- 
+
+using TheCombinedSource = (
+	  TheSource src
+	, string tfm
+	);
+
 [Generator(LanguageNames.CSharp)]
 public class ModelBindingGenerator : IIncrementalGenerator
 {
@@ -39,48 +44,86 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	private void InitializeCore(IncrementalGeneratorInitializationContext context)
 	{
-		var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<TheSource>(
-		  predicate: static (SyntaxNode node, CancellationToken cancelToken) =>
-		  {
-			  //the predicate should be super lightweight to filter out items that are not of interest quickly
-			  try
-			  {
-				  var exp = node is ClassDeclarationSyntax classDeclaration && classDeclaration.Identifier.ToString().EndsWith("Model") && classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword);
-				  // GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
+		try
+		{
 
-				  return exp;
-			  }
-			  catch (Exception ex)
-			  {
-				  EmergencyLog.Default.Message($"[-] {ex}");
-				  throw;
-			  }
-		  },
-		  transform: static (GeneratorSyntaxContext ctx, CancellationToken cancelToken) =>
-		  {
-			  cancelToken.ThrowIfCancellationRequested();
+			var buildProps = context.AnalyzerConfigOptionsProvider.Select((provider, _) =>
+			{
+				var g = provider.GlobalOptions;
+				string Get(string name) => g.TryGetValue(name, out var v) ? v : string.Empty;
 
-			  //the transform is called only when the predicate returns true, so it can do a bit more heavyweight work but should mainly be about getting the data we want to work with later
-			  var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
+				// Commonly useful properties:
+				var tfm = Get("build_property.TargetFramework");           // e.g. "net8.0", "net8.0-windows10.0.19041.0"
+				/*
+				var tfms = Get("build_property.TargetFrameworks");          // multi-target list (design-time only; normal builds run per TFM)
+				var tpi = Get("build_property.TargetPlatformIdentifier");  // e.g. "windows" (present when using OS-specific TFMs)
+				var tpv = Get("build_property.TargetPlatformVersion");     // e.g. "10.0.19041.0"
+				var rid = Get("build_property.RuntimeIdentifier");         // e.g. "win-x64"
+				var rids = Get("build_property.RuntimeIdentifiers");        // e.g. "win-x64;linux-x64"
+				var conf = Get("build_property.Configuration");             // Debug/Release
+				var osver = Get("build_property.TargetOSVersion");           // newer SDKs
+				var osid = Get("build_property.TargetOS");                  // newer SDKs
+				return new BuildProps(tfm, tfms, tpi, tpv, rid, rids, conf, osid, osver);
+				*/
+				return tfm;
+			});
 
-			  var comp = ctx.SemanticModel.Compilation;
-			  var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
-			  var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged");
-			  var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging");
-			  var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler");
-			  var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler");
+			var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<TheSource>(
+				predicate: static (SyntaxNode node, CancellationToken cancelToken) =>
+				{
+					//the predicate should be super lightweight to filter out items that are not of interest quickly
+					try
+					{
+						var exp = node is ClassDeclarationSyntax classDeclaration && classDeclaration.Identifier.ToString().EndsWith("Model") && classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword);
+						// GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
 
-			  var zlsSym = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, cancelToken);
-			  cancelToken.ThrowIfCancellationRequested();
+						return exp;
+					}
+					catch (Exception ex)
+					{
+						EmergencyLog.Default.Message($"[-] predicate: {ex}");
+						throw;
+					}
+				},
+				transform: static (GeneratorSyntaxContext ctx, CancellationToken cancelToken) =>
+				{
+					try
+					{
+						cancelToken.ThrowIfCancellationRequested();
 
-			  return (classDeclaration, zlsSym, ibm, ipc, ipcg, pceh, pcgeh);
+						//the transform is called only when the predicate returns true, so it can do a bit more heavyweight work but should mainly be about getting the data we want to work with later
+						var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
-		  });
+						var comp = ctx.SemanticModel.Compilation;
+						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
+						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged");
+						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging");
+						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler");
+						var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler");
 
-		context.RegisterSourceOutput(
-			  classesProvider
-			, static (SourceProductionContext sourceProductionContext, TheSource data) => Execute(data, sourceProductionContext)
-			);
+						var zlsSym = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, cancelToken);
+						cancelToken.ThrowIfCancellationRequested();
+
+
+						return (classDeclaration, zlsSym, ibm, ipc, ipcg, pceh, pcgeh);
+					}
+					catch (Exception ex)
+					{
+						EmergencyLog.Default.Message($"[-] transform: {ex}");
+						throw;
+					}
+				});
+
+			context.RegisterSourceOutput(
+				  classesProvider.Combine(buildProps)
+				, static (SourceProductionContext sourceProductionContext, TheCombinedSource data) => Execute(data, sourceProductionContext)
+				);
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.Message($"[-] {ex}");
+			throw;
+		}
 	}
 
 	static string FQN(ITypeSymbol? t) =>
@@ -92,12 +135,23 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	/// This ensures optimal performance by only executing the generator when needed
 	/// The method can be named whatever you want but Execute seems to be the standard 
 	/// </summary>
-	static void Execute(TheSource data, SourceProductionContext context)
+	static void Execute(TheCombinedSource combinedData, SourceProductionContext context)
 	{
+		TheSource data = combinedData.src;
+		string tfm = combinedData.tfm;
+		if (tfm == null || data.clazz is null)
+		{
+			return;
+		}
+
+		var netVer = tfm.StartsWith("net") ? Version.TryParse(tfm[3..], out var version) ? version : null : null;
+		var doesSupportField = false; // netVer != null && netVer.Major >= 6;
+
 		try
 		{
 			var clazz = data.clazz;
 			var classMembers = data.clazz.Members;
+			EmergencyLog.Default.Message($"[i] TFM {tfm}");
 			EmergencyLog.Default.Message($"[+] Analyze {clazz.Identifier}...");
 			EmergencyLog.Default.Message($"{data.pceh} pceh");
 			EmergencyLog.Default.Message($"{data.pcgeh} pcgeh");
@@ -206,9 +260,17 @@ $$"""
 
 			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
+				if (!doesSupportField)
+				{
+					body.AppendLine(
+$$"""
+	private {{pro.Type}} __{{pro.Identifier}};
+""");
+				}
 				body.AppendLine(
 $$"""
-	// private {{pro.Type}} __{{pro.Identifier}};
+
+	// tfm={{tfm}}	// doesSupportField={{doesSupportField}}
 
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changing({{pro.Type}} oldValue, {{pro.Type}} value);
@@ -217,10 +279,10 @@ $$"""
 
 	public partial {{pro.Type}} {{pro.Identifier}}
 	{
-		get => field;
+		get => {{(doesSupportField ? "field" : "__" + pro.Identifier)}};
 		set
 		{
-			var oldValue = field;
+			var oldValue = {{(doesSupportField ? "field" : "__" + pro.Identifier)}};
 			if (_assigning || __store is null)
 			{
 				var pci = PropertyChanging;
@@ -229,7 +291,7 @@ $$"""
 				{
 					On{{pro.Identifier}}Changing(value);
 					On{{pro.Identifier}}Changing(oldValue, value);
-					field = value;
+					{{(doesSupportField ? "field" : "__" + pro.Identifier)}} = value;
 					On{{pro.Identifier}}Changed(value);
 					On{{pro.Identifier}}Changed(oldValue, value);
 				}
@@ -238,7 +300,7 @@ $$"""
 					On{{pro.Identifier}}Changing(value);
 					On{{pro.Identifier}}Changing(oldValue, value);
 					pci?.Invoke(this, new PropertyChangingEventArgs(nameof({{pro.Identifier}})));
-					field = value;
+					{{(doesSupportField ? "field" : "__" + pro.Identifier)}} = value;
 					On{{pro.Identifier}}Changed(value);
 					On{{pro.Identifier}}Changed(oldValue, value);
 					pce?.Invoke(this, new PropertyChangedEventArgs(nameof({{pro.Identifier}})));
@@ -283,7 +345,7 @@ $$"""
 		}
 		catch (Exception ex)
 		{
-			EmergencyLog.Default.Message($"[-] Exception occurred in generator: {ex}");
+			EmergencyLog.Default.Message($"[-] Execute: {ex}");
 		}
 	}
 }

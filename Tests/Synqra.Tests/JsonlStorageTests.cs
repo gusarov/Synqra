@@ -4,8 +4,10 @@ using Synqra.Tests.DemoTodo;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Unicode;
 using System.Threading.Tasks;
@@ -13,18 +15,37 @@ using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests;
 
-public class TestItem
+public class TestItem : IIdentifiable<int>
 {
 	public int Id { get; set; }
 	public string Name { get; set; }
 }
 
 [NotInParallel]
-public abstract class StorageTests : BaseTest
+public class StorageTests<T, TKey> : BaseTest
+	where T : IIdentifiable<TKey>
 {
-	protected IStorage _storage;
+	private IStorage<T, TKey>? __storage;
 
-	protected abstract Task ReopenAsync();
+	protected IStorage<T, TKey> _storage => __storage ?? (__storage = ServiceProvider.GetRequiredService<IStorage<T, TKey>>());
+
+	protected string _fileName;
+
+	public void SetupCore(string? fileName = null)
+	{
+		HostBuilder.AddJsonLinesStorage<TestItem, int>();
+		HostBuilder.AddJsonLinesStorage<Event, Guid>();
+		ServiceCollection.AddSingleton(TestJsonSerializerContext.Default);
+		ServiceCollection.AddSingleton(TestJsonSerializerContext.Default.Options);
+
+		Configuration["JsonLinesStorage:FileName"] = _fileName = fileName ?? CreateTestFileName("data.jsonl");
+	}
+
+	[Before(Test)]
+	public void Setup()
+	{
+		SetupCore();
+	}
 
 	[After(Test)]
 	public void After()
@@ -32,6 +53,18 @@ public abstract class StorageTests : BaseTest
 		_storage?.Dispose();
 	}
 
+	protected async Task ReopenAsync()
+	{
+		_storage.Dispose();
+		var fix = new StorageTests<T, TKey>();
+		fix.SetupCore(_fileName);
+		__storage = fix._storage;
+	}
+}
+
+[InheritsTests]
+public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
+{
 	[Test]
 	public async Task Should_allow_append_and_read_items()
 	{
@@ -40,7 +73,7 @@ public abstract class StorageTests : BaseTest
 
 		await ReopenAsync();
 
-		var items = _storage.GetAll<TestItem>().ToBlockingEnumerable().ToList();
+		var items = _storage.GetAll().ToBlockingEnumerable().ToList();
 
 		await Assert.That(items).HasCount(2);
 
@@ -48,34 +81,6 @@ public abstract class StorageTests : BaseTest
 		await Assert.That(items[0].Name).IsEqualTo("Test Item 1");
 		await Assert.That(items[1].Id).IsEqualTo(2);
 		await Assert.That(items[1].Name).IsEqualTo("Test Item 2");
-	}
-}
-
-[InheritsTests]
-public class JsonlStorageTests : StorageTests
-{
-	string _fileName;
-
-	public JsonlStorageTests()
-	{
-		HostBuilder.AddJsonLinesStorage();
-		var options = TestJsonSerializerContext.Default.Options;
-		ServiceCollection.AddSingleton(options);
-	}
-
-	protected override async Task ReopenAsync()
-	{
-		_storage.Dispose();
-		var fix = new JsonlStorageTests();
-		fix.Configuration["JsonLinesStorage:FileName"] = _fileName;
-		_storage = fix.ServiceProvider.GetRequiredService<IStorage>();
-	}
-
-	[Before(Test)]
-	public void Before()
-	{
-		Configuration["JsonLinesStorage:FileName"] = _fileName = CreateTestFileName("data.jsonl");
-		_storage = ServiceProvider.GetRequiredService<IStorage>();
 	}
 
 	[Test]
@@ -89,26 +94,6 @@ public class JsonlStorageTests : StorageTests
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Tests.TestItem"}
 {"id":1,"name":"Test Item 1"}
 {"id":2,"name":"Test Item 2"}
-
-""".Replace("\r\n", "\n"));
-	}
-
-	[Test]
-	public async Task Should_store_polimorfic_as_jsonl()
-	{
-		await _storage.AppendAsync<Event>(new ObjectCreatedEvent
-		{
-			CollectionId = default,
-			CommandId = default,
-			EventId = default,
-			TargetId = default,
-			TargetTypeId = default,
-		});
-
-		_storage.Dispose();
-		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
-{"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{"_t":"ObjectCreatedEvent","targetId":"00000000-0000-0000-0000-000000000000","targetTypeId":"00000000-0000-0000-0000-000000000000","collectionId":"00000000-0000-0000-0000-000000000000","eventId":"00000000-0000-0000-0000-000000000000","commandId":"00000000-0000-0000-0000-000000000000"}
 
 """.Replace("\r\n", "\n"));
 	}
@@ -137,9 +122,44 @@ public class JsonlStorageTests : StorageTests
 		});
 	}
 
-	string FileReadAllText(string fileName)
+	[Test]
+	public async Task Should_continue_reading_with_same_iterator()
 	{
-		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
-		return sr.ReadToEnd();
+		await _storage.AppendAsync(new TestItem { Id = 0, Name = "For iterator" });
+
+		var iterator = _storage.GetAll().GetAsyncEnumerator();
+
+		await Assert.That(await iterator.MoveNextAsync()).IsTrue();
+		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end
+		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end
+
+		await _storage.AppendAsync(new TestItem { Id = 0, Name = "For iterator" });
+
+		await Assert.That(await iterator.MoveNextAsync()).IsTrue(); // continued!!
+		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end again
+	}
+}
+
+[InheritsTests]
+public class EventsJsonlStorageTests : StorageTests<Event, Guid>
+{
+	[Test]
+	public async Task Should_store_polimorfic_as_jsonl()
+	{
+		await _storage.AppendAsync(new ObjectCreatedEvent
+		{
+			CollectionId = default,
+			CommandId = default,
+			EventId = default,
+			TargetId = default,
+			TargetTypeId = default,
+		});
+
+		_storage.Dispose();
+		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
+{"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
+{"_t":"ObjectCreatedEvent","targetId":"00000000-0000-0000-0000-000000000000","targetTypeId":"00000000-0000-0000-0000-000000000000","collectionId":"00000000-0000-0000-0000-000000000000","eventId":"00000000-0000-0000-0000-000000000000","commandId":"00000000-0000-0000-0000-000000000000"}
+
+""".Replace("\r\n", "\n"));
 	}
 }

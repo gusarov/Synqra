@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
+using IStorage = IStorage<Event, Guid>;
+
 /// <summary>
 /// StoreContext is a replayer, it is StateProcessor that also holds all processed objects in memory and reacts on any new events.
 /// It can be used to replay events from scratch
@@ -21,7 +23,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 
 	internal readonly JsonSerializerContext? _jsonSerializerContext;
 	private readonly IStorage _storage;
-
+	private readonly EventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, WeakReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -34,9 +36,10 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
-	public StoreContext(IStorage storage, JsonSerializerContext? jsonSerializerContext = null)
+	public StoreContext(IStorage storage, EventReplicationService? eventReplicationService = null, JsonSerializerContext? jsonSerializerContext = null)
 	{
 		_storage = storage;
+		_eventReplicationService = eventReplicationService;
 		_jsonSerializerContext = jsonSerializerContext;
 		if (_jsonSerializerContext != null)
 		{
@@ -344,6 +347,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
 			await _storage.AppendAsync(@event); // store event in storage and trigger replication
 		}
+		_eventReplicationService?.Trigger(commandHandlingContext.Events);
 	}
 
 	/// <summary>

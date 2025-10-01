@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
+using System.Text;
 
 namespace Synqra.Tests.TestHelpers;
 
@@ -42,6 +43,12 @@ public class TestUtils : PerformanceTestUtils
 		synqraNewTestPath = Path.Combine(synqraNewTestPath, Guid.NewGuid().ToString());
 		Directory.CreateDirectory(synqraNewTestPath);
 		return synqraNewTestPath;
+	}
+
+	public string FileReadAllText(string fileName)
+	{
+		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
+		return sr.ReadToEnd();
 	}
 }
 

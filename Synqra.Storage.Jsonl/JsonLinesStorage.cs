@@ -4,9 +4,11 @@
 using Microsoft.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -18,9 +20,19 @@ namespace Synqra.Storage;
 
 public static class StorageExtensions
 {
+	// For nativeAOT
+	public static void AddJsonLinesStorage<T, TKey>(this IHostApplicationBuilder hostBuilder)
+		where T : IIdentifiable<TKey>
+	{
+		_ = typeof(IStorage<T, TKey>);
+		_ = typeof(JsonLinesStorage<T, TKey>);
+		AddJsonLinesStorage(hostBuilder);
+		hostBuilder.Services.TryAddSingleton<IStorage<T, TKey>, JsonLinesStorage<T, TKey>>();
+	}
+
 	public static void AddJsonLinesStorage(this IHostApplicationBuilder hostBuilder)
 	{
-		hostBuilder.Services.AddSingleton<IStorage, JsonLinesStorage>();
+		hostBuilder.Services.TryAddSingleton(typeof(IStorage<,>), typeof(JsonLinesStorage<,>));
 		hostBuilder.Services.Configure<JsonLinesStorageConfig>(hostBuilder.Configuration.GetSection("JsonLinesStorage"));
 	}
 
@@ -29,7 +41,8 @@ public static class StorageExtensions
 		public string FileName { get; set; } = "[TypeName].jsonl";
 	}
 
-	private class JsonLinesStorage : IStorage, IDisposable, IAsyncDisposable
+	private class JsonLinesStorage<T, TKey> : IStorage<T, TKey>, IDisposable, IAsyncDisposable
+		where T : IIdentifiable<TKey>
 	{
 		private readonly ILogger _logger;
 		private readonly IOptions<JsonLinesStorageConfig> _options;
@@ -38,11 +51,11 @@ public static class StorageExtensions
 #elif SEMAPHORE
 		private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
 #endif
-		FileStream? _stream;
-		StreamWriter? _streamWriter;
-		JsonSerializerOptions _serializerOptions;
+		private FileStream? _stream;
+		private StreamWriter? _streamWriter;
+		private JsonSerializerOptions _serializerOptions;
 
-		public JsonLinesStorage(ILogger<JsonLinesStorage> logger, IOptions<JsonLinesStorageConfig> options, JsonSerializerOptions? jsonSerializerOptions = null)
+		public JsonLinesStorage(ILogger<JsonLinesStorage<T, TKey>> logger, IOptions<JsonLinesStorageConfig> options, JsonSerializerOptions? jsonSerializerOptions = null)
 		{
 			_logger = logger;
 
@@ -59,95 +72,134 @@ public static class StorageExtensions
 			_serializerOptions.WriteIndented = false; // critical for jsonl
 		}
 
-		Type? _itemType;
-		string? _fileName;
-		string FileName
+		private string? _fileName;
+
+		private string FileName
 		{
 			get
 			{
 				if (_fileName == null)
 				{
-					_fileName = _options.Value.FileName.Replace("[TypeName]", _itemType?.Name ?? "storage");
+					_fileName = _options.Value.FileName.Replace("[TypeName]", typeof(T).Name);
 				}
 				return _fileName;
 			}
 		}
 
-		public async IAsyncEnumerable<T> GetAll<T>()
+		public IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken? cancellationToken = default)
 		{
-			if (_stream != null)
+			return new JsonLinesAsyncEnumerable(this);
+		}
+
+		private class JsonLinesAsyncEnumerable : IAsyncEnumerable<T>
+		{
+			private readonly JsonLinesStorage<T, TKey> _storage;
+
+			public JsonLinesAsyncEnumerable(JsonLinesStorage<T, TKey> storage)
 			{
-				throw new Exception("File is currently appending, you can not read it again"); // this exception is more specific to event stores. Before removing this limitation, consider how you going to read incomplete line of non flushed data
+				_storage = storage;
 			}
-			if (_itemType is null)
+
+			public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
 			{
-				_itemType = typeof(T);
+				return new JsonLinesAsyncEnumerator(_storage.FileName, _storage._serializerOptions, cancellationToken);
 			}
-			else
+		}
+
+		private class JsonLinesAsyncEnumerator : IAsyncEnumerator<T>
+		{
+			private static Encoding _utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+
+			private readonly string _fileName;
+			private readonly JsonSerializerOptions _jsonSerializerOptions;
+			private readonly CancellationToken? _cancellationToken;
+
+			private int _state;
+			private string? _currentLine;
+			private StreamReader? _streamReader;
+
+			public JsonLinesAsyncEnumerator(string fileName, JsonSerializerOptions jsonSerializerOptions, CancellationToken? cancellationToken = default)
 			{
-				if (_itemType != typeof(T))
+				_fileName = fileName;
+				_jsonSerializerOptions = jsonSerializerOptions;
+				_cancellationToken = cancellationToken;
+			}
+
+			public T Current
+			{
+				get
 				{
-					throw new Exception($"Item type mismatch, expected '{_itemType.FullName}' but got '{typeof(T).FullName}'");
+					if (_currentLine == null)
+					{
+						throw new InvalidOperationException("No current line, did you call MoveNextAsync?");
+					}
+					return JsonSerializer.Deserialize<T>(_currentLine, _jsonSerializerOptions)!;
 				}
 			}
 
-			if (File.Exists(FileName))
+			public ValueTask DisposeAsync()
 			{
-				// xxx file for writes and read it all to the end
-				using var stream = new FileStream(FileName, FileMode.OpenOrCreate /* already checked that it exists, so this is just to avoid error if it is been deleted in fraction of ms */, FileAccess.Read, FileShare.Read /* Do not allow parallel write! */, bufferSize: 1024 * 64, FileOptions.SequentialScan | FileOptions.Asynchronous);
-				using var streamReader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
-				string? line;
+				_streamReader?.Dispose();
+				return default;
+			}
+
+			public async ValueTask<bool> MoveNextAsync()
+			{
+				if (_state == 0)
+				{
+					if (File.Exists(_fileName))
+					{
+						var stream = new FileStream(
+							  _fileName
+							, FileMode.Open
+							, FileAccess.Read
+							, FileShare.ReadWrite
+							, bufferSize: 1024 * 64
+							, FileOptions.SequentialScan | FileOptions.Asynchronous
+							);
+						_streamReader = new StreamReader(stream, encoding: _utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
+						_state = 1;
+					}
+					else
+					{
+						return false;
+					}
+
+				}
 
 				#region Header check
 
-				line = await streamReader.ReadLineAsync();
-				if (line == null)
+				if (_state == 1)
 				{
-					throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
-				}
-				var header = JsonSerializer.Deserialize(line, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
-				if (header == null || header.Version == null)
-				{
-					throw new Exception("Header line of Syncra.Storage.Jsonl is not valid");
-				}
-				if (header.Version != new Version("0.1"))
-				{
-					throw new Exception("File version is newer than expected");
+					var lineHeader = await _streamReader.ReadLineAsync();
+					if (lineHeader == null)
+					{
+						throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
+					}
+					var header = JsonSerializer.Deserialize(lineHeader, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
+					if (header == null || header.Version == null)
+					{
+						throw new Exception("Header line of Syncra.Storage.Jsonl is not valid");
+					}
+					if (header.Version != new Version("0.1"))
+					{
+						throw new Exception("File version is newer than expected");
+					}
+					_state = 2;
 				}
 
 				#endregion
 
-				while ((line = await streamReader.ReadLineAsync()) != null)
-				{
-					if (line.StartsWith("{"))
-					{
-						yield return JsonSerializer.Deserialize<T>(line, _serializerOptions)!;
-					}
-					else
-					{
-						throw new Exception($"Wrong line format '{line}'");
-						_logger.LogWarning($"Loading - skipped line '{line}'");
-					}
-				}
+				_currentLine = await _streamReader.ReadLineAsync();
+				return _currentLine != null;
 			}
 		}
 
-		public async Task AppendAsync<T>(T item)
+		public async Task AppendAsync(T item)
 		{
 			if (item == null)
 			{
 				throw new ArgumentNullException(nameof(item), "Item to append can not be null");
-			}
-			if (_itemType is null)
-			{
-				_itemType = typeof(T);
-			}
-			else
-			{
-				if (_itemType != typeof(T))
-				{
-					throw new Exception($"Item type mismatch, expected '{_itemType.FullName}' but got '{typeof(T).FullName}'");
-				}
 			}
 
 			// first searialize then open
@@ -172,8 +224,8 @@ public static class StorageExtensions
 						);
 					_streamWriter = new StreamWriter(_stream)
 					{
+						AutoFlush = true, // today there is no other way to synchronize reader and writer
 #if DEBUG
-						AutoFlush = true,
 #endif
 					};// , new UTF8Encoding(false, false), bufferSize: 1024 * 64);
 					// Header
@@ -183,6 +235,7 @@ public static class StorageExtensions
 						RootItemType = typeof(T).FullName,
 					}, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
 					_streamWriter.WriteLine(header);
+					_streamWriter.Flush();
 				}
 #if LOCK
 				_streamWriter.WriteLine(json);
