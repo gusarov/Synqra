@@ -56,18 +56,33 @@ internal class BasicModelSyncronizationTests : BaseTest
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
 	}
 
-	// [Test] // in progress
-	public async Task Should_syncronize_simple_models()
+	[Test] // in progress
+	public async Task Should_synchronize_simple_models()
 	{
+		while (true)
+		{
+			if (_nodeA.StoreContext.IsOnline() && _nodeB.StoreContext.IsOnline())
+			{
+				break;
+			}
+			await Task.Delay(100);
+		}
 		await Should_have_node_with_model(); // Works on Node A
 		var collection = _nodeB.StoreContext.GetCollection<MyTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
-		while (collection.Count < 2 && sw.ElapsedMilliseconds < 2000)
+		while (collection.Count < 1 && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}
+
 		await Assert.That(collection).HasCount(1);
 		var task = collection.First();
+
+		sw = Stopwatch.StartNew();
+		while (task.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
+		{
+			await Task.Delay(100); // wait until all commands are processed
+		}
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
 	}
 }

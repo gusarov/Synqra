@@ -8,8 +8,8 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace Synqra.Tests.DemoTodo;
 
-[JsonSourceGenerationOptions(
-	  AllowTrailingCommas = true
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web
+	, AllowTrailingCommas = true
 	, DefaultBufferSize = 16384
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
@@ -20,6 +20,9 @@ namespace Synqra.Tests.DemoTodo;
 	, PropertyNameCaseInsensitive = true
 	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
 	, ReadCommentHandling = JsonCommentHandling.Skip
+	, Converters = [
+		typeof(ObjectConverter)
+	]
 	// , TypeInfoResolver = new TodoPolymorphicTypeResolver()
 #if DEBUG
 	, WriteIndented = true
@@ -42,7 +45,16 @@ namespace Synqra.Tests.DemoTodo;
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
 
 [JsonSerializable(typeof(Synqra.Command))]
+[JsonSerializable(typeof(Synqra.CreateObjectCommand))]
 [JsonSerializable(typeof(Synqra.ChangeObjectPropertyCommand))]
+
+[JsonSerializable(typeof(Guid))]
+[JsonSerializable(typeof(Int64))]
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(object))]
+
+[JsonSerializable(typeof(TransportOperation))]
+
 public partial class TestJsonSerializerContext : JsonSerializerContext
 {
 }

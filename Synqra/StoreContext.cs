@@ -1,4 +1,6 @@
 ﻿using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -8,6 +10,31 @@ using System.Text.Json.Serialization;
 namespace Synqra;
 
 using IStorage = IStorage<Event, Guid>;
+
+public static class StoreContextExtensions
+{
+	public static bool IsOnline(this ISynqraStoreContext storeContext)
+	{
+		if (storeContext is StoreContext sc)
+		{
+			return sc.IsOnline;
+		}
+		return false;
+	}
+}
+
+public class StrongReference
+{
+	public StrongReference(object target)
+	{
+		Target = target;
+	}
+	public StrongReference()
+	{
+	}
+	public object Target { get; set; }
+	public bool IsAlive => Target != null;
+}
 
 /// <summary>
 /// StoreContext is a replayer, it is StateProcessor that also holds all processed objects in memory and reacts on any new events.
@@ -21,43 +48,51 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
 
-	internal readonly JsonSerializerContext? _jsonSerializerContext;
+	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 	private readonly IStorage _storage;
 	private readonly EventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
-	private readonly ConcurrentDictionary<Guid, WeakReference> _attachedObjectsById = new();
+	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
 	private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
 	private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
 	private byte _attachedMaintain;
+
+	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
 	static StoreContext()
 	{
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
-	public StoreContext(IStorage storage, EventReplicationService? eventReplicationService = null, JsonSerializerContext? jsonSerializerContext = null)
+	public StoreContext(IStorage storage, EventReplicationService? eventReplicationService = null, JsonSerializerOptions? jsonSerializerOptions = null, JsonSerializerContext? jsonSerializerContext = null)
 	{
 		_storage = storage;
 		_eventReplicationService = eventReplicationService;
-		_jsonSerializerContext = jsonSerializerContext;
-		if (_jsonSerializerContext != null)
+		_jsonSerializerOptions = jsonSerializerOptions;
+		if (jsonSerializerContext != null)
 		{
 			foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x => x.AttributeType == typeof(JsonSerializableAttribute)))
 			{
 				var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
 				GetTypeMetadata(type);
 			}
+			if (jsonSerializerContext.Options.Converters.Count == 0)
+			{
+				throw new Exception("Something is wrong! We require JsonSerializerOptions to have converters registered!");
+			}
 		}
 		else
 		{
-			throw new Exception("Something is wrong! We require JsonSerializerContext to be registered!");
+			throw new Exception("Something is wrong! We require JsonSerializerOptions to be registered!");
 		}
 	}
 
 	internal AttachedObjectData Attach(object model, StoreCollection collection)
 	{
-		return GetAttachedData(model, default, collection, GetMode.RequiredNew);
+		var data = GetAttachedData(model, default, collection, GetMode.RequiredNew);
+		// data.Id
+		return data;
 	}
 
 	internal (object? Model, AttachedObjectData? Attached) TryGetModel(Guid id)
@@ -100,6 +135,10 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 
 	internal AttachedObjectData GetAttachedData(object model, Guid id, StoreCollection? collection, GetMode mode)
 	{
+		if (model == null)
+		{
+			throw new ArgumentNullException(nameof(model));
+		}
 #if NET8_0_OR_GREATER
 		if (_attachedObjects.TryGetValue(model, out var attachedData) && attachedData is not null)
 		{
@@ -111,6 +150,10 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			if (id != default && attachedData.Id != id)
 			{
 				throw new InvalidOperationException($"Object is already attached with different id <{attachedData.Id}>. Expected <{id}>.");
+			}
+			if (collection != default && attachedData.Collection != collection)
+			{
+				throw new InvalidOperationException($"Object is already attached with different collection <{collection}>. Expected <{collection}>.");
 			}
 			return attachedData;
 		}
@@ -131,7 +174,22 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 					{
 						throw new Exception("Can not attach object without collection");
 					}
-					if (!_attachedObjectsById.TryAdd(id, new WeakReference(model)))
+					if (model is IBindableModel bm)
+					{
+						if (bm.Store != null)
+						{
+							if (bm.Store != this)
+							{
+								throw new Exception("The model is already attached to store. To Different store.");
+							}
+							else
+							{
+								throw new Exception("The model is already attached to store. It is same store but still, inconsistent.");
+							}
+						}
+						bm.Store = this;
+					}
+					if (!_attachedObjectsById.TryAdd(id, new StrongReference(model)))
 					{
 						throw new Exception("This id is already used in the store. Pass default to generate new or make sure your id is fresh indeed");
 					}
@@ -143,19 +201,19 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 							if (_attachedObjectsById.TryGetValue(key, out var weakRef) && !weakRef.IsAlive)
 							{
 								_attachedObjects.Remove(key);
+								_attachedObjectsById.Remove(key, out _);
 							}
 						}
 					}
-					_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
+					if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 					{
 						Id = id,
 						IsJustCreated = true,
 						Collection = collection,
-					});
-					if (model is IBindableModel bm)
+					}))
 					{
-						bm.Store = this;
-					}
+						_attachedObjectsById[id] = new StrongReference(model);
+					};
 					return attachedData;
 				default:
 					throw new IndexOutOfRangeException($"Unknown mode <{mode}>");
@@ -179,12 +237,15 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			{
 				throw new Exception("Can not attach object without collection");
 			}
-			_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
+			if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 			{
 				Id = GuidExtensions.CreateVersion7(),
 				IsJustCreated = false,
 				Collection = collection,
-			});
+			}))
+			{
+				_attachedObjectsById[attachedData.Id] = new StrongReference(model);
+			};
 			return (true, attachedData.Id);
 		}
 #else
@@ -212,12 +273,15 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 				case 1:
 					return default; // return Guid.Empty
 				case 2:
-					_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
+					if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 					{
 						Id = GuidExtensions.CreateVersion7(),
 						IsJustCreated = false,
 						Collection = collection ?? throw new Exception("Collection is not specified for new object"),
-					});
+					}))
+					{
+						_attachedObjectsById[attachedData.Id] = new StrongReference(model);
+					};
 					return attachedData.Id;
 				default:
 					throw new IndexOutOfRangeException($"Unknown mode <{mode}>");
@@ -255,7 +319,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		{
 			slot = (StoreCollection)Activator.CreateInstance(gtype, [this
 #if NET8_0_OR_GREATER
-				, _jsonSerializerContext
+				, _jsonSerializerOptions
 #endif
 				, /*containerId*/ ContainerId
 				, collectionId/*collectionId*/
@@ -556,6 +620,11 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		var typeMetadata = GetTypeMetadata(ev.TargetTypeId);
 		var collection = GetCollectionInternal(GetTypeMetadata(ev.TargetTypeId).Type);
 
+		if (ev.TargetId == default)
+		{
+			throw new ArgumentException("TargetId required", nameof(ev));
+		}
+
 		object newItem;
 		if (ev.DataObject != null)
 		{
@@ -567,15 +636,45 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		}
 		else if (ev.DataString != null)
 		{
-			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerContext.Options);
+			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerOptions);
 		}
 		else if (ev.Data != null)
 		{
-			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerContext.Options), typeMetadata.Type, _jsonSerializerContext.Options);
+			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerOptions), typeMetadata.Type, _jsonSerializerOptions);
 		}
 		else
 		{
 			newItem = Activator.CreateInstance(typeMetadata.Type);
+		}
+
+
+
+		if (newItem is IIdentifiable<Guid> ig)
+		{
+			if (ig.Id == default)
+			{
+				throw new Exception($"Deserialized object's Id is not set.");
+			}
+			if (ig.Id != ev.TargetId)
+			{
+				throw new Exception($"Deserialized object's Id ({ig.Id}) does not match the expected TargetId ({ev.TargetId}).");
+			}
+		}
+
+		var data2 = GetAttachedData(newItem, ev.TargetId, collection, GetMode.GetOrCreate);
+		//if (!TryGetModel(ev.TargetId, out var data2))
+		{
+			
+			// Attach(newItem, collection);
+			// throw new Exception("The object is not attached yet");
+		}
+		// var dataX = Attach(newItem, collection);
+		if (newItem is IBindableModel ibm)
+		{
+			if (ibm.Store == null)
+			{
+				ibm.Store = this;
+			}
 		}
 		collection.AddByEvent(newItem);
 		return Task.CompletedTask;
