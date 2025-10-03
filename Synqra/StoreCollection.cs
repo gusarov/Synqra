@@ -10,7 +10,7 @@ abstract class StoreCollection
 {
 	// Remember - this is always client request, not a synchronization!
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
-	private protected readonly JsonSerializerContext _jsonSerializerContext;
+	private protected readonly JsonSerializerOptions _jsonSerializerOptions;
 
 	internal StoreContext Store { get; private init; }
 	internal Guid ContainerId { get; private init; }
@@ -20,10 +20,14 @@ abstract class StoreCollection
 	protected abstract IList IList { get; }
 	protected abstract ICollection ICollection { get; }
 
-	public StoreCollection(StoreContext storeContext, JsonSerializerContext jsonSerializerContext, Guid containerId, Guid collectionId)
+#if DEBUG
+	public IList List => IList;
+#endif
+
+	public StoreCollection(StoreContext storeContext, JsonSerializerOptions jsonSerializerOptions, Guid containerId, Guid collectionId)
 	{
 		Store = storeContext ?? throw new ArgumentNullException(nameof(storeContext));
-		_jsonSerializerContext = jsonSerializerContext ?? throw new ArgumentNullException(nameof(jsonSerializerContext));
+		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentNullException(nameof(jsonSerializerOptions));
 		ContainerId = containerId;
 		CollectionId = collectionId;
 	}
@@ -50,8 +54,8 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 	protected override IList IList => _list;
 	protected override ICollection ICollection => _list;
 
-	public StoreCollection(StoreContext storeContext, JsonSerializerContext jsonSerializerContext, Guid containerId, Guid collectionId)
-		: base(storeContext, jsonSerializerContext, containerId, collectionId)
+	public StoreCollection(StoreContext storeContext, JsonSerializerOptions jsonSerializerOptions, Guid containerId, Guid collectionId)
+		: base(storeContext, jsonSerializerOptions, containerId, collectionId)
 	{
 	}
 
@@ -120,11 +124,10 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 	private int Add(T item)
 	{
 		var o = _list.Count;
-		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerContext.Options);
-		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerContext.Options);
+		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerOptions);
+		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
 		var attachedData = Store.Attach(item, this);
-
 		Store.SubmitCommandAsync(new CreateObjectCommand
 		{
 			ContainerId = ContainerId,
@@ -146,7 +149,11 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 		{
 			throw new ArgumentException($"Item must be of type {typeof(T).Name}", nameof(item));
 		}
-		Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
+		if (item is IIdentifiable<Guid> g)
+		{
+			Store.GetAttachedData(item, g.Id, null, GetMode.GetOrCreate);
+		}
+		// Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
 		_list.Add(typedItem);
 	}
 

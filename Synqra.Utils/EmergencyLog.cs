@@ -88,7 +88,7 @@ public class EmergencyLog
 #endif
 		if (mutex == null)
 		{
-			mutex = new Mutex(false, "SynqraEmergencyLog");
+			mutex = new Mutex(false, "Global\\SynqraEmergencyLog");
 		}
 		using (mutex)
 		{

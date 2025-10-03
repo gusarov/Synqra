@@ -10,7 +10,7 @@ namespace Synqra;
 
 public abstract class SingleObjectEvent : Event
 {
-	public required Guid TargetId { get; init; } // like row id
-	public required Guid TargetTypeId { get; init; } // like descriminator
-	public required Guid CollectionId { get; init; } // like table name (can be derrived from root type id)
+	public required Guid TargetId { get; set; } // like row id
+	public required Guid TargetTypeId { get; set; } // like descriminator
+	public required Guid CollectionId { get; set; } // like table name (can be derrived from root type id)
 }

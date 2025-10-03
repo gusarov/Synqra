@@ -7,6 +7,10 @@ using System.Threading.Tasks;
 
 namespace Synqra;
 
+[JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = "_t", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
+[JsonDerivedType(typeof(ChangeObjectPropertyCommand), "ChangeObjectPropertyCommand")]
+[JsonDerivedType(typeof(DeleteObjectCommand), "DeleteObjectCommand")]
+[JsonDerivedType(typeof(CreateObjectCommand), "CreateObjectCommand")]
 public abstract class Command : ISynqraCommand
 {
 	public Guid CommandId { get; set; } = GuidExtensions.CreateVersion7();

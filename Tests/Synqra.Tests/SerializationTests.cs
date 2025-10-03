@@ -38,6 +38,115 @@ public class SerializationTests
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
 
+	[Test]
+	public async Task TestSerializationEvent()
+	{
+		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
+		var obj = new CommandCreatedEvent
+		{
+			CommandId = Guid.NewGuid(),
+			ContainerId = Guid.NewGuid(),
+			EventId = Guid.NewGuid(),
+			Data = new CreateObjectCommand
+			{
+				Data = new Dictionary<string, object>
+				{
+					["subject"] = "Test1",
+				},
+			},
+		};
+		async Task Check(JsonSerializerContext ctx)
+		{
+			var jsonOptions = new JsonSerializerOptions(ctx.Options)
+			{
+				IndentCharacter = '\t',
+				IndentSize = 1,
+				WriteIndented = true,
+			};
+			var json = JsonSerializer.Serialize<Event>(obj, jsonOptions);
+			await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
+	{
+		"_t": "CommandCreatedEvent",
+		"data": {
+			"_t": "CreateObjectCommand",
+			"data": {
+				"subject": "Test1"
+			},
+			"targetTypeId": "00000000-0000-0000-0000-000000000000",
+			"collectionId": "00000000-0000-0000-0000-000000000000",
+			"targetId": "00000000-0000-0000-0000-000000000000",
+			"commandId": "{{obj.Data.CommandId}}",
+			"containerId": "00000000-0000-0000-0000-000000000000"
+		},
+		"eventId": "{{obj.EventId}}",
+		"commandId": "{{obj.CommandId}}"
+	}
+	""".NormalizeNewLines());
+			var deserializedObj = JsonSerializer.Deserialize<Event>(json, jsonOptions);
+			await Assert.That(deserializedObj).IsNotNull();
+			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
+		}
+		await Check(TestJsonSerializerContext.Default);
+		await Check(AppJsonContext.Default);
+	}
+
+	[Test]
+	public async Task TestSerializationNetworkOperation()
+	{
+		var @event = new CommandCreatedEvent
+		{
+			CommandId = Guid.NewGuid(),
+			ContainerId = Guid.NewGuid(),
+			EventId = Guid.NewGuid(),
+			Data = new CreateObjectCommand
+			{
+				Data = new Dictionary<string, object>
+				{
+					["subject"] = "Test1",
+				},
+			},
+		};
+		var operation = new NewEvent1
+		{
+			Event = @event,
+		};
+		async Task Check(JsonSerializerContext ctx)
+		{
+			var jsonOptions = new JsonSerializerOptions(ctx.Options)
+			{
+				IndentCharacter = '\t',
+				IndentSize = 1,
+				WriteIndented = true,
+			};
+			var json = JsonSerializer.Serialize<TransportOperation>(operation, jsonOptions);
+			var deserializedObj = JsonSerializer.Deserialize<TransportOperation>(json, jsonOptions);
+			var json2 = JsonSerializer.Serialize<TransportOperation>(deserializedObj, jsonOptions);
+			await Assert.That(json2.NormalizeNewLines()).IsEqualTo($$"""
+	{
+		"_t": "NewEvent1",
+		"event": {
+			"_t": "CommandCreatedEvent",
+			"data": {
+				"_t": "CreateObjectCommand",
+				"data": {
+					"subject": "Test1"
+				},
+				"targetTypeId": "00000000-0000-0000-0000-000000000000",
+				"collectionId": "00000000-0000-0000-0000-000000000000",
+				"targetId": "00000000-0000-0000-0000-000000000000",
+				"commandId": "{{@event.Data.CommandId}}",
+				"containerId": "00000000-0000-0000-0000-000000000000"
+			},
+			"eventId": "{{@event.EventId}}",
+			"commandId": "{{@event.CommandId}}"
+		}
+	}
+	""".NormalizeNewLines());
+		}
+		await Check(TestJsonSerializerContext.Default);
+		await Check(AppJsonContext.Default);
+	}
+
 }
 
 public class AotTests

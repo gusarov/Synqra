@@ -15,7 +15,7 @@ public abstract class Event : IIdentifiable<Guid>
 {
 	Guid IIdentifiable<Guid>.Id => EventId;
 
-	public required Guid EventId { get; init; }
+	public required Guid EventId { get; set; }
 	public required Guid CommandId { get; set; }
 	// public required Guid UserId { get; set; }
 	[JsonIgnore] // too verbose, containerId (streamId) should be handled outside of event stream
