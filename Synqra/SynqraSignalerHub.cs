@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -9,6 +8,7 @@ namespace Synqra;
 /// <summary>
 /// Server-side Service that accept WS connections from clients
 /// </summary>
+/*
 public class SynqraSignalerHub : Hub // Hub<IEventHubClient>
 {
 	private readonly ILogger _logger;
@@ -47,3 +47,4 @@ public class SynqraSignalerHub : Hub // Hub<IEventHubClient>
 		Console.WriteLine();
 	}
 }
+*/
