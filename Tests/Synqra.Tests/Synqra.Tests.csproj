@@ -30,8 +30,6 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.9" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client.Core" Version="9.0.9" />
     <PackageReference Include="MongoDB.Bson" Version="3.5.0" />
     <PackageReference Include="MongoDB.Driver" Version="3.5.0" />
     <PackageReference Include="TUnit" Version="0.20" />

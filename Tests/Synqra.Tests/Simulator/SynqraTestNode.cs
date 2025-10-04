@@ -168,7 +168,7 @@ internal class SynqraTestNode
 		if (masterHost)
 		{
 			app.MapControllers();
-			app.MapHub<SynqraSignalerHub>("/api/synqra/signalR");
+			// app.MapHub<SynqraSignalerHub>("/api/synqra/signalR");
 			app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 			ConcurrentBag<WebSocket> _sockets = new ConcurrentBag<WebSocket>();
 			app.Map("/api/synqra/ws", async ctx =>
