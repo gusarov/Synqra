@@ -22,7 +22,7 @@ public static class StorageExtensions
 {
 	// For nativeAOT
 	public static void AddJsonLinesStorage<T, TKey>(this IHostApplicationBuilder hostBuilder)
-		where T : IIdentifiable<TKey>
+		// where T : IIdentifiable<TKey>
 	{
 		_ = typeof(IStorage<T, TKey>);
 		_ = typeof(JsonLinesStorage<T, TKey>);
@@ -42,7 +42,7 @@ public static class StorageExtensions
 	}
 
 	private class JsonLinesStorage<T, TKey> : IStorage<T, TKey>, IDisposable, IAsyncDisposable
-		where T : IIdentifiable<TKey>
+		//where T : IIdentifiable<TKey>
 	{
 		private readonly ILogger _logger;
 		private readonly IOptions<JsonLinesStorageConfig> _options;

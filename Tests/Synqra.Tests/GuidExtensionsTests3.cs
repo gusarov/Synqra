@@ -254,7 +254,7 @@ public class GuidExtensionsTests3 : BaseTest
 	[Obsolete]
 	public async Task Should_handle_v6_test_vector_create()
 	{
-		var guid = GuidExtensions.CreateVersion6(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)), 0x33C8, 0x9F6BDECED846);
+		var guid = GuidExtensions.Default.CreateVersion6(new DateTimeOffset(2022, 2, 22, 14, 22, 22, TimeSpan.FromHours(-5)), 0x33C8, 0x9F6BDECED846);
 		await Assert.That(guid.ToString()).IsEqualTo(new Guid("1EC9414C-232A-6B00-B3C8-9F6BDECED846").ToString());
 	}
 

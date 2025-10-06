@@ -149,9 +149,9 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 		{
 			throw new ArgumentException($"Item must be of type {typeof(T).Name}", nameof(item));
 		}
-		if (item is IIdentifiable<Guid> g)
+		// if (item is IIdentifiable<Guid> g)
 		{
-			Store.GetAttachedData(item, g.Id, null, GetMode.GetOrCreate);
+			// Store.GetAttachedData(item, g.Id, null, GetMode.GetOrCreate);
 		}
 		// Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
 		_list.Add(typedItem);

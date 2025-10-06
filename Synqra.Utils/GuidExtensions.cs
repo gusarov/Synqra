@@ -14,53 +14,249 @@ using System.Threading.Tasks;
 
 namespace Synqra;
 
+public static class SynqraGuidExtensions
+{
+	public static State Default { get; } = new State();
+
+	public class State
+	{
+		public Guid CreateVersion8_MasterId()
+		{
+			return default;
+		}
+	}
+
+	public static Guid CreateVersion8_MasterId() => Default.CreateVersion8_MasterId();
+}
+
 public static class GuidExtensions
 {
-	private static Encoding _utf8 = new UTF8Encoding(false, false); // for name-based UUIDs
+	/// <summary>
+	/// This is default state of counters. If you want to have a dedicated one - create your own instance of State class.
+	/// </summary>
+	public static State Default { get; } = new State();
+
+	public class State
+	{
+		// For v1 & v6: Same as Mongo ObjectID, it is reset on client start, not saved
+		private readonly ulong _nodeId; // actually only 6 bytes (48 bit) is in use
+		private int _clockSeq; // actually only 1.5 bytes (12 bits) is in use but Interlocked works with int
+
+		// For v7 monotonicy
+		private long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
+
+		public unsafe State(ulong nodeId)
+		{
+			_nodeId = nodeId;
+		}
+
+		public unsafe State()
+		{
+			try
+			{
+				var rng = RandomNumberGenerator.Create();
+#if NETSTANDARD2_0
+				var buffer = new byte[8];
+				rng.GetBytes(buffer);
+				ulong nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+				ulong nodeId = 0;
+				var span = new Span<byte>((byte*)&nodeId, 8);
+				rng.GetBytes(span);
+#endif
+				_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000; // set multicast bit to avoid using real MAC address (See RFC spec)
+			}
+			catch (Exception ex)
+			{
+				EmergencyLog.Default.Message(ex.ToString());
+				// fallback in case of crypto configuration problems
+#if NETSTANDARD
+				var buffer = new byte[8];
+				new Random().NextBytes(buffer);
+				var nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+				var nodeId = (ulong)Random.Shared.NextInt64();
+#endif
+				_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000;
+			}
+		}
+
+		[Obsolete("Use CreateVersion7 instead")]
+		public unsafe Guid CreateVersion1()
+		{
+			return GuidExtensions.CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
+		}
+
+		[Obsolete("Use CreateVersion7 instead")]
+		public unsafe Guid CreateVersion6()
+		{
+			return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
+		}
+
+		[Obsolete("Use CreateVersion7 instead")]
+		internal unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, ulong node)
+		{
+			var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
+
+			Guid g = default;
+			byte* bytes = (byte*)&g;
+
+			*(uint*)&g = (uint)(greg_100_ns >> 28); // write time_high
+			*(ushort*)(bytes + 4) = (ushort)(greg_100_ns >> 12); // write time_mid
+			*(ushort*)(bytes + 6) = (ushort)((ushort)(greg_100_ns & 0x0FFF) | (ushort)(6 << 12)); // write time_low & version 6
+
+			clockSeq = (ushort)(clockSeq & 0x3FFF | 0x8000); // variant 1, 0x10: RFC 4122
+			if (BitConverter.IsLittleEndian)
+			{
+				clockSeq = (ushort)((clockSeq << 8) | (clockSeq >> 8));
+			}
+			*(ushort*)(bytes + 8) = clockSeq;
+
+			byte* nodeBytes = (byte*)&node;
+			if (BitConverter.IsLittleEndian)
+			{
+				for (byte i = 0; i < 6; i++)
+				{
+					bytes[10 + i] = nodeBytes[5 - i];
+				}
+			}
+			else
+			{
+				for (byte i = 0; i < 6; i++)
+				{
+					bytes[10 + i] = nodeBytes[i];
+				}
+			}
+			return g;
+		}
+
+		public Guid CreateVersion7() => CreateVersion7(DateTime.UtcNow);
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private unsafe Guid CreateVersion7(DateTimeOffset timestamp)
+		{
+			return CreateVersion7(timestamp.ToUniversalTime().Ticks);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private unsafe Guid CreateVersion7(DateTime timestamp)
+		{
+			return CreateVersion7(timestamp.ToUniversalTime().Ticks);
+		}
+
+		/// <summary>
+		/// If this guid monotonically follows the previous guid, then it is returned as is and becomes previous guid.
+		/// Otherwise a new guid is created with incremented timestamp part, preserving the rest of the guid.
+		/// </summary>
+		public unsafe Guid CreateVersion7OrApprove(Guid example)
+		{
+			if (example == default)
+			{
+				return CreateVersion7();
+			}
+			if (example.GetVersion() != 7)
+			{
+				throw new Exception("Only GUID v7 is supported");
+			}
+			// Extract omnistamp
+			byte* bytes = (byte*)&example;
+			long omniStamp = *(ushort*)(bytes + 6); // 12 bits of c
+			omniStamp &= 0x0FFF; // clear version bits
+			omniStamp |= (*(ushort*)(bytes + 4)) << 12; // b
+			omniStamp |= (*(uint*)bytes) << 28; // a
+
+			// Rotate omnistamp
+			bool fix = false;
+			while (true)
+			{
+				var previousOmniStamp = _prevOmniStamp;
+				if (omniStamp <= previousOmniStamp)
+				{
+					omniStamp = previousOmniStamp + 1;
+					fix = true;
+				}
+				if (Interlocked.CompareExchange(ref _prevOmniStamp, omniStamp, previousOmniStamp) == previousOmniStamp)
+				{
+					break; // success
+				}
+			}
+
+			if (fix)
+			{
+				// this code writes to example!!
+				uint a = (uint)(omniStamp >> 28);
+				ushort b = (ushort)(omniStamp >> 12);
+				ushort c = (ushort)((((ushort)(omniStamp)) & 0xfff | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
+
+				*(uint*)bytes = a;
+				*(ushort*)(bytes + 4) = b;
+				*(ushort*)(bytes + 6) = c;
+			}
+			return example; // all good, return as is
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private unsafe Guid CreateVersion7(long ticks)
+		{
+			// Monotonicy
+			// Option 0: artificially bump ts to counter if input ts repeats (limited velocity, 1 GUID per 1 ms)
+			// Option 1: intra-ms counter in rand_a short (empty bytes in normal case, but can be randomly seeded except 1 bit, guessable in 1 ms space)
+			//       a) start from 0 and count if repeated ms
+			//       b) start from random and reset MSB to get 50% space
+			// Option 2: random_b is random first time in ms, but after that it increments like bigint or BigEndian Long (guessable in 1 ms space)
+			// Option 3: use rand_a for high precision time (DateTime already has 100ns precision) This can be combined with other options. E.g. very good combo with option 0.
+
+			// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds.
+
+			// The change from 3 ticks increment to 4 ticks increment:
+			// 1) Allows to avoid floating arithmetics and just do x>>2
+			// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
+			// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
+
+			var g = Guid.NewGuid();
+
+			ticks -= _unixEpochTicks;
+
+			// Omni Stamp is a combo of ms<<12 & custom sub_ms part
+			long omniStamp = (ticks / 10000) << 12;
+			omniStamp |= (ticks % 10000) >> 2;
+
+			while (true)
+			{
+				var previousOmniStamp = _prevOmniStamp;
+				if (omniStamp <= previousOmniStamp)
+				{
+					omniStamp = previousOmniStamp + 1;
+				}
+				if (Interlocked.CompareExchange(ref _prevOmniStamp, omniStamp, previousOmniStamp) == previousOmniStamp)
+				{
+					break; // success
+				}
+			}
+
+			byte* bytes = (byte*)&g;
+			uint a = (uint)(omniStamp >> 28);
+			ushort b = (ushort)(omniStamp >> 12);
+			ushort c = (ushort)((((ushort)(omniStamp)) & 0xfff | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
+
+			*(uint*)bytes = a;
+			*(ushort*)(bytes + 4) = b;
+			*(ushort*)(bytes + 6) = c;
+
+			bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
+
+
+			return g;
+		}
+	}
+
+	private static readonly Encoding _utf8 = new UTF8Encoding(false, false); // for name-based UUIDs
 	private const long _unixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
 	private const long _gregEpochTicks = 0x06ED6223E4344000; // new DateTime(1582, 10, 15, 0, 0, 0, DateTimeKind.Utc).Ticks;
-
-	// For v1 & v6: Same as Mongo ObjectID, it is reset on client start, not saved
-	private static readonly ulong _nodeId; // actually only 6 bytes (48 bit) is in use
-	private static int _clockSeq; // actually only 1.5 bytes (12 bits) is in use but Interlocked works with int
-
-	// For v7 monotonicy
-	private static long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
 
 	// https://www.rfc-editor.org/rfc/rfc9562.html?utm_source=chatgpt.com#name-namespace-id-usage-and-allo
 	private static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 	private static readonly Guid _namespaceUrl = new Guid("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
-
-	unsafe static GuidExtensions()
-	{
-		try
-		{
-			var rng = RandomNumberGenerator.Create();
-			ulong nodeId = 0;
-#if NETSTANDARD2_0
-			var buffer = new byte[8];
-			rng.GetBytes(buffer);
-			nodeId = BitConverter.ToUInt64(buffer, 0);
-#else
-			var span = new Span<byte>((byte*)&nodeId, 8);
-			rng.GetBytes(span);
-#endif
-			_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000; // set multicast bit to avoid using real MAC address (See RFC spec)
-		}
-		catch (Exception ex)
-		{
-			EmergencyLog.Default.Message(ex.ToString());
-			// fallback in case of crypto configuration problems
-#if NETSTANDARD
-			var buffer = new byte[8];
-			new Random().NextBytes(buffer);
-			var nodeId = BitConverter.ToUInt64(buffer, 0);
-#else
-			var nodeId = (ulong)Random.Shared.NextInt64();
-#endif
-			_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000;
-		}
-	}
 
 	public static unsafe int GetVariant(this Guid guid)
 	{
@@ -160,10 +356,7 @@ public static class GuidExtensions
 	}
 
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion1()
-	{
-		return CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
-	}
+	public static unsafe Guid CreateVersion1() => Default.CreateVersion1();
 
 	[Obsolete("Use CreateVersion7 instead")]
 	internal static unsafe Guid CreateVersion1(DateTimeOffset dateTime, ushort clockSeq, ulong node)
@@ -255,115 +448,9 @@ public static class GuidExtensions
 	}
 
 	[Obsolete("Use CreateVersion7 instead")]
-	public static unsafe Guid CreateVersion6()
-	{
-		return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
-	}
+	public static unsafe Guid CreateVersion6() => Default.CreateVersion6();
 
-	[Obsolete("Use CreateVersion7 instead")]
-	internal static unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, ulong node)
-	{
-		var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
-
-		Guid g = default;
-		byte* bytes = (byte*)&g;
-
-		*(uint*)&g = (uint)(greg_100_ns >> 28); // write time_high
-		*(ushort*)(bytes + 4) = (ushort)(greg_100_ns >> 12); // write time_mid
-		*(ushort*)(bytes + 6) = (ushort)((ushort)(greg_100_ns & 0x0FFF) | (ushort)(6 << 12)); // write time_low & version 6
-
-		clockSeq = (ushort)(clockSeq & 0x3FFF | 0x8000); // variant 1, 0x10: RFC 4122
-		if (BitConverter.IsLittleEndian)
-		{
-			clockSeq = (ushort)((clockSeq << 8) | (clockSeq >> 8));
-		}
-		*(ushort*)(bytes + 8) = clockSeq;
-
-		byte* nodeBytes = (byte*)&node;
-		if (BitConverter.IsLittleEndian)
-		{
-			for (byte i = 0; i < 6; i++)
-			{
-				bytes[10 + i] = nodeBytes[5 - i];
-			}
-		}
-		else
-		{
-			for (byte i = 0; i < 6; i++)
-			{
-				bytes[10 + i] = nodeBytes[i];
-			}
-		}
-		return g;
-	}
-
-	public static Guid CreateVersion7() => CreateVersion7(DateTime.UtcNow);
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static unsafe Guid CreateVersion7(DateTimeOffset timestamp)
-	{
-		return CreateVersion7(timestamp.ToUniversalTime().Ticks);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static unsafe Guid CreateVersion7(DateTime timestamp)
-	{
-		return CreateVersion7(timestamp.ToUniversalTime().Ticks);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static unsafe Guid CreateVersion7(long ticks)
-	{
-		// Monotonicy
-		// Option 0: artificially bump ts to counter if input ts repeats (limited velocity, 1 GUID per 1 ms)
-		// Option 1: intra-ms counter in rand_a short (empty bytes in normal case, but can be randomly seeded except 1 bit, guessable in 1 ms space)
-		//       a) start from 0 and count if repeated ms
-		//       b) start from random and reset MSB to get 50% space
-		// Option 2: random_b is random first time in ms, but after that it increments like bigint or BigEndian Long (guessable in 1 ms space)
-		// Option 3: use rand_a for high precision time (DateTime already has 100ns precision) This can be combined with other options. E.g. very good combo with option 0.
-
-		// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds.
-
-		// The change from 3 ticks increment to 4 ticks increment:
-		// 1) Allows to avoid floating arithmetics and just do x>>2
-		// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
-		// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
-
-		var g = Guid.NewGuid();
-
-		ticks -= _unixEpochTicks;
-
-		// Omni Stamp is a combo of ms<<12 & custom sub_ms part
-		long omniStamp = (ticks / 10000) << 12;
-		omniStamp |= (ticks % 10000) >> 2;
-
-		while (true)
-		{
-			var previousOmniStamp = _prevOmniStamp;
-			if (omniStamp <= previousOmniStamp)
-			{
-				omniStamp = previousOmniStamp + 1;
-			}
-			if (Interlocked.CompareExchange(ref _prevOmniStamp, omniStamp, previousOmniStamp) == previousOmniStamp)
-			{
-				break; // success
-			}
-		}
-
-		byte* bytes = (byte*)&g;
-		uint a = (uint)(omniStamp >> 28);
-		ushort b = (ushort)(omniStamp >> 12);
-		ushort c = (ushort)((((ushort)(omniStamp)) & 0xfff | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
-
-		*(uint*)bytes = a;
-		*(ushort*)(bytes + 4) = b;
-		*(ushort*)(bytes + 6) = c;
-
-		bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
-
-
-		return g;
-	}
+	public static Guid CreateVersion7() => Default.CreateVersion7();
 
 	public static unsafe Guid CreateVersion8_Sha256_Dns(string name)
 	{

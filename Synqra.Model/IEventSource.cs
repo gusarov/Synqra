@@ -19,7 +19,7 @@ namespace Synqra;
 /// Low-level storage interface for storing and retrieving events
 /// </summary>
 public interface IStorage<T, TKey> : IDisposable, IAsyncDisposable
-	where T : IIdentifiable<TKey>
+	//where T : IIdentifiable<TKey>
 {
 	Task AppendAsync(T item);
 
@@ -33,10 +33,12 @@ public interface IStorage<T, TKey> : IDisposable, IAsyncDisposable
 		;
 }
 
+/*
 public interface IIdentifiable<TKey>
 {
 	TKey Id { get; }
 }
+*/
 
 internal class AttachedData
 {

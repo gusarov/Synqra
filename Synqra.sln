@@ -42,6 +42,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Model", "Synqra.Mode
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Utils", "Synqra.Utils\Synqra.Utils.csproj", "{E2E448AD-28E6-16C4-BA93-22C51CC3F47E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.BinarySerializer", "Synqra.BinarySerializer\Synqra.BinarySerializer.csproj", "{CE411BC9-CA6B-4256-889B-F200153C9DBB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -92,6 +94,10 @@ Global
 		{E2E448AD-28E6-16C4-BA93-22C51CC3F47E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E2E448AD-28E6-16C4-BA93-22C51CC3F47E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E2E448AD-28E6-16C4-BA93-22C51CC3F47E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CE411BC9-CA6B-4256-889B-F200153C9DBB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CE411BC9-CA6B-4256-889B-F200153C9DBB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CE411BC9-CA6B-4256-889B-F200153C9DBB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CE411BC9-CA6B-4256-889B-F200153C9DBB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

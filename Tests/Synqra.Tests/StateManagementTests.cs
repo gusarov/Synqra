@@ -182,7 +182,7 @@ public class FakeStorage : FakeStorage<Event, Guid>, IStorage
 }
 
 public class FakeStorage<T, TKey> : IStorage<T, TKey>
-	where T : IIdentifiable<TKey>
+	// where T : IIdentifiable<TKey>
 {
 	public List<T> Items { get; } = new List<T>();
 
