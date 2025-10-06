@@ -35,7 +35,7 @@ internal class EmergencyLoggerTests : BaseTest
 	{
 		// NOTE: This test can fail if file rolls over. This will stay like this until I change my mind about rolling over between 2 files instead of one.
 		// Greenifying this test is considered as the only good reason to change the rollover logic to 2 files.
-		// An honestly it does not feel fair that EmergencyLog is as reliable as it claims. It should be as a black box for flight crash research. Chances are, people log things that can happen once a month mysteriously and hard to reproduce... And what you will say? File is too big and have to be deleted?
+		// And honestly it does not feel fair that EmergencyLog is as reliable as it claims. It should be as a black box for flight crash research. Chances are, people log things that can happen once a month mysteriously and hard to reproduce... And what you will say? File is too big and have to be deleted?
 
 		ConcurrentBag<Guid> guids = new ConcurrentBag<Guid>();
 
