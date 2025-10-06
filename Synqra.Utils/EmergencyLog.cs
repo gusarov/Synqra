@@ -43,7 +43,6 @@ public class EmergencyLog
 			// mutex name uniquiness should corelate with temp folder uniquiness.
 			// When TMP configured per-user, or per-session, or per-machine same would be with mutex name
 			_mutexName = $"Global\\SynqraEmergencyLog_{mutexName}";
-			// _mutexName = $"Global\\SynqraEmergencyLog";
 		}
 	}
 
@@ -79,7 +78,7 @@ public class EmergencyLog
 			}
 			// TODO use \\global and ACL on windows (or don't... TMP is session specific anyway. UPD: No, I just set both system and user tmp to C:\Dev\Temp and now I have services vs user going to same file. Mutext needs to be global on Windows)
 			// TODO do something for browser
-			message = $"[{DateTimeOffset.Now:yyyy'-'MM'-'dd' 'HH':'mm':'ss'.'fffffffzzz}] {message}{Environment.NewLine}";
+			message = Format(message);
 
 			Mutex mutex = null;
 #if NET8_0_OR_GREATER
@@ -89,13 +88,7 @@ public class EmergencyLog
 				{
 					var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
 					var security = new MutexSecurity();
-					security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.Modify | MutexRights.Synchronize, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
-					var self = WindowsIdentity.GetCurrent().User;
-					if (self != null)
-					{
-						security.AddAccessRule(new MutexAccessRule(self, MutexRights.FullControl, AccessControlType.Allow));
-					}
-
+					security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
 					bool createdNew;
 					mutex = MutexAcl.Create(
 						initiallyOwned: false,
@@ -138,7 +131,8 @@ public class EmergencyLog
 				try
 				{
 					var fi = new FileInfo(_logFilePath);
-					if (fi.Exists && fi.Length > 1024 * 1024)
+					// VNext - assess total size of logs to total space on disk. Bigger more expensive PCs should allow bigger logs and better problem solving, so use that. This approach helps to break the empirical values for size or amount of files or number of days to keep.
+					if (fi.Exists && (fi.Length > 100 * 1024 * 1024 || fi.LastWriteTimeUtc < DateTime.UtcNow.AddDays(-1)))
 					{
 						try
 						{
@@ -167,7 +161,7 @@ public class EmergencyLog
 							// V3 Log4Net style rename chain
 							var now = DateTime.UtcNow;
 							float maxFile = 0;
-							const int MaxTotalFiles = 100;
+							const int MaxTotalFiles = 10;
 							string DealWithNextFile(int number)
 							{
 								maxFile = number;
@@ -175,7 +169,7 @@ public class EmergencyLog
 								var fi = new FileInfo(file);
 								if (fi.Exists)
 								{
-									bool needToDrop = (now - fi.LastWriteTimeUtc).TotalDays > 7 || number > MaxTotalFiles; // this must have at least some limit, and 100 files looks like way too much. Having said that it is just 100MB (1MB per file), so it could make sense to increase 1 file size.
+									bool needToDrop = (now - fi.LastWriteTimeUtc).TotalDays > 7 || number > MaxTotalFiles; // this must have at least some limit, and 100 files looks like way too much, so it is reasonable number.
 									var next = DealWithNextFile(number + 1);
 									if (needToDrop)
 									{
@@ -189,7 +183,7 @@ public class EmergencyLog
 								return file;
 							}
 							fi.MoveTo(DealWithNextFile(2));
-							Message($"[EmergencyLog] Previous log file exceeded 1MiB and renamed. It is {maxFile} files a week ({maxFile / MaxTotalFiles:P0} capacity)");
+							Message($"[EmergencyLog] Previous log file was renamed. It is {maxFile} files a week ({maxFile / MaxTotalFiles:P0} capacity)");
 						}
 						catch
 						{
@@ -199,7 +193,45 @@ public class EmergencyLog
 #endif
 						}
 					}
-					FileAppendAllText(_logFilePath, message);
+					var fileName = _logFilePath;
+					Exception firstEx = null;
+					for (byte i = 0;; i++) // retry locked file with separate name (should be extremely rare and misuse of storage, but EmergencyLogger guarantees are more important)
+					{
+						try
+						{
+							if (firstEx != null)
+							{
+								FileAppendAllText(fileName, Format($"[Error] [EmergencyLog] Failed to write to {_logFilePath}: {firstEx}"));
+							}
+							FileAppendAllText(fileName, message);
+							break;
+						}
+						catch (IOException ex)
+						{
+							if (firstEx == null)
+							{
+								firstEx = ex;
+							}
+							if (i < 10)
+							{
+								fileName = string.Format(_logFilePathTemplate, "Locked_" + i);
+							}
+							else if (i == 10)
+							{
+								fileName = string.Format(_logFilePathTemplate
+#if NET9_0_OR_GREATER
+									, Guid.CreateVersion7() // sortable
+#else
+									, Guid.NewGuid()
+#endif
+									);
+							}
+							else
+							{
+								throw;
+							}
+						}
+					}
 				}
 				finally
 				{
@@ -221,9 +253,17 @@ public class EmergencyLog
 		}
 	}
 
+	private static string Format(string message)
+	{
+		message = $"[{DateTimeOffset.Now:yyyy'-'MM'-'dd' 'HH':'mm':'ss'.'fffffffzzz}] {message}{Environment.NewLine}"; // {new StackTrace()}{Environment.NewLine}
+		return message;
+	}
+
 	private void FileAppendAllText(string fileName, string message)
 	{
+		// File.AppendAllText does not share readers, so we do it manually
 		using var file = File.Open(fileName, FileMode.Append, FileAccess.Write, FileShare.Read);
+		file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
 		using var sw = new StreamWriter(file);
 		/*
 		using var sw2 = new StreamWriter(fileName, new FileStreamOptions
