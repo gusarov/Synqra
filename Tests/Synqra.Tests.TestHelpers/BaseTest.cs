@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
+using System.Diagnostics;
 using System.Text;
 
 namespace Synqra.Tests.TestHelpers;
@@ -47,6 +48,8 @@ public class TestUtils : PerformanceTestUtils
 
 	public string FileReadAllText(string fileName)
 	{
+		// Console.WriteLine("FileReadAllText: " + fileName);
+		// EmergencyLog.Default.Message("FileReadAllText: " + fileName + "\r\n" + new StackTrace());
 		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
 		return sr.ReadToEnd();
 	}
