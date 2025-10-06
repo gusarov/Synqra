@@ -15,7 +15,7 @@ using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests;
 
-public class TestItem : IIdentifiable<int>
+public class TestItem //: IIdentifiable<int>
 {
 	public int Id { get; set; }
 	public string Name { get; set; }
@@ -23,7 +23,7 @@ public class TestItem : IIdentifiable<int>
 
 [NotInParallel]
 public class StorageTests<T, TKey> : BaseTest
-	where T : IIdentifiable<TKey>
+	//where T //: IIdentifiable<TKey>
 {
 	private IStorage<T, TKey>? __storage;
 

@@ -647,8 +647,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			newItem = Activator.CreateInstance(typeMetadata.Type);
 		}
 
-
-
+		/*
 		if (newItem is IIdentifiable<Guid> ig)
 		{
 			if (ig.Id == default)
@@ -660,6 +659,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 				throw new Exception($"Deserialized object's Id ({ig.Id}) does not match the expected TargetId ({ev.TargetId}).");
 			}
 		}
+		*/
 
 		var data2 = GetAttachedData(newItem, ev.TargetId, collection, GetMode.GetOrCreate);
 		//if (!TryGetModel(ev.TargetId, out var data2))

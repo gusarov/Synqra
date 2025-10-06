@@ -53,6 +53,79 @@ public class TestUtils : PerformanceTestUtils
 		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
 		return sr.ReadToEnd();
 	}
+
+	public void HexDump(Span<byte> span)
+	{
+		int pos = 0;
+		while (span.Length - pos >= 16)
+		{
+			for (int i = 0; i < 16; i++)
+			{
+				Console.Write(span[pos + i].ToString("X2"));
+				if ((i + 1) % 4 == 0)
+				{
+					Console.Write(" ");
+				}
+			}
+			for (int i = 0; i < 16; i++)
+			{
+				var c = (char)span[pos + i];
+				if (c == 0)
+				{
+					c = '.';
+				}
+				else if (c < 32/* || c > 126*/)
+				{
+					c = '?';
+				}
+				Console.Write(c);
+				if ((i + 1) % 4 == 0)
+				{
+					Console.Write(" ");
+				}
+			}
+			pos += 16;
+			Console.WriteLine();
+		}
+		if (span.Length - pos > 0)
+		{
+			var rem = span.Length - pos;
+			for (int i = 0; i < rem; i++)
+			{
+				Console.Write(span[pos + i].ToString("X2"));
+				if ((i + 1) % 4 == 0)
+				{
+					Console.Write(" ");
+				}
+			}
+			for (int i = rem; i < 16; i++)
+			{
+				Console.Write("  ");
+				if ((i + 1) % 4 == 0)
+				{
+					Console.Write(" ");
+				}
+			}
+			for (int i = 0; i < rem; i++)
+			{
+				var c = (char)span[pos + i];
+				if (c == 0)
+				{
+					c = '.';
+				}
+				else if (c < 32/* || c > 126*/)
+				{
+					c = '?';
+				}
+				Console.Write(c);
+				if ((i + 1) % 4 == 0)
+				{
+					Console.Write(" ");
+				}
+			}
+			pos += rem;
+		}
+	}
 }
 
 public class BaseTest : TestUtils

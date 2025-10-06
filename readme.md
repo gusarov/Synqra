@@ -52,4 +52,9 @@ It all starts from IMyStoreContext : IStoreContext
 ========================= COMMUNICATION ==========================
 1) Protobuf over WebSocket
 2) JSON over WebSocket
+3) SignalR died and removed because it failed in Native AOT scenario
+4) It is communication, not just serialziation. So, some contracts should be defined in negotiation frames. E.g. endianess, compression, serialization format, protocol version etc.
 
+1. Before any successful exchange of commands or events, client should send a negotiation "HELLO" frame
+
+8 bytes magic: AD790DD0594578[01] - this represents Syncra [V1] protocol for Little Endian

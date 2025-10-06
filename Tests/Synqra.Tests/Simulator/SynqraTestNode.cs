@@ -57,6 +57,7 @@ internal class SynqraTestNode
 	public ushort Port { get; set; }
 
 	SemaphoreSlim _semaphoreSlim = new(1, 1);
+	long _masterSeq = 0;
 
 	public SynqraTestNode(Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false)
 	{
@@ -208,6 +209,7 @@ internal class SynqraTestNode
 						try
 						{
 							var ev = newEvent1.Event;
+							// ev.MasterSeq
 							await ev.AcceptAsync(storeCtx, null);
 							var storage = app.Services.GetRequiredService<IStorage<Event, Guid>>();
 							await storage.AppendAsync(ev);

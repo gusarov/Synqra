@@ -11,9 +11,9 @@ namespace Synqra;
 [JsonDerivedType(typeof(ObjectPropertyChangedEvent), "ObjectPropertyChangedEvent")]
 [JsonDerivedType(typeof(ObjectDeletedEvent), "ObjectDeletedEvent")]
 [JsonDerivedType(typeof(CommandCreatedEvent), "CommandCreatedEvent")]
-public abstract class Event : IIdentifiable<Guid>
+public abstract class Event // : IIdentifiable<Guid>
 {
-	Guid IIdentifiable<Guid>.Id => EventId;
+	// Guid IIdentifiable<Guid>.Id => EventId;
 
 	public required Guid EventId { get; set; }
 	public required Guid CommandId { get; set; }
