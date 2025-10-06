@@ -41,7 +41,7 @@ public class EmergencyLog
 				mutexName = mutexName.Replace(c, '_');
 			}
 			// mutex name uniquiness should corelate with temp folder uniquiness.
-			// When TMP configured per-user, or per-session, or per-machine same would ne with mutex name
+			// When TMP configured per-user, or per-session, or per-machine same would be with mutex name
 			_mutexName = $"Global\\SynqraEmergencyLog_{mutexName}";
 			// _mutexName = $"Global\\SynqraEmergencyLog";
 		}
