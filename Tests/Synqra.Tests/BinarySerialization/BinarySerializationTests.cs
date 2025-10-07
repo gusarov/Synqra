@@ -1,15 +1,52 @@
 ﻿using Synqra.BinarySerializer;
+using Synqra.Tests.DemoTodo;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests.BinarySerialization;
 
 #pragma warning disable TUnitAssertions0002 // Assert statements must be awaited
+
+[NotInParallel]
+internal class BinarySerializationGuidTests : BaseTest
+{
+	[Test]
+	[Arguments(1, "00000000-0000-0000-0000-000000000000", "00")] // glyph zero
+	[Arguments(2, "ffffffff-ffff-ffff-ffff-ffffffffffff", "01")] // glyph one
+	[Arguments(3, "DB7196E3-FD0C-4C15-8D5A-94ABC2D5DFDC", "8D E39671DB 0CFD 154C 5A 94ABC2D5DFDC")] // regular Guid v4
+	[Arguments(4, "DB7196E3-FD0C-4C15-8D5A-94ABC2D50000", "8D E39671DB 0CFD 154C 5A 94ABC2D50000")] // TODO compress it!
+	[Arguments(5, "0199bf3f-deae-77bb-8631-335347819f65", "07 BC01 BB 46 31335347819F65")] // v7 compressed related to known time base
+	[Arguments(6, "00000000-0037-8000-8000-000000000000", "28 3700")] // compress with presence mask
+	[Arguments(7, "DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")] // Apollo 1980 Guid
+	[Arguments(8, "DB7196E3-FD0C-AC15-C0DA-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC C0DA 94ABC2D5DFDC")] // Microsoft 1990 Guid
+	public void Should_serialize_guid_with_test_vectors(int id, string guidString, string hex)
+	{
+#if NET9_0_OR_GREATER
+		// Console.WriteLine(Guid.CreateVersion7());
+#endif
+
+		var guid = new Guid(guidString);
+		Span<byte> buffer = stackalloc byte[20];
+		var ser = new SBXSerializer();
+		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
+		int pos = 0;
+		ser.Serialize(buffer, guid, ref pos);
+		var pos2 = 0;
+		HexDump(buffer.Slice(0, pos));
+		var deserialized = ser.DeserializeGuid(buffer[0..pos], ref pos2);
+		Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex.Replace(" ", "")).GetAwaiter().GetResult();
+	}
+
+}
 
 [NotInParallel]
 internal class BinarySerializationSignedTests : BaseTest
@@ -240,7 +277,7 @@ public class BinarySerializationTests : BaseTest
 {
 
 	[Test]
-	public async Task Should_serialize_arbitrary_class_by_field_names()
+	public async Task Should_serialize_arbitrary_class_by_field_names_as_object()
 	{
 		// Arrange
 		var testData = new TestData
@@ -268,4 +305,74 @@ public class BinarySerializationTests : BaseTest
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
 
+	[Test]
+	public async Task Should_serialize_arbitrary_class_by_field_names_as_known()
+	{
+		// Arrange
+		var testData = new TestData
+		{
+			Id = 1,
+			Name = "Test",
+			// CreatedAt = DateTime.UtcNow,
+			// Tags = new List<string> { "Tag1", "Tag2" }
+		};
+
+		var ser = new SBXSerializer();
+		// Act
+		Span<byte> buffer = stackalloc byte[10240];
+		int pos = 0;
+		ser.Serialize(buffer, testData, ref pos);
+		buffer = buffer[..pos];
+
+		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
+		HexDump(buffer[..pos]);
+		Console.WriteLine();
+		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(TestJsonSerializerContext.Default.Options)
+		{
+			WriteIndented = false
+		})));
+		// Console.WriteLine(hex);
+		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
+
+		var de = ser.Deserialize<TestData>(ref buffer);
+		await Assert.That(de.Id).IsEqualTo(testData.Id);
+		await Assert.That(de.Name).IsEqualTo(testData.Name);
+	}
+
+	[Test]
+	public async Task Should_serialize_well_known_class_by_field_names_as_known()
+	{
+		// Arrange
+		var ser = new SBXSerializer();
+		var data = new NewEvent1
+		{
+			Event = new ObjectCreatedEvent
+			{
+				EventId = default,
+				CommandId = default,
+				TargetId = default,
+				TargetTypeId = default,
+				CollectionId = default,
+			},
+		};
+		ser.Map(1, typeof(NewEvent1));
+		ser.Map(2, typeof(ObjectCreatedEvent));
+
+		// Act
+		Span<byte> buffer = stackalloc byte[10240];
+		int pos = 0;
+		ser.Serialize<TransportOperation>(buffer, data, ref pos);
+		buffer = buffer[..pos];
+
+		// Assert
+		HexDump(buffer[..pos]);
+		var de = (NewEvent1)ser.Deserialize<TransportOperation>(ref buffer);
+		var te = (ObjectCreatedEvent)de.Event;
+		var te2 = (ObjectCreatedEvent)data.Event;
+		await Assert.That(te.EventId).IsEqualTo(te2.EventId);
+		await Assert.That(te.CommandId).IsEqualTo(te2.CommandId);
+		await Assert.That(te.TargetId).IsEqualTo(te2.TargetId);
+		await Assert.That(te.TargetTypeId).IsEqualTo(te2.TargetTypeId);
+		await Assert.That(te.CollectionId).IsEqualTo(te2.CollectionId);
+	}
 }

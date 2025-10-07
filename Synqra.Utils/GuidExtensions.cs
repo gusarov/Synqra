@@ -96,7 +96,7 @@ public static class GuidExtensions
 		[Obsolete("Use CreateVersion7 instead")]
 		internal unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, ulong node)
 		{
-			var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
+			var greg_100_ns = dateTime.ToUniversalTime().Ticks - GregEpochTicks;
 
 			Guid g = default;
 			byte* bytes = (byte*)&g;
@@ -215,7 +215,7 @@ public static class GuidExtensions
 
 			var g = Guid.NewGuid();
 
-			ticks -= _unixEpochTicks;
+			ticks -= UnixEpochTicks;
 
 			// Omni Stamp is a combo of ms<<12 & custom sub_ms part
 			long omniStamp = (ticks / 10000) << 12;
@@ -251,8 +251,8 @@ public static class GuidExtensions
 	}
 
 	private static readonly Encoding _utf8 = new UTF8Encoding(false, false); // for name-based UUIDs
-	private const long _unixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
-	private const long _gregEpochTicks = 0x06ED6223E4344000; // new DateTime(1582, 10, 15, 0, 0, 0, DateTimeKind.Utc).Ticks;
+	public const long UnixEpochTicks = 0x089F7FF5F7B58000; // new DateTime(1970, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
+	public const long GregEpochTicks = 0x06ED6223E4344000; // new DateTime(1582, 10, 15, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
 	// https://www.rfc-editor.org/rfc/rfc9562.html?utm_source=chatgpt.com#name-namespace-id-usage-and-allo
 	private static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
@@ -329,7 +329,7 @@ public static class GuidExtensions
 				long tsHigh = shorts[1] & 0x0FFF;
 
 				var greg_100_ns = (tsHigh << 48) | (tsMid << 32) | tsLow;
-				return new DateTime(_gregEpochTicks + greg_100_ns, DateTimeKind.Utc);
+				return new DateTime(GregEpochTicks + greg_100_ns, DateTimeKind.Utc);
 			}
 			case 2:
 				throw new NotImplementedException();
@@ -340,7 +340,7 @@ public static class GuidExtensions
 				var tsLow = shorts[1] & 0x0FFF;
 
 				var greg_100_ns = (tsHigh << 28) | (tsMid << 12) | tsLow;
-				return new DateTime(_gregEpochTicks + greg_100_ns, DateTimeKind.Utc);
+				return new DateTime(GregEpochTicks + greg_100_ns, DateTimeKind.Utc);
 			}
 			case 7:
 			{
@@ -348,7 +348,7 @@ public static class GuidExtensions
 				var tsLow = shorts[0];
 				long unix_64_bit_ms = (tsHigh << 16) | tsLow;
 
-				return new DateTime(_unixEpochTicks).AddMilliseconds(unix_64_bit_ms);
+				return new DateTime(UnixEpochTicks).AddMilliseconds(unix_64_bit_ms);
 			}
 			default:
 				throw new NotSupportedException($"Cannot get timestamp of UUID v{ver}");
@@ -361,7 +361,7 @@ public static class GuidExtensions
 	[Obsolete("Use CreateVersion7 instead")]
 	internal static unsafe Guid CreateVersion1(DateTimeOffset dateTime, ushort clockSeq, ulong node)
 	{
-		var greg_100_ns = dateTime.ToUniversalTime().Ticks - _gregEpochTicks;
+		var greg_100_ns = dateTime.ToUniversalTime().Ticks - GregEpochTicks;
 
 		Guid g = default;
 		byte* bytes = (byte*)&g;

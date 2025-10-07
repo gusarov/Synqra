@@ -81,7 +81,7 @@ public class TestUtils : PerformanceTestUtils
 				Console.Write(c);
 				if ((i + 1) % 4 == 0)
 				{
-					Console.Write(" ");
+					//Console.Write(" ");
 				}
 			}
 			pos += 16;
@@ -120,7 +120,7 @@ public class TestUtils : PerformanceTestUtils
 				Console.Write(c);
 				if ((i + 1) % 4 == 0)
 				{
-					Console.Write(" ");
+					//Console.Write(" ");
 				}
 			}
 			pos += rem;
