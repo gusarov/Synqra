@@ -37,8 +37,8 @@ WORKDIR /src
 COPY --parents **/*.*proj *.sln global.json *.targets *.props ./
 RUN dotnet restore --no-cache "-clp:ErrorsOnly;NoSummary" -tl:false -nologo && dotnet nuget disable source nuget.org
 COPY . .
-RUN dotnet build -f net8.0 Tests/Synqra.Tests -c $BUILD_CONFIGURATION --no-restore -m:1 "-clp:ErrorsOnly;NoSummary" -tl:false -nologo
-#RUN dotnet test -f net8.0 Tests/Synqra.Tests -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+#RUN dotnet build -f net8.0 Tests/Synqra.Tests -c $BUILD_CONFIGURATION --no-restore -m:1 "-clp:ErrorsOnly;NoSummary" -tl:false -nologo
+RUN dotnet test -f net8.0 Tests/Synqra.Tests -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 #RUN dotnet publish -f net8.0 Tests/Synqra.Tests -c Release -r linux-x64
 #RUN Tests/Synqra.Tests/bin/Release/net8.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
