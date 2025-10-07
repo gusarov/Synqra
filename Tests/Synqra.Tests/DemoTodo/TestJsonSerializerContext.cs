@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using MongoDB.Bson.Serialization.Attributes;
+using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.ModelManagement;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -53,6 +54,7 @@ namespace Synqra.Tests.DemoTodo;
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
 
+[JsonSerializable(typeof(TestData))]
 [JsonSerializable(typeof(TransportOperation))]
 
 public partial class TestJsonSerializerContext : JsonSerializerContext
