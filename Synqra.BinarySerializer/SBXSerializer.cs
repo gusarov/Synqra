@@ -9,7 +9,7 @@ using System.Text.Unicode;
 
 namespace Synqra.BinarySerializer;
 
-public class SBXSerializer
+public class SBXSerializer : ISBXSerializer
 {
 	// A schema can carry not only the mappings but also - a day when it was created. This can let automatically expire old schemas. E.g. just a simple rule that no stream can live for more than a year and have to be re-built, leads to a fact that we know, a year old format can be easily dropped if it is not latest.
 
@@ -49,8 +49,8 @@ public class SBXSerializer
 
 	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
 	DateTime _streamBaseTime = DateTime.UtcNow;
-	Dictionary<int, Type> _typeById = new();
-	Dictionary<Type, int> _idByType = new();
+	Dictionary<int, (float schemaVersion, Type type)> _typeById = new();
+	Dictionary<Type, (int typeId, float schemaVersion)> _idByType = new();
 
 	public void SetTimeBase(DateTime streamBaseTime)
 	{
@@ -61,10 +61,11 @@ public class SBXSerializer
 		_streamBaseTime = streamBaseTime;
 	}
 
-	public void Map(int typeId, Type type)
+	public void Map(int typeId, double schemaVersion, Type type)
 	{
-		_typeById[typeId] = type;
-		_idByType[type] = typeId;
+		var schemaVersionF = (float)schemaVersion;
+		_typeById[typeId] = (schemaVersionF, type);
+		_idByType[type] = (typeId, schemaVersionF);
 	}
 
 	/*
@@ -86,7 +87,7 @@ public class SBXSerializer
 
 	#region Object
 
-	public void Serialize<T>(Span<byte> buffer, T obj, ref int pos)
+	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(Span<byte> buffer, T obj, ref int pos)
 	{
 		Serialize(buffer, obj, ref pos, typeof(T));
 	}
@@ -117,7 +118,9 @@ public class SBXSerializer
 
 		if (obj is IBindableModel bm)
 		{
-			throw new NotSupportedException();
+			_idByType.TryGetValue(type, out var typeInfo);
+			EmergencyLog.Default.Debug($"Syncron Serializing {type.FullName} with schema version {typeInfo.schemaVersion}");
+			bm.Get(this, typeInfo.schemaVersion, buffer, ref pos);
 		}
 		else if (obj is int i)
 		{
@@ -150,7 +153,7 @@ public class SBXSerializer
 		}
 	}
 
-	public T Deserialize<T>(ref Span<byte> buffer)
+	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ref Span<byte> buffer)
 	{
 		return (T)Deserialize(ref buffer, typeof(T));
 	}
@@ -182,13 +185,17 @@ public class SBXSerializer
 		var typeId = (TypeId)DeserializeSigned(ref buffer);
 		Type type;
 		object value;
+		float schemaVersion;
 		if (typeId == 0)
 		{
 			type = Type.GetType(DeserializeString(ref buffer), true);
+			schemaVersion = default;
 		}
 		else if (typeId == TypeId.AsRequested)
 		{
 			type = requestedType;
+			_idByType.TryGetValue(type, out var typeInfo);
+			schemaVersion = typeInfo.schemaVersion;
 		}
 		else if (typeId == TypeId.SignedInteger)
 		{
@@ -211,9 +218,10 @@ public class SBXSerializer
 		}
 		else
 		{
-			if (_typeById.TryGetValue((int)typeId, out var t))
+			if (_typeById.TryGetValue((int)typeId, out var typeInfo))
 			{
-				type = t;
+				type = typeInfo.type;
+				schemaVersion = typeInfo.schemaVersion;
 			}
 			else
 			{
@@ -221,6 +229,20 @@ public class SBXSerializer
 			}
 		}
 		value = Activator.CreateInstance(type) ?? throw new Exception("Could not create instance of type " + type.FullName);
+		if (schemaVersion != 0)
+		{
+			if (value is IBindableModel bm)
+			{
+				int pos = 0;
+				bm.Set(this, schemaVersion, buffer, ref pos);
+				buffer = buffer[pos..];
+			}
+			else
+			{
+				throw new NotSupportedException("Only IBindableModel are supported for schema versioning.");
+			}
+		}
+		// _typeById.TryGetValue((int)typeId, out var typeInfo);
 
 		// free key-value pairs until the end of buffer or untill comment
 		while (buffer.Length > 0)
@@ -308,17 +330,17 @@ public class SBXSerializer
 			case Type t when t == typeof(Guid):
 				return TypeId.Guid;
 			default:
-				_idByType.TryGetValue(type, out var id); // it will stay Unknown if there is no such type, as designed.
-				return (TypeId)id;
+				_idByType.TryGetValue(type, out var metaData); // it will stay Unknown if there is no such type, as designed.
+				return (TypeId)metaData.typeId;
 				// throw new Exception($"Type {type.FullName} is not supported for serialization.");
 		}
 	}
 
 	private Type GetTypeFromId(TypeId typeId)
 	{
-		if (_typeById.TryGetValue((int)typeId, out var type))
+		if (_typeById.TryGetValue((int)typeId, out var metaData))
 		{
-			return type;
+			return metaData.type;
 		}
 		return typeId switch
 		{
@@ -361,7 +383,7 @@ public class SBXSerializer
 
 	public string DeserializeString(ReadOnlySpan<byte> buffer, ref int pos)
 	{
-		int length = MemoryExtensions.IndexOf<byte>(buffer, 0); // todo: it probably allocates array here :(
+		int length = MemoryExtensions.IndexOf<byte>(buffer[pos..], 0); // todo: it probably allocates array here :(
 		if (length < 0)
 		{
 			throw new ArgumentException("Buffer too small for string decoding.");
@@ -372,7 +394,7 @@ public class SBXSerializer
 		return str;
 	}
 
-	public string DeserializeString(ref ReadOnlySpan<byte> buffer)
+	public string DeserializeString(ref ReadOnlySpan<byte> buffer) // 37 38 00
 	{
 		int length = MemoryExtensions.IndexOf<byte>(buffer, 0); // todo: it probably allocates array here :(
 		// var length = (int)DeserializeUnsigned(ref buffer);

@@ -8,11 +8,45 @@ internal class CodeGenUtils
 	{
 	}
 
-	public void WriteFile(string synqraBuildBoxId, string filePath, string content)
+	public void WriteFile(string synqraBuildBoxId, string filePath, string originalContent, string newContent)
 	{
-		EmergencyLog.Default.Message("WriteFile: " + filePath);
-		File.WriteAllText(filePath, content);
+		using (var mutex = new Mutex(false, "Synqra_CodeGenUtils_Write"))
+		{
+			bool acquired = false;
+			try
+			{
+				acquired = mutex.WaitOne();
+			}
+			catch (AbandonedMutexException)
+			{
+				// The mutex was abandoned in another process, it will still get acquired. No need to do anything special here, it is normal case.
+				acquired = true;
+			}
+			try
+			{
+				var current = File.ReadAllText(filePath);
+				if (current == originalContent)
+				{
+					EmergencyLog.Default.Message("WriteFile: " + filePath);
+					File.WriteAllText(filePath, newContent);
+				}
+				else if (current != newContent)
+				{
+					EmergencyLog.Default.Debug("WriteFile: File has changed since last read, skip writing file: " + filePath);
+				}
+			}
+			finally
+			{
+				if (acquired)
+				{
+					mutex.ReleaseMutex();
+				}
+			}
+		}
+		// EmergencyLog.Default.Message("WriteFile: " + filePath);
+		// File.WriteAllText(filePath, content);
 		return;
+		/*
 		if (string.IsNullOrEmpty(synqraBuildBoxId))
 		{
 			EmergencyLog.Default.Error("WriteFile: synqraBuildBoxId is not set, skip writing file: " + filePath);
@@ -34,7 +68,6 @@ internal class CodeGenUtils
 		path = Path.Combine(path, Path.GetFileName(filePath));
 		EmergencyLog.Default.Message("WriteFile: " + path);
 		File.WriteAllText(path, content);
-		/*
 		ThreadPool.QueueUserWorkItem(delegate
 		{
 			Thread.Sleep(5000);

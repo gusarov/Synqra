@@ -3,7 +3,35 @@
 public interface IBindableModel
 {
 	ISynqraStoreContext? Store { get; set; }
+
+	/// <summary>
+	/// Dedicated access to set a property by name, without using reflection.
+	/// </summary>
+	/// <param name="propertyName"></param>
+	/// <param name="value"></param>
 	void Set(string propertyName, object? value);
+
+	/// <summary>
+	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Set(ISBXSerializer serializer, float schemaVersion, ReadOnlySpan<byte> buffer, ref int pos);
+
+	/// <summary>
+	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Get(ISBXSerializer serializer, float schemaVersion, Span<byte> buffer, ref int pos);
+}
+
+/// <summary>
+/// Synqra Binary eXchange // or // Syncron
+/// </summary>
+public interface ISBXSerializer
+{
+	void Serialize(Span<byte> buffer, string value, ref int pos);
+	void Serialize(Span<byte> buffer, in int value, ref int pos);
+	string? DeserializeString(ReadOnlySpan<byte> buffer, ref int pos);
+	long DeserializeSigned(ReadOnlySpan<byte> buffer, ref int pos);
+	ulong DeserializeUnsigned(ReadOnlySpan<byte> buffer, ref int pos);
 }
 
 public static class BinderModes

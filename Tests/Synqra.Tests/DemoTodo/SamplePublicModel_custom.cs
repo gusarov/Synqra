@@ -1,6 +1,7 @@
 ﻿// NOTE! this is a different class name - for experiments with manual code instead of generator
 /* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
 
+using Synqra.BinarySerializer;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -120,5 +121,21 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	public void CustomCommand1_Reset()
 	{
 		Name = "Value 0";
+	}
+
+	public void Set(ISBXSerializer serializer, float version, ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		// Positional Fields: Name
+		__name = serializer.DeserializeString(buffer, ref pos);
+	}
+
+	public void Get(ISBXSerializer serializer, float version, Span<byte> buffer, ref int pos)
+	{
+		// Positional Fields: Name
+		serializer.Serialize(buffer, __name, ref pos);
+
+		// Optional Presence Mask Fields: (??)
+		// Keyed Fields: (??)
+		// Named Fields: (auto processed by serializer later, it is never here)
 	}
 }
