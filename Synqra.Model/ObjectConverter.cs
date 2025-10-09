@@ -93,10 +93,10 @@ public class ObjectConverter : JsonConverter<object>
 		else
 		{
 			var typeName = value?.GetType()?.Name;
-			EmergencyLog.Default.Message($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
+			EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
 			if (typeName?.Contains("Task") == true)
 			{
-				EmergencyLog.Default.Message($"ObjectConverter.JsonSerializer.Serialize: Stack {new StackTrace()}");
+				EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: Stack {new StackTrace()}");
 			}
 			JsonSerializer.Serialize(writer, value, rootType, options);
 		}

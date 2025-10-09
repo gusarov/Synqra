@@ -10,19 +10,23 @@ using System.Text;
 // using TheSource = (Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax clazz, Microsoft.CodeAnalysis.SemanticModel sem, string? data);
 using TheSource = (
 	  Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax clazz
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? data
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? ibm
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? ipc
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? ipcg
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? pceh
-	, Microsoft.CodeAnalysis.INamedTypeSymbol? pcgeh
+	, Microsoft.CodeAnalysis.INamedTypeSymbol data
+	, Microsoft.CodeAnalysis.INamedTypeSymbol ibm
+	, Microsoft.CodeAnalysis.INamedTypeSymbol ipc
+	, Microsoft.CodeAnalysis.INamedTypeSymbol ipcg
+	, Microsoft.CodeAnalysis.INamedTypeSymbol pceh
+	, Microsoft.CodeAnalysis.INamedTypeSymbol pcgeh
 	);
+using System.Transactions;
+using System.Collections.Specialized;
 
 namespace Synqra.CodeGeneration;
 
 using TheCombinedSource = (
 	  TheSource src
-	, string tfm
+	, (string tfm
+	, string SynqraBuildBox
+	  ) buildProps
 	);
 
 [Generator(LanguageNames.CSharp)]
@@ -54,6 +58,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 				// Commonly useful properties:
 				var tfm = Get("build_property.TargetFramework");           // e.g. "net8.0", "net8.0-windows10.0.19041.0"
+				var SynqraBuildBox = Get("build_property.SynqraBuildBox");           // e.g. "net8.0", "net8.0-windows10.0.19041.0"
 				/*
 				var tfms = Get("build_property.TargetFrameworks");          // multi-target list (design-time only; normal builds run per TFM)
 				var tpi = Get("build_property.TargetPlatformIdentifier");  // e.g. "windows" (present when using OS-specific TFMs)
@@ -65,7 +70,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var osid = Get("build_property.TargetOS");                  // newer SDKs
 				return new BuildProps(tfm, tfms, tpi, tpv, rid, rids, conf, osid, osver);
 				*/
-				return tfm;
+				return (tfm, SynqraBuildBox);
 			});
 
 			var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<TheSource>(
@@ -81,7 +86,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					}
 					catch (Exception ex)
 					{
-						EmergencyLog.Default.Message($"[-] predicate: {ex}");
+						EmergencyLog.Default.Error($"predicate", ex);
 						throw;
 					}
 				},
@@ -95,13 +100,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
 						var comp = ctx.SemanticModel.Compilation;
-						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
-						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged");
-						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging");
-						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler");
-						var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler");
+						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel") ?? throw new Exception("Can't resolve Synqra.IBindableModel. Please, add reference to Syncra.Model");
+						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanged");
+						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanging");
+						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangedEventHandler");
+						var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangingEventHandler");
 
-						var zlsSym = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, cancelToken);
+						var zlsSym = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, cancelToken) ?? throw new Exception("zlsSym");
 						cancelToken.ThrowIfCancellationRequested();
 
 
@@ -109,7 +114,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					}
 					catch (Exception ex)
 					{
-						EmergencyLog.Default.Message($"[-] transform: {ex}");
+						EmergencyLog.Default.Error($"transform", ex);
 						throw;
 					}
 				});
@@ -121,14 +126,104 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 		catch (Exception ex)
 		{
-			EmergencyLog.Default.Message($"[-] {ex}");
+			EmergencyLog.Default.Error($"Initialize", ex);
 			throw;
 		}
 	}
 
-	static string FQN(ITypeSymbol? t) =>
-	(t ?? throw new InvalidOperationException("Type not found"))
-	.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+	static string FQN(ITypeSymbol t) =>
+		(t ?? throw new InvalidOperationException("Type not found"))
+		.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+	static IEnumerable<(double, string)> GetAllSchemas(ClassDeclarationSyntax clazz)
+	{
+		foreach (var attr in clazz.AttributeLists)
+		{
+			// bool useAttribute = false;
+			int i = 0;
+			EmergencyLog.Default.Debug("> AttrNode: " + attr.ToFullString());
+			foreach (var item in attr.ChildNodes())
+			{
+				EmergencyLog.Default.Debug(">> ChildNode: " + item.ToFullString());
+				foreach (var item2 in item.ChildNodes())
+				{
+					EmergencyLog.Default.Debug(">>> ChildNode: " + item2.ToFullString());
+					if (item2.ToFullString() == "Schema")
+					{
+						EmergencyLog.Default.Debug("!!! " + i);
+					}
+					foreach (var item3 in item2.ChildNodes())
+					{
+						EmergencyLog.Default.Debug(">>>> ChildNode: " + item3.ToFullString());
+					}
+					if (i++ == 0)
+					{
+						if (item2.ToFullString() == "Schema")
+						{
+							EmergencyLog.Default.Debug("! SELECTED NEXT AFTER: " + item2.ToFullString());
+							i = -1;
+							continue;
+						}
+					}
+					else if (i == 0)
+					{
+						int sc = 0;
+						double ver = 0;
+						EmergencyLog.Default.Debug("! ChildNode: " + item2.ToFullString());
+						foreach (var item3 in item2.ChildNodes())
+						{
+							EmergencyLog.Default.Debug(">>>> ChildNode: " + item3.ToFullString());
+							if (sc++ == 0)
+							{
+								if (double.TryParse(item3.ToFullString(), out ver))
+								{
+									EmergencyLog.Default.Debug("!!! Schema Version: " + ver);
+									continue;
+								}
+							}
+							else
+							{
+								var s = item3.ToFullString().Trim('"');
+								EmergencyLog.Default.Debug("!!! Schema String: " + s);
+								yield return (ver, s);
+								break;
+							}
+						}
+					}
+				}
+
+				if (i == -1)
+				{
+					/*
+					EmergencyLog.Default.Debug("! ChildNode: " + item.ToFullString());
+					foreach (var item2 in item.ChildNodes())
+					{
+						EmergencyLog.Default.Debug(">> ChildNode: " + item2.ToFullString());
+						foreach (var item3 in item2.ChildNodes())
+						{
+							EmergencyLog.Default.Debug(">>> ChildNode: " + item3.ToFullString());
+						}
+						if (sc++ == 0)
+						{
+						}
+						else
+						{
+
+						}
+					}
+					*/
+				}
+				else if (i++ == 0)
+				{
+					if (item.ToFullString() == "Schema")
+					{
+						i = -1;
+						// continue;
+					}
+				}
+			}
+		}
+	}	
 
 	/// <summary>
 	/// This method is where the real work of the generator is done
@@ -138,7 +233,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	static void Execute(TheCombinedSource combinedData, SourceProductionContext context)
 	{
 		TheSource data = combinedData.src;
-		string tfm = combinedData.tfm;
+		string tfm = combinedData.buildProps.tfm;
+		string SynqraBuildBox = combinedData.buildProps.SynqraBuildBox;
 		if (tfm == null || data.clazz is null)
 		{
 			return;
@@ -150,14 +246,51 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		try
 		{
 			var clazz = data.clazz;
+
+			var sourceContent = CodeGenUtils.Default.ReadFile(clazz.SyntaxTree.FilePath);
+			EmergencyLog.Default.Debug($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath} ioSourceContent={sourceContent} node.text={clazz.ToFullString()}");
+			var line = clazz.SyntaxTree.GetLineSpan(clazz.GetLocation().SourceSpan).StartLinePosition.Line;
+			if (clazz.AttributeLists.Count == 0)
+			{
+				EmergencyLog.Default.Debug($"GetLineSpan() {line} {clazz.Span.Start}");
+			}
+			else
+			{
+				var a = clazz.AttributeLists.First().Span.Start;
+				var b = clazz.AttributeLists.First().Span.End;
+				var c = clazz.AttributeLists.Last().Span.Start;
+				var d = clazz.AttributeLists.Last().Span.End;
+				EmergencyLog.Default.Debug($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
+
+				string lastSchema = "";
+				foreach (var item in GetAllSchemas(clazz))
+				{
+					EmergencyLog.Default.Debug("Schema: " + item);
+					lastSchema = item.Item2;
+				}
+
+				var sb = new StringBuilder(sourceContent);
+				var ver = 2025.99;
+				var schema = "1 Subject str? Number zig";
+				if (lastSchema != schema)
+				{
+					EmergencyLog.Default.Debug("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
+					sb.Insert(d, $"\r\n[Schema({ver}, \"{schema}\")]");
+					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, sb.ToString());
+				}
+				else
+				{
+					EmergencyLog.Default.Debug("*********** Schema already present as latest: " + lastSchema);
+				}
+				EmergencyLog.Default.Debug(sb.ToString());
+
+			}
+
+			EmergencyLog.Default.Debug("!! SynqraBuildBox = " + SynqraBuildBox);
+
 			var classMembers = data.clazz.Members;
-			EmergencyLog.Default.Message($"[i] TFM {tfm}");
-			EmergencyLog.Default.Message($"[+] Analyze {clazz.Identifier}...");
-			EmergencyLog.Default.Message($"{data.pceh} pceh");
-			EmergencyLog.Default.Message($"{data.pcgeh} pcgeh");
-			EmergencyLog.Default.Message($"{data.ibm} ibm");
-			EmergencyLog.Default.Message($"{data.ipc} ipc");
-			EmergencyLog.Default.Message($"{data.ipcg} ipcg");
+			EmergencyLog.Default.Debug($"TFM {tfm} Analyze {clazz.Identifier}...");
+			EmergencyLog.Default.Debug($"{data.pceh} pceh {data.pcgeh} pcgeh {data.ibm} ibm {data.ipc} ipc {data.ipcg} ipcg");
 
 			foreach (var item in classMembers)
 			{
@@ -171,9 +304,23 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
-			body.AppendLine("using Synqra;");
-			body.AppendLine("using System.ComponentModel;");
+			body.AppendLine("#nullable enable");
+			HashSet<string> usingsSet = new HashSet<string>();
+			List<string> usingsList = new List<string>();
+			void Add(string usingStatement)
+			{
+				if (usingsSet.Add(usingStatement))
+				{
+					usingsList.Add(usingStatement);
+				}
+			}
+			Add("using Synqra;");
+			Add("using System.ComponentModel;");
 			foreach (var usingStatement in clazz.SyntaxTree.GetCompilationUnitRoot().Usings)
+			{
+				Add(usingStatement.ToString());
+			}
+			foreach (var usingStatement in usingsList)
 			{
 				body.AppendLine(usingStatement.ToString());
 			}
@@ -187,10 +334,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 			if (calcClassNamespace is null)
 			{
-				EmergencyLog.Default.Debug($"[-] Could not find namespace for {clazz.Identifier}");
+				EmergencyLog.Default.Error($"Could not find namespace for {clazz.Identifier}", null);
 			}
-			EmergencyLog.Default.Debug($"[+] Found calcClassNamespace={calcClassNamespace?.Name}");
-			body.AppendLine($"using System.ComponentModel;");
+			EmergencyLog.Default.Debug($"Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
@@ -241,7 +387,7 @@ $$"""
 				{
 						body.AppendLine($$"""
 				case "{{pro.Identifier}}":
-					{{pro.Identifier}} = ({{pro.Type}})value;
+					{{pro.Identifier}} = ({{pro.Type}})value!;
 					break;
 """);
 				}
@@ -345,7 +491,7 @@ $$"""
 		}
 		catch (Exception ex)
 		{
-			EmergencyLog.Default.Message($"[-] Execute: {ex}");
+			EmergencyLog.Default.Error($"Execute", ex);
 		}
 	}
 }

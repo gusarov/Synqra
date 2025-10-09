@@ -35,7 +35,7 @@ internal class SynqraTestNode
 	{
 		AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
 		{
-			EmergencyLog.Default.Message($"{e.Exception}");
+			EmergencyLog.Default.Message("[Warning] First Chance Exception: " + e.Exception);
 		};
 	}
 
@@ -130,6 +130,7 @@ internal class SynqraTestNode
 			o.SerializerOptions.Converters.Add(new ObjectConverter());
 		});
 
+		/*
 		builder.Services.AddSignalR(o => o.EnableDetailedErrors = true)
 			.AddJsonProtocol(o =>
 			 {
@@ -142,6 +143,7 @@ internal class SynqraTestNode
 				 // (Optional) tune other STJ options here if you really need to.
 			 })
 			;
+		*/
 
 		builder.Services.AddTransient(typeof(Lazy<>), typeof(Lazier<>));
 

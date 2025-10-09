@@ -11,6 +11,25 @@ namespace Synqra.BinarySerializer;
 
 public class SBXSerializer
 {
+	// A schema can carry not only the mappings but also - a day when it was created. This can let automatically expire old schemas. E.g. just a simple rule that no stream can live for more than a year and have to be re-built, leads to a fact that we know, a year old format can be easily dropped if it is not latest.
+
+	// StaticMap|PresenceMaskLayout|fieldIds
+
+	// StaticMap - Id:zig,Name:str
+	// PresenceMaskLayout
+	// fieldIds
+
+	// [SchemaVersion(2025.15, "Id:zig|IsActive:exact_bool,Level:uns|LevelName:1")]
+	// [SchemaVersion(2025.16, "Id:zig,Name:str")]
+	// partial class SomeModel : IBindableObject
+	// {
+	//     public int Id { get; set; }
+	//     public string Name { get; set; }
+	//     public bool IsActive { get; set; }
+	//     public int? Level { get; set; }
+	//     public string? LevelName { get; set; }
+	// }
+
 	public enum TypeId
 	{
 		Unknown = 0,
