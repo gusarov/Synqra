@@ -1,4 +1,4 @@
-﻿using Synqra.BinarySerializer;
+using Synqra.BinarySerializer;
 using Synqra.Tests.DemoTodo;
 using Synqra.Tests.TestHelpers;
 using System;
@@ -10,6 +10,27 @@ using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests.BinarySerialization;
+
+public class TestData
+{
+	public TestData()
+	{
+
+	}
+
+	public int Id { get; set; }
+	public string? Name { get; set; }
+	// public DateTime CreatedAt { get; set; }
+	// public List<string> Tags { get; set; }
+}
+
+[Schema(2025.09, "0 Id int Name str?")]
+[Schema(2025.772, "1 Id int Name string?")]
+public partial class TestSynqraModel
+{
+	public partial int Id { get; set; }
+	public partial string? Name { get; set; }
+}
 
 #pragma warning disable TUnitAssertions0002 // Assert statements must be awaited
 
@@ -259,19 +280,6 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	*/
 }
 
-public class TestData
-{
-	public TestData()
-	{
-		
-	}
-
-	public int Id { get; set; }
-	public string? Name { get; set; }
-	// public DateTime CreatedAt { get; set; }
-	// public List<string> Tags { get; set; }
-}
-
 [NotInParallel]
 public class BinarySerializationTests : BaseTest
 {
@@ -340,7 +348,34 @@ public class BinarySerializationTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_serialize_well_known_class_by_field_names_as_known()
+	public async Task Should_serialize_generated_class_by_field_names_as_known()
+	{
+		// Arrange
+		var ser = new SBXSerializer();
+		var data = new TestSynqraModel
+		{
+			Id = 7,
+			Name = "The",
+		};
+		ser.Map(5, 2025.772, typeof(TestSynqraModel));
+		ser.Map(6, 2025.772, typeof(SamplePublicModel_));
+
+		// Act
+		Span<byte> buffer = stackalloc byte[10240];
+		int pos = 0;
+		ser.Serialize(buffer, data, ref pos);
+		buffer = buffer[..pos];
+
+		// Assert
+		HexDump(buffer[..pos]);
+		var de = ser.Deserialize<TestSynqraModel>(ref buffer);
+		await Assert.That(de.Id).IsEqualTo(data.Id);
+		await Assert.That(de.Name).IsEqualTo(data.Name);
+		await Assert.That(pos).IsEqualTo(6);
+	}
+
+	[Test]
+	public async Task Should_serialize_well_known_class_by_field_names_as_known2()
 	{
 		// Arrange
 		var ser = new SBXSerializer();
@@ -355,8 +390,8 @@ public class BinarySerializationTests : BaseTest
 				CollectionId = default,
 			},
 		};
-		ser.Map(1, typeof(NewEvent1));
-		ser.Map(2, typeof(ObjectCreatedEvent));
+		ser.Map(1, 0, typeof(NewEvent1));
+		ser.Map(2, 0, typeof(ObjectCreatedEvent));
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];

@@ -56,20 +56,24 @@ public class TestUtils : PerformanceTestUtils
 
 	public void HexDump(Span<byte> span)
 	{
-		int pos = 0;
-		while (span.Length - pos >= 16)
+		if (span.Length <= 20)
 		{
-			for (int i = 0; i < 16; i++)
+			for (int i = 0, m = span.Length; i < m; i++)
 			{
-				Console.Write(span[pos + i].ToString("X2"));
+				Console.Write(span[i].ToString("X2"));
 				if ((i + 1) % 4 == 0)
+				{
+					Console.Write("  ");
+				}
+				else
 				{
 					Console.Write(" ");
 				}
 			}
-			for (int i = 0; i < 16; i++)
+			Console.WriteLine();
+			for (int i = 0, m = span.Length; i < m; i++)
 			{
-				var c = (char)span[pos + i];
+				var c = (char)span[i];
 				if (c == 0)
 				{
 					c = '.';
@@ -78,52 +82,99 @@ public class TestUtils : PerformanceTestUtils
 				{
 					c = '?';
 				}
-				Console.Write(c);
+				Console.Write("{0,2}", c);
 				if ((i + 1) % 4 == 0)
 				{
-					//Console.Write(" ");
+					Console.Write("  ");
+				}
+				else
+				{
+					Console.Write(" ");
 				}
 			}
-			pos += 16;
+			Console.WriteLine();
 			Console.WriteLine();
 		}
-		if (span.Length - pos > 0)
+		else
 		{
-			var rem = span.Length - pos;
-			for (int i = 0; i < rem; i++)
+
+			int pos = 0;
+			while (span.Length - pos >= 16)
 			{
-				Console.Write(span[pos + i].ToString("X2"));
-				if ((i + 1) % 4 == 0)
+				for (int i = 0; i < 16; i++)
 				{
-					Console.Write(" ");
+					Console.Write(span[pos + i].ToString("X2"));
+					if ((i + 1) % 4 == 0)
+					{
+						Console.Write("  ");
+					}
+					else
+					{
+						Console.Write(" ");
+					}
 				}
+				for (int i = 0; i < 16; i++)
+				{
+					var c = (char)span[pos + i];
+					if (c == 0)
+					{
+						c = '.';
+					}
+					else if (c < 32/* || c > 126*/)
+					{
+						c = '?';
+					}
+					Console.Write(c);
+					if ((i + 1) % 4 == 0)
+					{
+						//Console.Write(" ");
+					}
+				}
+				pos += 16;
+				Console.WriteLine();
 			}
-			for (int i = rem; i < 16; i++)
+			if (span.Length - pos > 0)
 			{
-				Console.Write("  ");
-				if ((i + 1) % 4 == 0)
+				var rem = span.Length - pos;
+				for (int i = 0; i < rem; i++)
 				{
-					Console.Write(" ");
+					Console.Write(span[pos + i].ToString("X2"));
+					if ((i + 1) % 4 == 0)
+					{
+						Console.Write("  ");
+					}
+					else
+					{
+						Console.Write(" ");
+					}
 				}
+				for (int i = rem; i < 16; i++)
+				{
+					Console.Write("  ");
+					if ((i + 1) % 4 == 0)
+					{
+						Console.Write(" ");
+					}
+				}
+				for (int i = 0; i < rem; i++)
+				{
+					var c = (char)span[pos + i];
+					if (c == 0)
+					{
+						c = '.';
+					}
+					else if (c < 32/* || c > 126*/)
+					{
+						c = '?';
+					}
+					Console.Write(c);
+					if ((i + 1) % 4 == 0)
+					{
+						Console.Write(" ");
+					}
+				}
+				pos += rem;
 			}
-			for (int i = 0; i < rem; i++)
-			{
-				var c = (char)span[pos + i];
-				if (c == 0)
-				{
-					c = '.';
-				}
-				else if (c < 32/* || c > 126*/)
-				{
-					c = '?';
-				}
-				Console.Write(c);
-				if ((i + 1) % 4 == 0)
-				{
-					//Console.Write(" ");
-				}
-			}
-			pos += rem;
 		}
 	}
 }

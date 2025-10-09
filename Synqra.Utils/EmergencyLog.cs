@@ -19,8 +19,9 @@ namespace Synqra;
 /// It holds 100 files maximum (100MiB total) but expected to cleanup older files sooner.
 /// The encoding is utf8 (no_bom)
 /// </summary>
-public class EmergencyLog
+public sealed class EmergencyLog
 {
+	static char _rollingAvoidance = '♫';
 	public static EmergencyLog Default { get; } = new EmergencyLog();
 
 	private EmergencyLog()
@@ -50,37 +51,149 @@ public class EmergencyLog
 	private string? _mutexName;
 	private string? _logFilePathTemplate;
 
-	/// <summary>
-	/// Conditional message - #if DEBUG
-	/// </summary>
-	[Conditional("DEBUG")]
-	public void Debug(string message)
-	{
-		Message($"[Debug] {message}");
-	}
-
-	/// <summary>
-	/// Conditional message - #if TRACE
-	/// </summary>
-	[Conditional("TRACE")]
-	public void Trace(string message)
-	{
-		Message($"[Trace] {message}");
-	}
-
-	public void Error(string message, Exception? ex = null)
-	{
-		if (ex == null)
-		{
-			Message($"[Error] {message}");
-		}
-		else
-		{
-			Message($"[Error] {message}: {ex}");
-		}
-	}
-
 	public void Message(string message)
+	{
+		try
+		{
+			if (_logFilePath == null || _logFilePathTemplate == null)
+			{
+				return;
+			}
+
+			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
+
+			Mutex mutex = null;
+#if NET8_0_OR_GREATER
+			if (OperatingSystem.IsWindows())
+			{
+				try
+				{
+					var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+					var security = new MutexSecurity();
+					security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
+					bool createdNew;
+					mutex = MutexAcl.Create(
+						initiallyOwned: false,
+						name: _mutexName,
+						createdNew: out createdNew,
+						mutexSecurity: security);
+				}
+				catch
+				{
+					// It will fall back to general approach below. Unfortunately, can't log this here to avoid loops.
+#if DEBUG
+					// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
+					Debugger.Break();
+					throw;
+#endif
+				}
+			}
+			else if (OperatingSystem.IsBrowser())
+			{
+				Console.WriteLine("⚠️🚨 SynqraEmergencyLog: " + message);
+				return;
+			}
+#endif
+			if (mutex == null)
+			{
+				mutex = new Mutex(false, _mutexName);
+			}
+			using (mutex)
+			{
+				bool acquired = false;
+				try
+				{
+					acquired = mutex.WaitOne();
+				}
+				catch (AbandonedMutexException)
+				{
+					// The mutex was abandoned in another process, it will still get acquired. No need to do anything special here, it is normal case.
+					acquired = true;
+				}
+				try
+				{
+					var fi = new FileInfo(_logFilePath);
+					if (fi.Exists && (fi.Length > 10 * 1024 * 1024))
+					{
+						// slide 50% of file inside!
+						try
+						{
+							using var sr = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+							sr.Position = fi.Length / 2;
+							using var sw = new FileStream(_logFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+							sr.CopyTo(sw);
+							sw.SetLength(sw.Position);
+						}
+						catch (Exception ex)
+						{
+#if DEBUG
+							Debugger.Break();
+#endif
+							message = Format($"[Error] [EmergencyLog] Can't roll file: " + ex + Environment.NewLine) + message;
+						}
+					}
+					var fileName = _logFilePath;
+					Exception? firstEx = null;
+					for (byte i = 0; ; i++) // retry locked file with separate name (should be extremely rare and misuse of storage, but EmergencyLogger guarantees are more important)
+					{
+						try
+						{
+							FileAppendAllText(fileName, message);
+							break;
+						}
+						catch (IOException ex)
+						{
+							if (firstEx == null)
+							{
+								firstEx = ex;
+								message = Format($"[Error] [EmergencyLog] Failed to write to {fileName}, will retry with another file: {ex}") + message;
+							}
+							if (i < 10)
+							{
+								fileName = string.Format(_logFilePathTemplate, "Locked_" + i);
+							}
+							else if (i == 10)
+							{
+								fileName = string.Format(_logFilePathTemplate
+#if NET9_0_OR_GREATER
+									, Guid.CreateVersion7() // sortable
+#else
+									, Guid.NewGuid()
+#endif
+									);
+							}
+							else
+							{
+								throw;
+							}
+						}
+					}
+				}
+				catch
+				{
+					// ignore
+				}
+				finally
+				{
+					if (acquired)
+					{
+						mutex.ReleaseMutex();
+					}
+				}
+			} // Dispose() happens here, after ReleaseMutex()
+		}
+		catch
+		{
+			// Guaranteed no impact on the main application
+#if DEBUG
+			// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
+			Debugger.Break();
+			throw;
+#endif
+		}
+	}
+
+	private void Message_(string message)
 	{
 		try
 		{
@@ -90,7 +203,19 @@ public class EmergencyLog
 			}
 			// TODO use \\global and ACL on windows (or don't... TMP is session specific anyway. UPD: No, I just set both system and user tmp to C:\Dev\Temp and now I have services vs user going to same file. Mutext needs to be global on Windows)
 			// TODO do something for browser
-			message = Format(message);
+
+			bool isRollingAvoidance = message.Length > 0 && message[0] == _rollingAvoidance;
+			if (isRollingAvoidance)
+			{
+				message = message.Substring(1);
+			}
+			else if (message.Length > 0 && message[message.Length - 1] == _rollingAvoidance)
+			{
+				isRollingAvoidance = true;
+				message = message.Substring(0, message.Length - 1);
+			}
+
+			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
 
 			Mutex mutex = null;
 #if NET8_0_OR_GREATER
@@ -144,7 +269,11 @@ public class EmergencyLog
 				{
 					var fi = new FileInfo(_logFilePath);
 					// VNext - assess total size of logs to total space on disk. Bigger more expensive PCs should allow bigger logs and better problem solving, so use that. This approach helps to break the empirical values for size or amount of files or number of days to keep.
-					if (fi.Exists && (fi.Length > 100 * 1024 * 1024 || fi.LastWriteTimeUtc < DateTime.UtcNow.AddDays(-1)))
+					// FileAppendAllText(_logFilePath, $"fi.LastWriteTime - default(DateTime) {fi.LastWriteTime - default(DateTime)}\r\n");
+					// FileAppendAllText(_logFilePath, $"DateTime.Now - default(DateTime){DateTime.Now - default(DateTime)}\r\n");
+					// FileAppendAllText(_logFilePath, $"(int)(fi.LastWriteTime - default(DateTime)).TotalDays{(int)(fi.LastWriteTime - default(DateTime)).TotalDays}\r\n");
+					// FileAppendAllText(_logFilePath, $"(int)(DateTime.Now - default(DateTime)).TotalDays{(int)(DateTime.Now - default(DateTime)).TotalDays}\r\n");
+					if (!isRollingAvoidance && fi.Exists && (fi.Length > 100 * 1024 * 1024 || (int)(fi.LastWriteTime - default(DateTime)).TotalDays < (int)(DateTime.Now - default(DateTime)).TotalDays)) // rotate every day or if file is too big
 					{
 						try
 						{
@@ -197,12 +326,12 @@ public class EmergencyLog
 							fi.MoveTo(DealWithNextFile(2));
 							Message($"[EmergencyLog] Previous log file was renamed. It is {maxFile} files a week ({maxFile / MaxTotalFiles:P0} capacity)");
 						}
-						catch
+						catch (Exception ex)
 						{
 #if DEBUG
 							Debugger.Break();
-							throw;
 #endif
+							message = Format($"[Error] [EmergencyLog] Can't roll file: " + ex + Environment.NewLine) + message + _rollingAvoidance;
 						}
 					}
 					var fileName = _logFilePath;
@@ -211,10 +340,6 @@ public class EmergencyLog
 					{
 						try
 						{
-							if (firstEx != null)
-							{
-								FileAppendAllText(fileName, Format($"[Error] [EmergencyLog] Failed to write to {_logFilePath}: {firstEx}"));
-							}
 							FileAppendAllText(fileName, message);
 							break;
 						}
@@ -223,6 +348,7 @@ public class EmergencyLog
 							if (firstEx == null)
 							{
 								firstEx = ex;
+								message = Format($"[Error] [EmergencyLog] Failed to write to {fileName}, will retry with another file: {ex}");
 							}
 							if (i < 10)
 							{
@@ -289,5 +415,38 @@ public class EmergencyLog
 		});
 		*/
 		sw.Write(message);
+	}
+}
+
+public static class EmergencyLogExtensions
+{
+	/// <summary>
+	/// Conditional message - #if DEBUG
+	/// </summary>
+	[Conditional("DEBUG")]
+	public static void Debug(this EmergencyLog log, string message)
+	{
+		log.Message($"[Debug] {message}");
+	}
+
+	/// <summary>
+	/// Conditional message - #if TRACE
+	/// </summary>
+	[Conditional("TRACE")]
+	public static void Trace(this EmergencyLog log, string message)
+	{
+		log.Message($"[Trace] {message}");
+	}
+
+	public static void Error(this EmergencyLog log, string message, Exception? ex = null)
+	{
+		if (ex == null)
+		{
+			log.Message($"[Error] {message}");
+		}
+		else
+		{
+			log.Message($"[Error] {message}: {ex}");
+		}
 	}
 }
