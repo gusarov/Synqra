@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Synqra.Tests" />
+    <InternalsVisibleTo Include="Synqra.CodeGeneration" />
     <PackageReference Include="System.Threading.AccessControl" Version="9.0.9" />
   </ItemGroup>
 

@@ -17,9 +17,9 @@
  -->
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNet.SignalR.Core" Version="2.4.3" />
     <PackageReference Include="System.Text.Json" Version="9.0.9" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.9" />
+    <InternalsVisibleTo Include="Synqra.Tests.MiniModel" /><!-- THIS IS SERIOUS LIMITATION THAT NEEDS TO BE LIFTED -->
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 

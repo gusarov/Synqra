@@ -68,6 +68,18 @@ public class EmergencyLog
 		Message($"[Trace] {message}");
 	}
 
+	public void Error(string message, Exception? ex = null)
+	{
+		if (ex == null)
+		{
+			Message($"[Error] {message}");
+		}
+		else
+		{
+			Message($"[Error] {message}: {ex}");
+		}
+	}
+
 	public void Message(string message)
 	{
 		try
@@ -194,7 +206,7 @@ public class EmergencyLog
 						}
 					}
 					var fileName = _logFilePath;
-					Exception firstEx = null;
+					Exception? firstEx = null;
 					for (byte i = 0;; i++) // retry locked file with separate name (should be extremely rare and misuse of storage, but EmergencyLogger guarantees are more important)
 					{
 						try

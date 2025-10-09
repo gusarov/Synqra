@@ -24,10 +24,6 @@
     <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="BinarySerializer\" />
-  </ItemGroup>
-
   <!--
   <Target Name="Test_TFM" AfterTargets="CoreCompile">
     <Error Text="Is" Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))"/>

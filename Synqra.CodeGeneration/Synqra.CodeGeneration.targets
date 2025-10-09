@@ -1,0 +1,25 @@
+﻿<Project>
+	<PropertyGroup>
+		<SynqraBuildBox>$(Temp)\Synqra\Build\$([System.Guid]::NewGuid())</SynqraBuildBox>
+	</PropertyGroup>
+	<ItemGroup>
+		<CompilerVisibleProperty Include="SynqraBuildBox" />
+	</ItemGroup>
+
+	<Target Name="_Synqra_CodeGeneration_BeforeCoreCompile" BeforeTargets="CoreCompile">
+		<Message Text="Running Synqra.CodeGeneration _Synqra_CodeGeneration_BeforeCoreCompile $(SynqraBuildBox)" Importance="high" />
+	</Target>
+	
+	<Target Name="_Synqra_CodeGeneration_AfterCoreCompile" AfterTargets="CoreCompile">
+		<Message Text="Running Synqra.CodeGeneration _Synqra_CodeGeneration_AfterCoreCompile $(SynqraBuildBox)" Importance="high" />
+		<ItemGroup>
+			<_tmp Include="$(SynqraBuildBox)\*.*" />
+		</ItemGroup>
+		<Message Text="SynqraBuildBox=$(SynqraBuildBox) _tmp=@(_tmp) ProjectDir=$(ProjectDir)" Importance="high" />
+		<!--
+		<Move OverwriteReadOnlyFiles="true" SourceFiles="@(_tmp)" DestinationFolder="$(ProjectDir)" />
+		-->
+		<Copy SourceFiles="@(_tmp)" DestinationFolder="$(ProjectDir)" Retries="5" OverwriteReadOnlyFiles="true" />
+		<Message Text="Copied: @(_tmp)" Importance="high" />
+	</Target>
+</Project>
