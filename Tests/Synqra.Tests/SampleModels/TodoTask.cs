@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 
-namespace Synqra.Tests.DemoTodo;
+namespace Synqra.Tests.SampleModels;
 
 public class TodoTask
 {

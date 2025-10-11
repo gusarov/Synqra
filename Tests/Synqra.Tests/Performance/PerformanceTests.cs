@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Synqra.Tests.DemoTodo;
 using Synqra.Tests.Helpers;
+using Synqra.Tests.SampleModels;
 
 namespace Synqra.Tests.Performance;
 

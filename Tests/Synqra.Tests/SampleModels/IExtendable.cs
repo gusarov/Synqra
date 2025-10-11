@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Synqra.Tests.DemoTodo;
+namespace Synqra.Tests.SampleModels;
 
 public interface IExtendable
 {

@@ -14,6 +14,7 @@ using Synqra.Tests.Performance;
 using Synqra.Tests.DemoTodo;
 using Synqra.Tests.Helpers;
 using Synqra;
+using Synqra.Tests.SampleModels;
 
 
 namespace Synqra.Tests.Binding;
