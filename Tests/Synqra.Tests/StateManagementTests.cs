@@ -26,8 +26,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	public StateManagementTests()
 	{
 		HostBuilder.AddSynqraStoreContext();
-		HostBuilder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default); // im not sure yet, context or options
-		HostBuilder.Services.AddSingleton(TestJsonSerializerContext.Default.Options); // im not sure yet, context or options
+		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
+		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.Default.Options); // im not sure yet, context or options
 
 		HostBuilder.Services.AddSingleton<FakeStorage>();
 		// HostBuilder.Services.AddSingleton(typeof(IStorage<,>), typeof(FakeStorage<,>));

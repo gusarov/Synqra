@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Synqra.Tests.SampleModels;
+using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.TestHelpers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -17,11 +18,11 @@ public class SerializationTests
 #endif
 
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
-		var obj = new TodoTask
+		var obj = new SampleTodoTask
 		{
 			Subject = subject,
 		};
-		var jsonOptions = new JsonSerializerOptions(TestJsonSerializerContext.Default.Options)
+		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options)
 		{
 			IndentCharacter = '\t',
 			IndentSize = 1,
@@ -33,7 +34,7 @@ public class SerializationTests
 	"subject": "{{subject}}"
 }
 """.NormalizeNewLines());
-		var deserializedObj = JsonSerializer.Deserialize(json, TestJsonSerializerContext.Default.TodoTask);
+		var deserializedObj = JsonSerializer.Deserialize(json, SampleJsonSerializerContext.Default.SampleTodoTask);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
@@ -86,7 +87,7 @@ public class SerializationTests
 			await Assert.That(deserializedObj).IsNotNull();
 			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
 		}
-		await Check(TestJsonSerializerContext.Default);
+		await Check(SampleJsonSerializerContext.Default);
 		await Check(AppJsonContext.Default);
 	}
 
@@ -143,7 +144,7 @@ public class SerializationTests
 	}
 	""".NormalizeNewLines());
 		}
-		await Check(TestJsonSerializerContext.Default);
+		await Check(SampleJsonSerializerContext.Default);
 		await Check(AppJsonContext.Default);
 	}
 

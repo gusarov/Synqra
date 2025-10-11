@@ -1,5 +1,6 @@
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
+using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
@@ -385,7 +386,7 @@ public class BinarySerializationTests : BaseTest
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
 		HexDump(buffer[..pos]);
 		Console.WriteLine();
-		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(TestJsonSerializerContext.Default.Options)
+		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options)
 		{
 			WriteIndented = false
 		})));

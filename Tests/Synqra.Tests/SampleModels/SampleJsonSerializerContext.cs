@@ -2,6 +2,7 @@
 using MongoDB.Bson.Serialization.Attributes;
 using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.SampleModels.Binding;
+using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.SampleModels.Syncronization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -39,7 +40,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(MyPocoTask))]
 [JsonSerializable(typeof(SampleTaskModel))]
 [JsonSerializable(typeof(TestItem))]
-[JsonSerializable(typeof(TodoTask))]
+[JsonSerializable(typeof(SampleTodoTask))]
 
 [JsonSerializable(typeof(Synqra.Event))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
@@ -58,6 +59,6 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(TestData))]
 [JsonSerializable(typeof(TransportOperation))]
 
-public partial class TestJsonSerializerContext : JsonSerializerContext
+public partial class SampleJsonSerializerContext : JsonSerializerContext
 {
 }
