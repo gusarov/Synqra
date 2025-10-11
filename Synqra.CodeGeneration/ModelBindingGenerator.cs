@@ -610,7 +610,7 @@ $$"""
 
 			}
 
-			body.AppendLine("\tvoid IBindableModel.Get(ISBXSerializer serializer, float version, Span<byte> buffer, ref int pos)");
+			body.AppendLine("\tvoid IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)");
 			body.AppendLine("\t{");
 			string? els = null;
 			FormattableString x;
@@ -624,14 +624,14 @@ $$"""
 				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 				{
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Identifier}\");");
-					body.AppendLine($"\t\t\tserializer.Serialize(buffer, {(doesSupportField ? "field" : "__" + pro.Identifier)}, ref pos);");
+					body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {(doesSupportField ? "field" : "__" + pro.Identifier)}, ref pos);");
 				}
 				body.AppendLine($"\t\t}}");
 				els = "else ";
 			}
 			body.AppendLine("\t}");
 
-			body.AppendLine("\tvoid IBindableModel.Set(ISBXSerializer serializer, float version, ReadOnlySpan<byte> buffer, ref int pos)");
+			body.AppendLine("\tvoid IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)");
 			body.AppendLine("\t{");
 			els = null;
 			bool any = false;
@@ -643,7 +643,7 @@ $$"""
 				body.AppendLine($"\t\t\t// Positional Fields:");
 				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 				{
-					body.AppendLine($"\t\t\t{(doesSupportField ? "field" : "__" + pro.Identifier)} = ({pro.Type})serializer.Deserialize{DeserializeMethod(pro.Type)}(buffer, ref pos);");
+					body.AppendLine($"\t\t\t{(doesSupportField ? "field" : "__" + pro.Identifier)} = ({pro.Type})serializer.Deserialize{DeserializeMethod(pro.Type)}(in buffer, ref pos);");
 				}
 				body.AppendLine($"\t\t}}");
 				els = "else ";

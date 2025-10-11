@@ -19,13 +19,15 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+// using System.Text.Json;
+// using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Text.Json.Serialization.Metadata;
 using System.Net.WebSockets;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Synqra.Tests.Simulator;
 
@@ -203,6 +205,7 @@ internal class SynqraTestNode
 						break;
 					}
 					var json = Encoding.UTF8.GetString(messageBytes);
+					// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
 					var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
 					var storeCtx = app.Services.GetRequiredService<ISynqraStoreContext>();
 					if (operation is NewEvent1 newEvent1)

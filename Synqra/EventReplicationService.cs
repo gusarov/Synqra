@@ -1,14 +1,11 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Synqra.BinarySerializer;
 using System;
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Threading;
 
 namespace Synqra;
 
@@ -20,10 +17,18 @@ public class EventReplicationService : IHostedService
 	//private readonly IHubContext<SynqraSignalerHub, IEventHubClient> _hubContext;
 	private readonly IStorage<Event, Guid> _storage;
 	private readonly EventReplicationState _eventReplicationState;
-	private readonly JsonSerializerContext _jsonSerializerContext;
+	// private readonly JsonSerializerContext _jsonSerializerContext;
 	private readonly Lazy<ISynqraStoreContext> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
 	private ClientWebSocket? _connection;
+
+	private SBXSerializer? _sbxSerializerSender1 = new SBXSerializer();
+	private ISBXSerializer? _sbxSerializerSender => _sbxSerializerSender1;
+
+	private SBXSerializer? _sbxSerializerReceiver1 = new SBXSerializer();
+	private ISBXSerializer? _sbxSerializerReceiver => _sbxSerializerReceiver1;
+
+
 	private AutoResetEvent _autoResetEvent = new AutoResetEvent(false);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
 
@@ -35,14 +40,14 @@ public class EventReplicationService : IHostedService
 		  EventReplicationConfig config
 		, IStorage<Event, Guid> storage
 		, EventReplicationState eventReplicationState
-		, JsonSerializerContext jsonSerializerContext
+		// , JsonSerializerContext jsonSerializerContext
 		, Lazy<ISynqraStoreContext> synqraStoreContext
 		)
 	{
 		//_hubContext = hubContext;
 		_storage = storage;
 		_eventReplicationState = eventReplicationState;
-		_jsonSerializerContext = jsonSerializerContext;
+		// _jsonSerializerContext = jsonSerializerContext;
 		_synqraStoreContext = synqraStoreContext;
 		_config = config;
 	}
@@ -115,6 +120,8 @@ public class EventReplicationService : IHostedService
 				*/
 				// await _connection.StartAsync();
 				_connection = ws;
+				_sbxSerializerSender1 = new SBXSerializer();
+				_sbxSerializerReceiver1 = new SBXSerializer();
 				IsOnline = true;
 				break;
 			}
@@ -128,7 +135,9 @@ public class EventReplicationService : IHostedService
 			while (!_cts.IsCancellationRequested)
 			{
 				var bytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
-				var operation = JsonSerializer.Deserialize<TransportOperation>(Encoding.UTF8.GetString(bytes), _jsonSerializerContext.Options);
+				int pos = 0;
+				var operation = _sbxSerializerSender1.Deserialize<TransportOperation>(bytes, ref pos);
+				// var operation = JsonSerializer.Deserialize<TransportOperation>(Encoding.UTF8.GetString(bytes), _jsonSerializerContext.Options);
 				switch (operation)
 				{
 					case NewEvent1 ne1:
@@ -163,8 +172,23 @@ public class EventReplicationService : IHostedService
 				// await _connection.InvokeAsync("NewEvent1", ev);
 
 				var inv = new NewEvent1() { Event = ev };
-				var bytes = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(inv, AppJsonContext.Default.Options);
-				await _connection.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, endOfMessage: true, _cts.Token);
+
+				//var bytes = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(inv, AppJsonContext.Default.Options);
+				var pool = ArrayPool<byte>.Shared;
+				var bytes = pool.Rent(10240);
+				try
+				{
+					var span = new Span<byte>(bytes);
+					// JsonSerializer.Serialize(span, inv, AppJsonContext.Default.Options);
+					int pos = 0;
+					_sbxSerializerSender1.Serialize(span, inv, ref pos);
+
+					await _connection.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, endOfMessage: true, _cts.Token);
+				}
+				finally
+				{
+					pool.Return(bytes);
+				}
 
 				_eventReplicationState.LastEventIdFromMe = ev.EventId;
 				_eventReplicationState.Save();
