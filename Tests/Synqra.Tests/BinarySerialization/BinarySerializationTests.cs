@@ -12,27 +12,6 @@ using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests.BinarySerialization;
 
-public class TestData
-{
-	public TestData()
-	{
-
-	}
-
-	public int Id { get; set; }
-	public string? Name { get; set; }
-	// public DateTime CreatedAt { get; set; }
-	// public List<string> Tags { get; set; }
-}
-
-[Schema(2025.09, "0 Id int Name str?")]
-[Schema(2025.772, "1 Id int Name string?")]
-public partial class TestSynqraModel
-{
-	public partial int Id { get; set; }
-	public partial string? Name { get; set; }
-}
-
 #pragma warning disable TUnitAssertions0002 // Assert statements must be awaited
 
 internal class BinarySerializationGuidTests : BaseTest
@@ -166,6 +145,78 @@ internal class BinarySerializationStringTests : BaseTest
 
 		var serBuf = buffer;
 		ser.Serialize(ref serBuf, data);
+	}
+}
+
+internal class BinarySerializationObjectPropertyTests : BaseTest
+{
+	[Test]
+	public void Should_10_serialize_generic_int_without_type()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		int data = 4;
+
+		ser.Serialize<int>(buffer, data, ref pos, emitTypeId: false);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<int>(buffer, ref pos2, consumeTypeId: false);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("08").GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_10_serialize_generic_int_with_type()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		int data = 4;
+
+		ser.Serialize<int>(buffer, data, ref pos, emitTypeId: true);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<int>(buffer, ref pos2, consumeTypeId: true);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0108").GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_10_serialize_boxed_int()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		int data = 4;
+
+		ser.Serialize<object>(buffer, data, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = (int)(long)ser.Deserialize<object>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEqualTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0308").GetAwaiter().GetResult();
 	}
 }
 
@@ -336,7 +387,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_arbitrary_class_by_field_names_as_object()
 	{
 		// Arrange
-		var testData = new TestData
+		var testData = new SampleTestData
 		{
 			Id = 1,
 			Name = "Test",
@@ -358,7 +409,7 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
 		pos = 0;
-		var de = ser.Deserialize<TestData>(in rbuffer, ref pos);
+		var de = ser.Deserialize<SampleTestData>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
@@ -367,7 +418,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_arbitrary_class_by_field_names_as_known()
 	{
 		// Arrange
-		var testData = new TestData
+		var testData = new SampleTestData
 		{
 			Id = 1,
 			Name = "Test",
@@ -385,7 +436,6 @@ public class BinarySerializationTests : BaseTest
 
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
 		HexDump(buffer[..pos]);
-		Console.WriteLine();
 		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options)
 		{
 			WriteIndented = false
@@ -394,7 +444,7 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
 		pos = 0;
-		var de = ser.Deserialize<TestData>(in rbuffer, ref pos);
+		var de = ser.Deserialize<SampleTestData>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
@@ -404,12 +454,12 @@ public class BinarySerializationTests : BaseTest
 	{
 		// Arrange
 		var ser = new SBXSerializer();
-		var data = new TestSynqraModel
+		var data = new SampleTestSynqraModel
 		{
 			Id = 7,
 			Name = "The",
 		};
-		ser.Map(5, 2025.772, typeof(TestSynqraModel));
+		ser.Map(5, 2025.772, typeof(SampleTestSynqraModel));
 		ser.Map(6, 2025.772, typeof(SamplePublicModel_));
 
 		// Act
@@ -424,7 +474,7 @@ public class BinarySerializationTests : BaseTest
 		Assert.That(pos).IsEqualTo(6).GetAwaiter().GetResult();
 
 		pos = 0;
-		var de = ser.Deserialize<TestSynqraModel>(in rbuffer, ref pos);
+		var de = ser.Deserialize<SampleTestSynqraModel>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(data.Id);
 		await Assert.That(de.Name).IsEqualTo(data.Name);
 		await Assert.That(pos).IsEqualTo(6);
