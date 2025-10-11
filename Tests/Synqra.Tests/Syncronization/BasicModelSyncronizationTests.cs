@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra.Tests.DemoTodo;
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
 using System;

@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra.Tests.DemoTodo;
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;

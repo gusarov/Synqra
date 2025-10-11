@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using Synqra.Storage;
-using Synqra.Tests.DemoTodo;
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.Helpers;
 using Synqra.Tests.TestHelpers;
 using System;

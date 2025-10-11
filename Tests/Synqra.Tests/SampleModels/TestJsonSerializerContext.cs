@@ -2,13 +2,12 @@
 using MongoDB.Bson.Serialization.Attributes;
 using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.ModelManagement;
-using Synqra.Tests.SampleModels;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
-namespace Synqra.Tests.DemoTodo;
+namespace Synqra.Tests.SampleModels;
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web
 	, AllowTrailingCommas = true
