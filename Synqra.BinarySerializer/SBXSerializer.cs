@@ -93,7 +93,7 @@ public class SBXSerializer : ISBXSerializer
 
 	#region Object
 
-	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(in Span<byte> buffer, T? obj, ref int pos, bool emitTypeId = true)
+	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(in Span<byte> buffer, T? obj, ref int pos, bool? emitTypeId = null)
 	{
 		Serialize(buffer, obj, ref pos, typeof(T), emitTypeId);
 	}
@@ -103,7 +103,7 @@ public class SBXSerializer : ISBXSerializer
 		, object? obj
 		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type requestedType
-		, bool emitTypeId = true
+		, bool? emitTypeId = null
 		)
 	{
 		if (obj == null)
@@ -116,11 +116,19 @@ public class SBXSerializer : ISBXSerializer
 		// If this is level 3, the reset of the fields are in alphabetical order by field name (to ensure canonical normalization for auto-repairs & hash tree)
 
 		var type = obj?.GetType() ?? throw new ArgumentNullException();
-		var typeId = GetTypeId(type);
-		if (emitTypeId)
+		if (emitTypeId == null)
+		{
+			if (requestedType.IsValueType || requestedType.IsSealed)
+			{
+				emitTypeId = false;
+			}
+		}
+
+		if (emitTypeId != false)
 		{
 			if (requestedType != type)
 			{
+				var typeId = GetTypeId(type);
 				Serialize(in buffer, (int)typeId, ref pos);
 				if (typeId == 0)
 				{
@@ -144,11 +152,19 @@ public class SBXSerializer : ISBXSerializer
 		}
 		else if (obj is int i)
 		{
-			Serialize(in buffer, i, ref pos);
+			Serialize(in buffer, (long)i, ref pos);
 		}
-		else if (obj is uint u)
+		else if (obj is long l)
 		{
-			Serialize(in buffer, u, ref pos);
+			Serialize(in buffer, (long)l, ref pos);
+		}
+		else if (obj is uint ui)
+		{
+			Serialize(in buffer, (ulong)ui, ref pos);
+		}
+		else if (obj is ulong ul)
+		{
+			Serialize(in buffer, (ulong)ul, ref pos);
 		}
 		else if (obj is Guid g)
 		{
@@ -180,24 +196,42 @@ public class SBXSerializer : ISBXSerializer
 		}
 	}
 
-	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(in ReadOnlySpan<byte> buffer, ref int pos, bool consumeTypeId = true)
+	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+		  in ReadOnlySpan<byte> buffer
+		, ref int pos
+		, bool? consumeTypeId = null
+		)
 	{
-		return (T)Deserialize(buffer, ref pos, typeof(T), consumeTypeId);
+		return (T)Deserialize(
+			  buffer
+			, ref pos
+			, requestedType: typeof(T)
+			, consumeTypeId
+			);
 	}
 
 	public object Deserialize(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedType = null
-		, bool consumeTypeId = true
+		, bool? consumeTypeId = null
 		)
 	{
-		if (!consumeTypeId && requestedType == null)
+		if (requestedType == null)
+		{
+			requestedType = typeof(object);
+		}
+		if (consumeTypeId == null)
+		{
+			consumeTypeId = !requestedType.IsValueType && !requestedType.IsSealed;
+		}
+		if (consumeTypeId != true && requestedType == typeof(object))
 		{
 			throw new InvalidOperationException("Neither consumeTypeId nor requestType provided.");
 		}
+
 		// read type
-		var typeId = consumeTypeId
+		var typeId = consumeTypeId == true
 			? (TypeId)DeserializeSigned(in buffer, ref pos)
 			: GetTypeId(requestedType ?? throw new ArgumentNullException(nameof(requestedType), "For the case when consumeTypeId == false"))
 			;
@@ -215,12 +249,14 @@ public class SBXSerializer : ISBXSerializer
 			type = requestedType;
 			_idByType.TryGetValue(type, out var typeInfo);
 			schemaVersion = typeInfo.schemaVersion;
-			if (type.IsAssignableTo(typeof(IEnumerable)))
-			{
-				return DeserializeList(in buffer, ref pos, requestedCollectionType: type, consumeTypeId: false);
-			}
 		}
-		else if (typeId == TypeId.SignedInteger)
+		else
+		{
+			type = GetTypeFromId(typeId);
+			schemaVersion = 0;
+		}
+
+		if (typeId == TypeId.SignedInteger || type == typeof(int) || type == typeof(long))
 		{
 			var res = DeserializeSigned(in buffer, ref pos);
 			if (requestedType != null && requestedType != res.GetType())
@@ -229,7 +265,7 @@ public class SBXSerializer : ISBXSerializer
 			}
 			return res;
 		}
-		else if (typeId == TypeId.UnsignedInteger)
+		else if (typeId == TypeId.UnsignedInteger || type == typeof(uint) || type == typeof(ulong))
 		{
 			var res = DeserializeUnsigned(in buffer, ref pos);
 			if (requestedType != null && requestedType != res.GetType())
@@ -239,15 +275,19 @@ public class SBXSerializer : ISBXSerializer
 			return res;
 
 		}
-		else if (typeId == TypeId.Utf8String)
+		else if (typeId == TypeId.Utf8String || type == typeof(string))
 		{
 			return DeserializeString(in buffer, ref pos);
 		}
-		else if (typeId == TypeId.Guid)
+		else if (type.IsAssignableTo(typeof(IEnumerable)))
+		{
+			return DeserializeList(in buffer, ref pos, requestedCollectionType: type, consumeTypeId: false);
+		}
+		else if (typeId == TypeId.Guid || type == typeof(Guid))
 		{
 			return DeserializeGuid(in buffer, ref pos);
 		}
-		else if (typeId == TypeId.List)
+		else if (typeId == TypeId.List || type.IsAssignableTo(typeof(IEnumerable)))
 		{
 			type = requestedType;
 			if (type.IsAssignableTo(typeof(IEnumerable)))
@@ -256,17 +296,15 @@ public class SBXSerializer : ISBXSerializer
 			}
 			throw new Exception();
 		}
-		else
+		else if (_typeById.TryGetValue((int)typeId, out var typeInfo))
 		{
-			if (_typeById.TryGetValue((int)typeId, out var typeInfo))
-			{
-				type = typeInfo.type;
-				schemaVersion = typeInfo.schemaVersion;
-			}
-			else
-			{
-				throw new Exception("Unsupported Type Id " + typeId);
-			}
+			type = typeInfo.type;
+			schemaVersion = typeInfo.schemaVersion;
+		}
+
+		if (type.IsPrimitive)
+		{
+			throw new Exception("Primitives supposed to be handled by now");
 		}
 		value = Activator.CreateInstance(type) ?? throw new Exception("Could not create instance of type " + type.FullName);
 		if (schemaVersion != 0)
@@ -361,7 +399,7 @@ public class SBXSerializer : ISBXSerializer
 
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, IEnumerable<T> list
+		, in IEnumerable<T> list
 		, ref int pos
 		)
 	{
@@ -375,7 +413,7 @@ public class SBXSerializer : ISBXSerializer
 
 	public void Serialize(
 		  in Span<byte> buffer
-		, IEnumerable enumerable
+		, in IEnumerable enumerable
 		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedCollectionType = null
 		)
@@ -475,8 +513,22 @@ public class SBXSerializer : ISBXSerializer
 	public IList<T> DeserializeList<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
+	)
+	{
+		var list = new List<T>();
+		return (IList<T>)DeserializeList(
+			  in buffer
+			, ref pos
+			, listToFill: list
+			, requestedElementType: typeof(T)
+			);
+	}
+
+	public IList<T> DeserializeList<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+		  in ReadOnlySpan<byte> buffer
+		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedCollectionType = null
-		, bool consumeTypeId = true
+		, bool? consumeTypeId = null
 		)
 	{
 		var list = new List<T>();
@@ -492,10 +544,11 @@ public class SBXSerializer : ISBXSerializer
 
 	public IList DeserializeList(
 		  in ReadOnlySpan<byte> buffer
-		, ref int pos, IList? listToFill = null
+		, ref int pos
+		, IList? listToFill = null
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedCollectionType = null
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedElementType = null
-		, bool consumeTypeId = true
+		, bool? consumeTypeId = null
 		)
 	{
 		var count = (int)DeserializeUnsigned(buffer, ref pos);
@@ -566,6 +619,7 @@ public class SBXSerializer : ISBXSerializer
 			TypeId.SignedInteger => typeof(long),
 			TypeId.UnsignedInteger => typeof(ulong),
 			TypeId.Utf8String => typeof(string),
+			TypeId.Guid => typeof(Guid),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}
@@ -656,11 +710,11 @@ public class SBXSerializer : ISBXSerializer
 		Serialize(buffer, (int)data, ref pos);
 	}
 
-	public void Serialize(in Span<byte> buffer, in int data, ref int pos)
+	public void Serialize(in Span<byte> buffer, in long data, ref int pos)
 	{
 		// ZigZag encode the signed int
-		uint zigzag = (uint)(data << 1 ^ data >> 31);
-		while (zigzag >= 0x80)
+		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
+		while (zigzag >= 0x80UL)
 		{
 			if (pos >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
@@ -672,16 +726,16 @@ public class SBXSerializer : ISBXSerializer
 		buffer[pos++] = (byte)zigzag;
 	}
 
-	public void Serialize(ref Span<byte> buffer, in int data)
+	public void Serialize(ref Span<byte> buffer, in long data)
 	{
 		// ZigZag encode the signed int
-		uint zigzag = (uint)(data << 1 ^ data >> 31);
+		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
 		int count = 0;
-		while (zigzag >= 0x80)
+		while (zigzag >= 0x80UL)
 		{
 			if (count >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
-			buffer[count++] = (byte)(zigzag & 0x7F | 0x80);
+			buffer[count++] = (byte)(zigzag & 0x7FUL | 0x80UL);
 			zigzag >>= 7;
 		}
 		if (count >= buffer.Length)
@@ -716,10 +770,9 @@ public class SBXSerializer : ISBXSerializer
 
 	#region Unsigned Integer
 
-	public void Serialize(in Span<byte> buffer, in uint data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ulong value, ref int pos)
 	{
 		// Protobuf-style varint encoding for uint32 (little-endian, 7 bits per byte, MSB=1 means more)
-		uint value = data;
 		while (value >= 0x80)
 		{
 			if (pos >= buffer.Length)
@@ -732,11 +785,10 @@ public class SBXSerializer : ISBXSerializer
 		buffer[pos++] = (byte)value;
 	}
 
-	public void Serialize(ref Span<byte> buffer, in uint data)
+	public void Serialize(ref Span<byte> buffer, ulong value)
 	{
 		// Protobuf-style varint encoding for uint32 (little-endian, 7 bits per byte, MSB=1 means more)
 		int count = 0;
-		uint value = data;
 		while (value >= 0x80)
 		{
 			if (count >= buffer.Length)

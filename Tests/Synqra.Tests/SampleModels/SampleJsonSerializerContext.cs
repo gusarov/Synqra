@@ -56,7 +56,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
 
-[JsonSerializable(typeof(TestData))]
+[JsonSerializable(typeof(SampleTestData))]
 [JsonSerializable(typeof(TransportOperation))]
 
 public partial class SampleJsonSerializerContext : JsonSerializerContext

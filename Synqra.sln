@@ -46,6 +46,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.BinarySerializer", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Tests.MiniModel", "Tests\Synqra.Tests.MiniModel\Synqra.Tests.MiniModel.csproj", "{63BFB627-1668-49E9-8E55-44080C178EEF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.SourceGenerator.Tests", "Synqra.SourceGenerator.Tests\Synqra.SourceGenerator.Tests.csproj", "{40532983-0666-47A1-953E-20CA0CDAB12F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -104,6 +106,10 @@ Global
 		{63BFB627-1668-49E9-8E55-44080C178EEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{63BFB627-1668-49E9-8E55-44080C178EEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{63BFB627-1668-49E9-8E55-44080C178EEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{40532983-0666-47A1-953E-20CA0CDAB12F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{40532983-0666-47A1-953E-20CA0CDAB12F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{40532983-0666-47A1-953E-20CA0CDAB12F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{40532983-0666-47A1-953E-20CA0CDAB12F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -112,6 +118,7 @@ Global
 		{12AC2490-03BF-4817-9E85-6243FFD08EF0} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{0CE8AB7C-05DF-4516-9CCF-4F3E8217DCD5} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{63BFB627-1668-49E9-8E55-44080C178EEF} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{40532983-0666-47A1-953E-20CA0CDAB12F} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B771E5A2-6BE9-4340-BF65-4ED99CCDD586}

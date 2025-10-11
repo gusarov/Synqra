@@ -10,6 +10,16 @@ internal class CodeGenUtils
 
 	public void WriteFile(string synqraBuildBoxId, string filePath, string originalContent, string newContent)
 	{
+		if (string.IsNullOrEmpty(filePath))
+		{
+			EmergencyLog.Default.Error("[CodeGenUtils] Write: There is no filePath specified!");
+			return;
+		}
+		if (!File.Exists(filePath))
+		{
+			EmergencyLog.Default.Error($"[CodeGenUtils] Write: The file {filePath} does not exists!");
+			return;
+		}
 		using (var mutex = new Mutex(false, "Synqra_CodeGenUtils_Write"))
 		{
 			bool acquired = false;
@@ -86,8 +96,10 @@ internal class CodeGenUtils
 		*/
 	}
 
+	/*
 	public string ReadFile(string filePath)
 	{
 		return File.ReadAllText(filePath);
 	}
+	*/
 }

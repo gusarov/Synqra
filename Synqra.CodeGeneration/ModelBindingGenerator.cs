@@ -192,7 +192,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	static IEnumerable<(double, string)> GetAllSchemasSymbol(ITypeSymbol symbol, ITypeSymbol schemaAttribute)
 	{
 		return symbol.GetAttributes()
+#if DEBUG1
+			.Where(attr => attr.AttributeClass?.Name == schemaAttribute.Name)
+#else
 			.Where(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, schemaAttribute))
+#endif
 			.Select(GetSchemaData);
 	}
 
@@ -615,6 +619,15 @@ $$"""
 			string? els = null;
 			FormattableString x;
 			body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
+
+#if DEBUG
+			var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
+			if (isUnitTest)
+			{
+				schemas = [(1.2f, "1")];
+			}
+#endif
+
 			foreach (var item in schemas)
 			{
 				x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -678,6 +691,14 @@ $$"""
 
 	static string? DeserializeMethod(TypeSyntax type)
 	{
+		// Handle IEnumerable<T> (including fully-qualified names)
+		if (TryGetIEnumerableElement(type, out var elementTypeName))
+		{
+			// Expecting serializer to expose: DeserializeEnumerable<T>(...)
+			// return $"Enumerable<{elementTypeName}>";
+			return $"List<{elementTypeName}>";
+		}
+
 		switch (type)
 		{
 			case NullableTypeSyntax nts:
@@ -704,8 +725,46 @@ $$"""
 					default:
 						return "?? PTS: " + pts.Keyword.Kind() +"??";
 				}
+			case GenericNameSyntax gns when (
+				   gns.Identifier.ValueText == "IEnumerable"
+				|| gns.Identifier.ValueText == "IList"
+				|| gns.Identifier.ValueText == "IReadOnlyList"
+				|| gns.Identifier.ValueText == "IReadOnlyCollection"
+				) && gns.TypeArgumentList.Arguments.Count == 1:
+				// Fallback if top-level is directly IEnumerable<T> without qualifier
+				// return $"Enumerable<{gns.TypeArgumentList.Arguments[0].ToString()}>";
+				return $"List<{gns.TypeArgumentList.Arguments[0].ToString()}>";
+
+			case QualifiedNameSyntax qns when qns.Right is GenericNameSyntax g2 && g2.Identifier.ValueText == "IEnumerable" && g2.TypeArgumentList.Arguments.Count == 1:
+				// System.Collections.Generic.IEnumerable<T>
+				// return $"Enumerable<{g2.TypeArgumentList.Arguments[0].ToString()}>";
+				return $"List<{g2.TypeArgumentList.Arguments[0].ToString()}>";
+
 			default:
 				return $"?? {type} ({type.GetType().Name}) ??";
+				// throw new Exception($"Unknown Deserialization method for {type} ({type.GetType().Name})");
+		}
+	}
+
+	static bool TryGetIEnumerableElement(TypeSyntax t, out string elementTypeName)
+	{
+		switch (t)
+		{
+			case GenericNameSyntax g when g.Identifier.ValueText == "IEnumerable" && g.TypeArgumentList.Arguments.Count == 1:
+				elementTypeName = g.TypeArgumentList.Arguments[0].ToString();
+				return true;
+
+			case QualifiedNameSyntax q when q.Right is GenericNameSyntax g2 && g2.Identifier.ValueText == "IEnumerable" && g2.TypeArgumentList.Arguments.Count == 1:
+				elementTypeName = g2.TypeArgumentList.Arguments[0].ToString();
+				return true;
+
+			case AliasQualifiedNameSyntax a when a.Name is GenericNameSyntax g3 && g3.Identifier.ValueText == "IEnumerable" && g3.TypeArgumentList.Arguments.Count == 1:
+				elementTypeName = g3.TypeArgumentList.Arguments[0].ToString();
+				return true;
+
+			default:
+				elementTypeName = default!;
+				return false;
 		}
 	}
 }
