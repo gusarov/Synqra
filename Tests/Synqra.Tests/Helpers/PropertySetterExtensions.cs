@@ -5,7 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Synqra.Tests.DemoTodo;
+using Synqra.Tests.SampleModels;
 
 namespace Synqra.Tests.Helpers;
 

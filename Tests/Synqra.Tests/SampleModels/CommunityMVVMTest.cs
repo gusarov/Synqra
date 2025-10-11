@@ -2,7 +2,7 @@
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace Synqra.Tests.DemoTodo;
+namespace Synqra.Tests.SampleModels;
 
 public partial class CommunityMVVMTest : ObservableObject
 {

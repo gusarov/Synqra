@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Synqra.Storage;
-using Synqra.Tests.DemoTodo;
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
