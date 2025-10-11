@@ -2,6 +2,7 @@
 using MongoDB.Bson.Serialization.Attributes;
 using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.ModelManagement;
+using Synqra.Tests.SampleModels;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;

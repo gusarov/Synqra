@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TUnit.Assertions.AssertConditions.Operators;
 
-namespace Synqra.Tests.DemoTodo;
+namespace Synqra.Tests.SampleModels;
 
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
