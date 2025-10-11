@@ -34,7 +34,6 @@ public partial class TestSynqraModel
 
 #pragma warning disable TUnitAssertions0002 // Assert statements must be awaited
 
-[NotInParallel]
 internal class BinarySerializationGuidTests : BaseTest
 {
 	[Test]
@@ -69,7 +68,6 @@ internal class BinarySerializationGuidTests : BaseTest
 
 }
 
-[NotInParallel]
 internal class BinarySerializationSignedTests : BaseTest
 {
 	[Test]
@@ -146,7 +144,6 @@ internal class BinarySerializationSignedTests : BaseTest
 	}
 }
 
-[NotInParallel]
 internal class BinarySerializationStringTests : BaseTest
 {
 	[Test]
@@ -171,7 +168,58 @@ internal class BinarySerializationStringTests : BaseTest
 	}
 }
 
-[NotInParallel]
+internal class BinarySerializationListDictionaryTests : BaseTest
+{
+	[Test]
+	public void Should_15_serialize_list_of_int()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = new List<uint> { 1, 2, 3 };
+
+		ser.Serialize(buffer, data, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		Assert.That(pos).IsEqualTo(5).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<IEnumerable<uint>>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0103010203").GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_15_serialize_list_of_string()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = new List<string> { "One", "Two", "Three" };
+
+		ser.Serialize(buffer, data, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		Assert.That(pos).IsLessThan(20).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<List<string>>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		// Assert.That(Convert.ToHexString(buffer)).IsEqualTo(hex).GetAwaiter().GetResult();
+	}
+}
+
+// [NotInParallel]
 internal class BinarySerializationUnsignedTests : BaseTest
 {
 	[Test]
@@ -280,7 +328,6 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	*/
 }
 
-[NotInParallel]
 public class BinarySerializationTests : BaseTest
 {
 
@@ -299,6 +346,7 @@ public class BinarySerializationTests : BaseTest
 		var ser = new SBXSerializer();
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
+		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
 		ser.Serialize<object>(buffer, testData, ref pos);
 		buffer = buffer[..pos];
@@ -308,7 +356,8 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(hex);
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
-		var de = (TestData)ser.Deserialize(ref buffer, typeof(TestData) /* just to help with NativeAOT. It will not use that type in code flow, because it will not read -1 */);
+		pos = 0;
+		var de = ser.Deserialize<TestData>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
@@ -328,6 +377,7 @@ public class BinarySerializationTests : BaseTest
 		var ser = new SBXSerializer();
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
+		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
 		ser.Serialize(buffer, testData, ref pos);
 		buffer = buffer[..pos];
@@ -342,7 +392,8 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(hex);
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
-		var de = ser.Deserialize<TestData>(ref buffer);
+		pos = 0;
+		var de = ser.Deserialize<TestData>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
@@ -362,13 +413,17 @@ public class BinarySerializationTests : BaseTest
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
+		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
-		ser.Serialize(buffer, data, ref pos);
-		buffer = buffer[..pos];
+		ser.Serialize(in buffer, data, ref pos);
+		// buffer = buffer[..pos];
 
 		// Assert
 		HexDump(buffer[..pos]);
-		var de = ser.Deserialize<TestSynqraModel>(ref buffer);
+		Assert.That(pos).IsEqualTo(6).GetAwaiter().GetResult();
+
+		pos = 0;
+		var de = ser.Deserialize<TestSynqraModel>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(data.Id);
 		await Assert.That(de.Name).IsEqualTo(data.Name);
 		await Assert.That(pos).IsEqualTo(6);
@@ -395,13 +450,15 @@ public class BinarySerializationTests : BaseTest
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
+		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
 		ser.Serialize<TransportOperation>(buffer, data, ref pos);
 		buffer = buffer[..pos];
 
 		// Assert
-		HexDump(buffer[..pos]);
-		var de = (NewEvent1)ser.Deserialize<TransportOperation>(ref buffer);
+		HexDump(buffer);
+		pos = 0;
+		var de = (NewEvent1)ser.Deserialize<TransportOperation>(in rbuffer, ref pos);
 		var te = (ObjectCreatedEvent)de.Event;
 		var te2 = (ObjectCreatedEvent)data.Event;
 		await Assert.That(te.EventId).IsEqualTo(te2.EventId);

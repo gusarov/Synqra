@@ -55,17 +55,23 @@ public static class StorageExtensions
 		private StreamWriter? _streamWriter;
 		private JsonSerializerOptions _serializerOptions;
 
-		public JsonLinesStorage(ILogger<JsonLinesStorage<T, TKey>> logger, IOptions<JsonLinesStorageConfig> options, JsonSerializerOptions? jsonSerializerOptions = null)
+		public JsonLinesStorage(
+			  ILogger<JsonLinesStorage<T, TKey>> logger
+			, IOptions<JsonLinesStorageConfig> options
+			, JsonSerializerOptions? jsonSerializerOptions = null
+			)
 		{
 			_logger = logger;
 
 			_options = options;
 
+			/*
 			if (!JsonSerializer.IsReflectionEnabledByDefault && jsonSerializerOptions is null)
 			{
 				_logger.LogWarning("jsonSerializerOptions might be required in DI for NativeAOT environment");
 				throw new ArgumentNullException(nameof(jsonSerializerOptions), "jsonSerializerOptions might be required in DI for NativeAOT environment");
 			}
+			*/
 			_serializerOptions = jsonSerializerOptions is null
 				? new JsonSerializerOptions()
 				: new JsonSerializerOptions(jsonSerializerOptions);

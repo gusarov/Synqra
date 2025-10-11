@@ -123,16 +123,16 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 		Name = "Value 0";
 	}
 
-	public void Set(ISBXSerializer serializer, float version, ReadOnlySpan<byte> buffer, ref int pos)
+	public void Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		// Positional Fields: Name
-		__name = serializer.DeserializeString(buffer, ref pos);
+		__name = serializer.DeserializeString(in buffer, ref pos);
 	}
 
-	public void Get(ISBXSerializer serializer, float version, Span<byte> buffer, ref int pos)
+	public void Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 		// Positional Fields: Name
-		serializer.Serialize(buffer, __name, ref pos);
+		serializer.Serialize(in buffer, __name, ref pos);
 
 		// Optional Presence Mask Fields: (??)
 		// Keyed Fields: (??)
