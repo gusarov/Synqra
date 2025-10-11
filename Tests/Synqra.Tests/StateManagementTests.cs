@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Synqra.Storage;
+
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -11,7 +12,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace Synqra.Tests.ModelManagement;
+namespace Synqra.Tests;
 
 using IStorage = IStorage<Event, Guid>;
 
@@ -53,7 +54,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 
 		model.Name = "TestName"; // this should emit a command and broadcast it
 
-		var commands = _sut.GetCollection<Synqra.ISynqraCommand>().ToArray();
+		var commands = _sut.GetCollection<ISynqraCommand>().ToArray();
 
 		var jso = ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 		Console.WriteLine("Commands:");

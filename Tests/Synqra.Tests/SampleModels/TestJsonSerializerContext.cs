@@ -1,7 +1,8 @@
 ﻿using Microsoft.Extensions.Options;
 using MongoDB.Bson.Serialization.Attributes;
 using Synqra.Tests.BinarySerialization;
-using Synqra.Tests.ModelManagement;
+using Synqra.Tests.SampleModels.Binding;
+using Synqra.Tests.SampleModels.Syncronization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -30,13 +31,13 @@ namespace Synqra.Tests.SampleModels;
 #endif
 )]
 [JsonSerializable(typeof(DemoModel))]
-[JsonSerializable(typeof(DemoObject))]
+[JsonSerializable(typeof(SampleOnePropertyObject))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
 [JsonSerializable(typeof(ISynqraCommand))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(MyPocoTask))]
-[JsonSerializable(typeof(MyTaskModel))]
+[JsonSerializable(typeof(SampleTaskModel))]
 [JsonSerializable(typeof(TestItem))]
 [JsonSerializable(typeof(TodoTask))]
 

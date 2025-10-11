@@ -14,7 +14,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.Helpers;
-using Synqra.Tests.SampleModels;
+using Synqra.Tests.SampleModels.Binding;
 
 namespace Synqra.Tests.Performance;
 
@@ -73,7 +73,7 @@ public class PerformanceTests : BaseTest
 		}
 		await Assert.That(b).IsEqualTo(8);
 
-		var obj = new DemoObject();
+		var obj = new SampleOnePropertyObject();
 		var proName = nameof(obj.Property1);
 
 		bool ab = false;
@@ -122,7 +122,7 @@ public class PerformanceTests : BaseTest
 	[Test]
 	public async Task Should_Bind_02_BJ_01_Stj_property()
 	{
-		var obj = new DemoObject();
+		var obj = new SampleOnePropertyObject();
 		var proName = nameof(obj.Property1);
 
 		bool ab = false;
@@ -151,13 +151,13 @@ public class PerformanceTests : BaseTest
 	[Test]
 	public async Task Should_Bind_02_BJ_02_STJx_property()
 	{
-		var obj = new DemoObject
+		var obj = new SampleOnePropertyObject
 		{
 			Property1 = "unset",
 		};
 
 		var so = new JsonSerializerOptions(TestJsonSerializerContext.Default.Options);
-		var ti = so.GetTypeInfo(typeof(DemoObject));
+		var ti = so.GetTypeInfo(typeof(SampleOnePropertyObject));
 		ti.CreateObject = () => obj;
 		var json1 = """
 {"property1":"xa"}
