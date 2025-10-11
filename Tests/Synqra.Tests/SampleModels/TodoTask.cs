@@ -1,5 +1,4 @@
-﻿using Synqra.Tests.ModelManagement;
-using Synqra.Tests.Performance;
+﻿using Synqra.Tests.Performance;
 using System;
 using System.Collections.Generic;
 using System.Linq;

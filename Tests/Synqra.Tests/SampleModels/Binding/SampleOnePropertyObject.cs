@@ -1,11 +1,11 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 
-namespace Synqra.Tests.SampleModels;
+namespace Synqra.Tests.SampleModels.Binding;
 
 #if NET8_0_OR_GREATER
 [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
 #endif
-public class DemoObject
+public class SampleOnePropertyObject
 {
 #if NET8_0_OR_GREATER
 	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]

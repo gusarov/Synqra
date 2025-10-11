@@ -602,7 +602,7 @@ public class SBXSerializer : ISBXSerializer
 
 	public string DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
-		int length = MemoryExtensions.IndexOf<byte>(buffer[pos..], 0); // todo: it probably allocates array here :(
+		int length = buffer[pos..].IndexOf<byte>(0); // todo: it probably allocates array here :(
 		if (length < 0)
 		{
 			throw new ArgumentException("Buffer too small for string decoding.");
@@ -615,7 +615,7 @@ public class SBXSerializer : ISBXSerializer
 
 	public string DeserializeString(ref ReadOnlySpan<byte> buffer) // 37 38 00
 	{
-		int length = MemoryExtensions.IndexOf<byte>(buffer, 0); // todo: it probably allocates array here :(
+		int length = buffer.IndexOf<byte>(0); // todo: it probably allocates array here :(
 		// var length = (int)DeserializeUnsigned(ref buffer);
 		if (length < 0)
 		{
@@ -659,12 +659,12 @@ public class SBXSerializer : ISBXSerializer
 	public void Serialize(in Span<byte> buffer, in int data, ref int pos)
 	{
 		// ZigZag encode the signed int
-		uint zigzag = (uint)((data << 1) ^ (data >> 31));
+		uint zigzag = (uint)(data << 1 ^ data >> 31);
 		while (zigzag >= 0x80)
 		{
 			if (pos >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
-			buffer[pos++] = (byte)((zigzag & 0x7F) | 0x80);
+			buffer[pos++] = (byte)(zigzag & 0x7F | 0x80);
 			zigzag >>= 7;
 		}
 		if (pos >= buffer.Length)
@@ -675,13 +675,13 @@ public class SBXSerializer : ISBXSerializer
 	public void Serialize(ref Span<byte> buffer, in int data)
 	{
 		// ZigZag encode the signed int
-		uint zigzag = (uint)((data << 1) ^ (data >> 31));
+		uint zigzag = (uint)(data << 1 ^ data >> 31);
 		int count = 0;
 		while (zigzag >= 0x80)
 		{
 			if (count >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
-			buffer[count++] = (byte)((zigzag & 0x7F) | 0x80);
+			buffer[count++] = (byte)(zigzag & 0x7F | 0x80);
 			zigzag >>= 7;
 		}
 		if (count >= buffer.Length)
@@ -724,7 +724,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			if (pos >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
-			buffer[pos++] = (byte)((value & 0x7F) | 0x80);
+			buffer[pos++] = (byte)(value & 0x7F | 0x80);
 			value >>= 7;
 		}
 		if (pos >= buffer.Length)
@@ -741,7 +741,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			if (count >= buffer.Length)
 				throw new ArgumentException("Buffer too small for varint encoding.");
-			buffer[count++] = (byte)((value & 0x7F) | 0x80);
+			buffer[count++] = (byte)(value & 0x7F | 0x80);
 			value >>= 7;
 		}
 		if (count >= buffer.Length)
@@ -893,12 +893,12 @@ public class SBXSerializer : ISBXSerializer
 					}
 					case 7:
 					{
-						buffer[pos++] = (byte)((1<<2) | (bytes[7] & 0x03)); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
+						buffer[pos++] = (byte)(1<<2 | bytes[7] & 0x03); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
 						var ms = data.GetTimestamp();
-						var tsdiff = checked((int)((ms - _streamBaseTime).TotalMilliseconds));
+						var tsdiff = checked((int)(ms - _streamBaseTime).TotalMilliseconds);
 						Serialize(buffer, tsdiff, ref pos);
 						buffer[pos++] = bytes[6]; // rand_a_low
-						buffer[pos++] = (byte)(((bytes[7] & 0x0C)<<4) | (bytes[8] & 0x3F)); // packed8 rand_a_high 2 other bit + byte8
+						buffer[pos++] = (byte)((bytes[7] & 0x0C)<<4 | bytes[8] & 0x3F); // packed8 rand_a_high 2 other bit + byte8
 						for (int i = 9; i < 16; i++)
 						{
 							buffer[pos++] = bytes[i];
@@ -964,7 +964,7 @@ public class SBXSerializer : ISBXSerializer
 
 			// Apply Packed
 			var packed8 = buffer[pos++];
-			bytes[8] = (byte)(((packed8 & 0x3F) | 0b_1000_0000)); // set variant to RFC, and keep 2 bits of rand_a_high
+			bytes[8] = (byte)(packed8 & 0x3F | 0b_1000_0000); // set variant to RFC, and keep 2 bits of rand_a_high
 			bytes[7] = (byte)(7 << 4 | (packed8 & 0xC0) >> 4 | glyph & 0b11); // v7 + rand_a_high 2 bits from packed8 + 2 bits from glyph
 
 			// Apply Remaining 7 bytes

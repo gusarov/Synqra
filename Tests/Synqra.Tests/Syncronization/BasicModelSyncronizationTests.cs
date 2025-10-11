@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra.Tests.SampleModels;
+using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
 using System;
@@ -39,7 +39,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 	public async Task Should_attach_new_object_and_it_should_persist()
 	{
 		// the Attach() call alone should persist new object. This allows to make snapshot of new obejct with all properties and start tracking changes
-		var task = new MyTaskModel { Subject = "Task 1" };
+		var task = new SampleTaskModel { Subject = "Task 1" };
 		var data = _nodeA.StoreContext.Attach(task, null);
 		Assert.Fail("Synchronization failed");
 	}
@@ -47,9 +47,9 @@ internal class BasicModelSyncronizationTests : BaseTest
 	[Test]
 	public async Task Should_have_node_with_model()
 	{
-		var collection = _nodeA.StoreContext.GetCollection<MyTaskModel>();
+		var collection = _nodeA.StoreContext.GetCollection<SampleTaskModel>();
 		await Assert.That(collection).IsEmpty();
-		var task = new MyTaskModel { Subject = "Task 1" };
+		var task = new SampleTaskModel { Subject = "Task 1" };
 		collection.Add(task);
 		await Assert.That(collection).HasCount(1);
 		task.Subject = "Task 1 - updated";
@@ -68,7 +68,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 			await Task.Delay(100);
 		}
 		await Should_have_node_with_model(); // Works on Node A
-		var collection = _nodeB.StoreContext.GetCollection<MyTaskModel>(); //Same happened with Node B!!
+		var collection = _nodeB.StoreContext.GetCollection<SampleTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
 		while (collection.Count < 1 && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
 		{
