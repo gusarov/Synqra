@@ -8,9 +8,9 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 
-namespace Synqra.Tests.SampleModels;
+namespace Synqra.Tests.SampleModels.Serialization;
 
-public class TodoTask
+public class SampleTodoTask
 {
 	public string Subject { get; set; }
 }

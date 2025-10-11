@@ -90,7 +90,7 @@ public class BindingTests : BaseTest
 		obj.Property1 = "test1";
 		await Assert.That(obj.Property1).IsEqualTo("test1");
 
-		obj.RSetSTJ(proName, "test2", TestJsonSerializerContext.Default);
+		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.Default);
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 	}
 
@@ -102,7 +102,7 @@ public class BindingTests : BaseTest
 			Property1 = "unset",
 		};
 
-		var so = new JsonSerializerOptions(TestJsonSerializerContext.Default.Options);
+		var so = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
 		var ti = so.GetTypeInfo(typeof(SampleOnePropertyObject));
 		ti.CreateObject = () => obj;
 		var json1 = """

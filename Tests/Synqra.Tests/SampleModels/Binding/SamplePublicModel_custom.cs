@@ -10,8 +10,12 @@ using System.Text;
 using System.Threading.Tasks;
 using TUnit.Assertions.AssertConditions.Operators;
 
-namespace Synqra.Tests.SampleModels;
+namespace Synqra.Tests.SampleModels.Binding;
 
+/// <summary>
+/// Note, this is different class name - for experiments with manual code instead of generator
+/// The _ at the end stops code generation
+/// </summary>
 partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChanged, IBindableModel
 {
 	public partial string? Name { get; set; }

@@ -140,10 +140,10 @@ public class PerformanceTests : BaseTest
 		var ops1 = MeasureOps(() => obj.Property1 = next());
 		await Assert.That(ops1 > 1_000_000).IsTrue();
 
-		obj.RSetSTJ(proName, "test2", TestJsonSerializerContext.Default);
+		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.Default);
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 
-		var ops2 = MeasureOps(() => obj.RSetSTJ(proName, next(), TestJsonSerializerContext.Default));
+		var ops2 = MeasureOps(() => obj.RSetSTJ(proName, next(), SampleJsonSerializerContext.Default));
 		Console.WriteLine($"OPS1={ops1:N} OPS2={ops2:N} D={(ops1 - ops2) / ops1:P}");
 		await Assert.That(ops2 > 10).IsTrue();
 	}
@@ -156,7 +156,7 @@ public class PerformanceTests : BaseTest
 			Property1 = "unset",
 		};
 
-		var so = new JsonSerializerOptions(TestJsonSerializerContext.Default.Options);
+		var so = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
 		var ti = so.GetTypeInfo(typeof(SampleOnePropertyObject));
 		ti.CreateObject = () => obj;
 		var json1 = """
