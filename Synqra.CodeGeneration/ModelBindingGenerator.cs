@@ -305,6 +305,25 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		*/
 	}
 
+	// Enumerate instance properties across the full inheritance chain, most-derived first, no duplicates by name.
+	static IEnumerable<IPropertySymbol> GetAllInstanceProperties(INamedTypeSymbol type)
+	{
+		var seen = new HashSet<string>(StringComparer.Ordinal);
+		for (var t = type; t != null; t = t.BaseType)
+		{
+			foreach (var p in t.GetMembers().OfType<IPropertySymbol>())
+			{
+				if (p.IsStatic) continue;
+				if (p.IsIndexer) continue;
+				// Skip private members of base types
+				if (p.DeclaredAccessibility == Accessibility.Private && !SymbolEqualityComparer.Default.Equals(p.ContainingType, type))
+					continue;
+				if (!seen.Add(p.Name)) continue; // prefer most-derived
+				yield return p;
+			}
+		}
+	}
+
 	/// <summary>
 	/// This method is where the real work of the generator is done
 	/// This ensures optimal performance by only executing the generator when needed
@@ -315,16 +334,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 		try
 		{
-			/*
-			context.ReportDiagnostic(Diagnostic.Create(new DiagnosticDescriptor(
-				  "SYNG001"
-				, "ModelBindingGenerator"
-				, "ModelBindingGenerator: Processing {0}"
-				, "Synqra"
-				, DiagnosticSeverity.Info
-				, true), Location.None, combinedData.src.clazz.Identifier.Text));
-			*/
-
 			var classData = combinedData.ClassData;
 			string tfm = combinedData.BuildProps.Tfm;
 			string SynqraBuildBox = combinedData.BuildProps.SynqraBuildBox;
@@ -340,18 +349,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 
 			var classMembers = classData.Clazz.Members;
-			EmergencyLog.Default.Debug($"TFM {tfm} Analyze {clazz.Identifier}...");
-			EmergencyLog.Default.Debug($"{classData.Pceh} pceh {classData.Pcgeh} pcgeh {classData.Ibm} ibm {classData.Ipc} ipc {classData.Ipcg} ipcg");
-
-			foreach (var item in classMembers)
-			{
-				EmergencyLog.Default.Debug($" {item.GetType().Name} {item} {item.AttributeLists} [{item.FullSpan}] {item.Kind()}");
-			}
+			EmergencyLog.Default.Debug($"GENERATE FOR {clazz.Identifier} ({clazz.SyntaxTree.FilePath})...");
 
 			// check if the methods we want to add exist already 
 			var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
-
-			// SynqraEmergencyLog.Default.Debug("[+] Checked if methods exist in class: " + setMethod);
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
@@ -375,11 +376,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				body.AppendLine(usingStatement.ToString());
 			}
-			// SynqraEmergencyLog.Default.Debug("[+] Added using statements to generated class");
 
 			body.AppendLine();
 
-			// The previous Descendent Node check has been removed as it was only intended to help produce the error seen in logging
 			BaseNamespaceDeclarationSyntax? calcClassNamespace = clazz.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
 			calcClassNamespace ??= clazz.Ancestors().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
 
@@ -387,7 +386,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				EmergencyLog.Default.Error($"Could not find namespace for {clazz.Identifier}", null);
 			}
-			EmergencyLog.Default.Debug($"Found calcClassNamespace={calcClassNamespace?.Name}");
+			// EmergencyLog.Default.Debug($"Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
@@ -434,11 +433,12 @@ $$"""
 			switch (name)
 			{
 """);
-				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
+				// Include properties from this class and all base classes that have a setter
+				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.SetMethod is not null))
 				{
 					body.AppendLine($$"""
-				case "{{pro.Identifier}}":
-					{{pro.Identifier}} = ({{pro.Type}})value!;
+				case "{{pro.Name}}":
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
 					break;
 """);
 				}
@@ -457,6 +457,7 @@ $$"""
 
 			string suggestedSchema = "1";
 
+			// First: properties declared in this class (keep original textual type form to minimize schema noise)
 			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
 
@@ -534,22 +535,22 @@ $$"""
 """);
 			}
 
-
-			//while a bit crude it is a simple way to add the methods to the class
+			// Append inherited properties to schema suggestion (minimally qualified to keep it compact)
+			foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default)))
+			{
+				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+			}
 
 			EmergencyLog.Default.Debug("[+] Added methods to generated class");
 
-
-			// var sourceContent = CodeGenUtils.Default.ReadFile(clazz.SyntaxTree.FilePath);
-			// var sourceContent = clazz.Ancestors(true).Last().ToFullString();
 			var originalSourceContent = clazz.SyntaxTree.GetText().ToString();
-			EmergencyLog.Default.Debug($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath} ioSourceContent={originalSourceContent} node.text={clazz.ToFullString()}");
+			EmergencyLog.Default.Debug($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
 			var line = clazz.SyntaxTree.GetLineSpan(clazz.GetLocation().SourceSpan).StartLinePosition.Line;
 
 			var schemas = GetAllSchemasSymbol(classData.Data, classData.Ssa).ToArray();
 			if (clazz.AttributeLists.Count == 0)
 			{
-				EmergencyLog.Default.Debug($"GetLineSpan() {line} {clazz.Span.Start}");
+				// EmergencyLog.Default.Debug($"GetLineSpan() {line} {clazz.Span.Start}");
 			}
 			else
 			{
@@ -557,18 +558,10 @@ $$"""
 				var b = clazz.AttributeLists.First().Span.End;
 				var c = clazz.AttributeLists.Last().Span.Start;
 				var d = clazz.AttributeLists.Last().Span.End;
-				EmergencyLog.Default.Debug($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
+				// EmergencyLog.Default.Debug($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
 
 				double lastVer = 0;
 				string lastSchema = "";
-				/*
-				foreach (var item in GetAllSchemas(clazz))
-				{
-					EmergencyLog.Default.Debug("Schema: " + item);
-					lastVer = item.Item1;
-					lastSchema = item.Item2;
-				}
-				*/
 				foreach (var item in schemas)
 				{
 					EmergencyLog.Default.Debug("*** Schema: " + item);
@@ -590,21 +583,6 @@ $$"""
 					EmergencyLog.Default.Debug("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
 					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
 					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
-
-					/*
-					context.ReportDiagnostic(Diagnostic.Create(
-						new DiagnosticDescriptor(
-							  "SYNQRA001"
-							, "Schema drift detected"
-							, "The schema in {0} differs from expected"
-							, "Schema"
-							, DiagnosticSeverity.Error
-							, isEnabledByDefault: true
-							)
-						, clazz.GetLocation()
-						, clazz.SyntaxTree.FilePath
-						));
-					*/
 				}
 				else
 				{
@@ -634,10 +612,15 @@ $$"""
 				body.AppendLine($"\t\t{{");
 				body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 				body.AppendLine($"\t\t\t// Positional Fields:");
-				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
+				// Serialize all readable instance properties (this type + base types)
+				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.GetMethod is not null))
 				{
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Identifier}\");");
-					body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {(doesSupportField ? "field" : "__" + pro.Identifier)}, ref pos);");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+					// Use backing field only for properties declared in this class when we generated one; otherwise use the property
+					var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+						? "__" + pro.Name
+						: "this." + pro.Name;
+					body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
 				}
 				body.AppendLine($"\t\t}}");
 				els = "else ";
@@ -654,9 +637,13 @@ $$"""
 				x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 				body.AppendLine($"\t\t{{");
 				body.AppendLine($"\t\t\t// Positional Fields:");
-				foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
+				// Deserialize into all writable instance properties (this type + base types)
+				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.SetMethod is not null))
 				{
-					body.AppendLine($"\t\t\t{(doesSupportField ? "field" : "__" + pro.Identifier)} = ({pro.Type})serializer.Deserialize{DeserializeMethod(pro.Type)}(in buffer, ref pos);");
+					var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+						? "__" + pro.Name
+						: "this." + pro.Name;
+					body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type)}(in buffer, ref pos);");
 				}
 				body.AppendLine($"\t\t}}");
 				els = "else ";
@@ -673,7 +660,7 @@ $$"""
 			body.AppendLine("\t}");
 			body.AppendLine("}");
 
-			EmergencyLog.Default.Debug("!! SynqraBuildBox = " + SynqraBuildBox);
+			// EmergencyLog.Default.Debug("!! SynqraBuildBox = " + SynqraBuildBox);
 
 
 			//to write our source file we can use the context object that was passed in
@@ -689,6 +676,247 @@ $$"""
 		}
 	}
 
+	static string? DeserializeMethod(ITypeSymbol type)
+	{
+		if (type is INamedTypeSymbol named)
+		{
+			// Handle Nullable<T>
+			if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && named.TypeArguments.Length == 1)
+				return DeserializeMethod(named.TypeArguments[0]);
+
+			// Handle primitive & predefined types
+			switch (named.SpecialType)
+			{
+				case SpecialType.System_Boolean: return "Boolean";
+
+				case SpecialType.System_SByte:
+				case SpecialType.System_Int16:
+				case SpecialType.System_Int32:
+				case SpecialType.System_Int64:
+					return "Signed";
+
+				case SpecialType.System_Byte:
+				case SpecialType.System_UInt16:
+				case SpecialType.System_UInt32:
+				case SpecialType.System_UInt64:
+				case SpecialType.System_Char:
+					return "Unsigned";
+
+				case SpecialType.System_Single: return "Single";
+				case SpecialType.System_Double: return "Double";
+				case SpecialType.System_Decimal: return "Decimal";
+				case SpecialType.System_String: return "String";
+			}
+
+			// Fallback for generics like List<T> or IReadOnlyList<T>
+			if (named.IsGenericType &&
+				named.TypeArguments.Length == 1 &&
+				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
+			{
+				var arg = named.TypeArguments[0];
+				return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+			}
+
+			// Try matching implemented IEnumerable<T> interface
+			foreach (var i in named.AllInterfaces)
+			{
+				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+				{
+					return $"List<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+				}
+			}
+		}
+
+		// Handle IEnumerable<T> (and subclasses like List<T>, T[])
+		if (TryGetIEnumerableElement(type, out var elementType))
+		{
+			return $"List<{elementType}>";
+		}
+
+		// Arrays as List<T>
+		if (type is IArrayTypeSymbol array)
+		{
+			return $"List<{array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+		}
+
+		return $"<{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+	}
+
+
+	static bool TryGetIEnumerableElement(ITypeSymbol type, out string elementTypeName)
+	{
+		// Handle arrays directly
+		if (type is IArrayTypeSymbol array)
+		{
+			elementTypeName = array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+			return true;
+		}
+
+		if (type is INamedTypeSymbol named)
+		{
+			// Directly generic IEnumerable<T>
+			if (named.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+			{
+				elementTypeName = named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+				return true;
+			}
+
+			// Or any interface that implements it
+			foreach (var i in named.AllInterfaces)
+			{
+				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+				{
+					elementTypeName = i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+					return true;
+				}
+			}
+		}
+
+		elementTypeName = default!;
+		return false;
+	}
+
+	/*
+	static string? DeserializeMethod(ITypeSymbol type)
+	{
+		// Pseudocode:
+		// 1) If type is Nullable<T>, unwrap to T.
+		// 2) If type is an array, return "List<elementType>".
+		// 3) If type (or its interfaces) is/implements IEnumerable<T> (or IList<T>/IReadOnlyList<T>/IReadOnlyCollection<T>/ICollection<T>), return "List<T>".
+		// 4) If type is an enum, map its underlying type to Signed/Unsigned suffix.
+		// 5) Map primitive/special types to known suffixes (Boolean, Signed, Unsigned, Single, Double, Decimal, String).
+		// 6) Otherwise return null (which results in calling serializer.Deserialize(...)).
+
+		// 1) Unwrap Nullable<T>
+		if (type is INamedTypeSymbol named && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+		{
+			type = named.TypeArguments[0];
+		}
+
+		// 2) Arrays => treat as List<T>
+		if (type is IArrayTypeSymbol arrayType)
+		{
+			return $"List<{FQN(arrayType.ElementType)}>";
+		}
+
+		// 3) IEnumerable-like => treat as List<T>
+		if (TryGetEnumerableElement(type, out var elementType))
+		{
+			return $"List<{FQN(elementType)}>";
+		}
+
+		// 4) Enums => map underlying type to Signed/Unsigned
+		if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType && enumType.EnumUnderlyingType is { } underlying)
+		{
+			var enumSuffix = MapNumericSuffix(underlying.SpecialType);
+			if (enumSuffix is not null)
+				return enumSuffix;
+		}
+
+		// 5) Primitive/special types
+		var suffix = MapSpecialTypeSuffix(type.SpecialType);
+		if (suffix is not null)
+			return suffix;
+
+		// 6) Fallback: use generic Deserialize<T> (by returning null we produce "Deserialize(...)" in the generated code)
+		return null;
+
+		static string? MapSpecialTypeSuffix(SpecialType st)
+		{
+			switch (st)
+			{
+				case SpecialType.System_Boolean: return "Boolean";
+
+				// signed integers
+				case SpecialType.System_SByte:
+				case SpecialType.System_Int16:
+				case SpecialType.System_Int32:
+				case SpecialType.System_Int64:
+					return "Signed";
+
+				// unsigned integers (+ char as unsigned)
+				case SpecialType.System_Byte:
+				case SpecialType.System_UInt16:
+				case SpecialType.System_UInt32:
+				case SpecialType.System_UInt64:
+				case SpecialType.System_Char:
+					return "Unsigned";
+
+				case SpecialType.System_Single: return "Single";
+				case SpecialType.System_Double: return "Double";
+				case SpecialType.System_Decimal: return "Decimal";
+				case SpecialType.System_String: return "String";
+
+				default:
+					return null;
+			}
+		}
+
+		static string? MapNumericSuffix(SpecialType st)
+		{
+			// Map underlying enum numeric type to Signed/Unsigned
+			switch (st)
+			{
+				case SpecialType.System_SByte:
+				case SpecialType.System_Int16:
+				case SpecialType.System_Int32:
+				case SpecialType.System_Int64:
+					return "Signed";
+
+				case SpecialType.System_Byte:
+				case SpecialType.System_UInt16:
+				case SpecialType.System_UInt32:
+				case SpecialType.System_UInt64:
+				case SpecialType.System_Char:
+					return "Unsigned";
+
+				default:
+					return null;
+			}
+		}
+
+		static bool TryGetEnumerableElement(ITypeSymbol symbol, out ITypeSymbol elementType)
+		{
+			// Direct generic type check (e.g., IEnumerable<T>)
+			if (symbol is INamedTypeSymbol named && named.Arity == 1 && IsEnumerableLike(named))
+			{
+				elementType = named.TypeArguments[0];
+				return true;
+			}
+
+			// Check implemented interfaces (covers List<T>, IReadOnlyList<T>, etc.)
+			foreach (var iface in symbol.AllInterfaces)
+			{
+				if (iface is INamedTypeSymbol inamed && inamed.Arity == 1 && IsEnumerableLike(inamed))
+				{
+					elementType = inamed.TypeArguments[0];
+					return true;
+				}
+			}
+
+			elementType = null!;
+			return false;
+
+			static bool IsEnumerableLike(INamedTypeSymbol s)
+			{
+				var def = s.ConstructedFrom?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+				switch (def)
+				{
+					case "global::System.Collections.Generic.IEnumerable<T>":
+					case "global::System.Collections.Generic.IList<T>":
+					case "global::System.Collections.Generic.ICollection<T>":
+					case "global::System.Collections.Generic.IReadOnlyList<T>":
+					case "global::System.Collections.Generic.IReadOnlyCollection<T>":
+						return true;
+					default:
+						return false;
+				}
+			}
+		}
+	}
+	*/
+
+	/*
 	static string? DeserializeMethod(TypeSyntax type)
 	{
 		// Handle IEnumerable<T> (including fully-qualified names)
@@ -767,6 +995,7 @@ $$"""
 				return false;
 		}
 	}
+	*/
 }
 
 /*

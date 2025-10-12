@@ -1,6 +1,7 @@
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
+using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
@@ -9,6 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
+using static Synqra.BinarySerializer.SBXSerializer;
 
 namespace Synqra.Tests.BinarySerialization;
 
@@ -217,6 +219,101 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
 		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0308").GetAwaiter().GetResult();
+	}
+
+	public static IEnumerable<Func<(int, object, string)>> Should_20_serialize_sample_1_model_source()
+	{
+		yield return () => (11, new SampleFieldSealedModel() { Data = new SampleSealedModel { Id = 5 } }, "020A");
+		yield return () => (12, new SampleFieldBaseModel() { Data = new SampleBaseModel { Id = 5 } }, "06010A");
+		yield return () => (13, new SampleFieldBaseModel() { Data = new SampleDerivedModel { Id = 6, DerId = 4 } }, "060A080C");
+		yield return () => (14, new SampleFieldObjectModel() { Data = new SampleBaseModel { Id = 5 } }, "0C080A");
+		yield return () => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1403020406");
+		yield return () => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16010A");
+
+		yield return () => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "180F");     // List_R_E
+		yield return () => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1801010A"); // List_R_R
+		yield return () => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18010A");   // List_R_S
+		yield return () => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18010A");   // List_R_H
+
+		yield return () => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "0C0F"); // List_S_E
+		yield return () => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "0C10020A0A"); // List_S_R
+		yield return () => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C11020A0A"); // List_S_S
+		yield return () => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 }    } }, "0C120A"); // List_S_H
+		yield return () => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "0C0F"); // List_S_E
+		yield return () => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C11020A0A"); // List_S_S
+		// Todo: Add DerivedDerivedModel to make use of ElementType flags
+
+		yield return () => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C0F"); // List_S_E
+		yield return () => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C10020A0A"); // List_S_R
+		yield return () => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C11020A0A"); // List_S_S
+		yield return () => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C120A"); // List_S_H
+
+
+		yield return () => (51, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C0F"); // List_S_E
+		yield return () => (52, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C10020A0A"); // List_S_R
+		yield return () => (53, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C11020A0A"); // List_S_S
+		yield return () => (54, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C120A"); // List_S_H
+
+		yield return () => (61, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1400"); // no list type id but count 0
+		yield return () => (62, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14020A0C");
+		yield return () => (63, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1600"); // no list type id but count 0
+		yield return () => (64, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16020A0A");
+	}
+
+	[Test]
+	[MethodDataSource(typeof(BinarySerializationObjectPropertyTests), nameof(Should_20_serialize_sample_1_model_source))]
+	public async Task Should_20_serialize_sample_1_model(int id, object model, string expectedHex)
+	{
+		var ser = new SBXSerializer();
+		ser.Map( 1, 1, typeof(SampleFieldSealedModel));
+		ser.Map( 2, 1, typeof(SampleSealedModel));
+		ser.Map( 3, 1, typeof(SampleFieldBaseModel));
+		ser.Map( 4, 1, typeof(SampleBaseModel));
+		ser.Map( 5, 1, typeof(SampleDerivedModel));
+		ser.Map( 6, 1, typeof(SampleFieldObjectModel));
+		ser.Map( 7, 1, typeof(SampleFieldDerrivedModel));
+		ser.Map( 8, 1, typeof(SampleFieldIntModel));
+		ser.Map( 9, 1, typeof(SampleFieldSealedDerivedModel));
+		ser.Map(10, 1, typeof(SampleFieldListIntModel));
+		ser.Map(11, 1, typeof(SampleFieldListSealedModel));
+		ser.Map(12, 1, typeof(SampleFieldListBaseModel));
+		ser.Map(13, 1, typeof(SampleFieldEnumerableBaseModel));
+
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		ser.Serialize<object>(buffer, model, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
+
+		var modelJson = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = false });
+		var deserializedJson = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = false });
+
+		Assert.That(deserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo(expectedHex).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_reserve_list_type_id_range()
+	{
+		Console.WriteLine(".");
+		var count = (int)ListTypeId.MAX;
+		Assert.That(count).IsEqualTo(16).GetAwaiter().GetResult();
+		for (int i = 0; i < count; i++)
+		{
+			var listTypeId = (ListTypeId)(i);
+			var typeId = (TypeId)(TypeId.ListTypeFrom - i);
+			Console.WriteLine($"{i,2} {listTypeId,12} <--> {(int)typeId,3} {typeId,12}");
+			Assert.That(typeId.ToString()).Contains(listTypeId.ToString()).GetAwaiter().GetResult();
+		}
+		Assert.That(TypeId.ListTypeTo).IsEqualTo(TypeId.SpecList_S_H).GetAwaiter().GetResult();
+		Assert.That((int)TypeId.ListTypeTo).IsEqualTo((int)(TypeId.ListTypeFrom - (int)(ListTypeId.MAX - 1))).GetAwaiter().GetResult();
 	}
 }
 
