@@ -2,6 +2,7 @@
 /* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
 
 using Synqra.BinarySerializer;
+using Synqra.Tests.SampleModels.Serialization;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -11,6 +12,31 @@ using System.Threading.Tasks;
 using TUnit.Assertions.AssertConditions.Operators;
 
 namespace Synqra.Tests.SampleModels.Binding;
+
+
+public class SampleFieldListBaseModel_ : IBindableModel
+{
+	public IList<SampleBaseModel> Data { get; set; }
+
+	public ISynqraStoreContext? Store { get; set; }
+
+	public void Set(string propertyName, object? value)
+	{
+		throw new NotImplementedException();
+	}
+
+	public void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+	{
+		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass weather this list requires typeId or not
+	}
+
+	public void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		// DeserializeList - only executed when it is known from static data (field or request type) all information about the list.
+		// Deserialize<IList<SampleBaseModel>> - executed when there is not way to guarantee the list type or element types
+		Data = serializer.Deserialize<IList<SampleBaseModel>>(in buffer, ref pos); // TODO need to pass weather this list requires typeId or not
+	}
+}
 
 /// <summary>
 /// Note, this is different class name - for experiments with manual code instead of generator

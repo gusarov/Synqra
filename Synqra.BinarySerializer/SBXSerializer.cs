@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Numerics;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
@@ -34,24 +35,95 @@ public class SBXSerializer : ISBXSerializer
 	//     public string? LevelName { get; set; }
 	// }
 
-	public enum TypeId
+	internal enum TypeId
 	{
 		Unknown = 0,
 		AsRequested = -1, // same type as requested
+
 		// System primitives going down
 		SignedInteger = -2,
 		UnsignedInteger = -3,
 		Utf8String = -4,
 		Guid = -5,
-		List = -6,
+
+		// Special type-only values
+		Null = -6,
+		Object = -7, // e.g. to specify as List<T> type argument
+
+		// Lists
+		ListTypeFrom =  -8,
+		    List_R_E =  -8, // List<RequestedType>(empty)
+		    List_R_R =  -9, // List<RequestedType>(all items are of the same type R, not prefixed)
+		    List_R_S = -10, // List<RequestedType>(all items are of the same Specified type, not prefixed)
+		    List_R_H = -11, // List<RequestedType>(heterogeneous, each item prefixed)
+		    List_S_E = -12, // List<Specified>(empty)
+		    List_S_R = -13, // List<Specified>(all items are of the same type as T, not prefixed)
+		    List_S_S = -14, // List<Specified>(all items are of the same Specified type, not prefixed)
+		    List_S_H = -15, // List<Specified>(heterogeneous, each item prefixed)
+		SpecList_R_E = -16, // Specified<RequestedType>(empty)
+		SpecList_R_R = -17, // Specified<RequestedType>(all items are of the same type R, not prefixed)
+		SpecList_R_S = -18, // Specified<RequestedType>(all items are of the same Specified type, not prefixed)
+		SpecList_R_H = -19, // Specified<RequestedType>(heterogeneous, each item prefixed)
+		SpecList_S_E = -20, // Specified<Specified>(empty)
+		SpecList_S_R = -21, // Specified<Specified>(all items are of the same type as T, not prefixed)
+		SpecList_S_S = -22, // Specified<Specified>(all items are of the same Specified type, not prefixed)
+		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
+		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1,
 		// EndOfObject = -7,
 	}
 
-	static UTF8Encoding _utf8 = new(false, true)
+	internal enum ListTypeId : byte
 	{
-		// EncoderFallback = EncoderFallback.ExceptionFallback,
-		// DecoderFallback = DecoderFallback.ExceptionFallback,
-	};
+		List_R_E, // List<RequestedType>(empty)
+		List_R_R, // List<RequestedType>(all items are of the same type R, not prefixed)
+		List_R_S, // List<RequestedType>(all items are of the same Specified type, not prefixed)
+		List_R_H, // List<RequestedType>(heterogeneous, each item prefixed)
+
+		List_S_E, // List<Specified>(empty)
+		List_S_R, // List<Specified>(all items are of the same type as T, not prefixed)
+		List_S_S, // List<Specified>(all items are of the same Specified type, not prefixed)
+		List_S_H, // List<Specified>(heterogeneous, each item prefixed)
+
+		SpecList_R_E, // Specified<RequestedType>(empty)
+		SpecList_R_R, // Specified<RequestedType>(all items are of the same type R, not prefixed)
+		SpecList_R_S, // Specified<RequestedType>(all items are of the same Specified type, not prefixed)
+		SpecList_R_H, // Specified<RequestedType>(heterogeneous, each item prefixed)
+
+		SpecList_S_E, // Specified<Specified>(empty)
+		SpecList_S_R, // Specified<Specified>(all items are of the same type as T, not prefixed)
+		SpecList_S_S, // Specified<Specified>(all items are of the same Specified type, not prefixed)
+		SpecList_S_H, // Specified<Specified>(heterogeneous, each item prefixed)
+
+		MAX,
+	}
+
+	internal enum ListItemTypeId : byte
+	{
+		Empty = 0,
+		AsRequested = 1,
+		Specified = 2,
+		Heterogen = 3,
+	}
+
+	static (bool SpecList, bool CustomT, ListItemTypeId ItemsType) Decompose(ListTypeId listTypeId)
+	{
+		// from here we can easily decompose bitwise:
+		var specList = ((byte)listTypeId & 0b_0000_1000) > 0;
+		var customT = ((byte)listTypeId & 0b_0000_0100) > 0;
+		var itemsType = (ListItemTypeId)((byte)listTypeId & 0b_0000_0011);
+		return (specList, customT, itemsType);
+	}
+
+	static ListTypeId Compose(bool SpecList, bool CustomT, ListItemTypeId ItemsType)
+	{
+		return (ListTypeId)(
+			  (byte)ItemsType
+			| (CustomT ? 0b_0000_0100 : 0)
+			| (SpecList ? 0b_0000_1000 : 0)
+			);
+	}
+
+	static UTF8Encoding _utf8 = new(false, true);
 
 	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
 	DateTime _streamBaseTime = DateTime.UtcNow;
@@ -93,9 +165,29 @@ public class SBXSerializer : ISBXSerializer
 
 	#region Object
 
-	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(in Span<byte> buffer, T? obj, ref int pos, bool? emitTypeId = null)
+	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+		  in Span<byte> buffer
+		, T? obj
+		, ref int pos
+		)
 	{
-		Serialize(buffer, obj, ref pos, typeof(T), emitTypeId);
+		Serialize(buffer, obj, ref pos, typeof(T));
+	}
+
+	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+		  in Span<byte> buffer
+		, T? obj
+		, ref int pos
+		, bool? emitTypeId = null
+		)
+	{
+		Serialize(
+			  buffer
+			, obj
+			, ref pos
+			, typeof(T)
+			, emitTypeId
+			);
 	}
 
 	public void Serialize(
@@ -118,18 +210,46 @@ public class SBXSerializer : ISBXSerializer
 		var type = obj?.GetType() ?? throw new ArgumentNullException();
 		if (emitTypeId == null)
 		{
-			if (requestedType.IsValueType || requestedType.IsSealed)
+			var testType = requestedType;
+			if (requestedType != typeof(string) && requestedType.IsAssignableTo(typeof(IEnumerable)))
 			{
-				emitTypeId = false;
+				var ienum = requestedType.GetInterfaces().SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
+				if (ienum != null)
+				{
+					testType = ienum.GetGenericArguments()[0];
+				}
 			}
+			emitTypeId = !testType.IsValueType && !testType.IsSealed;
 		}
 
+		TypeId typeId = default;
 		if (emitTypeId != false)
 		{
 			if (requestedType != type)
 			{
-				var typeId = GetTypeId(type);
-				Serialize(in buffer, (int)typeId, ref pos);
+				typeId = GetTypeId(type);
+				if (typeId == TypeId.ListTypeFrom) // ListTypeFrom is a flag, GetTypeId can't figure out anything else, we will do the fix below:
+				{
+					var (IdForList, SpecList, ListTSpecified, SharedElementType) = GetTypeIdForList(type, obj);
+					typeId = IdForList;
+					Serialize(in buffer, (long)typeId, ref pos);
+					if (SpecList != null)
+					{
+						Serialize(in buffer, (int)SpecList.Value, ref pos);
+					}
+					if (ListTSpecified != null)
+					{
+						Serialize(in buffer, (int)ListTSpecified.Value, ref pos);
+					}
+					if (SharedElementType != null)
+					{
+						Serialize(in buffer, (int)SharedElementType.Value, ref pos);
+					}
+				}
+				else
+				{
+					Serialize(in buffer, (long)typeId, ref pos);
+				}
 				if (typeId == 0)
 				{
 					var aqn = type.AssemblyQualifiedName;
@@ -176,7 +296,25 @@ public class SBXSerializer : ISBXSerializer
 		}
 		else if (obj is IEnumerable enumerable)
 		{
-			Serialize(in buffer, enumerable, ref pos, requestedType);
+			// Serialize list content only! List Type data is already serialized above as typeId
+			// But content may be Heterogenic or SharedElementType
+			// For heterogenic, each item is prefixed with typeId and requestedType = null
+			// For SharedElementType, each item is serialized as requestedType = SharedElementType and no typeId prefix consumed per element
+			if (typeId <= TypeId.ListTypeFrom && typeId >= TypeId.ListTypeTo)
+			{
+				// we need this branch, because it might be already encoded that list is empty!
+				var listTypeId = (ListTypeId)(TypeId.ListTypeFrom - typeId);
+				(bool SpecList, bool CustomT, ListItemTypeId ItemsType) = Decompose(listTypeId);
+				if (ItemsType != ListItemTypeId.Empty)
+				{
+					Serialize(in buffer, enumerable, ref pos, requestedCollectionType: requestedType);
+				}
+			}
+			else // statically known!
+			{
+				Serialize(in buffer, enumerable, ref pos, requestedCollectionType: requestedType);
+				// throw new Exception($"List type expected but typeId is {typeId}");
+			}
 		}
 		else
 		{
@@ -194,6 +332,19 @@ public class SBXSerializer : ISBXSerializer
 			// we keep reading strings for the next property name! So let empty string be EndOfObject
 			Serialize(in buffer, "", ref pos);
 		}
+	}
+
+
+	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+		  in ReadOnlySpan<byte> buffer
+		, ref int pos
+		)
+	{
+		return (T)Deserialize(
+			  buffer
+			, ref pos
+			, requestedType: typeof(T)
+			);
 	}
 
 	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
@@ -223,6 +374,15 @@ public class SBXSerializer : ISBXSerializer
 		}
 		if (consumeTypeId == null)
 		{
+			var testType = requestedType;
+			if (requestedType != typeof(string) && requestedType.IsAssignableTo(typeof(IEnumerable)))
+			{
+				var ienum = requestedType.GetInterfaces().SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
+				if (ienum != null)
+				{
+					testType = ienum.GetGenericArguments()[0];
+				}
+			}
 			consumeTypeId = !requestedType.IsValueType && !requestedType.IsSealed;
 		}
 		if (consumeTypeId != true && requestedType == typeof(object))
@@ -233,8 +393,38 @@ public class SBXSerializer : ISBXSerializer
 		// read type
 		var typeId = consumeTypeId == true
 			? (TypeId)DeserializeSigned(in buffer, ref pos)
-			: GetTypeId(requestedType ?? throw new ArgumentNullException(nameof(requestedType), "For the case when consumeTypeId == false"))
+			: GetTypeId(requestedType)
 			;
+
+		if (typeId <= TypeId.ListTypeFrom && typeId >= TypeId.ListTypeTo)
+		{
+			var listTypeId = (ListTypeId)(typeId - TypeId.ListTypeFrom);
+			var (specList, specT, listElementType) = Decompose(listTypeId);
+			Type collectionType = requestedType;
+			if (specList)
+			{
+				var specListTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
+				collectionType = GetTypeFromId(specListTypeId) ?? throw new Exception();
+			}
+			Type? elementType = null;
+			if (specT)
+			{
+				var specTTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
+				elementType = GetTypeFromId(specTTypeId) ?? throw new Exception();
+			}
+			if (listElementType == ListItemTypeId.Specified)
+			{
+				var sharedElementTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
+			}
+			return DeserializeList(
+				  in buffer
+				, ref pos
+				, requestedCollectionType: collectionType
+				, requestedElementType: elementType
+				, consumeTypeId: false
+				, isEmpty: listElementType == ListItemTypeId.Empty
+				);
+		}
 
 		Type type;
 		object value;
@@ -253,7 +443,8 @@ public class SBXSerializer : ISBXSerializer
 		else
 		{
 			type = GetTypeFromId(typeId);
-			schemaVersion = 0;
+			_idByType.TryGetValue(type, out var typeInfo);
+			schemaVersion = typeInfo.schemaVersion;
 		}
 
 		if (typeId == TypeId.SignedInteger || type == typeof(int) || type == typeof(long))
@@ -279,7 +470,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			return DeserializeString(in buffer, ref pos);
 		}
-		else if (type.IsAssignableTo(typeof(IEnumerable)))
+		else if (type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
 		{
 			return DeserializeList(in buffer, ref pos, requestedCollectionType: type, consumeTypeId: false);
 		}
@@ -287,9 +478,9 @@ public class SBXSerializer : ISBXSerializer
 		{
 			return DeserializeGuid(in buffer, ref pos);
 		}
-		else if (typeId == TypeId.List || type.IsAssignableTo(typeof(IEnumerable)))
+		else if ((typeId >= TypeId.ListTypeTo && typeId <= TypeId.ListTypeTo) || type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
 		{
-			type = requestedType;
+			type = requestedType; // duplicate?
 			if (type.IsAssignableTo(typeof(IEnumerable)))
 			{
 				return DeserializeList(in buffer, ref pos, requestedCollectionType: type, consumeTypeId: false);
@@ -298,7 +489,7 @@ public class SBXSerializer : ISBXSerializer
 		}
 		else if (_typeById.TryGetValue((int)typeId, out var typeInfo))
 		{
-			type = typeInfo.type;
+			type = typeInfo.type;  // duplicate?
 			schemaVersion = typeInfo.schemaVersion;
 		}
 
@@ -471,39 +662,11 @@ public class SBXSerializer : ISBXSerializer
 
 		var materialized = enumerable as ICollection ?? enumerable.Cast<object?>().ToArray();
 
-		var monogenicList = true;
-		if (!isBuiltTimeImpliedType)
+		var cnt = materialized.Count;
+		// if (cnt > 0)
 		{
-			Type? monogenicType = null;
-			foreach (var item in materialized ?? throw new Exception("This will never happen"))
-			{
-				var itemType = item.GetType();
-				if (monogenicType == null)
-				{
-					monogenicType = itemType;
-				}
-				else if (monogenicType != itemType)
-				{
-					monogenicList = false;
-					break;
-				}
-			}
+			Serialize(buffer, (ulong)cnt, ref pos);
 		}
-
-		if (isBuiltTimeImpliedType) // no need in type id
-		{
-
-		}
-		else if (monogenicList)
-		{
-			// 1. all items are of the same type - then we can write type once, and then all items.
-		}
-		else
-		{
-			// 2. items are of different types - then we have to write type for each item, and this mean we can easily zero-end collections of different types
-		}
-		Serialize(buffer, (uint)materialized.Count, ref pos);
-
 		foreach (var item in materialized)
 		{
 			Serialize(buffer, item, ref pos, emitTypeId: !isBuiltTimeImpliedType);
@@ -549,9 +712,10 @@ public class SBXSerializer : ISBXSerializer
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedCollectionType = null
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedElementType = null
 		, bool? consumeTypeId = null
+		, bool isEmpty = false
 		)
 	{
-		var count = (int)DeserializeUnsigned(buffer, ref pos);
+		var count = isEmpty ? 0 : (int)DeserializeUnsigned(buffer, ref pos);
 
 		if (listToFill == null)
 		{
@@ -575,6 +739,7 @@ public class SBXSerializer : ISBXSerializer
 
 			listToFill = (IList)Activator.CreateInstance(requestedCollectionType ?? typeof(List<>).MakeGenericType(requestedElementType), count) ?? throw new Exception("Could not create instance of list of " + requestedElementType.Name);
 		}
+
 		for (int i = 0; i < count; i++)
 		{
 			var item = Deserialize(buffer, ref pos, requestedElementType, consumeTypeId: false);
@@ -587,7 +752,157 @@ public class SBXSerializer : ISBXSerializer
 
 	#region Type
 
-	private TypeId GetTypeId(Type type)
+	private (TypeId List, TypeId? SpecList, TypeId? ListTSpecified, TypeId? SharedElementType) GetTypeIdForList(Type type, object? obj = null)
+	{
+		// Calculate requested type properly from static data before analyzing actual data
+		var rienum = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+			? type
+			: type.GetInterfaces().SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
+
+		var requestedItemType = rienum == null ? typeof(object) : rienum.GetGenericArguments()[0];
+
+		if (obj is IEnumerable en)
+		{
+			// SpecList or Not?
+			var specListType = type;
+			var listType = obj.GetType();
+			if (listType.IsGenericType && listType.GetGenericTypeDefinition() == typeof(List<>) || listType.IsArray)
+			{
+				specListType = null;
+			}
+
+			// List: List<R>
+			// List: List<S>
+			// SpecList: MyCollection
+			// SpecList: MyCollection<R>
+			// SpecList: MyCollection<S>
+
+			Type? specifiedT;
+
+			if (specListType != null)
+			{
+				// check generic arguments.
+				if (listType.IsGenericType)
+				{
+					var ga = listType.GetGenericArguments();
+					if (ga.Length == 1)
+					{
+						var ga0 = ga[0];
+						if (ga0 != requestedItemType)
+						{
+							specifiedT = ga0;
+						}
+						else
+						{
+							specifiedT = null; // as requested
+						}
+					}
+					else
+					{
+						throw new Exception($"Could not serialize more than one generic arguments of {listType.Name}");
+					}
+				}
+				else
+				{
+					specifiedT = null; // not needed
+				}
+			}
+			else
+			{
+				if (listType.IsArray)
+				{
+					var elementType = listType.GetElementType();
+					if (elementType == requestedItemType)
+					{
+						specifiedT = null; // as requested
+					}
+					else
+					{
+						specifiedT = elementType;
+					}
+				}
+				else
+				{
+					var ga = listType.GetGenericArguments();
+					var ga0 = ga[0];
+					if (ga0 != requestedItemType)
+					{
+						specifiedT = ga0;
+					}
+					else
+					{
+						specifiedT = null; // as requested
+					}
+				}
+			}
+
+			// Shared Actual list items Type?
+			// we need type id, and now we can judge
+			var monogenic = true;
+			var empty = true;
+			Type? monogenicType = null;
+			foreach (var item in en)
+			{
+				empty = false;
+				var itemType = item?.GetType();
+				if (itemType == null)
+				{
+					continue; // nulls are ok, they do not affect monogenicity
+				}
+				if (monogenicType == null)
+				{
+					monogenicType = itemType;
+				}
+				else if (monogenicType != itemType)
+				{
+					monogenic = false;
+					monogenicType = null;
+					break;
+				}
+			}
+			var listItemTypeId = (monogenic, empty, requestedItemType == monogenicType) switch
+			{
+				(true/* */, true/* */, _/*    */) => ListItemTypeId.Empty,
+				(true/* */, false/**/, true/* */) => ListItemTypeId.AsRequested,
+				(true/* */, false/**/, false/**/) => ListItemTypeId.Specified,
+				(false/**/, _/*    */, _/*    */) => ListItemTypeId.Heterogen,
+			};
+			return (specListType != null, specifiedT != null, listItemTypeId) switch
+			{
+				(false, false, ListItemTypeId.Empty) /*      */ => (/**/TypeId.List_R_E, /*               */null, /*             */null, null),
+				(false, false, ListItemTypeId.AsRequested) /**/ => (/**/TypeId.List_R_R, /*               */null, /*             */null, null),
+				(false, false, ListItemTypeId.Specified) /*  */ => (/**/TypeId.List_R_S, /*               */null, /*             */null, GetTypeId(monogenicType)),
+				(false, false, ListItemTypeId.Heterogen) /*  */ => (/**/TypeId.List_R_H, /*               */null, /*             */null, null),
+
+				(false, true, ListItemTypeId.Empty) /*       */ => (/**/TypeId.List_S_E, /*               */null, GetTypeId(specifiedT), null),
+				(false, true, ListItemTypeId.AsRequested) /* */ => (/**/TypeId.List_S_R, /*               */null, GetTypeId(specifiedT), null),
+				(false, true, ListItemTypeId.Specified) /*   */ => (/**/TypeId.List_S_S, /*               */null, GetTypeId(specifiedT), GetTypeId(monogenicType)),
+				(false, true, ListItemTypeId.Heterogen) /*   */ => (/**/TypeId.List_S_H, /*               */null, GetTypeId(specifiedT), null),
+
+				(true, false, ListItemTypeId.Empty) /*       */ => (TypeId.SpecList_R_E, GetTypeId(specListType), /*             */null, null),
+				(true, false, ListItemTypeId.AsRequested) /* */ => (TypeId.SpecList_R_R, GetTypeId(specListType), /*             */null, null),
+				(true, false, ListItemTypeId.Specified) /*   */ => (TypeId.SpecList_R_S, GetTypeId(specListType), /*             */null, GetTypeId(monogenicType)),
+				(true, false, ListItemTypeId.Heterogen) /*   */ => (TypeId.SpecList_R_H, GetTypeId(specListType), /*             */null, null),
+
+				(true, true, ListItemTypeId.Empty) /*        */ => (TypeId.SpecList_S_E, GetTypeId(specListType), GetTypeId(specifiedT), null),
+				(true, true, ListItemTypeId.AsRequested) /*  */ => (TypeId.SpecList_S_R, GetTypeId(specListType), GetTypeId(specifiedT), null),
+				(true, true, ListItemTypeId.Specified) /*    */ => (TypeId.SpecList_S_S, GetTypeId(specListType), GetTypeId(specifiedT), GetTypeId(monogenicType)),
+				(true, true, ListItemTypeId.Heterogen) /*    */ => (TypeId.SpecList_S_H, GetTypeId(specListType), GetTypeId(specifiedT), null),
+
+				(_, _, _) => throw new Exception($"Unknown ListItemTypeId {listItemTypeId}"),
+			};
+		}
+		else if (obj == null)
+		{
+			return (TypeId.Null, null, null, null);
+		}
+		else
+		{
+			throw new Exception($"The object is not a collection: {obj.GetType().Name}");
+		}
+	}
+
+	private TypeId GetTypeId(Type type, object? obj = null)
 	{
 		switch (type)
 		{
@@ -600,7 +915,7 @@ public class SBXSerializer : ISBXSerializer
 			case Type t when t == typeof(Guid):
 				return TypeId.Guid;
 			case Type t when t.IsAssignableTo(typeof(IEnumerable)):
-				return TypeId.List;
+				return TypeId.ListTypeFrom; // artificial mark, requre a call to GetTypeIdForList
 			default:
 				_idByType.TryGetValue(type, out var metaData); // it will stay Unknown if there is no such type, as designed.
 				return (TypeId)metaData.typeId;
