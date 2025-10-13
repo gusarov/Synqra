@@ -32,7 +32,8 @@ public interface ISBXSerializer
 	void Serialize(in Span<byte> buffer, string value, ref int pos);
 	void Serialize(in Span<byte> buffer, in long value, ref int pos);
 	void Serialize(in Span<byte> buffer, ulong value, ref int pos);
-	void Serialize<T>(in Span<byte> buffer, in IEnumerable<T> value, ref int pos);
+	// it will go <T> route and will emit proper prefixes
+	// void Serialize<T>(in Span<byte> buffer, in IEnumerable<T> value, ref int pos);
 
 	T Deserialize<T>(in ReadOnlySpan<byte> buffer, ref int pos);
 
