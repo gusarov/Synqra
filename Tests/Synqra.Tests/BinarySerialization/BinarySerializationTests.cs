@@ -146,7 +146,8 @@ internal class BinarySerializationStringTests : BaseTest
 		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
 
 		var serBuf = buffer;
-		ser.Serialize(ref serBuf, data);
+		int pos3 = 0;
+		ser.Serialize(serBuf, data, ref pos3);
 	}
 }
 
@@ -341,14 +342,14 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		buffer = buffer[0..pos];
 		HexDump(buffer);
 
-		Assert.That(pos).IsEqualTo(5).GetAwaiter().GetResult();
+		Assert.That(pos).IsEqualTo(4).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.Deserialize<IEnumerable<uint>>(buffer, ref pos2);
 
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0103010203").GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03010203").GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -372,7 +373,60 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		// Assert.That(Convert.ToHexString(buffer)).IsEqualTo(hex).GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 4F6E6500 54776F00 546872656500".Replace(" ", "")).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_17_make_string_interning()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = new List<string> { "Three", "", "Three" };
+
+		ser.Serialize(buffer, data, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		//Assert.That(pos).IsLessThan(20).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<List<string>>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 546872656500 00 80".Replace(" ", "")).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_20_serialize_dictionary_of_string()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = new Dictionary<string, string>
+		{
+			{ "Key1", "Value1" },
+			{ "Key2", "Value2" },
+			{ "Key3", "Value3" }
+		};
+
+		ser.Serialize(buffer, data, ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		Assert.That(pos).IsLessThan(20).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<Dictionary<string, string>>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("44").GetAwaiter().GetResult();
 	}
 }
 
