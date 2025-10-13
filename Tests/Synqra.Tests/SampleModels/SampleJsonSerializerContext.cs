@@ -76,6 +76,12 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(SampleFieldListBaseModel))]
 [JsonSerializable(typeof(SampleFieldListSealedModel))]
 [JsonSerializable(typeof(SampleFieldListBaseModel_))]
+[JsonSerializable(typeof(SampleFieldEnumerableBaseModel))]
+[JsonSerializable(typeof(SampleFieldEnumerableBaseModel_))]
+
+[JsonSerializable(typeof(List<SampleBaseModel>))]
+[JsonSerializable(typeof(List<SampleDerivedModel>))]
+[JsonSerializable(typeof(List<SampleSealedModel>))]
 
 public partial class SampleJsonSerializerContext : JsonSerializerContext
 {

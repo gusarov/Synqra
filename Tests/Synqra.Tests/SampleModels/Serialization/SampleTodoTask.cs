@@ -108,9 +108,10 @@ public partial class SampleFieldEnumerableSealedModel
 
 
 [Schema(1, "1 Id int")]
-[JsonDerivedType(typeof(SampleDerivedModel))]
-[JsonDerivedType(typeof(SampleSealedDerivedModel))]
-[JsonDerivedType(typeof(SampleSealedModel))]
+[JsonPolymorphic]
+[JsonDerivedType(typeof(SampleDerivedModel), "SampleDerivedModel")]
+[JsonDerivedType(typeof(SampleSealedDerivedModel), "SampleSealedDerivedModel")]
+[JsonDerivedType(typeof(SampleSealedModel), "SampleSealedModel")]
 public partial class SampleBaseModel
 {
 	public partial int Id { get; set; }

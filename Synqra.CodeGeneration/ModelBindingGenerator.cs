@@ -714,7 +714,8 @@ $$"""
 				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
 			{
 				var arg = named.TypeArguments[0];
-				return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+				// return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+				return $"<{named.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 			}
 
 			// Try matching implemented IEnumerable<T> interface

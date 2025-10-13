@@ -38,6 +38,30 @@ public class SampleFieldListBaseModel_ : IBindableModel
 	}
 }
 
+public class SampleFieldEnumerableBaseModel_ : IBindableModel
+{
+	public IEnumerable<SampleBaseModel> Data { get; set; }
+
+	public ISynqraStoreContext? Store { get; set; }
+
+	public void Set(string propertyName, object? value)
+	{
+		throw new NotImplementedException();
+	}
+
+	public void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+	{
+		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass weather this list requires typeId or not
+	}
+
+	public void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		// DeserializeList - only executed when it is known from static data (field or request type) all information about the list.
+		// Deserialize<IList<SampleBaseModel>> - executed when there is not way to guarantee the list type or element types
+		Data = serializer.Deserialize<IEnumerable<SampleBaseModel>>(in buffer, ref pos); // TODO need to pass weather this list requires typeId or not
+	}
+}
+
 /// <summary>
 /// Note, this is different class name - for experiments with manual code instead of generator
 /// The _ at the end stops code generation
