@@ -131,6 +131,13 @@ public class SBXSerializer : ISBXSerializer
 	Dictionary<int, (float schemaVersion, Type type)> _typeById = new();
 	Dictionary<Type, (int typeId, float schemaVersion)> _idByType = new();
 
+	// Let's use UTF8 continuation ranges (0x80...0xBF) for string interning. This way, we can always distinguish between real first character and a pointer to dictionary.
+	static byte _startNextStringInternId = 0x80;
+	byte _nextStringId = _startNextStringInternId;
+	Dictionary<byte, string> _stringById = new();
+	Dictionary<string, (byte Id, LinkedListNode<string> Node)> _stringByValue = new();
+	LinkedList<string> _strings = new LinkedList<string>();
+
 	public void SetTimeBase(DateTime streamBaseTime)
 	{
 		if (streamBaseTime.Kind != DateTimeKind.Utc)
@@ -145,6 +152,44 @@ public class SBXSerializer : ISBXSerializer
 		var schemaVersionF = (float)schemaVersion;
 		_typeById[typeId] = (schemaVersionF, type);
 		_idByType[type] = (typeId, schemaVersionF);
+	}
+
+	/// <summary>
+	/// The utf8 byte that represents either 0 or a string intern id (0x80...0xC1)
+	/// </summary>
+	/// <param name="value"></param>
+	/// <returns></returns>
+	byte Intern(string value)
+	{
+		if (value.Length == 0)
+		{
+			return 0;
+		}
+		if (!_stringByValue.TryGetValue(value, out var metadata))
+		{
+			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
+			{
+				var first = _strings.First!;
+				_strings.Remove(first);
+				var (code, _) = _stringByValue[first.Value];
+				_stringByValue.Remove(first.Value);
+				_stringById[code] = value;
+				_stringByValue[value] = (code, _strings.AddLast(value));
+			}
+			else
+			{
+				var id = _nextStringId++; // first allocated point is 0x80, last is 0xC1
+				_stringById[id] = value;
+				_stringByValue[value] = (id, _strings.AddLast(value));
+			}
+			return 0;
+		}
+		else
+		{
+			_strings.Remove(metadata.Node);
+			_strings.AddLast(metadata.Node);
+			return metadata.Id;
+		}
 	}
 
 	/*
@@ -1038,6 +1083,19 @@ public class SBXSerializer : ISBXSerializer
 
 	public string DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
+		var b = buffer[pos];
+
+		if (b >= 0x80 && b <= 0xC1)
+		{
+			pos++;
+			return _stringById[b];
+		}
+		else if (b == 0)
+		{
+			pos++;
+			return "";
+		}
+
 		int length = buffer[pos..].IndexOf<byte>(0); // todo: it probably allocates array here :(
 		if (length < 0)
 		{
@@ -1049,6 +1107,7 @@ public class SBXSerializer : ISBXSerializer
 		return str;
 	}
 
+	/*
 	public string DeserializeString(ref ReadOnlySpan<byte> buffer) // 37 38 00
 	{
 		int length = buffer.IndexOf<byte>(0); // todo: it probably allocates array here :(
@@ -1061,14 +1120,27 @@ public class SBXSerializer : ISBXSerializer
 		buffer = buffer[(length + 1)..];
 		return str;
 	}
+	*/
 
 	public void Serialize(in Span<byte> buffer, string data, ref int pos)
 	{
-		// Serialize(buffer, (uint)data.Length, ref pos);
-		pos += _utf8.GetBytes(data, buffer[pos..]);
-		buffer[pos++] = 0; // null terminator
+		var id = Intern(data);
+		if (id == 0)
+		{
+			pos += _utf8.GetBytes(data, buffer[pos..]);
+			buffer[pos++] = 0; // null terminator
+		}
+		else if (id >= 0x80 && id <=0xC1)
+		{
+			buffer[pos++] = (byte)id;
+		}
+		else
+		{
+			throw new Exception("Incorrect Intern String id");
+		}
 	}
 
+	/*
 	public void Serialize(ref Span<byte> buffer, string data)
 	{
 		// Serialize(buffer, (uint)data.Length, ref pos);
@@ -1076,6 +1148,7 @@ public class SBXSerializer : ISBXSerializer
 		buffer[pos++] = 0; // null terminator
 		buffer = buffer[pos..];
 	}
+	*/
 
 	public static int IndexOfNull(in ReadOnlySpan<byte> span)
 	{
