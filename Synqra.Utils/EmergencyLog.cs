@@ -420,6 +420,19 @@ public sealed class EmergencyLog
 
 public static class EmergencyLogExtensions
 {
+	static HexDumpWriter _hexDumpWriter = new HexDumpWriter();
+
+	/// <summary>
+	/// Conditional message - #if DEBUG
+	/// </summary>
+	[Conditional("DEBUG")]
+	public static void DebugHexDump(this EmergencyLog log, ReadOnlySpan<byte> data)
+	{
+		var sb = new StringBuilder();
+		_hexDumpWriter.HexDump(data, x => sb.Append(x), x => sb.Append(x));
+		log.Message($"[Debug] [HexDump] {sb}");
+	}
+
 	/// <summary>
 	/// Conditional message - #if DEBUG
 	/// </summary>
