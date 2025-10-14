@@ -24,7 +24,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
+    <!--
+    <ProjectReference Include="..\Synqra.CoreModel\Synqra.CoreModel.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
+    -->
     <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
 
     <!-- TODO Pack the dependencies!
@@ -45,9 +47,9 @@
       <TargetPathWithTargetPlatformMoniker
          Include="C:\Users\xkip\source\repos\Quotaly\external\Synqra\Synqra.Model\bin\Debug\netstandard2.0\Synqra.Model.dll"
          IncludeRuntimeDependency="false" />
-      -->
       <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Model.dll" IncludeRuntimeDependency="false" />
-      <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Utils.dll" IncludeRuntimeDependency="false" />
+      -->
+         <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Utils.dll" IncludeRuntimeDependency="false" />
     </ItemGroup>
   </Target>
 </Project>

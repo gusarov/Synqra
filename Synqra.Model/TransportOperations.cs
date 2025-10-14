@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -13,7 +13,9 @@ public abstract class TransportOperation
 {
 }
 
-public class NewEvent1 : TransportOperation
+[SynqraModel]
+[Schema(2025.785, "1 Event Event")]
+public partial class NewEvent1 : TransportOperation
 {
-	public required Event Event { get; set; }
+	public required partial Event Event { get; set; }
 }

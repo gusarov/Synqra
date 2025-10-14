@@ -38,14 +38,14 @@ public class SBXSerializer : ISBXSerializer
 
 	internal enum TypeId
 	{
-		Unknown = 0,
+		Unknown = 0, // if used for type id, then it follows utf8 encoded full type name
 		AsRequested = -1, // same type as requested
 
 		// System primitives going down
-		SignedInteger = -2,
-		UnsignedInteger = -3,
-		Utf8String = -4,
-		Guid = -5,
+		SignedInteger = -2, // varint
+		UnsignedInteger = -3, // zigzag varint
+		Utf8String = -4, // zero-tailed utf8 or an interned pointer (using 0x80-0xC1 range blocked in utf8)
+		Guid = -5, // custom compression for guids
 
 		// Special type-only values
 		Null = -6,
@@ -70,7 +70,10 @@ public class SBXSerializer : ISBXSerializer
 		SpecList_S_S = -22, // Specified<Specified>(all items are of the same Specified type, not prefixed)
 		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
 		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1,
-		// EndOfObject = -7,
+
+		// TEMPORAY:
+		DictStrObj = -30,
+		DictStrStr = -31,
 	}
 
 	internal enum ListTypeId : byte
@@ -128,8 +131,8 @@ public class SBXSerializer : ISBXSerializer
 
 	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
 	DateTime _streamBaseTime = DateTime.UtcNow;
-	Dictionary<int, (float schemaVersion, Type type)> _typeById = new();
-	Dictionary<Type, (int typeId, float schemaVersion)> _idByType = new();
+	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
+	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
 
 	// Let's use UTF8 continuation ranges (0x80...0xBF) for string interning. This way, we can always distinguish between real first character and a pointer to dictionary.
 	static byte _startNextStringInternId = 0x80;
@@ -137,6 +140,38 @@ public class SBXSerializer : ISBXSerializer
 	Dictionary<byte, string> _stringById = new();
 	Dictionary<string, (byte Id, LinkedListNode<string> Node)> _stringByValue = new();
 	LinkedList<string> _strings = new LinkedList<string>();
+
+	public SBXSerializer()
+	{
+		Map(-100, 1, typeof(KeyValuePair<string, object>), new KeyValuePairModelBinder<string, object>());
+		Map(-101, 1, typeof(KeyValuePair<string, string>), new KeyValuePairModelBinder<string, string>());
+		Map(-99, 1, typeof(TransportOperation));
+		Map(-98, 2025.785f, typeof(NewEvent1));
+	}
+
+	class KeyValuePairModelBinder<TK, TV> : IModelBinder<KeyValuePair<TK, TV>>
+	{
+		public void Get(KeyValuePair<TK, TV> model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		{
+			serializer.Serialize(buffer, model.Key, ref pos);
+			serializer.Serialize(buffer, model.Value, ref pos);
+		}
+
+		public void Get(object model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		{
+			Get((KeyValuePair<TK, TV>)model, serializer, schemaVersion, buffer, ref pos);
+		}
+
+		public void Set(ref KeyValuePair<TK, TV> model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		{
+			model = new KeyValuePair<TK, TV>(serializer.Deserialize<TK>(buffer, ref pos), serializer.Deserialize<TV>(buffer, ref pos));
+		}
+
+		public void Set(ref object model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		{
+			model = new KeyValuePair<TK, TV>(serializer.Deserialize<TK>(buffer, ref pos), serializer.Deserialize<TV>(buffer, ref pos));
+		}
+	}
 
 	public void SetTimeBase(DateTime streamBaseTime)
 	{
@@ -147,11 +182,14 @@ public class SBXSerializer : ISBXSerializer
 		_streamBaseTime = streamBaseTime;
 	}
 
-	public void Map(int typeId, double schemaVersion, Type type)
+	// void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	// void IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+
+	public void Map(int typeId, double schemaVersion, Type type, IModelBinder? binder = null)
 	{
 		var schemaVersionF = (float)schemaVersion;
-		_typeById[typeId] = (schemaVersionF, type);
-		_idByType[type] = (typeId, schemaVersionF);
+		_typeById[typeId] = (schemaVersionF, type, binder);
+		_idByType[type] = (typeId, schemaVersionF, binder);
 	}
 
 	/// <summary>
@@ -358,6 +396,16 @@ public class SBXSerializer : ISBXSerializer
 		{
 			Serialize(in buffer, s, ref pos);
 		}
+		else if (obj is KeyValuePair<string, string> ks)
+		{
+			Serialize(in buffer, ks.Key, ref pos);
+			Serialize(in buffer, ks.Value, ref pos);
+		}
+		else if (obj is KeyValuePair<string, object> ko)
+		{
+			Serialize(in buffer, ko.Key, ref pos);
+			Serialize(in buffer, ko.Value, ref pos);
+		}
 		else if (obj is IEnumerable enumerable)
 		{
 			// Serialize list content only! List Type data is already serialized above as typeId
@@ -379,6 +427,10 @@ public class SBXSerializer : ISBXSerializer
 				Serialize(in buffer, enumerable, ref pos/*, requestedCollectionType: requestedType*/, emitTypePerElement: false);
 				// throw new Exception($"List type expected but typeId is {typeId}");
 			}
+		}
+		else if (_idByType.TryGetValue(actualType, out var typeInfo) && typeInfo.Binder != null)
+		{
+			typeInfo.Binder.Get(obj, this, 0, buffer, ref pos);
 		}
 		else
 		{
@@ -445,7 +497,7 @@ public class SBXSerializer : ISBXSerializer
 				if (requestedType.IsGenericType)
 				{
 					list = true;
-					var ienum = requestedType; // .GetInterfaces().SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
+					var ienum = requestedType.GetInterfaces().Concat([requestedType]).SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
 					if (ienum != null)
 					{
 						testType = ienum.GetGenericArguments()[0];
@@ -560,8 +612,17 @@ public class SBXSerializer : ISBXSerializer
 		{
 			return DeserializeString(in buffer, ref pos);
 		}
+		else if (type.IsAssignableTo(typeof(IDictionary<string, object>)))
+		{
+			return DeserializeDict<string, object>(buffer, ref pos);
+		}
+		else if (type.IsAssignableTo(typeof(IDictionary<string, string>)))
+		{
+			return DeserializeDict<string, string>(buffer, ref pos);
+		}
 		else if (type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
 		{
+
 			return DeserializeList(
 				  in buffer
 				, ref pos
@@ -601,6 +662,11 @@ public class SBXSerializer : ISBXSerializer
 			if (value is IBindableModel bm)
 			{
 				bm.Set(this, schemaVersion, in buffer, ref pos);
+				return value; // do not process named properties for now
+			}
+			else if (_idByType.TryGetValue(type, out var metadata) && metadata.Binder != null)
+			{
+				metadata.Binder.Set(ref value, this, schemaVersion, in buffer, ref pos);
 				return value; // do not process named properties for now
 			}
 			else
@@ -810,7 +876,26 @@ public class SBXSerializer : ISBXSerializer
 			);
 	}
 
-	public IList DeserializeList(
+	public IDictionary<TK, TV> DeserializeDict<
+	  [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] TK
+	, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] TV
+	>(
+	  in ReadOnlySpan<byte> buffer
+	, ref int pos
+)
+	{
+		var list = new List<KeyValuePair<TK, TV>>();
+		DeserializeList(
+			  in buffer
+			, ref pos
+			, listToFill: list
+			, requestedElementType: typeof(KeyValuePair<TK, TV>)
+			);
+		var dict = new Dictionary<TK, TV>(list);
+		return dict;
+	}
+
+	public object DeserializeList(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
 		, IList? listToFill = null
@@ -881,6 +966,18 @@ public class SBXSerializer : ISBXSerializer
 			if (listType.IsGenericType && listType.GetGenericTypeDefinition() == typeof(List<>) || listType.IsArray)
 			{
 				specListType = null;
+			}
+			else
+			{
+				var ienum = listType.GetInterfaces().SingleOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>)); // TODO: There are rare cases with multiple different IEnumerable<T>
+				if (ienum != null)
+				{
+					var ga = ienum.GetGenericArguments();
+					if (ga.Length == 1 && ga[0] == requestedItemType)
+					{
+						specListType = null; // as requested
+					}
+				}
 			}
 
 			// List: List<R>
@@ -1026,6 +1123,10 @@ public class SBXSerializer : ISBXSerializer
 				return TypeId.Utf8String;
 			case Type t when t == typeof(Guid):
 				return TypeId.Guid;
+			case Type t when t.IsAssignableTo(typeof(IDictionary<string, string>)):
+				return TypeId.DictStrStr; // artificial mark, requre a call to GetTypeIdForList
+			case Type t when t.IsAssignableTo(typeof(IDictionary<string, object>)):
+				return TypeId.DictStrObj; // artificial mark, requre a call to GetTypeIdForList
 			case Type t when t.IsAssignableTo(typeof(IEnumerable)):
 				return TypeId.ListTypeFrom; // artificial mark, requre a call to GetTypeIdForList
 			default:
@@ -1121,7 +1222,7 @@ public class SBXSerializer : ISBXSerializer
 		return str;
 	}
 	*/
-
+	
 	public void Serialize(in Span<byte> buffer, string data, ref int pos)
 	{
 		var id = Intern(data);

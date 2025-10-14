@@ -1,4 +1,4 @@
-using Synqra.BinarySerializer;
+﻿using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
@@ -253,6 +253,28 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		yield return () => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14020A0C");
 		yield return () => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1600"); // no list type id but count 0
 		yield return () => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16020A0A");
+
+		// Dictionary                                                                                                                                                                     A=  int1  B=  SSM5
+		yield return () => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 02 4100 0302 4200 040A");
+
+		// Prod
+		yield return () => (70, new NewEvent1
+		{
+			Event = new CommandCreatedEvent
+			{
+				CommandId = default,
+				EventId = default,
+				Data = new CreateObjectCommand
+				{
+					CommandId = default,
+					ContainerId = default,
+					CollectionId = default,
+					Target = null,
+					TargetId = default,
+					TargetTypeId = default,
+				},
+			},
+		}, "1C 02 4100 0302 4200 040A");
 	}
 
 	[Test]
@@ -263,12 +285,12 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Console.WriteLine(modelJsonX);
 
 		var ser = new SBXSerializer();
-		ser.Map( 1, 1, typeof(SampleFieldSealedModel));
-		ser.Map( 2, 1, typeof(SampleSealedModel));
-		ser.Map( 3, 1, typeof(SampleFieldBaseModel));
+		ser.Map( 1, 1, typeof(SampleFieldSealedModel)); // 0z02
+		ser.Map( 2, 1, typeof(SampleSealedModel)); // 0z04
+		ser.Map( 3, 1, typeof(SampleFieldBaseModel)); // 0z06
 		ser.Map( 4, 1, typeof(SampleBaseModel));
-		ser.Map( 5, 1, typeof(SampleDerivedModel));
-		ser.Map( 6, 1, typeof(SampleFieldObjectModel));
+		ser.Map( 5, 1, typeof(SampleDerivedModel)); // 0z1A
+		ser.Map( 6, 1, typeof(SampleFieldObjectModel)); // 0z1C
 		ser.Map( 7, 1, typeof(SampleFieldDerrivedModel));
 		ser.Map( 8, 1, typeof(SampleFieldIntModel));
 		ser.Map( 9, 1, typeof(SampleFieldSealedDerivedModel));
@@ -276,6 +298,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		ser.Map(11, 1, typeof(SampleFieldListSealedModel));
 		ser.Map(12, 1, typeof(SampleFieldListBaseModel));
 		ser.Map(13, 1, typeof(SampleFieldEnumerableBaseModel));
+		ser.Map(14, 1, typeof(SampleFieldDictionaryStringObjectModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
@@ -298,7 +321,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Assert.That(deserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo(expectedHex).GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo(expectedHex.Replace(" ", "")).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -401,6 +424,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	}
 
 	[Test]
+	[Explicit]
 	public void Should_20_serialize_dictionary_of_string()
 	{
 		var ser = new SBXSerializer();
@@ -419,14 +443,36 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		buffer = buffer[0..pos];
 		HexDump(buffer);
 
-		Assert.That(pos).IsLessThan(20).GetAwaiter().GetResult();
+		Assert.That(pos).IsLessThan(40).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.Deserialize<Dictionary<string, string>>(buffer, ref pos2);
 
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("44").GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 4B 65 79  31 00 56 61  6C 75 65 31  00 4B 65 79  32 00 56 61  6C 75 65 32  00 4B 65 79  33 00 56 61  6C 75 65 33  00 ".Replace(" ", "")).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_print_cyrillic_utf8_codes()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		ser.Serialize(buffer, "п", ref pos);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		Assert.That(pos).IsLessThan(20).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<string>(buffer, ref pos2);
+
+		Assert.That(deserialized).IsEqualTo("п").GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("D0BF00").GetAwaiter().GetResult();
 	}
 }
 

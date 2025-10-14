@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" />
+    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
   </ItemGroup>
 
 </Project>

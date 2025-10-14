@@ -399,22 +399,22 @@ public sealed class EmergencyLog
 
 	private void FileAppendAllText(string fileName, string message)
 	{
-		// File.AppendAllText does not share readers, so we do it manually
+			// File.AppendAllText does not share readers, so we do it manually
 		using var file = File.Open(fileName, FileMode.Append, FileAccess.Write, FileShare.Read);
 		file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
 		using var sw = new StreamWriter(file);
-		/*
-		using var sw2 = new StreamWriter(fileName, new FileStreamOptions
-		{
-			Access = FileAccess.Write,
-			Mode = FileMode.Append,
-			PreallocationSize = 1024 * 1024,
-			Share = FileShare.Read,
-			// Options = FileOptions.SequentialScan,
-			// BufferSize = 1024 * 1024,
-		});
-		*/
-		sw.Write(message);
+			/*
+			using var sw2 = new StreamWriter(fileName, new FileStreamOptions
+			{
+				Access = FileAccess.Write,
+				Mode = FileMode.Append,
+				PreallocationSize = 1024 * 1024,
+				Share = FileShare.Read,
+				// Options = FileOptions.SequentialScan,
+				// BufferSize = 1024 * 1024,
+			});
+			*/
+			sw.Write(message);
 	}
 }
 

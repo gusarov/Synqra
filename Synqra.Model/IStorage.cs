@@ -32,35 +32,3 @@ public interface IStorage<T, TKey> : IDisposable, IAsyncDisposable
 #endif
 		;
 }
-
-/*
-public interface IIdentifiable<TKey>
-{
-	TKey Id { get; }
-}
-*/
-
-internal class AttachedData
-{
-	public string? TrackingSinceJsonSnapshot { get; set; }
-}
-
-public class CommandHandlerContext
-{
-	internal List<Event> Events { get; set; } = new List<Event>();
-}
-
-public class EventVisitorContext
-{
-}
-
-class TypeMetadata
-{
-	public Type Type { get; set; }
-	public Guid TypeId { get; set; }
-
-	public override string ToString()
-	{
-		return $"{TypeId.ToString("N")[..4]} {Type.Name}";
-	}
-}
