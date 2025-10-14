@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 
 namespace Synqra.Tests.TestHelpers;
@@ -16,6 +17,7 @@ public abstract class BaseTest<T> : BaseTest where T : notnull
 public class TestUtils : PerformanceTestUtils
 {
 	public Random RandomShared = new Random();
+	public HexDumpWriter HexDumpWriter = new HexDumpWriter();
 
 	public string CreateTestFileName(string fileName)
 	{
@@ -54,131 +56,9 @@ public class TestUtils : PerformanceTestUtils
 		return sr.ReadToEnd();
 	}
 
-	public void HexDump(Span<byte> span)
+	public void HexDump(ReadOnlySpan<byte> data)
 	{
-		if (span.Length <= 20)
-		{
-			for (int i = 0, m = span.Length; i < m; i++)
-			{
-				Console.Write(span[i].ToString("X2"));
-				if ((i + 1) % 4 == 0)
-				{
-					Console.Write("  ");
-				}
-				else
-				{
-					Console.Write(" ");
-				}
-			}
-			Console.WriteLine();
-			for (int i = 0, m = span.Length; i < m; i++)
-			{
-				var c = (char)span[i];
-				if (c == 0)
-				{
-					c = '.';
-				}
-				else if (c < 32/* || c > 126*/)
-				{
-					c = '?';
-				}
-				Console.Write("{0,2}", c);
-				if ((i + 1) % 4 == 0)
-				{
-					Console.Write("  ");
-				}
-				else
-				{
-					Console.Write(" ");
-				}
-			}
-			Console.WriteLine();
-			Console.WriteLine();
-		}
-		else
-		{
-			int pos = 0;
-			while (span.Length - pos >= 16)
-			{
-				for (int i = 0; i < 16; i++)
-				{
-					Console.Write(span[pos + i].ToString("X2"));
-					if ((i + 1) % 4 == 0)
-					{
-						Console.Write("  ");
-					}
-					else
-					{
-						Console.Write(" ");
-					}
-				}
-				for (int i = 0; i < 16; i++)
-				{
-					var c = (char)span[pos + i];
-					if (c == 0)
-					{
-						c = '.';
-					}
-					else if (c < 32/* || c > 126*/)
-					{
-						c = '?';
-					}
-					Console.Write(c);
-					if ((i + 1) % 4 == 0)
-					{
-						Console.Write(" ");
-					}
-				}
-				pos += 16;
-				Console.WriteLine();
-			}
-			if (span.Length - pos > 0)
-			{
-				var rem = span.Length - pos;
-				for (int i = 0; i < rem; i++)
-				{
-					Console.Write(span[pos + i].ToString("X2"));
-					if ((i + 1) % 4 == 0)
-					{
-						Console.Write("  ");
-					}
-					else
-					{
-						Console.Write(" ");
-					}
-				}
-				for (int i = rem; i < 16; i++)
-				{
-					Console.Write("  ");
-					if ((i + 1) % 4 == 0)
-					{
-						Console.Write("  ");
-					}
-					else
-					{
-						Console.Write(" ");
-					}
-				}
-				for (int i = 0; i < rem; i++)
-				{
-					var c = (char)span[pos + i];
-					if (c == 0)
-					{
-						c = '.';
-					}
-					else if (c < 32/* || c > 126*/)
-					{
-						c = '?';
-					}
-					Console.Write(c);
-					if ((i + 1) % 4 == 0)
-					{
-						Console.Write(" ");
-					}
-				}
-				pos += rem;
-			}
-		}
+		HexDumpWriter.HexDump(data, Console.Write, Console.Write);
 	}
 }
 

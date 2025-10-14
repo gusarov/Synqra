@@ -2,6 +2,13 @@
 
 public interface ISynqraStoreContext : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
+	/// <summary>
+	/// Get Id of the model instance. If model is not tracked, throw exception.
+	/// </summary>
+	/// <param name="model"></param>
+	/// <returns></returns>
+	Guid GetId(object model);
+
 	ISynqraCollection GetCollection(Type type);
 
 	ISynqraCollection<T> GetCollection<T>()

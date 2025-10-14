@@ -22,6 +22,32 @@ public interface IBindableModel
 	void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
 }
 
+public interface IModelBinder
+{
+	/// <summary>
+	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Set(ref object model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
+
+	/// <summary>
+	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Get(object model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+}
+
+public interface IModelBinder<T> : IModelBinder
+{
+	/// <summary>
+	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Set(ref T model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
+
+	/// <summary>
+	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// </summary>
+	void Get(T model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+}
+
 /// <summary>
 /// Synqra Binary eXchange serializer // or // Syncron
 /// </summary>
@@ -41,6 +67,7 @@ public interface ISBXSerializer
 	long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos);
 	ulong DeserializeUnsigned(in ReadOnlySpan<byte> buffer, ref int pos);
 	IList<T> DeserializeList<T>(in ReadOnlySpan<byte> buffer, ref int pos);
+	IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos);
 }
 
 public static class BinderModes

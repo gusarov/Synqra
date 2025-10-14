@@ -253,6 +253,11 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 #endif
 	}
 
+	public Guid GetId(object model)
+	{
+		return GetId(model, null, GetMode.RequiredId);
+	}
+
 	internal Guid GetId(object model, StoreCollection? collection, GetMode mode)
 	{
 #if NET8_0_OR_GREATER

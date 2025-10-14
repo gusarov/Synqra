@@ -48,6 +48,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Tests.MiniModel", "T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.SourceGenerator.Tests", "Synqra.SourceGenerator.Tests\Synqra.SourceGenerator.Tests.csproj", "{40532983-0666-47A1-953E-20CA0CDAB12F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.CoreModel", "Synqra.CoreModel\Synqra.CoreModel.csproj", "{A77980EA-3119-4CF2-8915-F01A01655CDD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -110,6 +112,10 @@ Global
 		{40532983-0666-47A1-953E-20CA0CDAB12F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{40532983-0666-47A1-953E-20CA0CDAB12F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{40532983-0666-47A1-953E-20CA0CDAB12F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

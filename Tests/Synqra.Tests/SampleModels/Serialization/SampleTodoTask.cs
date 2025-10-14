@@ -27,6 +27,13 @@ public partial class SampleFieldObjectModel
 	public partial object Data { get; set; }
 }
 
+[Schema(1, "1 Data object")]
+[Schema(2025.783, "1 Data IDictionary<string, object>")]
+public partial class SampleFieldDictionaryStringObjectModel
+{
+	public partial IDictionary<string, object> Data { get; set; }
+}
+
 [Schema(1, "1 Data SampleBaseModel")]
 public partial class SampleFieldBaseModel
 {

@@ -6,6 +6,7 @@ using System;
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
+using System.Text.Json;
 
 namespace Synqra;
 
@@ -22,6 +23,7 @@ public class EventReplicationService : IHostedService
 	private readonly EventReplicationConfig _config;
 	private ClientWebSocket? _connection;
 
+	private SBXSerializer? _sbxSerializerSenderVerify1 = new SBXSerializer();
 	private SBXSerializer? _sbxSerializerSender1 = new SBXSerializer();
 	private ISBXSerializer? _sbxSerializerSender => _sbxSerializerSender1;
 
@@ -135,8 +137,14 @@ public class EventReplicationService : IHostedService
 			while (!_cts.IsCancellationRequested)
 			{
 				var bytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
+				if (bytes == null || bytes.Length == 0)
+				{
+					IsOnline = false;
+					break;
+				}
 				int pos = 0;
 				var operation = _sbxSerializerSender1.Deserialize<TransportOperation>(bytes, ref pos);
+				EmergencyLog.Default.Debug("°9 Received: " + JsonSerializer.Serialize(operation, AppJsonContext.Default.TransportOperation));
 				// var operation = JsonSerializer.Deserialize<TransportOperation>(Encoding.UTF8.GetString(bytes), _jsonSerializerContext.Options);
 				switch (operation)
 				{
@@ -181,9 +189,15 @@ public class EventReplicationService : IHostedService
 					var span = new Span<byte>(bytes);
 					// JsonSerializer.Serialize(span, inv, AppJsonContext.Default.Options);
 					int pos = 0;
-					_sbxSerializerSender1.Serialize(span, inv, ref pos);
+					_sbxSerializerSender1.Serialize<TransportOperation>(span, inv, ref pos);
+					EmergencyLog.Default.Debug("°8 SEND: " + JsonSerializer.Serialize(inv, AppJsonContext.Default.TransportOperation));
+					EmergencyLog.Default.DebugHexDump(span[..pos]);
 
-					await _connection.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, endOfMessage: true, _cts.Token);
+					int posVerify = 0;
+					var des = _sbxSerializerSenderVerify1.Deserialize<TransportOperation>(span, ref posVerify);
+					EmergencyLog.Default.Debug("°8 SEND VERIFY: " + JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation));
+
+					await _connection.SendAsync(new ArraySegment<byte>(bytes[..pos]), WebSocketMessageType.Text, endOfMessage: true, _cts.Token);
 				}
 				finally
 				{

@@ -117,9 +117,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					//the predicate should be super lightweight to filter out items that are not of interest quickly
 					try
 					{
-						var exp = node is ClassDeclarationSyntax classDeclaration && classDeclaration.Identifier.ToString().EndsWith("Model") && classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword);
+						var exp = node is ClassDeclarationSyntax classDeclaration
+							&& (classDeclaration.Identifier.ToString().EndsWith("Model") || classDeclaration.AttributeLists.Any(al => al.Attributes.Any(a => a.Name.ToString() == "SynqraModel")))
+							&& classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword
+							);
 						// GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
-
 						return exp;
 					}
 					catch (Exception ex)
@@ -480,7 +482,7 @@ $$"""
 	partial void On{{pro.Identifier}}Changed({{pro.Type}} value);
 	partial void On{{pro.Identifier}}Changed({{pro.Type}} oldValue, {{pro.Type}} value);
 
-	public partial {{pro.Type}} {{pro.Identifier}}
+	public {{(pro.Modifiers.Any(x=>x.ToString() == "required") ? "required ":"")}}partial {{pro.Type}} {{pro.Identifier}}
 	{
 		get => {{(doesSupportField ? "field" : "__" + pro.Identifier)}};
 		set
@@ -520,9 +522,9 @@ $$"""
 					CollectionId = default,
 
 					Target = this,
-					TargetId = __store.GetId(this, null, GetMode.RequiredId),
+					TargetId = __store.GetId(this),
 					TargetTypeId = default,
-					// TargetTypeId = __store.GetId(this, null, GetMode.RequiredId),
+					// TargetTypeId = __store.GetId(this),
 
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
@@ -588,7 +590,7 @@ $$"""
 				{
 					EmergencyLog.Default.Debug("*********** Schema already present as latest: " + lastSchema);
 				}
-				EmergencyLog.Default.Debug(sb.ToString());
+				// EmergencyLog.Default.Debug(sb.ToString());
 
 			}
 
@@ -668,6 +670,7 @@ $$"""
 			var fileName = $"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs";
 			context.AddSource(fileName, SourceText.From(body.ToString(), Encoding.UTF8));
 			EmergencyLog.Default.Debug($"[+] Added source to context {fileName}");
+			EmergencyLog.Default.Debug($"GENERATED FOR {clazz.Identifier} ({clazz.SyntaxTree.FilePath})");
 		}
 		catch (Exception ex)
 		{
@@ -677,6 +680,13 @@ $$"""
 	}
 
 	static string? DeserializeMethod(ITypeSymbol type)
+	{
+		EmergencyLog.Default.Debug($"DeserializeMethod: {type} ({type.GetType().Name})");
+		var res = DeserializeMethodCore(type);
+		EmergencyLog.Default.Debug($"\t\tDeserializeMethod: {type} => {res}");
+		return res;
+	}
+	static string? DeserializeMethodCore(ITypeSymbol type)
 	{
 		if (type is INamedTypeSymbol named)
 		{
@@ -713,34 +723,56 @@ $$"""
 				named.TypeArguments.Length == 1 &&
 				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
 			{
+				EmergencyLog.Default.Debug($"//// Lsit detected named.Name {named.Name}");
+
 				var arg = named.TypeArguments[0];
 				// return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-				return $"<{named.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+				return $"/*named.IsGenericType*/<{named.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 			}
 
 			// Try matching implemented IEnumerable<T> interface
+			EmergencyLog.Default.Debug($"°2 {named}");
+			if (named.ToString().EndsWith("IDictionary<string, object>"))
+			{
+				return "Dict<string, object>";
+			}
+			foreach (var i in named.AllInterfaces)
+			{
+				EmergencyLog.Default.Debug($"°1 Detected: {i}");
+			}
 			foreach (var i in named.AllInterfaces)
 			{
 				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
 				{
-					return $"List<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+					return $"List/*SpecialType*/<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 				}
 			}
+			// throw new Exception("Unknown collection type");
+		}
+
+		if (TryGetIDictionaryKeyAndElement(type, out var keyType, out var elementType1))
+		{
+			EmergencyLog.Default.Debug($"//// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
+			return $"Dict<{keyType}, {elementType1}>";
+		}
+		else
+		{
+			EmergencyLog.Default.Debug($"//// Unknown collection type detected: {type}");
 		}
 
 		// Handle IEnumerable<T> (and subclasses like List<T>, T[])
-		if (TryGetIEnumerableElement(type, out var elementType))
+		if (TryGetIEnumerableElement(type, out var elementType2))
 		{
-			return $"List<{elementType}>";
+			return $"List/*TryGetIEnumerableElement*/<{elementType2}>";
 		}
 
 		// Arrays as List<T>
 		if (type is IArrayTypeSymbol array)
 		{
-			return $"List<{array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+			return $"List/*BottomIsArray*/<{array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 		}
 
-		return $"<{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
+		return $"/*None*/<{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 	}
 
 
@@ -774,6 +806,47 @@ $$"""
 		}
 
 		elementTypeName = default!;
+		return false;
+	}
+
+	static bool TryGetIDictionaryKeyAndElement(ITypeSymbol type, out string keyTypeName, out string elementTypeName)
+	{
+		keyTypeName = default!;
+		elementTypeName = default!;
+
+		// Handle arrays directly (not a dictionary, but for compatibility)
+		if (type is IArrayTypeSymbol array)
+		{
+			elementTypeName = array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+			return false;
+		}
+
+		if (type is INamedTypeSymbol named)
+		{
+			// Check if type is IDictionary<TKey, TValue> or Dictionary<TKey, TValue>
+			if (named.IsGenericType &&
+				(named.Name == "IDictionary" || named.Name == "Dictionary") &&
+				named.TypeArguments.Length == 2)
+			{
+				keyTypeName = named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+				elementTypeName = named.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+				return true;
+			}
+
+			// Check interfaces for IDictionary<TKey, TValue>
+			foreach (var i in named.AllInterfaces)
+			{
+				if (i.IsGenericType &&
+					(i.Name == "IDictionary" || i.Name == "Dictionary") &&
+					i.TypeArguments.Length == 2)
+				{
+					keyTypeName = i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+					elementTypeName = i.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+					return true;
+				}
+			}
+		}
+
 		return false;
 	}
 

@@ -107,7 +107,38 @@ internal class EmergencyLoggerTests : BaseTest
 		await Task.WhenAll(Thread(), Thread(), Thread(), Thread(), Thread());
 		var log = ReadAllLogs();
 		await Assert.That(log).Contains("Should_survive_multithread");
-		using var _ = Assert.Multiple();
+		// using var _ = Assert.Multiple();
+		EmergencyLog.Default.Message("Should_survive_multithread verifying...");
+
+		foreach (var guid in guids)
+		{
+			await Assert.That(log).Contains(guid.ToString());
+		}
+		EmergencyLog.Default.Message("Should_survive_multithread verifying done.");
+	}
+
+	[Test]
+	[Category("Performance")]
+	public async Task Should_40_measure_concurrent_performance()
+	{
+		ConcurrentBag<Guid> guids = new ConcurrentBag<Guid>();
+
+		async Task Thread()
+		{
+			MeasurePerformance(() =>
+			{
+				var guid = Guid.NewGuid();
+				guids.Add(guid);
+				EmergencyLog.Default.Message("Should_40_measure_concurrent_performance test " + guid);
+			}, new PerformanceParameters
+			{
+				MaxAcceptableDeviationFactor = 1000,
+			});
+		}
+		await Task.WhenAll(Thread(), Thread(), Thread());
+		var log = ReadAllLogs();
+		await Assert.That(log).Contains("Should_40_measure_concurrent_performance " + guids.Count);
+		// using var _ = Assert.Multiple();
 		foreach (var guid in guids)
 		{
 			await Assert.That(log).Contains(guid.ToString());
