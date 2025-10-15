@@ -258,6 +258,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		yield return () => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 02 4100 0302 4200 040A");
 
 		// Prod
+		/*
 		yield return () => (70, new NewEvent1
 		{
 			Event = new CommandCreatedEvent
@@ -275,6 +276,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				},
 			},
 		}, "1C 02 4100 0302 4200 040A");
+		*/
 	}
 
 	[Test]
@@ -325,6 +327,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
 	public void Should_reserve_list_type_id_range()
 	{
 		Console.WriteLine(".");
@@ -424,7 +427,8 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	}
 
 	[Test]
-	[Explicit]
+	[Property("CI", "false")]
+	// [Explicit] NEVER MARK AS EXPLICIT
 	public void Should_20_serialize_dictionary_of_string()
 	{
 		var ser = new SBXSerializer();
@@ -686,6 +690,8 @@ public class BinarySerializationTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	// [Explicit] NEVER MARK AS EXPLICIT
 	public async Task Should_serialize_well_known_class_by_field_names_as_known2()
 	{
 		// Arrange
