@@ -14,6 +14,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
     <PackageReference Include="System.Threading.AccessControl" Version="9.0.9" />
   </ItemGroup>
 

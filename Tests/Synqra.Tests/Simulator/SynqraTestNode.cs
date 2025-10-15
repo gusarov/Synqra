@@ -28,16 +28,41 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Data.Common;
 
 namespace Synqra.Tests.Simulator;
 
 internal class SynqraTestNode
 {
+	[ThreadStatic]
+	static int _fceRecursionGuard;
+
 	static SynqraTestNode()
 	{
+		// Log all first-chance exceptions (for diagnostics, not errors)
 		AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
 		{
-			EmergencyLog.Default.Message("[Warning] First Chance Exception: " + e.Exception);
+			if (_fceRecursionGuard > 1)
+			{
+				return;
+			}
+			var pre = _fceRecursionGuard;
+			_fceRecursionGuard = pre + 1;
+			try
+			{
+				if (_fceRecursionGuard > 0)
+				{
+					EmergencyLog.Default.Message("[Warning] First Chance Exception StackOverflow prevention happened!!");
+				}
+				EmergencyLog.Default.Message("[Warning] First Chance Exception: " + e.Exception);
+			}
+			catch
+			{
+			}
+			finally
+			{
+				_fceRecursionGuard = pre;
+			}
 		};
 	}
 
@@ -121,10 +146,12 @@ internal class SynqraTestNode
 
 		builder.AddSynqraStoreContext();
 		builder.AddJsonLinesStorage<Event, Guid>();
+		builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
 		options.Converters.Add(new ObjectConverter());
 		builder.Services.AddSingleton(options);
+		builder.Services.AddEmergencyLogger();
 
 		builder.Services.ConfigureHttpJsonOptions(o =>
 		{
@@ -173,15 +200,14 @@ internal class SynqraTestNode
 		if (masterHost)
 		{
 			app.MapControllers();
-			// app.MapHub<SynqraSignalerHub>("/api/synqra/signalR");
 			app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 			ConcurrentBag<WebSocket> _sockets = new ConcurrentBag<WebSocket>();
 			app.Map("/api/synqra/ws", async ctx =>
 			{
+				var networkSerializationService = app.Services.GetRequiredService<INetworkSerializationService>();
 				if (!ctx.WebSockets.IsWebSocketRequest) { ctx.Response.StatusCode = 400; return; }
 				using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
 
-				_sockets.Add(socket);
 				// Simple command registry (no reflection)
 				/*
 				var handlers = new Dictionary<string, Func<JsonElement, ValueTask<JsonElement>>>
@@ -197,6 +223,29 @@ internal class SynqraTestNode
 				};
 				*/
 
+				#region HELLO - from client
+				var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
+				if (helloBytes is null)
+				{
+					return;
+				}
+				if (helloBytes.Length != 8)
+				{
+					throw new Exception($"Protocol Negotiation Failed! Received {helloBytes.Length} bytes instead of 8.");
+				}
+				var magic = BitConverter.ToUInt64(helloBytes);
+				if (magic != networkSerializationService.Magic)
+				{
+					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
+				}
+				#endregion
+				#region HELLO - to client
+				var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
+				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+				#endregion
+
+				_sockets.Add(socket);
+
 				while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
 				{
 					var messageBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
@@ -204,9 +253,9 @@ internal class SynqraTestNode
 					{
 						break;
 					}
-					var json = Encoding.UTF8.GetString(messageBytes);
+					// var json = Encoding.UTF8.GetString(messageBytes);
 					// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
-					var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
+					var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
 					var storeCtx = app.Services.GetRequiredService<ISynqraStoreContext>();
 					if (operation is NewEvent1 newEvent1)
 					{
@@ -218,19 +267,31 @@ internal class SynqraTestNode
 							await ev.AcceptAsync(storeCtx, null);
 							var storage = app.Services.GetRequiredService<IStorage<Event, Guid>>();
 							await storage.AppendAsync(ev);
-							foreach (var item in _sockets)
+							var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+							try
 							{
-								if (item != socket)
+								var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
+								foreach (var item in _sockets)
 								{
-									// var payload = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(new Envelope<EventMessage>("event", new EventMessage(ev)), AppJsonContext.Default);
-									await item.SendAsync(messageBytes, WebSocketMessageType.Text, true, ctx.RequestAborted);
+									if (item != socket)
+									{
+										await item.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
+									}
 								}
+							}
+							finally
+							{
+								ArrayPool<byte>.Shared.Return(buffer);
 							}
 						}
 						finally
 						{
 							_semaphoreSlim.Release();
 						}
+					}
+					else
+					{
+						throw new NotSupportedException();
 					}
 					/*
 					try

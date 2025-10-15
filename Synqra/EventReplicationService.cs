@@ -1,12 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Synqra.BinarySerializer;
 using System;
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Synqra;
 
@@ -15,21 +15,17 @@ namespace Synqra;
 /// </summary>
 public class EventReplicationService : IHostedService
 {
-	//private readonly IHubContext<SynqraSignalerHub, IEventHubClient> _hubContext;
+	public const int DefaultFrameSize = 8192;
+
 	private readonly IStorage<Event, Guid> _storage;
 	private readonly EventReplicationState _eventReplicationState;
-	// private readonly JsonSerializerContext _jsonSerializerContext;
+	private readonly JsonSerializerContext _jsonSerializerContext;
 	private readonly Lazy<ISynqraStoreContext> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
+
 	private ClientWebSocket? _connection;
 
-	private SBXSerializer? _sbxSerializerSenderVerify1 = new SBXSerializer();
-	private SBXSerializer? _sbxSerializerSender1 = new SBXSerializer();
-	private ISBXSerializer? _sbxSerializerSender => _sbxSerializerSender1;
-
-	private SBXSerializer? _sbxSerializerReceiver1 = new SBXSerializer();
-	private ISBXSerializer? _sbxSerializerReceiver => _sbxSerializerReceiver1;
-
+	private readonly INetworkSerializationService _networkSerializationService;
 
 	private AutoResetEvent _autoResetEvent = new AutoResetEvent(false);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
@@ -37,21 +33,21 @@ public class EventReplicationService : IHostedService
 	public bool IsOnline { get; private set; }
 
 	public EventReplicationService(
-		/*IHubContext<SynqraSignalerHub, IEventHubClient> hubContext
-		 * , IOptions<EventReplicationConfig> options*/
-		  EventReplicationConfig config
+		  IOptions<EventReplicationConfig> options
 		, IStorage<Event, Guid> storage
 		, EventReplicationState eventReplicationState
-		// , JsonSerializerContext jsonSerializerContext
+		, JsonSerializerContext jsonSerializerContext
 		, Lazy<ISynqraStoreContext> synqraStoreContext
+		, INetworkSerializationService? networkSerializationService = null
+		, EventReplicationConfig? config = null
 		)
 	{
-		//_hubContext = hubContext;
 		_storage = storage;
 		_eventReplicationState = eventReplicationState;
-		// _jsonSerializerContext = jsonSerializerContext;
+		_jsonSerializerContext = jsonSerializerContext;
 		_synqraStoreContext = synqraStoreContext;
-		_config = config;
+		_networkSerializationService = networkSerializationService ?? new JsonNetworkSerializationService();
+		_config = config ?? options.Value;
 	}
 
 	public async Task StartAsync(CancellationToken cancellationToken)
@@ -79,18 +75,24 @@ public class EventReplicationService : IHostedService
 
 	static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
 	{
-		var rent = ArrayPool<byte>.Shared.Rent(64 * 1024);
+		var rent = ArrayPool<byte>.Shared.Rent(DefaultFrameSize);
 		try
 		{
-			using var ms = new MemoryStream();
+			using var ms = new MemoryStream(DefaultFrameSize);
 			while (true)
 			{
 				var seg = new ArraySegment<byte>(rent);
 				var res = await ws.ReceiveAsync(seg, ct);
-				if (res.MessageType == WebSocketMessageType.Close) return null;
+				if (res.MessageType == WebSocketMessageType.Close)
+				{
+					return null;
+				}
 
 				ms.Write(rent, 0, res.Count);
-				if (res.EndOfMessage) break;
+				if (res.EndOfMessage)
+				{
+					break;
+				}
 			}
 			return ms.ToArray();
 		}
@@ -122,8 +124,7 @@ public class EventReplicationService : IHostedService
 				*/
 				// await _connection.StartAsync();
 				_connection = ws;
-				_sbxSerializerSender1 = new SBXSerializer();
-				_sbxSerializerReceiver1 = new SBXSerializer();
+				_networkSerializationService.Reinitialize();
 				IsOnline = true;
 				break;
 			}
@@ -134,6 +135,25 @@ public class EventReplicationService : IHostedService
 		}
 		async void Reader()
 		{
+			#region HELLO
+			var magicBytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
+			if (magicBytes == null || magicBytes.Length == 0)
+			{
+				IsOnline = false;
+				return;
+			}
+			if (magicBytes.Length != 8)
+			{
+				var sb = new System.Text.StringBuilder();
+				new HexDumpWriter().HexDump(magicBytes, s => sb.Append(s), c => sb.Append(c));
+				throw new Exception($"Protocol Negotiation Failed! Received {magicBytes.Length} bytes instead of 8. {Environment.NewLine}{sb}");
+			}
+			var magic = BitConverter.ToUInt64(magicBytes);
+			if (magic != _networkSerializationService.Magic)
+			{
+				throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
+			}
+			#endregion
 			while (!_cts.IsCancellationRequested)
 			{
 				var bytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
@@ -142,10 +162,8 @@ public class EventReplicationService : IHostedService
 					IsOnline = false;
 					break;
 				}
-				int pos = 0;
-				var operation = _sbxSerializerSender1.Deserialize<TransportOperation>(bytes, ref pos);
+				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
 				EmergencyLog.Default.Debug("°9 Received: " + JsonSerializer.Serialize(operation, AppJsonContext.Default.TransportOperation));
-				// var operation = JsonSerializer.Deserialize<TransportOperation>(Encoding.UTF8.GetString(bytes), _jsonSerializerContext.Options);
 				switch (operation)
 				{
 					case NewEvent1 ne1:
@@ -158,8 +176,18 @@ public class EventReplicationService : IHostedService
 			}
 		}
 		Reader();
-		// await _connection.InvokeAsync("Hello1", Guid.NewGuid(), 0L); // client send hello message to server. Parameters are: client id (guid me), last known event id (long)
-
+		#region HELLO
+		var buffer = ArrayPool<byte>.Shared.Rent(8);
+		try
+		{
+			BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
+			await _connection.SendAsync(new ArraySegment<byte>(buffer, 0, 8), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(buffer);
+		}
+		#endregion
 		var myEnumerable = _storage.GetAll(from: _eventReplicationState.LastEventIdFromMe);
 		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
@@ -182,22 +210,14 @@ public class EventReplicationService : IHostedService
 				var inv = new NewEvent1() { Event = ev };
 
 				//var bytes = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(inv, AppJsonContext.Default.Options);
+
 				var pool = ArrayPool<byte>.Shared;
 				var bytes = pool.Rent(10240);
+				// var span = new Span<byte>(bytes);
 				try
 				{
-					var span = new Span<byte>(bytes);
-					// JsonSerializer.Serialize(span, inv, AppJsonContext.Default.Options);
-					int pos = 0;
-					_sbxSerializerSender1.Serialize<TransportOperation>(span, inv, ref pos);
-					EmergencyLog.Default.Debug("°8 SEND: " + JsonSerializer.Serialize(inv, AppJsonContext.Default.TransportOperation));
-					EmergencyLog.Default.DebugHexDump(span[..pos]);
-
-					int posVerify = 0;
-					var des = _sbxSerializerSenderVerify1.Deserialize<TransportOperation>(span, ref posVerify);
-					EmergencyLog.Default.Debug("°8 SEND VERIFY: " + JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation));
-
-					await _connection.SendAsync(new ArraySegment<byte>(bytes[..pos]), WebSocketMessageType.Text, endOfMessage: true, _cts.Token);
+					var serialized = _networkSerializationService.Serialize<TransportOperation>(inv, bytes);
+					await _connection.SendAsync(serialized, _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 				}
 				finally
 				{

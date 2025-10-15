@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -50,6 +53,8 @@ public sealed class EmergencyLog
 	private string? _logFilePath;
 	private string? _mutexName;
 	private string? _logFilePathTemplate;
+
+	public string LogPath => _logFilePath ?? "<Disabled>";
 
 	public void Message(string message)
 	{
@@ -130,6 +135,7 @@ public sealed class EmergencyLog
 							Debugger.Break();
 #endif
 							message = Format($"[Error] [EmergencyLog] Can't roll file: " + ex + Environment.NewLine) + message;
+							
 						}
 					}
 					var fileName = _logFilePath;
@@ -171,7 +177,11 @@ public sealed class EmergencyLog
 				}
 				catch
 				{
-					// ignore
+#if DEBUG
+					// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
+					Debugger.Break();
+					throw;
+#endif
 				}
 				finally
 				{
@@ -460,6 +470,49 @@ public static class EmergencyLogExtensions
 		else
 		{
 			log.Message($"[Error] {message}: {ex}");
+		}
+	}
+
+	public static void AddEmergencyLogger(this IServiceCollection services)
+	{
+		services.AddSingleton<ILoggerProvider, EmergencyLoggerProvider>();
+	}
+
+	public class EmergencyLoggerProvider : ILoggerProvider
+	{
+		ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
+
+		public ILogger CreateLogger(string categoryName)
+		{
+			return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName));
+		}
+		public void Dispose()
+		{
+		}
+	}
+
+	public class EmergencyLogger : ILogger
+	{
+		private readonly string _categoryName;
+
+		public EmergencyLogger(string categoryName)
+		{
+			_categoryName = categoryName;
+		}
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+		{
+			return null;
+		}
+
+		public bool IsEnabled(LogLevel logLevel)
+		{
+			return logLevel >= LogLevel.Information;
+		}
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+		{
+			EmergencyLog.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
 		}
 	}
 }
