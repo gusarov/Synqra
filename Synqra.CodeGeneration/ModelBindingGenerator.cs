@@ -307,11 +307,18 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		*/
 	}
 
-	// Enumerate instance properties across the full inheritance chain, most-derived first, no duplicates by name.
+	// Enumerate instance properties across the full inheritance chain, most-base first, no duplicates by name.
 	static IEnumerable<IPropertySymbol> GetAllInstanceProperties(INamedTypeSymbol type)
 	{
 		var seen = new HashSet<string>(StringComparer.Ordinal);
+		var types = new List<INamedTypeSymbol>();
 		for (var t = type; t != null; t = t.BaseType)
+		{
+			types.Add(t);
+		}
+		types.Reverse(); // base types first
+
+		foreach (var t in types)
 		{
 			foreach (var p in t.GetMembers().OfType<IPropertySymbol>())
 			{
@@ -320,7 +327,21 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				// Skip private members of base types
 				if (p.DeclaredAccessibility == Accessibility.Private && !SymbolEqualityComparer.Default.Equals(p.ContainingType, type))
 					continue;
-				if (!seen.Add(p.Name)) continue; // prefer most-derived
+				if (!seen.Add(p.Name)) continue; // prefer most-base
+
+				// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
+				if (p.GetAttributes().Any())
+				{
+					EmergencyLog.Default.Debug($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				}
+				if (p.GetAttributes().Any(attr =>
+					attr.AttributeClass?.ToDisplayString() == "System.Text.Json.Serialization.JsonIgnoreAttribute"
+					|| attr.AttributeClass?.ToDisplayString() == "SbxIgnoreAttribute"))
+				{
+					EmergencyLog.Default.Debug($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+					continue;
+				}
+
 				yield return p;
 			}
 		}
@@ -543,7 +564,7 @@ $$"""
 				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 			}
 
-			EmergencyLog.Default.Debug("[+] Added methods to generated class");
+			// EmergencyLog.Default.Debug("[+] Added methods to generated class");
 
 			var originalSourceContent = clazz.SyntaxTree.GetText().ToString();
 			EmergencyLog.Default.Debug($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
@@ -607,9 +628,10 @@ $$"""
 				schemas = [(1.2f, "1")];
 			}
 #endif
-
+			bool any = false;
 			foreach (var item in schemas)
 			{
+				any = true;
 				x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 				body.AppendLine($"\t\t{{");
 				body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
@@ -627,12 +649,19 @@ $$"""
 				body.AppendLine($"\t\t}}");
 				els = "else ";
 			}
+			if (any)
+			{
+				body.AppendLine($"\t\telse");
+				body.AppendLine($"\t\t{{");
+				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+				body.AppendLine($"\t\t}}");
+			}
 			body.AppendLine("\t}");
 
 			body.AppendLine("\tvoid IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)");
 			body.AppendLine("\t{");
 			els = null;
-			bool any = false;
 			foreach (var item in schemas)
 			{
 				any = true;
@@ -653,11 +682,11 @@ $$"""
 			if (any)
 			{
 				body.AppendLine($"\t\telse");
-				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
-				body.AppendLine($"\t\t}}");
 			}
+			body.AppendLine($"\t\t{{");
+			body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
+			body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+			body.AppendLine($"\t\t}}");
 
 			body.AppendLine("\t}");
 			body.AppendLine("}");
