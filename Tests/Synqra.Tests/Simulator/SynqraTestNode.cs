@@ -42,7 +42,7 @@ internal class SynqraTestNode
 		// Log all first-chance exceptions (for diagnostics, not errors)
 		AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
 		{
-			if (_fceRecursionGuard > 1)
+			if (_fceRecursionGuard > 2)
 			{
 				return;
 			}
@@ -50,11 +50,27 @@ internal class SynqraTestNode
 			_fceRecursionGuard = pre + 1;
 			try
 			{
-				if (_fceRecursionGuard > 0)
+				if (_fceRecursionGuard > 1)
 				{
 					EmergencyLog.Default.Message("[Warning] First Chance Exception StackOverflow prevention happened!!");
 				}
-				EmergencyLog.Default.Message("[Warning] First Chance Exception: " + e.Exception);
+				Exception? exceptionToStringException = null;
+				try
+				{
+					e.Exception.ToString();
+				}
+				catch (Exception ex)
+				{
+					exceptionToStringException = ex;
+				}
+				if (exceptionToStringException != null)
+				{
+					EmergencyLog.Default.Message("[Warning] First Chance Exception (Exception.ToString Exception!): " + exceptionToStringException);
+				}
+				else
+				{
+					EmergencyLog.Default.Message("[Warning] First Chance Exception: " + e.Exception);
+				}
 			}
 			catch
 			{
@@ -147,8 +163,8 @@ internal class SynqraTestNode
 		builder.AddSynqraStoreContext();
 		builder.AddJsonLinesStorage<Event, Guid>();
 
-		builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
-		// builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
+		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
+		builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
 
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
@@ -202,6 +218,8 @@ internal class SynqraTestNode
 
 		if (masterHost)
 		{
+			var knownEvents = new ConcurrentDictionary<Guid, object?>();
+
 			app.MapControllers();
 			app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 			ConcurrentBag<WebSocket> _sockets = new ConcurrentBag<WebSocket>();
@@ -249,85 +267,106 @@ internal class SynqraTestNode
 
 				_sockets.Add(socket);
 
-				while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
+				try
 				{
-					var messageBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
-					if (messageBytes is null)
+					while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
 					{
-						break;
-					}
-					// var json = Encoding.UTF8.GetString(messageBytes);
-					// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
-					var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
-					var storeCtx = app.Services.GetRequiredService<ISynqraStoreContext>();
-					if (operation is NewEvent1 newEvent1)
-					{
-						await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
-						try
+						var messageBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
+						if (messageBytes is null)
 						{
-							var ev = newEvent1.Event;
-							// ev.MasterSeq
-							await ev.AcceptAsync(storeCtx, null);
-							var storage = app.Services.GetRequiredService<IStorage<Event, Guid>>();
-							await storage.AppendAsync(ev);
-							var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+							break;
+						}
+						// var json = Encoding.UTF8.GetString(messageBytes);
+						// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
+						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
+
+						var storeCtx = app.Services.GetRequiredService<ISynqraStoreContext>();
+						if (operation is NewEvent1 newEvent1)
+						{
+							if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
+							{
+								// already known, ignore
+								continue;
+							}
+							EmergencyLog.Default.Message($"Master Received: {newEvent1.Event}{Environment.NewLine}{JsonSerializer.Serialize(newEvent1.Event, AppJsonContext.Default.Options)}");
+							await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
 							try
 							{
-								var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
-								foreach (var item in _sockets)
+								var ev = newEvent1.Event;
+								// ev.MasterSeq
+								await ev.AcceptAsync(storeCtx, null);
+								var storage = app.Services.GetRequiredService<IStorage<Event, Guid>>();
+								await storage.AppendAsync(ev);
+								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+								try
 								{
-									if (item != socket)
+									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
+									foreach (var item in _sockets)
 									{
-										await item.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
+										if (item != socket)
+										{
+											try
+											{
+												await item.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+											}
+											catch
+											{
+												// ignore
+											}
+										}
 									}
+								}
+								finally
+								{
+									ArrayPool<byte>.Shared.Return(buffer);
 								}
 							}
 							finally
 							{
-								ArrayPool<byte>.Shared.Return(buffer);
+								_semaphoreSlim.Release();
 							}
-						}
-						finally
-						{
-							_semaphoreSlim.Release();
-						}
-					}
-					else
-					{
-						throw new NotSupportedException();
-					}
-					/*
-					try
-					{
-						var invoke = JsonSerializer.Deserialize(messageBytes.Value, AppJsonContext.Default);
-						if (invoke?.Kind != "invoke") continue;
-
-						JsonElement resultEl;
-						string? error = null;
-
-						if (handlers.TryGetValue(invoke.Data.Method, out var handler))
-						{
-							resultEl = await handler(invoke.Data.Args);
 						}
 						else
 						{
-							error = $"Unknown method '{invoke.Data.Method}'";
-							resultEl = default;
+							throw new NotSupportedException();
 						}
-					// var result = new Envelope<ResultMessage>("result", new ResultMessage(invoke.Data.Id, error is null ? resultEl : null, error));
+						/*
+						try
+						{
+							var invoke = JsonSerializer.Deserialize(messageBytes.Value, AppJsonContext.Default);
+							if (invoke?.Kind != "invoke") continue;
+
+							JsonElement resultEl;
+							string? error = null;
+
+							if (handlers.TryGetValue(invoke.Data.Method, out var handler))
+							{
+								resultEl = await handler(invoke.Data.Args);
+							}
+							else
+							{
+								error = $"Unknown method '{invoke.Data.Method}'";
+								resultEl = default;
+							}
+						// var result = new Envelope<ResultMessage>("result", new ResultMessage(invoke.Data.Id, error is null ? resultEl : null, error));
 
 
-					var payload = JsonSerializer.SerializeToUtf8Bytes(result, AppJsonContext.Default);
-						await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
+						var payload = JsonSerializer.SerializeToUtf8Bytes(result, AppJsonContext.Default);
+							await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
+						}
+						catch (Exception ex)
+						{
+							// best-effort error reply with id=-1 when deserialization fails
+							var err = new Envelope<ResultMessage>("result", new ResultMessage(-1, null, ex.GetType().Name));
+							var payload = JsonSerializer.SerializeToUtf8Bytes(err, WsJson.Default.EnvelopeResultMessage);
+							await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
+						}
+						*/
 					}
-					catch (Exception ex)
-					{
-						// best-effort error reply with id=-1 when deserialization fails
-						var err = new Envelope<ResultMessage>("result", new ResultMessage(-1, null, ex.GetType().Name));
-						var payload = JsonSerializer.SerializeToUtf8Bytes(err, WsJson.Default.EnvelopeResultMessage);
-						await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
-					}
-					*/
+				}
+				catch (Exception ex)
+				{
+					EmergencyLog.Default.Error("Master Loop Error", ex);
 				}
 			});
 		}

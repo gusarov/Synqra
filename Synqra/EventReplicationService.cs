@@ -38,7 +38,7 @@ public class EventReplicationService : IHostedService
 		, EventReplicationState eventReplicationState
 		, JsonSerializerContext jsonSerializerContext
 		, Lazy<ISynqraStoreContext> synqraStoreContext
-		, INetworkSerializationService? networkSerializationService = null
+		, INetworkSerializationService networkSerializationService
 		, EventReplicationConfig? config = null
 		)
 	{
@@ -46,7 +46,7 @@ public class EventReplicationService : IHostedService
 		_eventReplicationState = eventReplicationState;
 		_jsonSerializerContext = jsonSerializerContext;
 		_synqraStoreContext = synqraStoreContext;
-		_networkSerializationService = networkSerializationService ?? new JsonNetworkSerializationService();
+		_networkSerializationService = networkSerializationService;
 		_config = config ?? options.Value;
 	}
 
@@ -79,13 +79,18 @@ public class EventReplicationService : IHostedService
 		try
 		{
 			using var ms = new MemoryStream(DefaultFrameSize);
-			while (true)
+			while (!ct.IsCancellationRequested)
 			{
 				var seg = new ArraySegment<byte>(rent);
 				var res = await ws.ReceiveAsync(seg, ct);
 				if (res.MessageType == WebSocketMessageType.Close)
 				{
 					return null;
+				}
+
+				if (res.Count == 0)
+				{
+					break;
 				}
 
 				ms.Write(rent, 0, res.Count);
@@ -163,7 +168,6 @@ public class EventReplicationService : IHostedService
 					break;
 				}
 				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
-				EmergencyLog.Default.Debug("°9 Received: " + JsonSerializer.Serialize(operation, AppJsonContext.Default.TransportOperation));
 				switch (operation)
 				{
 					case NewEvent1 ne1:
@@ -212,7 +216,7 @@ public class EventReplicationService : IHostedService
 				//var bytes = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(inv, AppJsonContext.Default.Options);
 
 				var pool = ArrayPool<byte>.Shared;
-				var bytes = pool.Rent(10240);
+				var bytes = pool.Rent(DefaultFrameSize);
 				// var span = new Span<byte>(bytes);
 				try
 				{

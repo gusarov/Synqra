@@ -307,8 +307,36 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		*/
 	}
 
+	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesOfType(INamedTypeSymbol type)
+	{
+		foreach (var p in type.GetMembers().OfType<IPropertySymbol>())
+		{
+			if (p.IsStatic) continue;
+			if (p.IsIndexer) continue;
+			// Skip private members of base types
+			if (p.DeclaredAccessibility == Accessibility.Private && !SymbolEqualityComparer.Default.Equals(p.ContainingType, type))
+				continue;
+			// if (!seen.Add(p.Name)) continue; // prefer most-base
+
+			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
+			if (p.GetAttributes().Any())
+			{
+				EmergencyLog.Default.Debug($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+			}
+			if (p.GetAttributes().Any(attr =>
+				attr.AttributeClass?.ToDisplayString() == "System.Text.Json.Serialization.JsonIgnoreAttribute"
+				|| attr.AttributeClass?.ToDisplayString() == "SbxIgnoreAttribute"))
+			{
+				EmergencyLog.Default.Debug($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				continue;
+			}
+
+			yield return p;
+		}
+	}
+
 	// Enumerate instance properties across the full inheritance chain, most-base first, no duplicates by name.
-	static IEnumerable<IPropertySymbol> GetAllInstanceProperties(INamedTypeSymbol type)
+	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesWithAncestors(INamedTypeSymbol type)
 	{
 		var seen = new HashSet<string>(StringComparer.Ordinal);
 		var types = new List<INamedTypeSymbol>();
@@ -320,28 +348,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 		foreach (var t in types)
 		{
-			foreach (var p in t.GetMembers().OfType<IPropertySymbol>())
+			foreach (var p in GetAllInstancePropertiesOfType(t))
 			{
-				if (p.IsStatic) continue;
-				if (p.IsIndexer) continue;
-				// Skip private members of base types
-				if (p.DeclaredAccessibility == Accessibility.Private && !SymbolEqualityComparer.Default.Equals(p.ContainingType, type))
-					continue;
-				if (!seen.Add(p.Name)) continue; // prefer most-base
-
-				// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
-				if (p.GetAttributes().Any())
-				{
-					EmergencyLog.Default.Debug($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
-				}
-				if (p.GetAttributes().Any(attr =>
-					attr.AttributeClass?.ToDisplayString() == "System.Text.Json.Serialization.JsonIgnoreAttribute"
-					|| attr.AttributeClass?.ToDisplayString() == "SbxIgnoreAttribute"))
-				{
-					EmergencyLog.Default.Debug($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
-					continue;
-				}
-
 				yield return p;
 			}
 		}
@@ -372,10 +380,19 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 
 			var classMembers = classData.Clazz.Members;
-			EmergencyLog.Default.Debug($"GENERATE FOR {clazz.Identifier} ({clazz.SyntaxTree.FilePath})...");
+			EmergencyLog.Default.Debug($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
+
+			INamedTypeSymbol rootType = classData.Data;
+			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
+			{
+				EmergencyLog.Default.Debug($"{rootType} PARENT IS {rootType.BaseType}");
+				rootType = rootType.BaseType;
+			}
+
+			bool isRootType = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
 
 			// check if the methods we want to add exist already 
-			var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
+			// var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
 
 			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
@@ -415,151 +432,15 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine();
 			// body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
-			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier} : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}");
+			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}");
+			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}");
 			body.AppendLine("{");
-			body.AppendLine();
-			body.AppendLine($"\tpublic event PropertyChangedEventHandler? PropertyChanged;");
-			body.AppendLine($"\tpublic event PropertyChangingEventHandler? PropertyChanging;");
-			body.AppendLine();
-
-			//if the methods do not exist, we will add them
-			if (setMethod is null)
-			{
-				//when using a raw string the first " is the far left margin in the file
-				//if you want the proper indention on the methods you will want to tab the string content at least once
-				body.AppendLine(
-$$"""
-	global::Synqra.ISynqraStoreContext? __store;
-
-	global::Synqra.ISynqraStoreContext? IBindableModel.Store
-	{
-		get => __store;
-		set
-		{
-			if (__store is not null && __store != value)
-			{
-				throw new global::System.InvalidOperationException("Store can only be set once.");
-			}
-			__store = value;
-		}
-	}
-
-	[ThreadStatic]
-	static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
-
-	void IBindableModel.Set(string name, object? value)
-	{
-		var previous = _assigning;
-		_assigning = true;
-		try
-		{
-			switch (name)
-			{
-""");
-				// Include properties from this class and all base classes that have a setter
-				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.SetMethod is not null))
-				{
-					body.AppendLine($$"""
-				case "{{pro.Name}}":
-					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
-					break;
-""");
-				}
-				body.AppendLine(
-"""
-			}
-		}
-		finally
-		{
-			_assigning = previous;
-		}
-	}
-""");
-			}
 
 
+			#region SchemaDetection
 			string suggestedSchema = "1";
-
-			// First: properties declared in this class (keep original textual type form to minimize schema noise)
-			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
-			{
-
-				suggestedSchema += " " + pro.Identifier + " " + GetSchemaTypeDeclaration(pro.Type);
-
-				if (!doesSupportField)
-				{
-					body.AppendLine(
-$$"""
-	private {{pro.Type}} __{{pro.Identifier}};
-""");
-				}
-				body.AppendLine(
-$$"""
-
-	// tfm={{tfm}}	// doesSupportField={{doesSupportField}}
-
-	partial void On{{pro.Identifier}}Changing({{pro.Type}} value);
-	partial void On{{pro.Identifier}}Changing({{pro.Type}} oldValue, {{pro.Type}} value);
-	partial void On{{pro.Identifier}}Changed({{pro.Type}} value);
-	partial void On{{pro.Identifier}}Changed({{pro.Type}} oldValue, {{pro.Type}} value);
-
-	public {{(pro.Modifiers.Any(x=>x.ToString() == "required") ? "required ":"")}}partial {{pro.Type}} {{pro.Identifier}}
-	{
-		get => {{(doesSupportField ? "field" : "__" + pro.Identifier)}};
-		set
-		{
-			var oldValue = {{(doesSupportField ? "field" : "__" + pro.Identifier)}};
-			if (_assigning || __store is null)
-			{
-				var pci = PropertyChanging;
-				var pce = PropertyChanged;
-				if (pci is null && pce is null)
-				{
-					On{{pro.Identifier}}Changing(value);
-					On{{pro.Identifier}}Changing(oldValue, value);
-					{{(doesSupportField ? "field" : "__" + pro.Identifier)}} = value;
-					On{{pro.Identifier}}Changed(value);
-					On{{pro.Identifier}}Changed(oldValue, value);
-				}
-				else if (!Equals(oldValue, value))
-				{
-					On{{pro.Identifier}}Changing(value);
-					On{{pro.Identifier}}Changing(oldValue, value);
-					pci?.Invoke(this, new PropertyChangingEventArgs(nameof({{pro.Identifier}})));
-					{{(doesSupportField ? "field" : "__" + pro.Identifier)}} = value;
-					On{{pro.Identifier}}Changed(value);
-					On{{pro.Identifier}}Changed(oldValue, value);
-					pce?.Invoke(this, new PropertyChangedEventArgs(nameof({{pro.Identifier}})));
-				}
-			}
-			else
-			{
-				On{{pro.Identifier}}Changing(value);
-				On{{pro.Identifier}}Changing(oldValue, value);
-				__store.SubmitCommandAsync(new ChangeObjectPropertyCommand
-				{
-					CommandId = GuidExtensions.CreateVersion7(),
-					ContainerId = default,
-					CollectionId = default,
-
-					Target = this,
-					TargetId = __store.GetId(this),
-					TargetTypeId = default,
-					// TargetTypeId = __store.GetId(this),
-
-					PropertyName = nameof({{pro.Identifier}}),
-					OldValue = oldValue,
-					NewValue = value
-				}).GetAwaiter().GetResult();
-			}
-		}
-	}
-
-""");
-			}
-
 			// Append inherited properties to schema suggestion (minimally qualified to keep it compact)
-			foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default)))
+			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data)/*.Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default))*/)
 			{
 				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 			}
@@ -614,81 +495,342 @@ $$"""
 				// EmergencyLog.Default.Debug(sb.ToString());
 
 			}
+			#endregion
 
-			body.AppendLine("\tvoid IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)");
-			body.AppendLine("\t{");
-			string? els = null;
-			FormattableString x;
-			body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
+			if (isRootType)
+			{
+				body.AppendLine("""
+	[ThreadStatic]
+	protected static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
+
+	public event PropertyChangedEventHandler? PropertyChanged;
+	public event PropertyChangingEventHandler? PropertyChanging;
+
+	protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+	protected void OnPropertyChanging(string propertyName) => PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(propertyName));
+
+	protected global::Synqra.ISynqraStoreContext? _store;
+
+	global::Synqra.ISynqraStoreContext? IBindableModel.Store
+	{
+		get => _store;
+		set
+		{
+			if (_store is not null && _store != value)
+			{
+				throw new global::System.InvalidOperationException("Store can only be set once.");
+			}
+			_store = value;
+		}
+	}
+
+	void IBindableModel.Set(string name, object? value)
+	{
+		var previous = _assigning;
+		_assigning = true;
+		try
+		{
+			SetCore(name, value);
+		}
+		finally
+		{
+			_assigning = previous;
+		}
+	}
+
+	void IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	{
+		GetCore(serializer, version, in buffer, ref pos);
+	}
+
+	void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		SetCore(serializer, version, in buffer, ref pos);
+	}
+
+	protected virtual void SetCore(string name, object? value)
+	{
+		switch (name)
+		{
+""");
+				// Include properties from this class and all base classes that have a setter
+				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data).Where(p => p.SetMethod is not null))
+				{
+					body.AppendLine($$"""
+			case "{{pro.Name}}":
+				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				break;
+""");
+				}
+				body.AppendLine(
+	"""
+		}
+	}
+
+	protected virtual void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	{
+""");
+				string? els = null;
+				FormattableString x;
+				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
 
 #if DEBUG
-			var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
-			if (isUnitTest)
-			{
-				schemas = [(1.2f, "1")];
-			}
-#endif
-			bool any = false;
-			foreach (var item in schemas)
-			{
-				any = true;
-				x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
-				body.AppendLine($"\t\t\t// Positional Fields:");
-				// Serialize all readable instance properties (this type + base types)
-				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.GetMethod is not null))
+				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
+				if (isUnitTest)
 				{
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
-					// Use backing field only for properties declared in this class when we generated one; otherwise use the property
-					var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-						? "__" + pro.Name
-						: "this." + pro.Name;
-					body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+					schemas = [(1.2f, "1")];
 				}
-				body.AppendLine($"\t\t}}");
-				els = "else ";
+#endif
+				bool any = false;
+				foreach (var item in schemas)
+				{
+					any = true;
+					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
+					body.AppendLine($"\t\t\t// Positional Fields:");
+					// Serialize all readable instance properties (this type + base types)
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+					{
+						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
+						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+							? GetFieldName(pro, doesSupportField: false)
+							: "this." + pro.Name;
+						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+					}
+					body.AppendLine($"\t\t}}");
+					els = "else ";
+				}
+				if (any)
+				{
+					body.AppendLine($"\t\telse");
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t}}");
+				}
+				body.AppendLine("""
+	}
+
+
+	protected virtual void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+""");
+					els = null;
+					foreach (var item in schemas)
+					{
+						any = true;
+						x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
+						body.AppendLine($"\t\t{{");
+						body.AppendLine($"\t\t\t// Positional Fields:");
+						// Deserialize into all writable instance properties (this type + base types)
+						foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+						{
+							var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+								? GetFieldName(pro)
+								: "this." + pro.Name;
+							body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
+						}
+						body.AppendLine($"\t\t}}");
+						els = "else ";
+					}
+					if (any)
+					{
+						body.AppendLine($"\t\telse");
+					}
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t}}");
+
+					body.AppendLine("""
+						}
+""");
 			}
-			if (any)
+			else
 			{
-				body.AppendLine($"\t\telse");
+				body.AppendLine($$"""
+	protected override void SetCore(string name, object? value)
+	{
+		switch (name)
+		{
+""");
+				// Include properties from this class and all base classes that have a setter
+				foreach (var pro in GetAllInstancePropertiesOfType(classData.Data))
+				{
+					body.AppendLine($$"""
+			case "{{pro.Name}}":
+				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				break;
+""");
+				}
+				body.AppendLine(
+"""
+			default:
+				base.SetCore(name, value);
+				break;
+		}
+	}
+
+	protected override void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	{
+""");
+				string? els = null;
+				FormattableString x;
+				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
+
+#if DEBUG
+				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
+				if (isUnitTest)
+				{
+					schemas = [(1.2f, "1")];
+				}
+#endif
+				bool any = false;
+				foreach (var item in schemas)
+				{
+					any = true;
+					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
+					body.AppendLine($"\t\t\t// Positional Fields:");
+					// Serialize all readable instance properties (this type + base types)
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+					{
+						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
+						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+							? GetFieldName(pro)
+							: "this." + pro.Name;
+						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+					}
+					body.AppendLine($"\t\t}}");
+					els = "else ";
+				}
+				if (any)
+				{
+					body.AppendLine($"\t\telse");
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t}}");
+				}
+				body.AppendLine("""
+	}
+
+	protected override void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+""");
+				els = null;
+				foreach (var item in schemas)
+				{
+					any = true;
+					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
+					body.AppendLine($"\t\t{{");
+					body.AppendLine($"\t\t\t// Positional Fields:");
+					// Deserialize into all writable instance properties (this type + base types)
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data).Where(p => p.SetMethod is not null))
+					{
+						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+							? GetFieldName(pro)
+							: "this." + pro.Name;
+						body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
+					}
+					body.AppendLine($"\t\t}}");
+					els = "else ";
+				}
+				if (any)
+				{
+					body.AppendLine($"\t\telse");
+				}
 				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
 				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
 				body.AppendLine($"\t\t}}");
-			}
-			body.AppendLine("\t}");
 
-			body.AppendLine("\tvoid IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)");
-			body.AppendLine("\t{");
-			els = null;
-			foreach (var item in schemas)
+				body.AppendLine("""
+	}
+""");
+					
+
+			}
+
+			#region Fields and Properties
+
+			body.AppendLine($$"""
+
+""");
+			// First: properties declared in this class (keep original textual type form to minimize schema noise)
+			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
-				any = true;
-				x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\t// Positional Fields:");
-				// Deserialize into all writable instance properties (this type + base types)
-				foreach (var pro in GetAllInstanceProperties(classData.Data).Where(p => p.SetMethod is not null))
+				if (!pro.Modifiers.Any(x => x.ToString() == "partial"))
 				{
-					var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-						? "__" + pro.Name
-						: "this." + pro.Name;
-					body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type)}(in buffer, ref pos);");
+					continue;
 				}
-				body.AppendLine($"\t\t}}");
-				els = "else ";
-			}
-			if (any)
-			{
-				body.AppendLine($"\t\telse");
-			}
-			body.AppendLine($"\t\t{{");
-			body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-			body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
-			body.AppendLine($"\t\t}}");
+				// suggestedSchema += " " + pro.Identifier + " " + GetSchemaTypeDeclaration(pro.Type);
 
-			body.AppendLine("\t}");
+				if (!doesSupportField)
+				{
+					body.AppendLine(
+$$"""
+	private {{pro.Type}} {{GetFieldName(pro)}};
+""");
+				}
+				body.AppendLine(
+$$"""
+
+	// tfm={{tfm}}	// doesSupportField={{doesSupportField}}
+
+	partial void On{{pro.Identifier}}Changing({{pro.Type}} value);
+	partial void On{{pro.Identifier}}Changing({{pro.Type}} oldValue, {{pro.Type}} value);
+	partial void On{{pro.Identifier}}Changed({{pro.Type}} value);
+	partial void On{{pro.Identifier}}Changed({{pro.Type}} oldValue, {{pro.Type}} value);
+
+	public {{(pro.Modifiers.Any(x=>x.ToString() == "required") ? "required ":"")}}partial {{pro.Type}} {{pro.Identifier}}
+	{
+		get => {{(doesSupportField ? "field" : GetFieldName(pro))}};
+		set
+		{
+			var oldValue = {{(doesSupportField ? "field" : GetFieldName(pro))}};
+			if (_assigning || _store is null)
+			{
+				On{{pro.Identifier}}Changing(value);
+				On{{pro.Identifier}}Changing(oldValue, value);
+				OnPropertyChanging(nameof({{pro.Identifier}}));
+				{{(doesSupportField ? "field" : GetFieldName(pro))}} = value;
+				On{{pro.Identifier}}Changed(value);
+				On{{pro.Identifier}}Changed(oldValue, value);
+				OnPropertyChanged(nameof({{pro.Identifier}}));
+			}
+			else
+			{
+				On{{pro.Identifier}}Changing(value);
+				On{{pro.Identifier}}Changing(oldValue, value);
+				_store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					ContainerId = default,
+					CollectionId = default,
+
+					Target = this,
+					TargetId = _store.GetId(this),
+					TargetTypeId = default,
+					// TargetTypeId = _store.GetId(this),
+
+					PropertyName = nameof({{pro.Identifier}}),
+					OldValue = oldValue,
+					NewValue = value
+				}).GetAwaiter().GetResult();
+			}
+		}
+	}
+
+""");
+			}
+
+			#endregion
+
 			body.AppendLine("}");
 
 			// EmergencyLog.Default.Debug("!! SynqraBuildBox = " + SynqraBuildBox);
@@ -708,20 +850,54 @@ $$"""
 		}
 	}
 
-	static string? DeserializeMethod(ITypeSymbol type)
+	static string? GetFieldName(PropertyDeclarationSyntax syntax, bool? doesSupportField = null)
 	{
-		EmergencyLog.Default.Debug($"DeserializeMethod: {type} ({type.GetType().Name})");
-		var res = DeserializeMethodCore(type);
-		EmergencyLog.Default.Debug($"\t\tDeserializeMethod: {type} => {res}");
+		/*
+		if (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+		{
+			return 
+		}
+		*/
+		var identifier = syntax.Identifier.ToString();
+		if (char.IsUpper(identifier[0]))
+		{
+			identifier = "_" + char.ToLowerInvariant(identifier[0]) + identifier[1..];
+		}
+		else
+		{
+			identifier = "_" + identifier;
+		}
+		return identifier;
+	}
+
+	static string? GetFieldName(IPropertySymbol symbol, bool? doesSupportField = null)
+	{
+		var identifier = symbol.Name.ToString();
+		if (char.IsUpper(identifier[0]))
+		{
+			identifier = "_" + char.ToLowerInvariant(identifier[0]) + identifier[1..];
+		}
+		else
+		{
+			identifier = "_" + identifier;
+		}
+		return identifier;
+	}
+
+	static string? DeserializeMethod(ITypeSymbol type, string debug)
+	{
+		EmergencyLog.Default.Debug($"[Type {debug}] <DeserializeMethod>: {type} ({type.GetType().Name})");
+		var res = DeserializeMethodCore(type, debug: debug);
+		EmergencyLog.Default.Debug($"[Type {debug}] </DeserializeMethod>: {type} => {res}");
 		return res;
 	}
-	static string? DeserializeMethodCore(ITypeSymbol type)
+	static string? DeserializeMethodCore(ITypeSymbol type, string debug)
 	{
 		if (type is INamedTypeSymbol named)
 		{
 			// Handle Nullable<T>
 			if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && named.TypeArguments.Length == 1)
-				return DeserializeMethod(named.TypeArguments[0]);
+				return DeserializeMethod(named.TypeArguments[0], debug: debug);
 
 			// Handle primitive & predefined types
 			switch (named.SpecialType)
@@ -752,7 +928,7 @@ $$"""
 				named.TypeArguments.Length == 1 &&
 				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
 			{
-				EmergencyLog.Default.Debug($"//// Lsit detected named.Name {named.Name}");
+				EmergencyLog.Default.Debug($"[Type {debug}] //// Lsit detected named.Name {named.Name}");
 
 				var arg = named.TypeArguments[0];
 				// return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
@@ -760,19 +936,24 @@ $$"""
 			}
 
 			// Try matching implemented IEnumerable<T> interface
-			EmergencyLog.Default.Debug($"°2 {named}");
-			if (named.ToString().EndsWith("IDictionary<string, object>"))
+			EmergencyLog.Default.Debug($"[Type {debug}] °2 {named}");
+			if (named.ToString().EndsWith("IDictionary<string, object>")
+				|| named.ToString().EndsWith("IDictionary<string, object>?")
+				|| named.ToString().EndsWith("IDictionary<string, object?>")
+				|| named.ToString().EndsWith("IDictionary<string, object?>?")
+				)
 			{
 				return "Dict<string, object>";
 			}
 			foreach (var i in named.AllInterfaces)
 			{
-				EmergencyLog.Default.Debug($"°1 Detected: {i}");
+				EmergencyLog.Default.Debug($"[Type {debug}] °1 Detected Interface: {i}");
 			}
 			foreach (var i in named.AllInterfaces)
 			{
 				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
 				{
+					EmergencyLog.Default.Debug($"[Type {debug}] °1 Selected Interface: {i}");
 					return $"List/*SpecialType*/<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 				}
 			}
@@ -781,12 +962,12 @@ $$"""
 
 		if (TryGetIDictionaryKeyAndElement(type, out var keyType, out var elementType1))
 		{
-			EmergencyLog.Default.Debug($"//// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
+			EmergencyLog.Default.Debug($"[Type {debug}] //// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
 			return $"Dict<{keyType}, {elementType1}>";
 		}
 		else
 		{
-			EmergencyLog.Default.Debug($"//// Unknown collection type detected: {type}");
+			EmergencyLog.Default.Debug($"[Type {debug}] //// Unknown collection type detected: {type}");
 		}
 
 		// Handle IEnumerable<T> (and subclasses like List<T>, T[])

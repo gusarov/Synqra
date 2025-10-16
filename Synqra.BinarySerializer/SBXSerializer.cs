@@ -130,7 +130,7 @@ public class SBXSerializer : ISBXSerializer
 	static UTF8Encoding _utf8 = new(false, true);
 
 	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
-	DateTime _streamBaseTime = DateTime.UtcNow;
+	DateTime _streamBaseTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
 	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
 
@@ -145,8 +145,15 @@ public class SBXSerializer : ISBXSerializer
 	{
 		Map(-100, 1, typeof(KeyValuePair<string, object>), new KeyValuePairModelBinder<string, object>());
 		Map(-101, 1, typeof(KeyValuePair<string, string>), new KeyValuePairModelBinder<string, string>());
-		Map(-99, 1, typeof(TransportOperation));
-		Map(-98, 2025.785f, typeof(NewEvent1));
+		Map(-99, typeof(TransportOperation));
+		Map(-98, typeof(NewEvent1));
+		Map(-97, typeof(ObjectCreatedEvent));
+		Map(-96, typeof(CreateObjectCommand));
+		Map(-95, typeof(ChangeObjectPropertyCommand));
+		Map(-94, typeof(ObjectPropertyChangedEvent));
+		Map(-93, typeof(Event));
+		Map(-92, typeof(Command));
+		Map(-91, typeof(CommandCreatedEvent));
 	}
 
 	class KeyValuePairModelBinder<TK, TV> : IModelBinder<KeyValuePair<TK, TV>>
@@ -185,8 +192,29 @@ public class SBXSerializer : ISBXSerializer
 	// void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	// void IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 
+	public void Map(int typeId, Type type, IModelBinder? binder = null)
+	{
+		Map(typeId, 0, type, binder);
+	}
+
 	public void Map(int typeId, double schemaVersion, Type type, IModelBinder? binder = null)
 	{
+		if (schemaVersion == 0)
+		{
+			// if (!type.IsAbstract && !type.IsInterface)
+			{
+				var schemaAttribute = (SchemaAttribute)type.GetCustomAttributes(typeof(SchemaAttribute), false)
+					.Cast<SchemaAttribute>()
+					.OrderByDescending(x => x.Version)
+					.FirstOrDefault()
+					;
+				if (schemaAttribute is null)
+				{
+					throw new Exception($"Can not detect latest version, no schema defined for {type.Name}");
+				}
+				schemaVersion = schemaAttribute.Version;
+			}
+		}
 		var schemaVersionF = (float)schemaVersion;
 		_typeById[typeId] = (schemaVersionF, type, binder);
 		_idByType[type] = (typeId, schemaVersionF, binder);
@@ -1538,7 +1566,7 @@ public class SBXSerializer : ISBXSerializer
 		// 00000000 00 nil (that's it, the guid is nil, no other bytes)
 		// 00000001 01 max
 		// 00000010 02 fallback 17 bytes mode (any Legacy or non standard guid)
-		// 00000011 03 RESERVED
+		// 00000011 03 RESERVED (NULL?)
 		// 000001xx 04-07 v7 time based compressed +2 bits from rand_a
 		// 001xxxxx v8 5 section compression
 		// 1xxxxxxx Guid as in RFC (mixed endian for .Net performance on LE, except that this byte goes to 8 and the rest is picked from/to RAM sequentially) This ensures we can store any standard guid in 16 bytes max.
@@ -1628,7 +1656,7 @@ public class SBXSerializer : ISBXSerializer
 					{
 						buffer[pos++] = (byte)(1<<2 | bytes[7] & 0x03); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
 						var ms = data.GetTimestamp();
-						var tsdiff = checked((int)(ms - _streamBaseTime).TotalMilliseconds);
+						var tsdiff = checked((long)(ms - _streamBaseTime).TotalMilliseconds);
 						Serialize(buffer, tsdiff, ref pos);
 						buffer[pos++] = bytes[6]; // rand_a_low
 						buffer[pos++] = (byte)((bytes[7] & 0x0C)<<4 | bytes[8] & 0x3F); // packed8 rand_a_high 2 other bit + byte8

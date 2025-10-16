@@ -246,45 +246,58 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("0308").GetAwaiter().GetResult();
 	}
 
+	static T SP<T>(Func<T> func)
+	{
+		try
+		{
+			return func();
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.Error("Source Method Protection", ex);
+			throw;
+			// return default;
+		}
+	}
+
 	public static IEnumerable<Func<(int, object, string)>> Should_20_serialize_sample_1_model_source()
 	{
-		yield return () => (11, new SampleFieldSealedModel() { Data = new SampleSealedModel { Id = 5 } }, "020A");
-		yield return () => (12, new SampleFieldBaseModel() { Data = new SampleBaseModel { Id = 5 } }, "06010A");
-		yield return () => (13, new SampleFieldBaseModel() { Data = new SampleDerivedModel { Id = 6, DerId = 4 } }, "060A0C08");
-		yield return () => (14, new SampleFieldObjectModel() { Data = new SampleBaseModel { Id = 5 } }, "0C080A");
-		yield return () => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1404020406");
-		yield return () => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16020A");
+		yield return () => SP(() => (11, new SampleFieldSealedModel() { Data = new SampleSealedModel { Id = 5 } }, "020A"));
+		yield return () => SP(() => (12, new SampleFieldBaseModel() { Data = new SampleBaseModel { Id = 5 } }, "06010A"));
+		yield return () => SP(() => (13, new SampleFieldBaseModel() { Data = new SampleDerivedModel { Id = 6, DerId = 4 } }, "060A0C08"));
+		yield return () => SP(() => (14, new SampleFieldObjectModel() { Data = new SampleBaseModel { Id = 5 } }, "0C080A"));
+		yield return () => SP(() => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1404020406"));
+		yield return () => SP(() => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16020A"));
 
-		yield return () => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "180F");     // List_R_E // No, I still need typeID here. Yes, it is not covariant, but it is not sealed either, but items can be derived...
-		yield return () => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1811030A0A"); // List_R_R
-		yield return () => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18130A030A000A00");   // List_R_S
-		yield return () => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18150308010A0C00");   // List_R_H
+		yield return () => SP(() => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "180F"));     // List_R_E // No, I still need typeID here. Yes, it is not covariant, but it is not sealed either, but items can be derived...
+		yield return () => SP(() => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1811030A0A")); // List_R_R
+		yield return () => SP(() => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18130A030A000A00"));   // List_R_S
+		yield return () => SP(() => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18150308010A0C00"));   // List_R_H
 
-		yield return () => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "1A0F"); // List_S_E
-		yield return () => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A11030A0A"); // List_S_R
-		yield return () => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5, DerId = 3, }, new SampleDerivedModel { Id = 5, DerId = 3, } } }, "1A130A030A060A06"); // List_S_S
-		yield return () => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5, DerId = 2, }    } }, "1A1503080A0A0A04"); // List_S_H
-		yield return () => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "1A170A"); // List_S_E
-		yield return () => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A190A030A000A00"); // List_S_S
-		yield return () => (38, new SampleFieldEnumerableBaseModel() { Data = null }, "1A0B"); // Null
+		yield return () => SP(() => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "1A0F")); // List_S_E
+		yield return () => SP(() => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A11030A0A")); // List_S_R
+		yield return () => SP(() => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5, DerId = 3, }, new SampleDerivedModel { Id = 5, DerId = 3, } } }, "1A130A030A060A06")); // List_S_S
+		yield return () => SP(() => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5, DerId = 2, }    } }, "1A1503080A0A0A04")); // List_S_H
+		yield return () => SP(() => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "1A170A")); // List_S_E
+		yield return () => SP(() => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A190A030A000A00")); // List_S_S
+		yield return () => SP(() => (38, new SampleFieldEnumerableBaseModel() { Data = null }, "1A0B")); // Null
 		// Todo: Add DerivedDerivedModel to make use of ElementType flags
 
-		yield return () => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C1708"); // List_S_E
-		yield return () => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C1908030A0A"); // List_S_R
-		yield return () => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1B080A030A000A00"); // List_S_S
-		yield return () => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1D0803080A0A0A00"); // List_S_H
+		yield return () => SP(() => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C1708")); // List_S_E
+		yield return () => SP(() => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C1908030A0A")); // List_S_R
+		yield return () => SP(() => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1B080A030A000A00")); // List_S_S
+		yield return () => SP(() => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1D0803080A0A0A00")); // List_S_H
 
-		yield return () => (51, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1401"); // no list type id but count 0
-		yield return () => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14030A0C");
-		yield return () => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1601"); // no list type id but count 0
-		yield return () => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16030A0A");
+		yield return () => SP(() => (51, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1401")); // no list type id but count 0
+		yield return () => SP(() => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14030A0C"));
+		yield return () => SP(() => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1601")); // no list type id but count 0
+		yield return () => SP(() => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16030A0A"));
 
-		// Dictionary                                                                                                                                                                     A=  int1  B=  SSM5
-		yield return () => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A");
+		// Dictionary
+		yield return () => SP(() => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A"));
 
 		// Prod
-		/*
-		yield return () => (70, new NewEvent1
+		yield return () => SP(() => (70, new NewEvent1
 		{
 			Event = new CommandCreatedEvent
 			{
@@ -298,10 +311,51 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					Target = null,
 					TargetId = default,
 					TargetTypeId = default,
+					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+					{
+						["subject"] = "Task1",
+						["number"] = 1,
+					}
 				},
 			},
-		}, "1C 02 4100 0302 4200 040A");
-		*/
+		}, "C301B5010000BF010000000000037375626A65637400075461736B31006E756D626572000302"));
+
+		yield return () => SP(() => (71, new NewEvent1
+		{
+			Event = new CommandCreatedEvent
+			{
+				Data = new CreateObjectCommand
+				{
+					TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556297525"),
+					CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770"),
+					TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
+					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
+					ContainerId = default,
+					Target = null,
+					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+					{
+						["subject"] = "Task1",
+						["number"] = 1,
+					}
+				},
+				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
+				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
+			},
+		}, "C301B50104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE683BF0104B8DFD5F8B901B2B1C5AB90B83BE683009849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D77004B6DFD5F8B901DB216DF966E2C9F33D037375626A65637400075461736B31006E756D626572000302"));
+
+		yield return () => SP(() => (72, new NewEvent1
+		{
+			Event = new ObjectPropertyChangedEvent
+			{
+				PropertyName = "subject",
+				TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556297525"),
+				CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770"),
+				TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
+				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
+				ContainerId = default,
+				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
+			},
+		}, "C301BB0104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE68304B6DFD5F8B901DB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
 	}
 
 	[Test]
@@ -312,20 +366,20 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Console.WriteLine(modelJsonX);
 
 		var ser = new SBXSerializer();
-		ser.Map( 1, 1, typeof(SampleFieldSealedModel)); // 0z02
-		ser.Map( 2, 1, typeof(SampleSealedModel)); // 0z04
-		ser.Map( 3, 1, typeof(SampleFieldBaseModel)); // 0z06
-		ser.Map( 4, 1, typeof(SampleBaseModel));
-		ser.Map( 5, 1, typeof(SampleDerivedModel)); // 0z1A
-		ser.Map( 6, 1, typeof(SampleFieldObjectModel)); // 0z1C
-		ser.Map( 7, 1, typeof(SampleFieldDerrivedModel));
-		ser.Map( 8, 1, typeof(SampleFieldIntModel));
-		ser.Map( 9, 1, typeof(SampleFieldSealedDerivedModel));
-		ser.Map(10, 1, typeof(SampleFieldListIntModel));
-		ser.Map(11, 1, typeof(SampleFieldListSealedModel));
-		ser.Map(12, 1, typeof(SampleFieldListBaseModel));
-		ser.Map(13, 1, typeof(SampleFieldEnumerableBaseModel));
-		ser.Map(14, 1, typeof(SampleFieldDictionaryStringObjectModel));
+		ser.Map( 1, typeof(SampleFieldSealedModel)); // 0z02
+		ser.Map( 2, typeof(SampleSealedModel)); // 0z04
+		ser.Map( 3, typeof(SampleFieldBaseModel)); // 0z06
+		ser.Map( 4, typeof(SampleBaseModel));
+		ser.Map( 5, typeof(SampleDerivedModel)); // 0z1A
+		ser.Map( 6, typeof(SampleFieldObjectModel)); // 0z1C
+		ser.Map( 7, typeof(SampleFieldDerrivedModel));
+		ser.Map( 8, typeof(SampleFieldIntModel));
+		ser.Map( 9, typeof(SampleFieldSealedDerivedModel));
+		ser.Map(10, typeof(SampleFieldListIntModel));
+		ser.Map(11, typeof(SampleFieldListSealedModel));
+		ser.Map(12, typeof(SampleFieldListBaseModel));
+		ser.Map(13, typeof(SampleFieldEnumerableBaseModel));
+		ser.Map(14, typeof(SampleFieldDictionaryStringObjectModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
@@ -348,6 +402,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Assert.That(deserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
+		EmergencyLog.Default.Debug("HEX DUMP ACTUAL " + Convert.ToHexString(buffer));
 		Assert.That(Convert.ToHexString(buffer)).IsEqualTo(expectedHex.Replace(" ", "")).GetAwaiter().GetResult();
 	}
 

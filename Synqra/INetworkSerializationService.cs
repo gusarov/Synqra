@@ -38,12 +38,14 @@ public class JsonNetworkSerializationService : INetworkSerializationService
 
 	public ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T inv, ArraySegment<byte> buffer)
 	{
+		EmergencyLog.Default.Debug($"°8 JSON Sent: {inv}{Environment.NewLine}{JsonSerializer.Serialize(inv, AppJsonContext.Default.Options)}");
 		return JsonSerializer.SerializeToUtf8Bytes(inv, _jsonSerializerContext.Options);
 	}
 
 	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ReadOnlySpan<byte> bytes)
 	{
 		var operation = JsonSerializer.Deserialize<T>(bytes, _jsonSerializerContext.Options) ?? throw new Exception();
+		EmergencyLog.Default.Debug($"°9 JSON Received: : {operation}{Environment.NewLine}{JsonSerializer.Serialize(operation, AppJsonContext.Default.Options)}");
 		return operation;
 	}
 }
@@ -70,6 +72,8 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 	public ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj, ArraySegment<byte> buffer)
 	{
+		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
+
 		ArraySegment<byte> span = buffer == default ? new byte[EventReplicationService.DefaultFrameSize] : buffer; // stackalloc byte[EventReplicationService.DefaultFrameSize];
 		int pos = 0;
 		_sbxSerializerSender.Serialize(span, obj, ref pos);
@@ -77,14 +81,23 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 #if DEBUG
 		var json = JsonSerializer.Serialize(obj, AppJsonContext.Default.TransportOperation);
-		EmergencyLog.Default.Debug("°8 SEND Serialize: " + json);
+		EmergencyLog.Default.Debug($"°8 SBX Sent: {obj}{Environment.NewLine}{json}");
 		EmergencyLog.Default.DebugHexDump(span);
 
-		var des = _sbxSerializerSenderVerify.Deserialize<T>(span, ref pos);
+		var pos2 = 0;
+		var des = _sbxSerializerSenderVerify.Deserialize<T>(span, ref pos2);
 		var json2 = JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation);
-		EmergencyLog.Default.Debug("°8 SEND VERIFY: " + json2);
+		EmergencyLog.Default.Debug($"°8 SBX Verify: {des}{Environment.NewLine}{json2}");
 		if (json != json2)
 		{
+			for (int i = 0, m = Math.Max(json.Length, json2.Length); i < m; i++)
+			{
+				if (json[i] != json2[i])
+				{
+					EmergencyLog.Default.Error($"Serialization mismatch at char {i}: '{(i < json.Length ? json[i] : ' ')}' vs '{(i < json2.Length ? json2[i] : ' ')}'. Context: {json[..i][Math.Max(0, i - 10)..]}");
+					break;
+				}
+			}
 			throw new Exception($"Serialization mismatch! Failed to verify, see emergency logs at {EmergencyLog.Default.LogPath}.");
 		}
 #endif
@@ -93,8 +106,11 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ReadOnlySpan<byte> bytes)
 	{
+		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
+
 		int pos = 0;
 		var des = _sbxSerializerReceiver.Deserialize<T>(bytes, ref pos);
+		EmergencyLog.Default.Debug($"°9 SBC Received: {des}{Environment.NewLine}{JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation)}");
 		if (pos != bytes.Length)
 		{
 			throw new Exception("Did not consume all bytes");
