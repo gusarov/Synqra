@@ -1,4 +1,6 @@
-﻿namespace Synqra;
+﻿using System.Text;
+
+namespace Synqra;
 
 internal class CodeGenUtils
 {
@@ -43,6 +45,28 @@ internal class CodeGenUtils
 				else if (current != newContent)
 				{
 					EmergencyLog.Default.Debug("WriteFile: File has changed since last read, skip writing file: " + filePath);
+					// EmergencyLog.Default.Debug($"Expected content:{Environment.NewLine}{originalContent}");
+					/*
+					var enc = new UTF8Encoding(false, false);
+					var hd = new HexDumpWriter();
+
+					var originalContentBytes = enc.GetBytes(originalContent);
+					var originalSb = new StringBuilder();
+					hd.HexDump(originalContentBytes, s => originalSb.Append(s), c => originalSb.Append(c.ToString()));
+
+					var currentContentBytes = enc.GetBytes(current);
+					var currentSb = new StringBuilder();
+					hd.HexDump(currentContentBytes, s => currentSb.Append(s), c => currentSb.Append(c.ToString()));
+					*/
+					/*
+					for (int i = 0; i < length; i++)
+					{
+						if (originalContentBytes[i] != currentContentBytes[i])
+						{
+							EmergencyLog.Default.Debug($"WriteFile: File has changed at byte {i}: {originalContentBytes[i]} != {currentContentBytes[i]}");
+						}
+					}
+					*/
 				}
 			}
 			finally

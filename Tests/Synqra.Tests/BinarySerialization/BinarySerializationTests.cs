@@ -754,7 +754,7 @@ public class BinarySerializationTests : BaseTest
 				EventId = default,
 				CommandId = default,
 				TargetId = default,
-				TargetTypeId = default,
+				TargetTypeId = new Guid("00000000-0000-8000-8001-000000000000"),
 				CollectionId = default,
 			},
 		};

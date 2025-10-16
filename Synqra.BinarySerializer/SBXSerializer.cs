@@ -68,8 +68,8 @@ public class SBXSerializer : ISBXSerializer
 		SpecList_S_E = -20, // Specified<Specified>(empty)
 		SpecList_S_R = -21, // Specified<Specified>(all items are of the same type as T, not prefixed)
 		SpecList_S_S = -22, // Specified<Specified>(all items are of the same Specified type, not prefixed)
+		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1, // -23, there is a unit test to ensure this value is correct
 		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
-		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1,
 
 		// TEMPORAY:
 		DictStrObj = -30,
