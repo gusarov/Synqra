@@ -11,10 +11,21 @@ namespace Synqra;
 [JsonDerivedType(typeof(ChangeObjectPropertyCommand), "ChangeObjectPropertyCommand")]
 [JsonDerivedType(typeof(DeleteObjectCommand), "DeleteObjectCommand")]
 [JsonDerivedType(typeof(CreateObjectCommand), "CreateObjectCommand")]
-public abstract class Command : ISynqraCommand
+[SynqraModel]
+[Schema(2025.1, "")]
+[Schema(2025.791, "1")]
+[Schema(2025.792, "1 CommandId Guid ContainerId Guid")]
+[Schema(2025.793, "1")]
+[Schema(2025.794, "1 CommandId Guid ContainerId Guid")]
+public abstract partial class Command : ISynqraCommand
 {
-	public Guid CommandId { get; set; } = GuidExtensions.CreateVersion7();
-	public Guid ContainerId { get; set; }
+	protected Command()
+	{
+		CommandId = GuidExtensions.CreateVersion7();
+	}
+
+	public partial Guid CommandId { get; set; }
+	public partial Guid ContainerId { get; set; }
 
 	protected abstract Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx);
 
@@ -31,40 +42,65 @@ public abstract class Command : ISynqraCommand
 	}
 }
 
-public abstract class SingleObjectCommand : Command
+[SynqraModel]
+[Schema(2025.1, "")]
+[Schema(2025.791, "1 CommandId Guid ContainerId Guid-")]
+[Schema(2025.792, "1 CommandId Guid ContainerId Guid")]
+[Schema(2025.793, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2025.794, "1 TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
+[Schema(2025.795, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2025.796, "1 TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
+[Schema(2025.797, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+public abstract partial class SingleObjectCommand : Command
 {
-	public Guid TargetTypeId { get; set; }
+	public partial Guid TargetTypeId { get; set; }
 
-	public Guid CollectionId { get; set; }
+	public partial Guid CollectionId { get; set; }
 
-	public Guid TargetId { get; set; }
+	public partial Guid TargetId { get; set; }
 
 	[JsonIgnore]
 	public object? Target { get; set; }
 }
 
-public class CreateObjectCommand : SingleObjectCommand
+[SynqraModel]
+[Schema(2025.791, "1 Data IDictionary<string, object?>? DataJson string? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]
+[Schema(2025.792, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2025.793, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
+[Schema(2025.794, "1 Data IDictionary<string, object?>? DataJson string? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
+[Schema(2025.795, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
+[Schema(2025.796, "1 Data IDictionary<string, object?>? DataJson string? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
+[Schema(2025.797, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
+public partial class CreateObjectCommand : SingleObjectCommand
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 
-	public IDictionary<string, object?>? Data { get; set; }
+	public partial IDictionary<string, object?>? Data { get; set; }
 
 	[JsonIgnore]
 	public string? DataJson { get; set; }
 }
 
+[SynqraModel]
+[Schema(2025.1, "")]
 public class DeleteObjectCommand : Command
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }
 
-public class ChangeObjectPropertyCommand : SingleObjectCommand
+[SynqraModel]
+[Schema(2025.1, "")]
+[Schema(2025.791, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2025.792, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2025.793, "1 PropertyName string OldValue object? NewValue object? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
+[Schema(2025.794, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
+public partial class ChangeObjectPropertyCommand : SingleObjectCommand
 {
-	public required string PropertyName { get; init; }
+	public required partial string PropertyName { get; set; }
 
-	public object? OldValue { get; set; }
+	public partial object? OldValue { get; set; }
 
-	public object? NewValue { get; set; }
+	public partial object? NewValue { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

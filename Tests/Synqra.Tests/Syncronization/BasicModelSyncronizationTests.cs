@@ -67,6 +67,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 			}
 			await Task.Delay(100);
 		}
+		EmergencyLog.Default.Message("°0 <==========> Should_synchronize_simple_models");
 		await Should_have_node_with_model(); // Works on Node A
 		var collection = _nodeB.StoreContext.GetCollection<SampleTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
@@ -84,5 +85,6 @@ internal class BasicModelSyncronizationTests : BaseTest
 			await Task.Delay(100); // wait until all commands are processed
 		}
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
+		EmergencyLog.Default.Message("°0 </==========> Should_synchronize_simple_models");
 	}
 }

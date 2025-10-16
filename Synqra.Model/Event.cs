@@ -13,6 +13,16 @@ namespace Synqra;
 [JsonDerivedType(typeof(CommandCreatedEvent), "CommandCreatedEvent")]
 [SynqraModel]
 [Schema(2025.789, "1 EventId Guid CommandId Guid ContainerId Guid")]
+[Schema(2025.791, "1")]
+[Schema(2025.792, "1 EventId Guid CommandId Guid ContainerId Guid")]
+[Schema(2025.793, "1")]
+[Schema(2025.794, "1 EventId Guid CommandId Guid")]
+[Schema(2025.795, "1")]
+[Schema(2025.796, "1 EventId Guid CommandId Guid")]
+[Schema(2025.797, "1 EventId Guid CommandId Guid ContainerId Guid")]
+[Schema(2025.798, "1 EventId Guid CommandId Guid")]
+[Schema(2025.799, "1 EventId Guid CommandId Guid ContainerId Guid")]
+[Schema(2025.800, "1 EventId Guid CommandId Guid")]
 public abstract partial class Event : IEvent
 {
 	// Guid IIdentifiable<Guid>.Id => EventId;
@@ -40,4 +50,10 @@ public abstract partial class Event : IEvent
 	}
 
 	protected abstract Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx);
+
+	public override string? ToString()
+	{
+		var ts = base.ToString();
+		return true == ts?.StartsWith("Synqra.") ? ts[7..] : ts;
+	}
 }
