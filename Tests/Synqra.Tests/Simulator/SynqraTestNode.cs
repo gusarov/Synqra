@@ -146,7 +146,10 @@ internal class SynqraTestNode
 
 		builder.AddSynqraStoreContext();
 		builder.AddJsonLinesStorage<Event, Guid>();
+
 		builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
+		// builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
+
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
 		options.Converters.Add(new ObjectConverter());

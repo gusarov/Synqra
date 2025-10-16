@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace Synqra;
 
@@ -11,15 +11,17 @@ namespace Synqra;
 [JsonDerivedType(typeof(ObjectPropertyChangedEvent), "ObjectPropertyChangedEvent")]
 [JsonDerivedType(typeof(ObjectDeletedEvent), "ObjectDeletedEvent")]
 [JsonDerivedType(typeof(CommandCreatedEvent), "CommandCreatedEvent")]
-public abstract class Event : IEvent
+[SynqraModel]
+[Schema(2025.789, "1 EventId Guid CommandId Guid ContainerId Guid")]
+public abstract partial class Event : IEvent
 {
 	// Guid IIdentifiable<Guid>.Id => EventId;
 
-	public required Guid EventId { get; set; }
-	public required Guid CommandId { get; set; }
+	public required partial Guid EventId { get; set; }
+	public required partial Guid CommandId { get; set; }
 	// public required Guid UserId { get; set; }
 	[JsonIgnore] // too verbose, containerId (streamId) should be handled outside of event stream
-	public Guid ContainerId { get; set; } // like layer id
+	public partial Guid ContainerId { get; set; } // like layer id
 
 	/*
 	public async Task AcceptAsync<T>(IEventVisitor<object?> visitor)

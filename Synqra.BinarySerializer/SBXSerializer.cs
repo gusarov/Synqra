@@ -282,16 +282,14 @@ public class SBXSerializer : ISBXSerializer
 		, bool? emitTypeId = null
 		)
 	{
-		if (obj == null)
-		{
-			throw new Exception("Decision about null serialization is not yet finalized");
-		}
+		// obj - null? Then if we emit type, it is TypeId.Null, otherwise try known types or if type formatter supports built-in null serialization.
+		// string, bool?, int? - the all potentially can support built-in NULL serialization.
 
 		// If this is level 1 (precise custom) then schema id. Schema ID always assumes a class name (type).
 		// If this is level 2 (field names) then 0 (schemaid=0) and the first field is the type name string.
 		// If this is level 3, the reset of the fields are in alphabetical order by field name (to ensure canonical normalization for auto-repairs & hash tree)
 
-		var actualType = obj?.GetType() ?? throw new ArgumentNullException();
+		var actualType = obj?.GetType();
 		if (emitTypeId == null)
 		{
 			var testType = requestedType;
@@ -360,10 +358,36 @@ public class SBXSerializer : ISBXSerializer
 					Serialize(buffer, aqn ?? throw new NotSupportedException(), ref pos);
 				}
 			}
+			else if (obj == null)
+			{
+				Serialize(in buffer, (long)TypeId.Null, ref pos);
+			}
+			/*
+			else if (typeId == TypeId.Unknown)
+			{
+				Serialize(in buffer, (int)TypeId.AsRequested, ref pos);
+			}
+			*/
 			else
 			{
 				Serialize(in buffer, (int)TypeId.AsRequested, ref pos);
 			}
+		}
+		else if (obj == null)
+		{
+			/*
+			if (requestedType.IsValueType && requestedType.IsGenericType && requestedType.GetGenericTypeDefinition() == typeof(Nullable<>))
+			{
+				var underlying = requestedType.GetGenericArguments();
+				if (underlying == typeof())
+			}
+			*/
+			if (requestedType.IsAssignableTo(typeof(IEnumerable)))
+			{
+				SerializeNullableUnsigned(buffer, null, ref pos);
+				return;
+			}
+			throw new NotSupportedException("Need to track capability of a type to encode null state inside value");
 		}
 
 		if (obj is IBindableModel bm)
@@ -371,6 +395,11 @@ public class SBXSerializer : ISBXSerializer
 			_idByType.TryGetValue(actualType, out var typeInfo);
 			EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo.schemaVersion}");
 			bm.Get(this, typeInfo.schemaVersion, buffer, ref pos);
+		}
+		else if (obj is null)
+		{
+			// if it is not thrown above, then a type id is emitted, so we are done
+			return;
 		}
 		else if (obj is int i)
 		{
@@ -450,7 +479,6 @@ public class SBXSerializer : ISBXSerializer
 		}
 	}
 
-
 	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
@@ -477,7 +505,7 @@ public class SBXSerializer : ISBXSerializer
 			);
 	}
 
-	public object Deserialize(
+	public object? Deserialize(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedType = null
@@ -608,6 +636,10 @@ public class SBXSerializer : ISBXSerializer
 			return res;
 
 		}
+		else if(typeId == TypeId.Null)
+		{
+			return null;
+		}
 		else if (typeId == TypeId.Utf8String || type == typeof(string))
 		{
 			return DeserializeString(in buffer, ref pos);
@@ -622,7 +654,6 @@ public class SBXSerializer : ISBXSerializer
 		}
 		else if (type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
 		{
-
 			return DeserializeList(
 				  in buffer
 				, ref pos
@@ -829,12 +860,18 @@ public class SBXSerializer : ISBXSerializer
 		}
 		*/
 
+		if (enumerable is null)
+		{
+			SerializeNullableUnsigned(buffer, null, ref pos);
+			return;
+		}
+
 		var materialized = enumerable as ICollection ?? enumerable.Cast<object?>().ToArray();
 
 		var cnt = materialized.Count;
 		// if (cnt > 0)
 		{
-			Serialize(buffer, (ulong)cnt, ref pos);
+			SerializeNullableUnsigned(buffer, (ulong?)cnt, ref pos);
 		}
 		foreach (var item in materialized)
 		{
@@ -895,7 +932,7 @@ public class SBXSerializer : ISBXSerializer
 		return dict;
 	}
 
-	public object DeserializeList(
+	public object? DeserializeList(
 		  in ReadOnlySpan<byte> buffer
 		, ref int pos
 		, IList? listToFill = null
@@ -911,7 +948,11 @@ public class SBXSerializer : ISBXSerializer
 		{
 			throw new Exception();
 		}
-		var count = isEmpty ? 0 : (int)DeserializeUnsigned(buffer, ref pos);
+		var count = isEmpty ? 0 : (int?)DeserializeNullableUnsigned(buffer, ref pos);
+		if (count == null)
+		{
+			return null;
+		}
 
 		if (listToFill == null)
 		{
@@ -1115,6 +1156,8 @@ public class SBXSerializer : ISBXSerializer
 	{
 		switch (type)
 		{
+			case null:
+				return TypeId.Null;
 			case Type t when t == typeof(sbyte) || t == typeof(short) || t == typeof(int) || t == typeof(long) || t == typeof(BigInteger):
 				return TypeId.SignedInteger; // Signed Integers
 			case Type t when t == typeof(byte) || t == typeof(ushort) || t == typeof(uint) || t == typeof(ulong):
@@ -1259,11 +1302,61 @@ public class SBXSerializer : ISBXSerializer
 
 	#endregion
 
+	#region Nullable Signed Integer
+
+	public void SerializeNullableSigned(in Span<byte> buffer, long? data, ref int pos)
+	{
+		// ZigZag encode the signed int with null offset
+		if (data == null)
+		{
+			Serialize(buffer, (ulong)0, ref pos);
+			return;
+		}
+		if (data > 0)
+		{
+			data++;
+		}
+
+		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
+		while (zigzag >= 0x80UL)
+		{
+			if (pos >= buffer.Length)
+				throw new ArgumentException("Buffer too small for varint encoding.");
+			buffer[pos++] = (byte)(zigzag & 0x7F | 0x80);
+			zigzag >>= 7;
+		}
+		if (pos >= buffer.Length)
+			throw new ArgumentException("Buffer too small for varint encoding.");
+		buffer[pos++] = (byte)zigzag;
+	}
+
+	public long? DeserializeNullableSigned(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		ulong raw = DeserializeUnsigned(buffer, ref pos);
+		long temp = (long)(raw >> 1);
+		if ((raw & 1) != 0)
+		{
+			temp = ~temp;
+		}
+		if (temp == 0)
+		{
+			return null;
+		}
+		if (temp > 0)
+		{
+			temp--;
+		}
+		return temp;
+	}
+
+
+	#endregion
+
 	#region Signed Integer
 
 	private void Serialize(in Span<byte> buffer, in TypeId data, ref int pos)
 	{
-		Serialize(buffer, (int)data, ref pos);
+		Serialize(buffer, (long)data, ref pos);
 	}
 
 	public void Serialize(in Span<byte> buffer, in long data, ref int pos)
@@ -1282,6 +1375,7 @@ public class SBXSerializer : ISBXSerializer
 		buffer[pos++] = (byte)zigzag;
 	}
 
+	/*
 	public void Serialize(ref Span<byte> buffer, in long data)
 	{
 		// ZigZag encode the signed int
@@ -1310,6 +1404,7 @@ public class SBXSerializer : ISBXSerializer
 		}
 		return temp;
 	}
+	*/
 
 	public long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
@@ -1322,6 +1417,36 @@ public class SBXSerializer : ISBXSerializer
 		return temp;
 	}
 
+	#endregion
+
+	#region Nullable Unsigned Integer
+
+	public void SerializeNullableUnsigned(in Span<byte> buffer, ulong? value, ref int pos)
+	{
+		if (value == null)
+		{
+			value = 0;
+		}
+		else if (value >= 0)
+		{
+			value++;
+		}
+		Serialize(buffer, value.Value, ref pos);
+	}
+
+	public ulong? DeserializeNullableUnsigned(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var result = DeserializeUnsigned(buffer, ref pos);
+		if (result == 0)
+		{
+			return null;
+		}
+		if (result > 0)
+		{
+			result--;
+		}
+		return result;
+	}
 	#endregion
 
 	#region Unsigned Integer

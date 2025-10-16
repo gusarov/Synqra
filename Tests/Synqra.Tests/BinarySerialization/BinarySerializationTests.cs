@@ -102,10 +102,33 @@ internal class BinarySerializationSignedTests : BaseTest
 		var ser = new SBXSerializer();
 		ser.Serialize(buffer, i, ref pos);
 		ReadOnlySpan<byte> buffer2 = buffer;
-		var deserialized = ser.DeserializeSigned(ref buffer2);
+		int pos2 = 0;
+		var deserialized = ser.DeserializeSigned(buffer2, ref pos2);
 		Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
-		Assert.That(pos).IsEqualTo(buffer.Length - buffer2.Length).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	[Arguments(-32766)]
+	[Arguments(-32767)]
+	[Arguments(-32768)]
+	[Arguments(32766)]
+	[Arguments(null)]
+	[Arguments(32767)]
+	[Arguments(32768)]
+	public void Should_serialize_nullable_signed_integers(int? i)
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		int pos = 0;
+		var ser = new SBXSerializer();
+		ser.SerializeNullableSigned(buffer, i, ref pos);
+		ReadOnlySpan<byte> buffer2 = buffer;
+		int pos2 = 0;
+		var deserialized = ser.DeserializeNullableSigned(buffer2, ref pos2);
+		Assert.That($"{deserialized}").IsEqualTo($"{i}").GetAwaiter().GetResult();
+		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -118,10 +141,11 @@ internal class BinarySerializationSignedTests : BaseTest
 			int pos = 0;
 			ser.Serialize(buffer, i, ref pos);
 			ReadOnlySpan<byte> buffer2 = buffer;
-			var deserialized = ser.DeserializeSigned(ref buffer2);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeSigned(buffer2, ref pos2);
 			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
-			Assert.That(pos).IsEqualTo(buffer.Length - buffer2.Length).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos2).GetAwaiter().GetResult();
 		}
 	}
 }
@@ -226,36 +250,37 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	{
 		yield return () => (11, new SampleFieldSealedModel() { Data = new SampleSealedModel { Id = 5 } }, "020A");
 		yield return () => (12, new SampleFieldBaseModel() { Data = new SampleBaseModel { Id = 5 } }, "06010A");
-		yield return () => (13, new SampleFieldBaseModel() { Data = new SampleDerivedModel { Id = 6, DerId = 4 } }, "060A080C");
+		yield return () => (13, new SampleFieldBaseModel() { Data = new SampleDerivedModel { Id = 6, DerId = 4 } }, "060A0C08");
 		yield return () => (14, new SampleFieldObjectModel() { Data = new SampleBaseModel { Id = 5 } }, "0C080A");
-		yield return () => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1403020406");
-		yield return () => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16010A");
+		yield return () => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1404020406");
+		yield return () => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16020A");
 
 		yield return () => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "180F");     // List_R_E // No, I still need typeID here. Yes, it is not covariant, but it is not sealed either, but items can be derived...
-		yield return () => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1811020A0A"); // List_R_R
-		yield return () => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18130A02000A000A");   // List_R_S
-		yield return () => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18150208010A000C");   // List_R_H
+		yield return () => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1811030A0A"); // List_R_R
+		yield return () => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18130A030A000A00");   // List_R_S
+		yield return () => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18150308010A0C00");   // List_R_H
 
 		yield return () => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "1A0F"); // List_S_E
-		yield return () => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A11020A0A"); // List_S_R
-		yield return () => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { DerId = 3, Id = 5 }, new SampleDerivedModel { DerId = 3, Id = 5 } } }, "1A130A02060A060A"); // List_S_S
-		yield return () => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { DerId = 2, Id = 5 }    } }, "1A1502080A0A040A"); // List_S_H
+		yield return () => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A11030A0A"); // List_S_R
+		yield return () => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5, DerId = 3, }, new SampleDerivedModel { Id = 5, DerId = 3, } } }, "1A130A030A060A06"); // List_S_S
+		yield return () => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5, DerId = 2, }    } }, "1A1503080A0A0A04"); // List_S_H
 		yield return () => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "1A170A"); // List_S_E
-		yield return () => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A190A02000A000A"); // List_S_S
+		yield return () => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A190A030A000A00"); // List_S_S
+		yield return () => (38, new SampleFieldEnumerableBaseModel() { Data = null }, "1A0B"); // Null
 		// Todo: Add DerivedDerivedModel to make use of ElementType flags
 
 		yield return () => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C1708"); // List_S_E
-		yield return () => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C1908020A0A"); // List_S_R
-		yield return () => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1B080A02000A000A"); // List_S_S
-		yield return () => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1D0802080A0A000A"); // List_S_H
+		yield return () => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C1908030A0A"); // List_S_R
+		yield return () => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1B080A030A000A00"); // List_S_S
+		yield return () => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1D0803080A0A0A00"); // List_S_H
 
-		yield return () => (51, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1400"); // no list type id but count 0
-		yield return () => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14020A0C");
-		yield return () => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1600"); // no list type id but count 0
-		yield return () => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16020A0A");
+		yield return () => (51, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1401"); // no list type id but count 0
+		yield return () => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14030A0C");
+		yield return () => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1601"); // no list type id but count 0
+		yield return () => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16030A0A");
 
 		// Dictionary                                                                                                                                                                     A=  int1  B=  SSM5
-		yield return () => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 02 4100 0302 4200 040A");
+		yield return () => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A");
 
 		// Prod
 		/*
@@ -375,7 +400,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03010203").GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("04010203").GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -399,7 +424,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 4F6E6500 54776F00 546872656500".Replace(" ", "")).GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("04 4F6E6500 54776F00 546872656500".Replace(" ", "")).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -423,7 +448,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 546872656500 00 80".Replace(" ", "")).GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("04 546872656500 00 80".Replace(" ", "")).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -454,7 +479,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 
-		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("03 4B 65 79  31 00 56 61  6C 75 65 31  00 4B 65 79  32 00 56 61  6C 75 65 32  00 4B 65 79  33 00 56 61  6C 75 65 33  00 ".Replace(" ", "")).GetAwaiter().GetResult();
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("04 4B 65 79  31 00 56 61  6C 75 65 31  00 4B 65 79  32 00 56 61  6C 75 65 32  00 4B 65 79  33 00 56 61  6C 75 65 33  00 ".Replace(" ", "")).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -517,6 +542,32 @@ internal class BinarySerializationUnsignedTests : BaseTest
 			var pos2 = 0;
 			var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
 			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+		}
+	}
+
+	[Test]
+	public void Should_serialize_nullable_unsigned_integers()
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		var ser = new SBXSerializer();
+		for (uint? i = 0; i < ushort.MaxValue; i++)
+		{
+			int pos = 0;
+			ser.SerializeNullableUnsigned(buffer, i, ref pos);
+			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+			var pos2 = 0;
+			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
+			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+		}
+		{
+			int pos = 0;
+			ser.SerializeNullableUnsigned(buffer, null, ref pos);
+			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+			var pos2 = 0;
+			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
+			Assert.That(deserialized).IsEqualTo(null).GetAwaiter().GetResult();
 			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 		}
 	}
@@ -707,8 +758,9 @@ public class BinarySerializationTests : BaseTest
 				CollectionId = default,
 			},
 		};
-		ser.Map(1, 0, typeof(NewEvent1));
-		ser.Map(2, 0, typeof(ObjectCreatedEvent));
+		ser.Map(1, 2025.785, typeof(TransportOperation));
+		ser.Map(2, 2025.785, typeof(NewEvent1));
+		ser.Map(3, 2025.789, typeof(ObjectCreatedEvent));
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
