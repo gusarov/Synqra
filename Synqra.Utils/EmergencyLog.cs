@@ -118,7 +118,7 @@ public sealed class EmergencyLog
 				try
 				{
 					var fi = new FileInfo(_logFilePath);
-					if (fi.Exists && (fi.Length > 10 * 1024 * 1024))
+					if (fi.Exists && (fi.Length > 20 * 1024 * 1024))
 					{
 						// slide 50% of file inside!
 						try
