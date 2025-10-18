@@ -641,11 +641,27 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				// Include properties from this class and all base classes that have a setter
 				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data).Where(p => p.SetMethod is not null))
 				{
-					body.AppendLine($$"""
+					if (pro.Type.ToString() == "int")
+					{
+						body.AppendLine($$"""
+			case "{{pro.Name}}":
+				if (value is long l)
+				{
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})l;
+				} else {
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				}
+				break;
+""");
+					}
+					else
+					{
+						body.AppendLine($$"""
 			case "{{pro.Name}}":
 				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
 				break;
 """);
+					}
 				}
 				body.AppendLine(
 	"""
@@ -692,7 +708,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\telse");
 					body.AppendLine($"\t\t{{");
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
 					body.AppendLine($"\t\t}}");
 				}
 				body.AppendLine("""
@@ -726,7 +742,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					}
 					body.AppendLine($"\t\t{{");
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
 					body.AppendLine($"\t\t}}");
 
 					body.AppendLine("""
@@ -798,7 +814,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\telse");
 					body.AppendLine($"\t\t{{");
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
 					body.AppendLine($"\t\t}}");
 				}
 				body.AppendLine("""
@@ -831,7 +847,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				}
 				body.AppendLine($"\t\t{{");
 				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}}\");");
+				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
 				body.AppendLine($"\t\t}}");
 
 				body.AppendLine("""

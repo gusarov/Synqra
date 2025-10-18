@@ -19,7 +19,7 @@ public class EventReplicationService : IHostedService
 
 	private readonly IStorage<Event, Guid> _storage;
 	private readonly EventReplicationState _eventReplicationState;
-	private readonly JsonSerializerContext _jsonSerializerContext;
+	private readonly JsonSerializerContext? _jsonSerializerContext;
 	private readonly Lazy<ISynqraStoreContext> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
 
@@ -36,17 +36,17 @@ public class EventReplicationService : IHostedService
 		  IOptions<EventReplicationConfig> options
 		, IStorage<Event, Guid> storage
 		, EventReplicationState eventReplicationState
-		, JsonSerializerContext jsonSerializerContext
 		, Lazy<ISynqraStoreContext> synqraStoreContext
 		, INetworkSerializationService networkSerializationService
+		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
 		)
 	{
 		_storage = storage;
 		_eventReplicationState = eventReplicationState;
-		_jsonSerializerContext = jsonSerializerContext;
 		_synqraStoreContext = synqraStoreContext;
 		_networkSerializationService = networkSerializationService;
+		_jsonSerializerContext = jsonSerializerContext;
 		_config = config ?? options.Value;
 	}
 
