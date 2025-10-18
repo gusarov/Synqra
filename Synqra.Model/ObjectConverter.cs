@@ -10,10 +10,41 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace Synqra;
 
+public class BindableModelConverter : JsonConverter<IBindableModel>
+{
+	private readonly Type[] _extraTypes;
+
+	public BindableModelConverter(params Type[] extraTypes)
+	{
+		_extraTypes = extraTypes;
+	}
+
+	public override IBindableModel? Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+	{
+		if (options.TypeInfoResolver == null)
+		{
+			throw new SynqraJsonException();
+		}
+		throw new SynqraJsonException();
+	}
+
+	public override void Write(Utf8JsonWriter writer, IBindableModel value, JsonSerializerOptions options)
+	{
+		if (options.TypeInfoResolver == null)
+		{
+			throw new SynqraJsonException();
+		}
+		throw new SynqraJsonException();
+	}
+}
+
 public class ObjectConverter : JsonConverter<object>
 {
-	public ObjectConverter()
+	private readonly Type[] _extraTypes;
+
+	public ObjectConverter(params Type[] extraTypes)
 	{
+		_extraTypes = extraTypes;
 		// Microsoft SerializeAsync implementation is very hacky with their custom ObjectConverter. It is not possible to use it as is. As soon as our converter injected, it will serialize IAsyncEnumerable as a value unless I set this internal property.
 		// GetType().GetProperty("CanBePolymorphic", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(this, true);
 	}
@@ -76,6 +107,17 @@ public class ObjectConverter : JsonConverter<object>
 			if (SynqraPolymorphicTypeResolver.PolimorficRoots.Contains(ancestor))
 			{
 				rootType = ancestor;
+				if (ancestor != typeof(IBindableModel))
+				{
+					if (options.TypeInfoResolver == null)
+					{
+						throw new SynqraJsonException();
+					}
+					options = new JsonSerializerOptions(options)
+					{
+						TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extraTypes),
+					};
+				}
 			}
 		}
 
@@ -132,9 +174,9 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 	// mongo attribute driven with name match
 	Dictionary<Type, List<JsonDerivedType>> _derivedTypes = new Dictionary<Type, List<JsonDerivedType>>();
 
-	public SynqraPolymorphicTypeResolver()
+	public SynqraPolymorphicTypeResolver(params Type[] extraTypes)
 	{
-
+		_extraTypes = extraTypes;
 	}
 
 	public static HashSet<Type> PolimorficRoots = new HashSet<Type>
@@ -142,14 +184,15 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 		typeof(Event),
 		typeof(Command),
 		typeof(TransportOperation),
+		typeof(IBindableModel),
 	};
+	private readonly Type[] _extraTypes;
 
 	public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
 	{
 		// lock (this)
 		{
 			var jsonTypeInfo = base.GetTypeInfo(type, options);
-
 			/*
 			if (type == typeof(IComponent))
 			{
@@ -210,6 +253,29 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 							}
 						}
 						*/
+						if (type == typeof(IBindableModel))
+						{
+							foreach (var type2 in PolimorficRoots)
+							{
+								var attrs = (JsonDerivedTypeAttribute[])type2.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), true);
+								foreach (var attr in attrs)
+								{
+									list.Add(new JsonDerivedType(attr.DerivedType, attr.DerivedType.Name));
+								}
+							}
+							foreach (var item in _extraTypes)
+							{
+								list.Add(new JsonDerivedType(item, item.Name));
+							}
+						}
+						else
+						{
+							var attrs = (JsonDerivedTypeAttribute[])type.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), true);
+							foreach (var attr in attrs)
+							{
+								list.Add(new JsonDerivedType(attr.DerivedType, attr.DerivedType.Name));
+							}
+						}
 					}
 					var poliOptions = new JsonPolymorphismOptions
 					{

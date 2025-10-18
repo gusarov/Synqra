@@ -15,6 +15,21 @@ using static Synqra.BinarySerializer.SBXSerializer;
 
 namespace Synqra.BinarySerializer;
 
+public class SBXSerializerFactory : ISBXSerializerFactory
+{
+	private readonly Func<ISBXSerializer>? _func;
+
+	public SBXSerializerFactory(Func<ISBXSerializer>? func = null)
+	{
+		_func = func;
+	}
+
+	public ISBXSerializer CreateSerializer()
+	{
+		return _func?.Invoke() ?? new SBXSerializer();
+	}
+}
+
 public class SBXSerializer : ISBXSerializer
 {
 	// A schema can carry not only the mappings but also - a day when it was created. This can let automatically expire old schemas. E.g. just a simple rule that no stream can live for more than a year and have to be re-built, leads to a fact that we know, a year old format can be easily dropped if it is not latest.
@@ -492,9 +507,24 @@ public class SBXSerializer : ISBXSerializer
 		else
 		{
 			// Only generated bindable models are supported for Level 1 & 2 serialization. All other types are Level 3 (field names).
+
+#if DEBUG
+			var name = actualType.FullName;
+			if (name != "xx"
+				&& name != "xx"
+				)
+			{
+				throw new Exception($"Type {actualType.FullName} is quaranteened for serialization. Falling back to field names must be approved.");
+			}
+#endif
+
 			var props = actualType.GetProperties();
 			foreach (var item in props)
 			{
+				if (item.GetIndexParameters().Length > 0)
+				{
+					continue;
+				}
 				var val = item.GetValue(obj);
 				if (val != null)
 				{

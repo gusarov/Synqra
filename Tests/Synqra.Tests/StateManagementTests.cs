@@ -27,7 +27,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 	{
 		HostBuilder.AddSynqraStoreContext();
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
-		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.Default.Options); // im not sure yet, context or options
+		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
 		HostBuilder.Services.AddSingleton<FakeStorage>();
 		// HostBuilder.Services.AddSingleton(typeof(IStorage<,>), typeof(FakeStorage<,>));
@@ -96,11 +96,13 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		await Assert.That(ReferenceEquals(_tasks[0], t)).IsTrue();
 
 		// events
-		await Assert.That(events).HasCount(2);
+		await Assert.That(events).HasCount(3);
 		var commandCreated = events[0];
 		await Assert.That(commandCreated).IsTypeOf<CommandCreatedEvent>();
 		var objectCreated = events[1];
 		await Assert.That(objectCreated).IsTypeOf<ObjectCreatedEvent>();
+		var propertyChanged = events[2];
+		await Assert.That(propertyChanged).IsTypeOf<ObjectPropertyChangedEvent>();
 
 		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
@@ -133,8 +135,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		{
 			Console.WriteLine($"{item.GetType().Name} {item}");
 		}
-		await Assert.That(events).HasCount(4);
-		await Assert.That(events[3]).IsTypeOf<ObjectPropertyChangedEvent>();
+		await Assert.That(events).HasCount(5);
+		await Assert.That(events[4]).IsTypeOf<ObjectPropertyChangedEvent>();
 
 		await Assert.That(_tasks).HasCount(1);
 		await Assert.That(_tasks[0].Subject).IsEqualTo("123");

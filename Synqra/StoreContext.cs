@@ -49,6 +49,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
 
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
+
 	private readonly IStorage _storage;
 	private readonly EventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
@@ -65,7 +66,12 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
-	public StoreContext(IStorage storage, EventReplicationService? eventReplicationService = null, JsonSerializerOptions? jsonSerializerOptions = null, JsonSerializerContext? jsonSerializerContext = null)
+	public StoreContext(
+		  IStorage storage
+		, EventReplicationService? eventReplicationService = null
+		, JsonSerializerOptions? jsonSerializerOptions = null
+		, JsonSerializerContext? jsonSerializerContext = null
+		)
 	{
 		_storage = storage;
 		_eventReplicationService = eventReplicationService;
@@ -77,14 +83,18 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 				var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
 				GetTypeMetadata(type);
 			}
-			if (jsonSerializerContext.Options.Converters.Count == 0)
-			{
-				throw new Exception("Something is wrong! We require JsonSerializerOptions to have converters registered!");
-			}
 		}
 		else
 		{
-			throw new Exception("Something is wrong! We require JsonSerializerOptions to be registered!");
+			// throw new Exception("Something is wrong! We require JsonSerializerOptions to be registered!");
+		}
+
+		if (jsonSerializerOptions != null)
+		{
+			if (jsonSerializerOptions.Converters.Count == 0)
+			{
+				throw new Exception("Something is wrong! We require JsonSerializerOptions to have converters registered!");
+			}
 		}
 	}
 
@@ -323,11 +333,11 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		if (!exists || slot == null)
 		{
 			slot = (StoreCollection)Activator.CreateInstance(gtype, [this
+				, /*containerId*/ ContainerId
+				, collectionId/*collectionId*/
 #if NET8_0_OR_GREATER
 				, _jsonSerializerOptions
 #endif
-				, /*containerId*/ ContainerId
-				, collectionId/*collectionId*/
 				])!;
 		}
 		return slot;
@@ -531,11 +541,40 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 			CommandId = cmd.CommandId,
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
-			Data = cmd.Data,
-			DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
+			// Data = cmd.Data,
+			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
 			DataObject = cmd.Target, // or may be entire object
 		};
 		ctx.Events.Add(created);
+
+		if (false && cmd.Data is IBindableModel bm)
+		{
+			
+		}
+		else
+		{
+			var pros = cmd.Data.GetType().GetProperties();
+			foreach (var item in pros)
+			{
+				var value = item.GetValue(cmd.Data);
+				if (value != null)
+				{
+					ctx.Events.Add(new ObjectPropertyChangedEvent
+					{
+						ContainerId = cmd.ContainerId,
+						CommandId = cmd.CommandId,
+						CollectionId = cmd.CollectionId,
+						EventId = GuidExtensions.CreateVersion7(),
+						TargetTypeId = cmd.TargetTypeId,
+						TargetId = cmd.TargetId,
+						PropertyName = item.Name,
+						OldValue = null,
+						NewValue = value,
+					});
+				}
+			}
+		}
+
 		/*
 		foreach (var kvp in data)
 		{
@@ -639,13 +678,15 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		{
 			newItem = data.Model;
 		}
+		/*
 		else if (ev.DataString != null)
 		{
 			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerOptions);
 		}
+		*/
 		else if (ev.Data != null)
 		{
-			newItem = JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerOptions), typeMetadata.Type, _jsonSerializerOptions);
+			newItem = ev.Data; //JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerOptions), typeMetadata.Type, _jsonSerializerOptions);
 		}
 		else
 		{

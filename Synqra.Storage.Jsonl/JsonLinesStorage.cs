@@ -73,7 +73,7 @@ public static class StorageExtensions
 			}
 			*/
 			_serializerOptions = jsonSerializerOptions is null
-				? new JsonSerializerOptions()
+				? throw new ArgumentNullException(nameof(jsonSerializerOptions))
 				: new JsonSerializerOptions(jsonSerializerOptions);
 			_serializerOptions.WriteIndented = false; // critical for jsonl
 		}
