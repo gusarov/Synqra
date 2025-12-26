@@ -102,7 +102,7 @@ public class BindingTests : BaseTest
 			Property1 = "unset",
 		};
 
-		var so = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
+		var so = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions);
 		var ti = so.GetTypeInfo(typeof(SampleOnePropertyObject));
 		ti.CreateObject = () => obj;
 		var json1 = """

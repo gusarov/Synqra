@@ -377,7 +377,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[MethodDataSource(typeof(BinarySerializationObjectPropertyTests), nameof(Should_20_serialize_sample_1_model_source))]
 	public async Task Should_20_serialize_sample_1_model(int id, object model, string expectedHex)
 	{
-		var modelJsonX = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = true });
+		var modelJsonX = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = true });
 		Console.WriteLine(modelJsonX);
 
 		var ser = new SBXSerializer();
@@ -408,11 +408,11 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		var pos2 = 0;
 		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
 
-		var deserializedJsonX = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = true });
+		var deserializedJsonX = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = true });
 		Console.WriteLine(deserializedJsonX);
 
-		var modelJson = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = false });
-		var deserializedJson = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options) { WriteIndented = false });
+		var modelJson = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = false });
+		var deserializedJson = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = false });
 
 		Assert.That(deserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
@@ -766,7 +766,7 @@ public class BinarySerializationTests : BaseTest
 
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
 		HexDump(buffer[..pos]);
-		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options)
+		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
 		{
 			WriteIndented = false
 		})));

@@ -36,6 +36,11 @@ internal class EmergencyLoggerTests : BaseTest
 
 	string ReadAllLogs()
 	{
+		/*
+#if NET9_0_OR_GREATER
+		return string.Join("", Bro.Viewer.BroViewer.Default.ReadAllLogs());
+#endif
+		*/
 		var path = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency.log");
 		var log = FileReadAllText(path);
 		var pathTemplate = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency_{0}.log");

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
@@ -29,7 +29,6 @@
     <ProjectReference Include="..\Synqra.CoreModel\Synqra.CoreModel.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
     -->
     <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" OutputItemType="Analyzer" PrivateAssets="all" GeneratePathProperty="false" />
-
     <!-- TODO Pack the dependencies!
     <None Include="$(PkgNewtonsoft_Json)\lib\netstandard2.0\Synqra.Model.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="$(PkgNewtonsoft_Json)\lib\netstandard2.0\Synqra.Utils.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />

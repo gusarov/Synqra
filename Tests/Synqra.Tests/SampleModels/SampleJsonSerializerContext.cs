@@ -106,7 +106,37 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 			{
 				new ObjectConverter(_extra),
 			},
-			TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
+			// TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
+			/*
+			TypeInfoResolver = new DefaultJsonTypeInfoResolver
+			{
+				Modifiers =
+				{
+					ti =>
+					{
+						if (ti.Type == typeof(object))
+						{
+							ti.PolymorphismOptions = new JsonPolymorphismOptions
+							{
+								TypeDiscriminatorPropertyName = "_t",
+								IgnoreUnrecognizedTypeDiscriminators = true,
+								UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+							};
+							foreach (var item in _extra)
+							{
+								ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(item, item.Name));
+							}
+							// Register supported runtime types (add as many as you like)
+							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(Uri),          "uri"));
+							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(DateTime),     "dt"));
+							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(DateTime),     "dt"));
+							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MyMessageA),   "A"));
+							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MyMessageB),   "B"));
+							// …scan assemblies and add more if desired (see below)
+						}
+					}
+				}
+			},*/
 		};
 	}
 

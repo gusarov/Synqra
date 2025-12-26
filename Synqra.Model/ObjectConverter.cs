@@ -98,15 +98,22 @@ public class ObjectConverter : JsonConverter<object>
 		throw new SynqraJsonException();
 	}
 
-	public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
+	public override void Write(Utf8JsonWriter w, object value, JsonSerializerOptions options)
 	{
 		var type = value.GetType();
-		Type rootType = type;
+		if (type == typeof(string) || type.IsPrimitive || value is JsonElement)
+		{
+			JsonSerializer.Serialize(w, value, type, options);
+			return;
+		}
+
+		Type? rootType = type;
 		foreach (var ancestor in type.GetAncestors())
 		{
 			if (SynqraPolymorphicTypeResolver.PolimorficRoots.Contains(ancestor))
 			{
 				rootType = ancestor;
+				/*
 				if (ancestor != typeof(IBindableModel))
 				{
 					if (options.TypeInfoResolver == null)
@@ -118,14 +125,15 @@ public class ObjectConverter : JsonConverter<object>
 						TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extraTypes),
 					};
 				}
+				*/
 			}
 		}
 
 		if (value is IAsyncStateMachine) // this branch is disabled in favour of CanBePolymorphic flag. Both are - to support IAsyncEnumerable
 		{
 			throw new SynqraJsonException("IAsyncStateMachine is temporarely disabled");
-			writer.Flush();
-			var pipeWriter = (PipeWriter)writer.GetType().GetField("_output", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(writer);
+			w.Flush();
+			var pipeWriter = (PipeWriter)w.GetType().GetField("_output", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(w);
 			if (pipeWriter is null)
 			{
 				throw new SynqraJsonException("PipeWriter is null");
@@ -134,13 +142,38 @@ public class ObjectConverter : JsonConverter<object>
 		}
 		else
 		{
-			var typeName = value?.GetType()?.Name;
+			var typeName = type?.Name;
 			EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
 			if (typeName?.Contains("Task") == true)
 			{
 				EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: Stack {new StackTrace()}");
 			}
-			JsonSerializer.Serialize(writer, value, rootType, options);
+
+			if (rootType == type)
+			{
+				// Merge: { "$type": id, ...properties... }
+				w.WriteStartObject();
+				w.WriteString("_t", typeName);
+
+				var elem = JsonSerializer.SerializeToElement(value, type, options);
+				foreach (var p in elem.EnumerateObject())
+				{
+					if (!string.Equals(p.Name, "_t", StringComparison.Ordinal))
+					{
+						p.WriteTo(w);
+					}
+					else
+					{
+						int q = 1;
+					}
+				}
+
+				w.WriteEndObject();
+			}
+			else
+			{
+				JsonSerializer.Serialize(w, value, rootType, options);
+			}
 		}
 	}
 }

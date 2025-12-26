@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\..\Synqra.Storage.Jsonl\Synqra.Storage.Jsonl.csproj" />
+    <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
     <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\Synqra.Tests.TestHelpers\Synqra.Tests.TestHelpers.csproj" />
   </ItemGroup>
