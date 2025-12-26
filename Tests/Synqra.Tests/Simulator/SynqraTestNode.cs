@@ -170,7 +170,7 @@ internal class SynqraTestNode
 
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 
-		var options = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions);
 		if (options.Converters.Count == 0)
 		{
 			Type[] extra = [

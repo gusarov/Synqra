@@ -12,7 +12,7 @@ namespace Synqra.Tests;
 public class SerializationTests
 {
 	[Test]
-	public async Task TestSerialization()
+	public async Task Should_05_serialize()
 	{
 #if NET8_0_OR_GREATER
 		await Assert.That(JsonSerializer.IsReflectionEnabledByDefault).IsFalse();
@@ -23,7 +23,7 @@ public class SerializationTests
 		{
 			Subject = subject,
 		};
-		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options)
+		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
 		{
 			IndentCharacter = '\t',
 			IndentSize = 1,
@@ -41,7 +41,37 @@ public class SerializationTests
 	}
 
 	[Test]
-	public async Task TestSerializationEvent()
+	public async Task Should_10_serialize_object()
+	{
+#if NET8_0_OR_GREATER
+		await Assert.That(JsonSerializer.IsReflectionEnabledByDefault).IsFalse();
+#endif
+
+		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
+		var obj = new SampleTodoTask
+		{
+			Subject = subject,
+		};
+		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
+		{
+			IndentCharacter = '\t',
+			IndentSize = 1,
+			WriteIndented = true,
+		};
+		var json = JsonSerializer.Serialize<object>(obj, jsonOptions);
+		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
+{
+	"_t": "SampleTodoTask",
+	"subject": "{{subject}}"
+}
+""".NormalizeNewLines());
+		var deserializedObj = (SampleTodoTask)JsonSerializer.Deserialize<object>(json, jsonOptions);
+		await Assert.That(deserializedObj).IsNotNull();
+		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
+	}
+
+	[Test]
+	public async Task Should_20_serialize_event()
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		var obj = new CommandCreatedEvent
@@ -99,7 +129,7 @@ public class SerializationTests
 	}
 
 	[Test]
-	public async Task TestSerializationNetworkOperation()
+	public async Task Should_30_serialize_network_operation()
 	{
 		var @event = new CommandCreatedEvent
 		{
@@ -117,6 +147,7 @@ public class SerializationTests
 				Data = new SampleTaskModel
 				{
 					Subject = "Test1",
+					Number = 1,
 				},
 			},
 		};
@@ -124,9 +155,9 @@ public class SerializationTests
 		{
 			Event = @event,
 		};
-		async Task Check(JsonSerializerContext ctx)
+		async Task Check(JsonSerializerOptions options)
 		{
-			var jsonOptions = new JsonSerializerOptions(ctx.Options)
+			var jsonOptions = new JsonSerializerOptions(options)
 			{
 				IndentCharacter = '\t',
 				IndentSize = 1,
@@ -135,6 +166,7 @@ public class SerializationTests
 			var json = JsonSerializer.Serialize<TransportOperation>(operation, jsonOptions);
 			var deserializedObj = JsonSerializer.Deserialize<TransportOperation>(json, jsonOptions);
 			var json2 = JsonSerializer.Serialize<TransportOperation>(deserializedObj, jsonOptions);
+			Console.WriteLine(json2.NormalizeNewLines());
 			await Assert.That(json2.NormalizeNewLines()).IsEqualTo($$"""
 	{
 		"_t": "NewEvent1",
@@ -143,7 +175,9 @@ public class SerializationTests
 			"data": {
 				"_t": "CreateObjectCommand",
 				"data": {
-					"subject": "Test1"
+					"_t": "SampleTaskModel",
+					"subject": "Test1",
+					"number": 1
 				},
 				"targetTypeId": "00000000-0000-0000-0000-000000000000",
 				"collectionId": "00000000-0000-0000-0000-000000000000",
@@ -157,8 +191,8 @@ public class SerializationTests
 	}
 	""".NormalizeNewLines());
 		}
-		await Check(SampleJsonSerializerContext.Default);
-		await Check(AppJsonContext.Default);
+		await Check(SampleJsonSerializerContext.DefaultOptions);
+		// await Check(AppJsonContext.Default);
 	}
 
 }

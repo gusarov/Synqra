@@ -36,7 +36,7 @@ public class StorageTests<T, TKey> : BaseTest
 		HostBuilder.AddJsonLinesStorage<TestItem, int>();
 		HostBuilder.AddJsonLinesStorage<Event, Guid>();
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
-		ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default.Options);
+		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
 
 		Configuration["JsonLinesStorage:FileName"] = _fileName = fileName ?? CreateTestFileName("data.jsonl");
 	}

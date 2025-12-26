@@ -10,6 +10,7 @@
 		<NoWarn>$(NoWarn);1998</NoWarn> <!-- no await in async -->
 		<NoWarn>$(NoWarn);IL2026;IL3050;</NoWarn> <!-- STJ Gen -->
 
+		<WarningsNotAsErrors>$(WarningsNotAsErrors);NU1605</WarningsNotAsErrors> <!-- Detected package downgrade -->
 		<WarningsAsErrors>$(WarningsAsErrors);8785</WarningsAsErrors> <!-- generator failed -->
 
 		<ImplicitUsings>enable</ImplicitUsings>
