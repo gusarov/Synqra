@@ -144,14 +144,13 @@ public class ObjectConverter : JsonConverter<object>
 		{
 			var typeName = type?.Name;
 			EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
+			/*
 			if (typeName?.Contains("Task") == true)
 			{
 				EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: Stack {new StackTrace()}");
 			}
-
 			if (rootType == type)
 			{
-				// Merge: { "$type": id, ...properties... }
 				w.WriteStartObject();
 				w.WriteString("_t", typeName);
 
@@ -174,6 +173,8 @@ public class ObjectConverter : JsonConverter<object>
 			{
 				JsonSerializer.Serialize(w, value, rootType, options);
 			}
+			*/
+			JsonSerializer.Serialize(w, value, rootType, options);
 		}
 	}
 }
