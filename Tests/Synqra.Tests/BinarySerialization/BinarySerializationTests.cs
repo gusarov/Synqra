@@ -728,7 +728,6 @@ public class BinarySerializationTests : BaseTest
 		var ser = new SBXSerializer();
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
-		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
 		ser.Serialize<object>(buffer, testData, ref pos);
 		buffer = buffer[..pos];
@@ -739,6 +738,7 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
 		pos = 0;
+		ReadOnlySpan<byte> rbuffer = buffer;
 		var de = ser.Deserialize<SampleTestData>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);

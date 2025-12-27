@@ -19,6 +19,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
 using System.Transactions;
+
 using BuildPropsProviderT = (
 	  string Tfm
 	, string SynqraBuildBox
@@ -569,7 +570,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						ver = lastVer + 0.001;
 					}
-					DebugLog("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
+					DebugLog($"*********** Schema drift! path={clazz.SyntaxTree.FilePath} clazz={clazz}");
 					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
 					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
 				}
