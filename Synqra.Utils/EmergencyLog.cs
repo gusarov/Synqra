@@ -10,24 +10,18 @@ using System.Threading;
 
 namespace Synqra;
 
-/// <summary>
-/// This logger can be used in any circumstance where normal logging is not available. E.g. in source generators.
-/// No threads, no async/await, no complex dependencies, no state, no buffers.
-/// Every call synchronized system-wide with a named Mutex.
-/// Every call opens a handle to append to a log file in the temp folder.
-/// No flushing, no caching, no batching.
-/// It is not performance efficient but reliable and always ready.
-/// It makes 1MiB file size limit and rolls over between multiple files.
-/// It keeps a logs for 1 week.
-/// It holds 100 files maximum (100MiB total) but expected to cleanup older files sooner.
-/// The encoding is utf8 (no_bom)
-/// </summary>
 public sealed class EmergencyLog : ILogger
 {
-	static char _rollingAvoidance = '♫';
-	public static EmergencyLog Default { get; } = new EmergencyLog();
+	public static EmergencyLog Default { get; } = new EmergencyLog(EmergencyLoggerProvider.DefaultLogger);
+
+	public string LogPath => EmergencyLogImplementation.Default.LogPath;
 
 	private readonly ILogger _logger;
+
+	EmergencyLog(ILogger logger)
+	{
+		_logger = logger;
+	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
 	{
@@ -44,11 +38,29 @@ public sealed class EmergencyLog : ILogger
 		_logger.Log(logLevel, eventId, state, exception, formatter);
 	}
 
-	public ILogger Logger => this;
+	internal ILogger Logger => _logger;
+}
 
-	private EmergencyLog()
+/// <summary>
+/// This logger can be used in any circumstance where normal logging is not available. E.g. in source generators.
+/// No threads, no async/await, no complex dependencies, no state, no buffers.
+/// Every call synchronized system-wide with a named Mutex.
+/// Every call opens a handle to append to a log file in the temp folder.
+/// No flushing, no caching, no batching.
+/// It is not performance efficient but reliable and always ready.
+/// It makes 1MiB file size limit and rolls over between multiple files.
+/// It keeps a logs for 1 week.
+/// It holds 100 files maximum (100MiB total) but expected to cleanup older files sooner.
+/// The encoding is utf8 (no_bom)
+/// </summary>
+sealed file class EmergencyLogImplementation
+{
+	public static EmergencyLogImplementation Default { get; } = new EmergencyLogImplementation();
+
+	static char _rollingAvoidance = '♫';
+
+	private EmergencyLogImplementation()
 	{
-		_logger = EmergencyLoggerProvider.DefaultLogger;
 		if (!AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var isEnabled))
 		{
 			isEnabled = true;
@@ -456,7 +468,7 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if DEBUG
 	/// </summary>
 	[Conditional("DEBUG")]
-	// [Obsolete("Use ILogger")]
+	[Obsolete("Use ILogger")]
 	public static void DebugHexDump(this EmergencyLog log, ReadOnlySpan<byte> data)
 	{
 		var sb = new StringBuilder();
@@ -465,7 +477,7 @@ public static class EmergencyLogExtensions
 	}
 
 	[Conditional("DEBUG")]
-	// [Obsolete("Use ILogger")]
+	[Obsolete("Use ILogger")]
 	public static void DebugHexDump(this ILogger log, ReadOnlySpan<byte> data)
 	{
 		var sb = new StringBuilder();
@@ -477,7 +489,7 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if DEBUG
 	/// </summary>
 	[Conditional("DEBUG")]
-	// [Obsolete("Use ILogger")]
+	[Obsolete("Use ILogger")]
 	public static void Debug(this EmergencyLog log, string message)
 	{
 		log.Message($"[Debug] {message}");
@@ -487,37 +499,37 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if TRACE
 	/// </summary>
 	[Conditional("TRACE")]
-	// [Obsolete("Use ILogger")]
+	[Obsolete("Use ILogger")]
 	public static void Trace(this EmergencyLog log, string message)
 	{
 		log.Message($"[Trace] {message}");
 	}
 
-	// [Obsolete("Use LogInformation instead")]
+	[Obsolete("Use LogInformation instead")]
 	public static void Message(this EmergencyLog log, string message)
 	{
 		log.Logger.LogInformation(message);
 	}
 
-	// [Obsolete("Use LogInformation instead")]
+	[Obsolete("Use LogInformation instead")]
 	public static void Message(this ILogger log, string message)
 	{
 		log.LogInformation(message);
 	}
 
-	// [Obsolete("Use LogError instead")]
+	[Obsolete("Use LogError instead")]
 	public static void Error(this ILogger log, string message, Exception? ex = null)
 	{
 		log.LogError(ex, message);
 	}
 
-	// [Obsolete("Use LogDebug instead")]
+	[Obsolete("Use LogDebug instead")]
 	public static void Debug(this ILogger log, string message, Exception? ex = null)
 	{
 		log.LogDebug(ex, message);
 	}
 
-	// [Obsolete("Use ILogger.LogError")]
+	[Obsolete("Use ILogger.LogError")]
 	public static void Error(this EmergencyLog log, string message, Exception? ex = null)
 	{
 		if (ex == null)
@@ -574,6 +586,6 @@ internal class EmergencyLogger : ILogger
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
 	{
-		EmergencyLog.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
+		EmergencyLogImplementation.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
 	}
 }
