@@ -22,13 +22,33 @@ namespace Synqra;
 /// It holds 100 files maximum (100MiB total) but expected to cleanup older files sooner.
 /// The encoding is utf8 (no_bom)
 /// </summary>
-public sealed class EmergencyLog
+public sealed class EmergencyLog : ILogger
 {
 	static char _rollingAvoidance = '♫';
 	public static EmergencyLog Default { get; } = new EmergencyLog();
 
+	private readonly ILogger _logger;
+
+	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+	{
+		return _logger.BeginScope(state);
+	}
+
+	public bool IsEnabled(LogLevel logLevel)
+	{
+		return _logger.IsEnabled(logLevel);
+	}
+
+	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+	{
+		_logger.Log(logLevel, eventId, state, exception, formatter);
+	}
+
+	public ILogger Logger => this;
+
 	private EmergencyLog()
 	{
+		_logger = EmergencyLoggerProvider.DefaultLogger;
 		if (!AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var isEnabled))
 		{
 			isEnabled = true;
@@ -56,7 +76,7 @@ public sealed class EmergencyLog
 
 	public string LogPath => _logFilePath ?? "<Disabled>";
 
-	public void Message(string message)
+	internal void Message(string message)
 	{
 		try
 		{
@@ -436,6 +456,7 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if DEBUG
 	/// </summary>
 	[Conditional("DEBUG")]
+	// [Obsolete("Use ILogger")]
 	public static void DebugHexDump(this EmergencyLog log, ReadOnlySpan<byte> data)
 	{
 		var sb = new StringBuilder();
@@ -443,10 +464,20 @@ public static class EmergencyLogExtensions
 		log.Message($"[Debug] [HexDump] {sb}");
 	}
 
+	[Conditional("DEBUG")]
+	// [Obsolete("Use ILogger")]
+	public static void DebugHexDump(this ILogger log, ReadOnlySpan<byte> data)
+	{
+		var sb = new StringBuilder();
+		_hexDumpWriter.HexDump(data, x => sb.Append(x), x => sb.Append(x));
+		log.LogInformation($"[Debug] [HexDump] {sb}");
+	}
+
 	/// <summary>
 	/// Conditional message - #if DEBUG
 	/// </summary>
 	[Conditional("DEBUG")]
+	// [Obsolete("Use ILogger")]
 	public static void Debug(this EmergencyLog log, string message)
 	{
 		log.Message($"[Debug] {message}");
@@ -456,11 +487,37 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if TRACE
 	/// </summary>
 	[Conditional("TRACE")]
+	// [Obsolete("Use ILogger")]
 	public static void Trace(this EmergencyLog log, string message)
 	{
 		log.Message($"[Trace] {message}");
 	}
 
+	// [Obsolete("Use LogInformation instead")]
+	public static void Message(this EmergencyLog log, string message)
+	{
+		log.Logger.LogInformation(message);
+	}
+
+	// [Obsolete("Use LogInformation instead")]
+	public static void Message(this ILogger log, string message)
+	{
+		log.LogInformation(message);
+	}
+
+	// [Obsolete("Use LogError instead")]
+	public static void Error(this ILogger log, string message, Exception? ex = null)
+	{
+		log.LogError(ex, message);
+	}
+
+	// [Obsolete("Use LogDebug instead")]
+	public static void Debug(this ILogger log, string message, Exception? ex = null)
+	{
+		log.LogDebug(ex, message);
+	}
+
+	// [Obsolete("Use ILogger.LogError")]
 	public static void Error(this EmergencyLog log, string message, Exception? ex = null)
 	{
 		if (ex == null)
@@ -475,44 +532,48 @@ public static class EmergencyLogExtensions
 
 	public static void AddEmergencyLogger(this IServiceCollection services)
 	{
-		services.AddSingleton<ILoggerProvider, EmergencyLoggerProvider>();
+		services.AddSingleton<ILoggerProvider>(EmergencyLoggerProvider.DefaultProvider);
+	}
+}
+
+internal class EmergencyLoggerProvider : ILoggerProvider
+{
+	public static EmergencyLoggerProvider DefaultProvider { get; } = new EmergencyLoggerProvider();
+	public static EmergencyLogger DefaultLogger { get; } = (EmergencyLogger)DefaultProvider.CreateLogger("Static");
+
+	ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
+
+	public ILogger CreateLogger(string categoryName)
+	{
+		return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName));
 	}
 
-	public class EmergencyLoggerProvider : ILoggerProvider
+	public void Dispose()
 	{
-		ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
+	}
+}
 
-		public ILogger CreateLogger(string categoryName)
-		{
-			return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName));
-		}
-		public void Dispose()
-		{
-		}
+internal class EmergencyLogger : ILogger
+{
+	private readonly string _categoryName;
+
+	public EmergencyLogger(string categoryName)
+	{
+		_categoryName = categoryName;
 	}
 
-	public class EmergencyLogger : ILogger
+	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
 	{
-		private readonly string _categoryName;
+		return null;
+	}
 
-		public EmergencyLogger(string categoryName)
-		{
-			_categoryName = categoryName;
-		}
+	public bool IsEnabled(LogLevel logLevel)
+	{
+		return logLevel >= LogLevel.Information;
+	}
 
-		public IDisposable? BeginScope<TState>(TState state) where TState : notnull
-		{
-			return null;
-		}
-
-		public bool IsEnabled(LogLevel logLevel)
-		{
-			return logLevel >= LogLevel.Information;
-		}
-
-		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-		{
-			EmergencyLog.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
-		}
+	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+	{
+		EmergencyLog.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
 	}
 }

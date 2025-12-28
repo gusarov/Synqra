@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11205.157 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra", "Synqra\Synqra.csproj", "{E8976F48-48BA-46D7-9B95-15A7061103BD}"
 EndProject
@@ -49,6 +49,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.SourceGenerator.Tests", "Synqra.SourceGenerator.Tests\Synqra.SourceGenerator.Tests.csproj", "{40532983-0666-47A1-953E-20CA0CDAB12F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.CoreModel", "Synqra.CoreModel\Synqra.CoreModel.csproj", "{A77980EA-3119-4CF2-8915-F01A01655CDD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Utils.Tests", "Synqra.Utils.Tests\Synqra.Utils.Tests.csproj", "{602A0B6D-D0E2-41ED-9B5B-8EBFE19CE132}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -116,6 +118,10 @@ Global
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{602A0B6D-D0E2-41ED-9B5B-8EBFE19CE132}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{602A0B6D-D0E2-41ED-9B5B-8EBFE19CE132}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{602A0B6D-D0E2-41ED-9B5B-8EBFE19CE132}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{602A0B6D-D0E2-41ED-9B5B-8EBFE19CE132}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
