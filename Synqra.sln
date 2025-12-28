@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11205.157 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra", "Synqra\Synqra.csproj", "{E8976F48-48BA-46D7-9B95-15A7061103BD}"
 EndProject
@@ -49,6 +49,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.SourceGenerator.Tests", "Synqra.SourceGenerator.Tests\Synqra.SourceGenerator.Tests.csproj", "{40532983-0666-47A1-953E-20CA0CDAB12F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.CoreModel", "Synqra.CoreModel\Synqra.CoreModel.csproj", "{A77980EA-3119-4CF2-8915-F01A01655CDD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XKit.LoggingCommands", "XKit.LoggingCommands\XKit.LoggingCommands.csproj", "{47EF836C-95F9-46EC-891C-D1D908CE6FEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XKit.LoggingCommands.Tests", "XKit.LoggingCommands.Tests\XKit.LoggingCommands.Tests.csproj", "{83CBFD7E-54C6-4B0B-BB5D-BF7B2536A4E7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -116,6 +120,14 @@ Global
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A77980EA-3119-4CF2-8915-F01A01655CDD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47EF836C-95F9-46EC-891C-D1D908CE6FEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47EF836C-95F9-46EC-891C-D1D908CE6FEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47EF836C-95F9-46EC-891C-D1D908CE6FEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47EF836C-95F9-46EC-891C-D1D908CE6FEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{83CBFD7E-54C6-4B0B-BB5D-BF7B2536A4E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{83CBFD7E-54C6-4B0B-BB5D-BF7B2536A4E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{83CBFD7E-54C6-4B0B-BB5D-BF7B2536A4E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{83CBFD7E-54C6-4B0B-BB5D-BF7B2536A4E7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
