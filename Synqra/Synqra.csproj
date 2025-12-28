@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net9.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
     <!--
     ;netstandard2.1;netstandard2.0
     -->
@@ -20,8 +20,8 @@
  -->
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.9" />
+    <PackageReference Include="System.Text.Json" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <InternalsVisibleTo Include="Synqra.Tests.MiniModel" /><!-- THIS IS SERIOUS LIMITATION THAT NEEDS TO BE LIFTED -->
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
