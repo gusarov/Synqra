@@ -7,15 +7,23 @@ using System;
 using System.Collections.Immutable;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Text;
 using System.Transactions;
-
+using BuildPropsProviderT = (
+	  string Tfm
+	, string SynqraBuildBox
+	);
 // using TheSource = (Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax clazz, Microsoft.CodeAnalysis.SemanticModel sem, string? data);
 using ClassesProviderT = (
-	  Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax Clazz
+	  string? errorMessage
+	, System.Exception? exception
+	// -- OR --
+	, Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax Clazz
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Data
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ibm
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ssa
@@ -23,11 +31,6 @@ using ClassesProviderT = (
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ipcg
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pceh
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pcgeh
-	);
-
-using BuildPropsProviderT = (
-	  string Tfm
-	, string SynqraBuildBox
 	);
 
 /*
@@ -47,6 +50,22 @@ using TheCombinedSource = (
 [Generator(LanguageNames.CSharp)]
 public class ModelBindingGenerator : IIncrementalGenerator
 {
+	private static readonly DiagnosticDescriptor MissingReferenceDiagnostic = new(
+		id: "SYNQRA001",
+		title: "Synqra model generator prerequisites missing",
+		messageFormat: "Synqra source generation requires a reference to Synqra.Model (missing type(s): {0})",
+		category: "Synqra.ModelBindingGenerator",
+		defaultSeverity: DiagnosticSeverity.Error,
+		isEnabledByDefault: true);
+
+	private static readonly DiagnosticDescriptor GenerationFailureDiagnostic = new(
+		id: "SYNQRA002",
+		title: "Synqra model generator failed",
+		messageFormat: "{0}",
+		category: "Synqra.ModelBindingGenerator",
+		defaultSeverity: DiagnosticSeverity.Error,
+		isEnabledByDefault: true);
+
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
 		// AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve;
@@ -111,6 +130,30 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				return (tfm, SynqraBuildBox);
 			});
 
+			var missingReferences = context.CompilationProvider.Select((comp, _) =>
+			{
+				var missing = new List<string>();
+				if (comp.GetTypeByMetadataName("Synqra.IBindableModel") is null)
+					missing.Add("Synqra.IBindableModel");
+				if (comp.GetTypeByMetadataName("Synqra.SchemaAttribute") is null)
+					missing.Add("Synqra.SchemaAttribute");
+				return missing;
+			});
+
+			context.RegisterSourceOutput(
+				missingReferences,
+				static (ctx, missing) =>
+				{
+					if (missing.Count == 0)
+					{
+						return;
+					}
+					ctx.ReportDiagnostic(Diagnostic.Create(
+						MissingReferenceDiagnostic,
+						Location.None,
+						string.Join(", ", missing)));
+				});
+
 			var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<ClassesProviderT>(
 				predicate: static (SyntaxNode node, CancellationToken cancelToken) =>
 				{
@@ -142,8 +185,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 						var comp = ctx.SemanticModel.Compilation;
 
-						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel") ?? throw new Exception("Can't resolve Synqra.IBindableModel. Please, add reference to Syncra.Model");
-						var ssa = comp.GetTypeByMetadataName("Synqra.SchemaAttribute") ?? throw new Exception("Can't resolve Synqra.SchemaAttribute. Please, add reference to Syncra.Model");
+						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
+						var ssa = comp.GetTypeByMetadataName("Synqra.SchemaAttribute");
+						if (ibm is null || ssa is null)
+						{
+							return (null, null, default!, default!, default!, default!, default!, default!, default!, default!);
+						}
 						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanged");
 						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanging");
 						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangedEventHandler");
@@ -159,12 +206,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 								 .ToImmutableArray();
 						*/
 
-						return (classDeclaration, symbol, ibm, ssa, ipc, ipcg, pceh, pcgeh);
+						return (null, null, classDeclaration, symbol, ibm, ssa, ipc, ipcg, pceh, pcgeh);
 					}
 					catch (Exception ex)
 					{
 						EmergencyLog.Default.Error($"transform", ex);
-						throw;
+						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!, default!, default!);
+						// throw;
 					}
 				});
 
@@ -362,7 +410,19 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	/// </summary>
 	static void Execute(SourceProductionContext context, TheCombinedSource combinedData)
 	{
+		// convey an error message from analyzer:
+		if (combinedData.ClassData.errorMessage is not null || combinedData.ClassData.exception is not null)
+		{
+			var message = combinedData.ClassData.exception is null
+				? combinedData.ClassData.errorMessage ?? "Model binding generation error"
+				: $"{combinedData.ClassData.errorMessage ?? "Model binding generation error"}; {combinedData.ClassData.exception}";
 
+			context.ReportDiagnostic(Diagnostic.Create(
+				GenerationFailureDiagnostic,
+				combinedData.ClassData.Clazz?.Identifier.GetLocation() ?? Location.None,
+				message));
+			return;
+		}
 		try
 		{
 			var classData = combinedData.ClassData;
