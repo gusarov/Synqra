@@ -460,16 +460,16 @@ public static class EmergencyLogExtensions
 	/// Conditional message - #if DEBUG
 	/// </summary>
 	[Conditional("DEBUG")]
-	[Obsolete("Use ILogger")]
+	// [Obsolete("Use ILogger")]
 	public static void DebugHexDump(this EmergencyLog log, ReadOnlySpan<byte> data)
 	{
 		var sb = new StringBuilder();
 		_hexDumpWriter.HexDump(data, x => sb.Append(x), x => sb.Append(x));
-		log.Message($"[Debug] [HexDump] {sb}");
+		log.LogInformation($"[Debug] [HexDump] {sb}");
 	}
 
 	[Conditional("DEBUG")]
-	[Obsolete("Use ILogger")]
+	// [Obsolete("Use ILogger")]
 	public static void DebugHexDump(this ILogger log, ReadOnlySpan<byte> data)
 	{
 		var sb = new StringBuilder();
@@ -501,24 +501,6 @@ public static class EmergencyLogExtensions
 	public static void Message(this EmergencyLog log, string message)
 	{
 		log.Logger.LogInformation(message);
-	}
-
-	[Obsolete("Use LogInformation instead")]
-	public static void Message(this ILogger log, string message)
-	{
-		log.LogInformation(message);
-	}
-
-	[Obsolete("Use LogError instead")]
-	public static void Error(this ILogger log, string message, Exception? ex = null)
-	{
-		log.LogError(ex, message);
-	}
-
-	[Obsolete("Use LogDebug instead")]
-	public static void Debug(this ILogger log, string message, Exception? ex = null)
-	{
-		log.LogDebug(ex, message);
 	}
 
 	[Obsolete("Use ILogger.LogError")]
