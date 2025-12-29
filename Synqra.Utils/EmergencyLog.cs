@@ -16,29 +16,21 @@ public sealed class EmergencyLog : ILogger
 
 	public string LogPath => EmergencyLogImplementation.Default.LogPath;
 
-	private readonly ILogger _logger;
-
 	EmergencyLog(ILogger logger)
 	{
-		_logger = logger;
+		Logger = logger;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
-	{
-		return _logger.BeginScope(state);
-	}
+		=> Logger.BeginScope(state);
 
 	public bool IsEnabled(LogLevel logLevel)
-	{
-		return _logger.IsEnabled(logLevel);
-	}
+		=> Logger.IsEnabled(logLevel);
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-	{
-		_logger.Log(logLevel, eventId, state, exception, formatter);
-	}
+		=> Logger.Log(logLevel, eventId, state, exception, formatter);
 
-	internal ILogger Logger => _logger;
+	internal ILogger Logger { get; }
 }
 
 /// <summary>
@@ -553,7 +545,12 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 	public static EmergencyLoggerProvider DefaultProvider { get; } = new EmergencyLoggerProvider();
 	public static EmergencyLogger DefaultLogger { get; } = (EmergencyLogger)DefaultProvider.CreateLogger("Static");
 
-	ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
+	private ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
+
+	private EmergencyLoggerProvider()
+	{
+		
+	}
 
 	public ILogger CreateLogger(string categoryName)
 	{
