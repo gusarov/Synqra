@@ -23,13 +23,7 @@ public class SerializationTests
 		{
 			Subject = subject,
 		};
-		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
-		{
-			IndentCharacter = '\t',
-			IndentSize = 1,
-			WriteIndented = true,
-		};
-		var json = JsonSerializer.Serialize(obj, jsonOptions);
+		var json = JsonSerializer.Serialize(obj, SampleJsonSerializerContext.DefaultOptions.Indented());
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 {
 	"subject": "{{subject}}"
@@ -52,20 +46,14 @@ public class SerializationTests
 		{
 			Subject = subject,
 		};
-		var jsonOptions = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
-		{
-			IndentCharacter = '\t',
-			IndentSize = 1,
-			WriteIndented = true,
-		};
-		var json = JsonSerializer.Serialize<object>(obj, jsonOptions);
+		var json = JsonSerializer.Serialize<object>(obj, SampleJsonSerializerContext.DefaultOptions.Indented());
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 {
 	"_t": "SampleTodoTask",
 	"subject": "{{subject}}"
 }
 """.NormalizeNewLines());
-		var deserializedObj = (SampleTodoTask)JsonSerializer.Deserialize<object>(json, jsonOptions);
+		var deserializedObj = (SampleTodoTask)JsonSerializer.Deserialize<object>(json, SampleJsonSerializerContext.DefaultOptions);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
@@ -95,34 +83,35 @@ public class SerializationTests
 		};
 		async Task Check(JsonSerializerContext ctx)
 		{
-			var jsonOptions = new JsonSerializerOptions(ctx.Options)
-			{
-				IndentCharacter = '\t',
-				IndentSize = 1,
-				WriteIndented = true,
-			};
-			var json = JsonSerializer.Serialize<Event>(obj, jsonOptions);
+			var json = JsonSerializer.Serialize<Event>(obj, ctx.Options.Indented());
 			await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
-	{
-		"_t": "CommandCreatedEvent",
-		"data": {
-			"_t": "CreateObjectCommand",
-			"data": {
-				"subject": "Test1"
-			},
-			"targetTypeId": "00000000-0000-0000-0000-000000000000",
-			"collectionId": "00000000-0000-0000-0000-000000000000",
-			"targetId": "00000000-0000-0000-0000-000000000000",
-			"commandId": "{{obj.Data.CommandId}}",
-			"containerId": "00000000-0000-0000-0000-000000000000"
-		},
-		"eventId": "{{obj.EventId}}",
-		"commandId": "{{obj.CommandId}}"
-	}
-	""".NormalizeNewLines());
-			var deserializedObj = JsonSerializer.Deserialize<Event>(json, jsonOptions);
+			{
+				"_t": "CommandCreatedEvent",
+				"data": {
+					"_t": "CreateObjectCommand",
+					"data": {
+						"_t": "SampleTaskModel",
+						"subject": "Test1"
+					},
+					"targetTypeId": "00000000-0000-0000-0000-000000000000",
+					"collectionId": "00000000-0000-0000-0000-000000000000",
+					"targetId": "00000000-0000-0000-0000-000000000000",
+					"commandId": "{{obj.Data.CommandId}}",
+					"containerId": "00000000-0000-0000-0000-000000000000"
+				},
+				"eventId": "{{obj.EventId}}",
+				"commandId": "{{obj.CommandId}}"
+			}
+			""".NormalizeNewLines());
+			var deserializedObj = JsonSerializer.Deserialize<Event>(json, ctx.Options);
 			await Assert.That(deserializedObj).IsNotNull();
 			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
+			var createdEvent = (CommandCreatedEvent)deserializedObj;
+			await Assert.That(createdEvent.Data).IsNotNull();
+			var createCommand = (CreateObjectCommand)createdEvent.Data;
+			await Assert.That(createCommand.Data).IsNotNull();
+			var taskModel = (SampleTaskModel)createCommand.Data;
+			await Assert.That(taskModel.Subject).IsEqualTo(subject);
 		}
 		await Check(SampleJsonSerializerContext.Default);
 		await Check(AppJsonContext.Default);

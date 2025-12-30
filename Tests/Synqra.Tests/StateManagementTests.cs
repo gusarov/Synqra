@@ -38,7 +38,7 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		// HostBuilder.AddJsonLinesStorage();
 
 		// var _fileName = string.Empty;
-		// Configuration["JsonLinesStorage:FileName"] = _fileName = $"TestData/data_{Guid.NewGuid():N}_[TypeName].jsonl";
+		// Configuration["Storage:JsonLinesStorage:FileName"] = _fileName = $"TestData/data_{Guid.NewGuid():N}_[TypeName].jsonl";
 		// Directory.CreateDirectory(Path.GetDirectoryName(_fileName));
 	}
 

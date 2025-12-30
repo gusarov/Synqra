@@ -8,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
-using Synqra.Storage;
+using Synqra.Storage.Jsonl;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.Helpers;
 using Synqra.Tests.TestHelpers;
@@ -123,7 +123,7 @@ internal class SynqraTestNode
 		});
 		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 		{
-			["JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
+			["Storage:JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
 		});
 		builder.AddSynqraStoreContext();
 		builder.AddJsonLinesStorage<Event, Guid>();
@@ -158,7 +158,7 @@ internal class SynqraTestNode
 		var port = Port = GetNextAvailablePort();
 		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 		{
-			["JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
+			["Storage:JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
 			["URLS"] = "http://*:" + port,
 		});
 

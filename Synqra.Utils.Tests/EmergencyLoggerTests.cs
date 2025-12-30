@@ -84,7 +84,7 @@ internal class EmergencyLoggerTests : BaseTest
 		var keyData = Guid.NewGuid().ToString("N");
 		var path = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency.log");
 
-		EmergencyLog.Default.LogInformation("Prepare file");
+		// EmergencyLog.Default.LogInformation("Prepare file");
 		using var file = File.OpenRead(path); // forgot to share!! So this should cause EmergencyLog to create new file
 		file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
 
@@ -135,6 +135,7 @@ internal class EmergencyLoggerTests : BaseTest
 		{
 			// MaxAcceptableDeviationFactor = 1000,
 			// DeviationMeasurementBatches = 7,
+			MaxAcceptableDeviationFactor = 1000,
 			BatchTime = TimeSpan.FromSeconds(.5),
 		});
 		await Assert.That(ops).IsGreaterThan(100_000);
