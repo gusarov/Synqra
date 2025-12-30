@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace Synqra.Tests.SampleModels.Serialization;
 
-public class SampleTodoTask
+public class SampleTodoTaskPoco
 {
 	public string Subject { get; set; }
 }

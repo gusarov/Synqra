@@ -171,6 +171,7 @@ internal class SynqraTestNode
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions);
+		/*
 		if (options.Converters.Count == 0)
 		{
 			Type[] extra = [
@@ -179,12 +180,13 @@ internal class SynqraTestNode
 			];
 			options.Converters.Add(new ObjectConverter(extra));
 			// options.Converters.Add(new BindableModelConverter(extra));
-			options.TypeInfoResolver = new SynqraPolymorphicTypeResolver(extra);
+			options.TypeInfoResolver = new SynqraJsonTypeInfoResolver(extra);
 		}
 		else
 		{
 			throw new Exception("Double check why we are here now");
 		}
+		*/
 		/*
 		var typeInfo = options.GetTypeInfo(typeof(IBindableModel));
 		typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions

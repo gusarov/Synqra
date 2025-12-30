@@ -1,16 +1,18 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Synqra;
 
-[JsonSourceGenerationOptions(JsonSerializerDefaults.Web
+[JsonSourceGenerationOptions(
+	  JsonSerializerDefaults.Web
 	, AllowTrailingCommas = true
-	, DefaultBufferSize = 16384
+	, DefaultBufferSize = 16 * 1024
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 	, GenerationMode = JsonSourceGenerationMode.Default
-	, IgnoreReadOnlyFields = false
-	, IgnoreReadOnlyProperties = false
+	, IgnoreReadOnlyFields = true
+	, IgnoreReadOnlyProperties = true
 	, IncludeFields = false
 	, PropertyNameCaseInsensitive = true
 	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
@@ -20,12 +22,14 @@ namespace Synqra;
 	, WriteIndented = true
 #endif
 	, Converters = [
-		typeof(ObjectConverter)
+		typeof(ObjectConverter),
+		// typeof(BindableModelConverter),
 	]
 )]
 [JsonSerializable(typeof(Synqra.Event))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
 [JsonSerializable(typeof(Synqra.Command))]
+[JsonSerializable(typeof(Synqra.IBindableModel))]
 [JsonSerializable(typeof(Guid))]
 [JsonSerializable(typeof(byte))]
 [JsonSerializable(typeof(sbyte))]
@@ -42,4 +46,25 @@ namespace Synqra;
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 public partial class AppJsonContext : JsonSerializerContext
 {
+	public static JsonSerializerOptions DefaultOptions { get; }
+
+	static AppJsonContext()
+	{
+		DefaultOptions = new JsonSerializerOptions(Default.Options)
+		{
+			TypeInfoResolver = JsonTypeInfoResolver.Combine(new SynqraJsonTypeInfoResolver(/*_extra*/), Default),
+		};
+		/*
+		// remove first dups if any (this is better than avoid registration and allow someone to consume it without ObjectConverter at all)
+		for (int i = DefaultOptions.Converters.Count - 1; i >= 0; i--)
+		{
+			if (DefaultOptions.Converters[i] is ObjectConverter)
+			{
+				DefaultOptions.Converters.RemoveAt(i);
+			}
+		}
+		DefaultOptions.Converters.Add(new ObjectConverter(_extra));
+		*/
+	}
+
 }

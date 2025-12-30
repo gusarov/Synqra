@@ -1,16 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Synqra.Storage.Jsonl;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.Unicode;
-using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests;
@@ -63,13 +55,45 @@ public class StorageTests<T, TKey> : BaseTest
 }
 
 [InheritsTests]
+public class JsonLinesStorageRegistrationPerformance : BaseTest
+{
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	public async Task Should_register_quickly()
+	{
+		Configuration["Storage:JsonLinesStorage:FileName"] = "test1";
+
+		var cnt = ServiceCollection.Count;
+
+		HostBuilder.AddJsonLinesStorageCore();
+
+		await Assert.That(MeasureOps(() =>
+		{
+			HostBuilder.AddJsonLinesStorageCore();
+			/*
+			for (int i = ServiceCollection.Count - 1; i >= cnt; i--)
+			{
+				ServiceCollection.RemoveAt(i);
+			}
+			*/
+		})).IsGreaterThan(20_000_000);
+
+		await Assert.That(ServiceCollection.Count).IsEqualTo(cnt + 2);
+
+		var cfg = ServiceProvider.GetRequiredService<IOptions<StorageExtensions.JsonLinesStorageConfig>>();
+		await Assert.That(cfg.Value.FileName).IsEqualTo("test1");
+	}
+}
+
+[InheritsTests]
 public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 {
 	[Test]
 	public async Task Should_allow_append_and_read_items()
 	{
-		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1" });
-		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2" });
+		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1", });
+		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2", });
 
 		await ReopenAsync();
 
@@ -86,8 +110,8 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	[Test]
 	public async Task Should_store_objects_as_jsonl()
 	{
-		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1" });
-		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2" });
+		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1", });
+		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2", });
 
 		_storage.Dispose();
 		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
@@ -116,7 +140,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	[Property("CI", "false")]
 	public async Task Should_write_quickly2()
 	{
-		var item = new TestItem { Id = 1, Name = "Test Item 1" };
+		var item = new TestItem { Id = 1, Name = "Test Item 1", };
 		MeasurePerformance(async () => {
 			await _storage.AppendAsync(item);
 		});
@@ -125,7 +149,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	[Test]
 	public async Task Should_continue_reading_with_same_iterator()
 	{
-		await _storage.AppendAsync(new TestItem { Id = 0, Name = "For iterator" });
+		await _storage.AppendAsync(new TestItem { Id = 0, Name = "For iterator", });
 
 		var iterator = _storage.GetAll().GetAsyncEnumerator();
 
@@ -156,10 +180,10 @@ public class EventsJsonlStorageTests : StorageTests<Event, Guid>
 		});
 
 		_storage.Dispose();
-		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
+		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo("""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
 {"_t":"ObjectCreatedEvent","targetId":"00000000-0000-0000-0000-000000000000","targetTypeId":"00000000-0000-0000-0000-000000000000","collectionId":"00000000-0000-0000-0000-000000000000","eventId":"00000000-0000-0000-0000-000000000000","commandId":"00000000-0000-0000-0000-000000000000"}
 
-""".Replace("\r\n", "\n"));
+""".NormalizeNewLines());
 	}
 }

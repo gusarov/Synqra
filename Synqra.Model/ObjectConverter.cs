@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO.Pipelines;
 using System.Reflection;
@@ -41,9 +44,14 @@ public class BindableModelConverter : JsonConverter<IBindableModel>
 
 public class ObjectConverter : JsonConverter<object>
 {
-	private readonly Type[] _extraTypes;
+	private readonly Type[] _extraTypes; // likely need to drop (replaced by generated static ctor with registration)
 
-	public ObjectConverter(params Type[] extraTypes)
+	public ObjectConverter()
+	{
+		_extraTypes = [];
+	}
+
+	public ObjectConverter(params Type[] extraTypes) // likely need to drop (replaced by generated static ctor with registration)
 	{
 		_extraTypes = extraTypes;
 		// Microsoft SerializeAsync implementation is very hacky with their custom ObjectConverter. It is not possible to use it as is. As soon as our converter injected, it will serialize IAsyncEnumerable as a value unless I set this internal property.
@@ -99,24 +107,8 @@ public class ObjectConverter : JsonConverter<object>
 				if (reader.TokenType == JsonTokenType.PropertyName && reader.GetString() == "_t")
 				{
 					if (!reader.Read()) throw new SynqraJsonException("Can't advance 2");
-					var typeName = reader.GetString();
-					Type? derivedType = null;
-					foreach (var rootType in SynqraPolymorphicTypeResolver.PolimorficRoots)
-					{
-						var attrs = (JsonDerivedTypeAttribute[])rootType.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), true);
-						foreach (var attr in attrs)
-						{
-							if (attr.DerivedType.Name == typeName)
-							{
-								derivedType = attr.DerivedType;
-								break;
-							}
-						}
-						if (derivedType != null)
-						{
-							break;
-						}
-					}
+					var typeName = reader.GetString() ?? throw new SynqraJsonException("Null descriminator");
+					Type? derivedType = SynqraJsonTypeInfoResolver.GetByDiscriminator(typeName);
 					if (derivedType == null)
 					{
 						foreach (var item in _extraTypes)
@@ -155,10 +147,10 @@ public class ObjectConverter : JsonConverter<object>
 			return;
 		}
 
-		Type? rootType = type;
+		Type rootType = type;
 		foreach (var ancestor in type.GetAncestors())
 		{
-			if (SynqraPolymorphicTypeResolver.PolimorficRoots.Contains(ancestor))
+			if (SynqraJsonTypeInfoResolver.PolimorficRoots.Contains(ancestor))
 			{
 				rootType = ancestor;
 				/*
@@ -190,9 +182,9 @@ public class ObjectConverter : JsonConverter<object>
 		}
 		else
 		{
-			var typeName = type?.Name;
-			EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
-			if (rootType == type)
+			var typeName = type.Name;
+			EmergencyLog.Default.LogDebug($"ObjectConverter.JsonSerializer.Serialize: {typeName} ({rootType.Name})");
+			if (rootType == type) // it will not produce discriminator, but we need one
 			{
 				w.WriteStartObject();
 				w.WriteString("_t", typeName);
@@ -210,8 +202,20 @@ public class ObjectConverter : JsonConverter<object>
 			}
 			else
 			{
+#if DEBUG1
+				var json = JsonSerializer.Serialize(value, rootType, options);
+#endif
 				JsonSerializer.Serialize(w, value, rootType, options);
 			}
+			/*
+			else // it supports polymorfism natively
+			{
+#if DEBUG
+				var json = JsonSerializer.Serialize(value, type, options);
+#endif
+				JsonSerializer.Serialize(w, value, type, options);
+			}
+			*/
 			/*
 			var optionsNoObjectConverter = new JsonSerializerOptions(options);
 			var q = optionsNoObjectConverter.Converters.Remove(this);
@@ -224,7 +228,11 @@ public class ObjectConverter : JsonConverter<object>
 
 public static class TypeExtensions
 {
-	public static IEnumerable<Type> GetAncestors(this Type type)
+	public static IEnumerable<Type> GetAncestors(
+#if NET
+		[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)]
+#endif
+		this Type type)
 	{
 		if (type == null) yield break;
 		yield return type;
@@ -235,6 +243,10 @@ public static class TypeExtensions
 				yield return ancestor;
 			}
 		}
+		foreach (var iface in type.GetInterfaces())
+		{
+			yield return iface;
+		}
 	}
 }
 
@@ -242,19 +254,9 @@ public static class TypeExtensions
 /// Enables _t Polymorfism for Conmmand
 /// Enables _t Polymorfism for IComponent
 /// </summary>
-public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
+public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
-	// private static int _lastComponentsCount;
-	// private static JsonPolymorphismOptions _lastComponents;
-	// private static JsonPolymorphismOptions _lastCommands;
-
-	// mongo attribute driven with name match
-	Dictionary<Type, List<JsonDerivedType>> _derivedTypes = new Dictionary<Type, List<JsonDerivedType>>();
-
-	public SynqraPolymorphicTypeResolver(params Type[] extraTypes)
-	{
-		_extraTypes = extraTypes;
-	}
+	static HashSet<Type> _bindableModels = new HashSet<Type>();
 
 	public static HashSet<Type> PolimorficRoots = new HashSet<Type>
 	{
@@ -263,7 +265,77 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 		typeof(TransportOperation),
 		typeof(IBindableModel),
 	};
-	private readonly Type[] _extraTypes;
+
+	static Dictionary<string, Type> _descriminators = new ();
+
+	public static void RegisterGeneratedModel<T>()
+	{
+		var type = typeof(T);
+		if (!type.IsAbstract)
+		{
+			_bindableModels.Add(type);
+			_descriminators[type.Name] = type;
+		}
+	}
+
+	public static Type? GetByDiscriminator(string discriminator)
+	{
+		if (_descriminators.TryGetValue(discriminator, out var foundType))
+		{
+			return foundType;
+		}
+		foreach (var type in PolimorficRoots)
+		{
+			var attrs = (JsonDerivedTypeAttribute[])type.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), true);
+			foreach (var attr in attrs)
+			{
+				if (attr.DerivedType.Name == discriminator)
+				{
+					return attr.DerivedType;
+				}
+			}
+		}
+		return null;
+		// throw new SynqraJsonException($"Unknown derived type name: {discriminator}");
+	}
+
+	// private static int _lastComponentsCount;
+	// private static JsonPolymorphismOptions _lastComponents;
+	// private static JsonPolymorphismOptions _lastCommands;
+
+	// mongo attribute driven with name match
+	private readonly Dictionary<Type, List<JsonDerivedType>> _derivedTypes = new Dictionary<Type, List<JsonDerivedType>>();
+
+	public SynqraJsonTypeInfoResolver(params Type[] extraTypes) // likely need to drop (replaced by generated static ctor with registration)
+	{
+		_extraTypes = extraTypes;
+	}
+
+	private readonly Type[] _extraTypes; // likely need to drop (replaced by generated static ctor with registration)
+
+	class ConfiguredMarker : IBindableModel
+	{
+		ISynqraStoreContext? IBindableModel.Store
+		{
+			get => throw new NotImplementedException();
+			set => throw new NotImplementedException();
+		}
+
+		void IBindableModel.Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		{
+			throw new NotImplementedException();
+		}
+
+		void IBindableModel.Set(string propertyName, object? value)
+		{
+			throw new NotImplementedException();
+		}
+
+		void IBindableModel.Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		{
+			throw new NotImplementedException();
+		}
+	}
 
 	public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
 	{
@@ -311,7 +383,29 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 				}
 			}
 			else*/
-			if (PolimorficRoots.Contains(type))
+			if (typeof(IBindableModel) == type)
+			{
+				if (jsonTypeInfo.PolymorphismOptions == null)
+				{
+					var poliOptions = new JsonPolymorphismOptions
+					{
+						TypeDiscriminatorPropertyName = "_t",
+						IgnoreUnrecognizedTypeDiscriminators = false,
+						UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+					};
+					jsonTypeInfo.PolymorphismOptions = poliOptions;
+				}
+				var cnt = jsonTypeInfo.PolymorphismOptions.DerivedTypes.Count;
+				if (cnt == 0 || jsonTypeInfo.PolymorphismOptions.DerivedTypes[cnt - 1].DerivedType != typeof(ConfiguredMarker))
+				{
+					foreach (var knownType in _bindableModels)
+					{
+						jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(knownType, knownType.Name));
+					}
+					jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(ConfiguredMarker), nameof(ConfiguredMarker)));
+				}
+			}
+			else if (PolimorficRoots.Contains(type)) // that should include cases when type root is actually sub-root and also derrives from IBindableModel (client's hierarchy or e.g. Event)
 			{
 				if (jsonTypeInfo.PolymorphismOptions == null)
 				{

@@ -510,11 +510,15 @@ public class SBXSerializer : ISBXSerializer
 
 #if DEBUG
 			var name = actualType.FullName;
-			if (name != "xx"
+			if (name != "Synqra.Tests.BinarySerialization.SampleTestDataPoco"
 				&& name != "xx"
+				&& name != "xx"
+				&& name?.StartsWith("Synqra.Tests") == false
+				&& name?.Contains("Sample") == false
+				&& name?.EndsWith("Poco") == false
 				)
 			{
-				throw new Exception($"Type {actualType.FullName} is quaranteened for serialization. Falling back to field names must be approved.");
+				throw new Exception($"Type {actualType.FullName} is quaranteened for serialization in DEBUG. If you really want POCO serialization for it, please approve by whitelisting.");
 			}
 #endif
 

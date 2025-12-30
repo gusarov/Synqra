@@ -526,6 +526,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}");
 			body.AppendLine("{");
 
+			body.AppendLine($"\tstatic {clazz.Identifier}()");
+			body.AppendLine($"\t{{");
+			body.AppendLine($"\t\tSynqraJsonTypeInfoResolver.RegisterGeneratedModel<{clazz.Identifier}>();");
+			body.AppendLine($"\t}}");
+			body.AppendLine($"");
+
 
 			#region SchemaDetection
 			string suggestedSchema = "1";
