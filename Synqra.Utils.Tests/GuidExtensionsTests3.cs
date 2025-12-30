@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using TUnit.Assertions.Extensions;
 
-namespace Synqra.Tests;
+namespace Synqra.Utils.Tests;
 
 public class GuidExtensionsTests3 : BaseTest
 {

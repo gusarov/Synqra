@@ -9,6 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>annotations</Nullable>
     <UseAppHost>true</UseAppHost>
+    <UserSecretsId>e3a9b10e-820e-4da9-9777-768db7f85353</UserSecretsId>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <IsAotCompatible>true</IsAotCompatible>
@@ -26,6 +27,8 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" Version="0.20" />
+    <PackageReference Include="MongoDB.Bson" Version="3.5.0" />
+    <PackageReference Include="MongoDB.Driver" Version="3.5.0" />
   </ItemGroup>
   
 </Project>

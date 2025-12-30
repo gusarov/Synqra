@@ -1,7 +1,7 @@
 ﻿using Synqra.Tests.TestHelpers;
 using System.Diagnostics;
 
-namespace Synqra.Tests;
+namespace Synqra.Utils.Tests;
 
 [NotInParallel]
 [Category("Performance")]

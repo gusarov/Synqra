@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TUnit.Assertions.AssertionBuilders.Wrappers;
 
-namespace Synqra.Tests;
+namespace Synqra.Utils.Tests;
 
 internal class EmergencyLoggerTests : BaseTest
 {

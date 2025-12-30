@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Synqra.Tests;
+namespace Synqra.Utils.Tests;
 
 internal class MonotonicGuids
 {
