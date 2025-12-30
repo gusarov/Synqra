@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TUnit.Assertions.Extensions;
 
-namespace Synqra.Tests.Integration;
+namespace Synqra.Utils.Tests;
 
 [Property("CI", "false")]
 internal class MongoDbUuidOrdering : BaseTest
