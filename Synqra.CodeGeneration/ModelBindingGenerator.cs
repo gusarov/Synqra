@@ -524,15 +524,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var d = clazz.AttributeLists.Last().Span.End;
 				// EmergencyLog.Default.Debug($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
 
-				double lastVer = 0;
-				string lastSchema = "";
-				foreach (var item in schemas)
-				{
-					EmergencyLog.Default.Debug("*** Schema: " + item);
-					lastVer = item.Item1;
-					lastSchema = item.Item2;
-				}
-
+				var lastSchemaEntry = schemas.Length == 0
+					? (0d, string.Empty)
+					: schemas.OrderBy(s => s.Item1).Last();
+				double lastVer = lastSchemaEntry.Item1;
+				string lastSchema = lastSchemaEntry.Item2;
 				var sb = new StringBuilder(originalSourceContent);
 				if (lastSchema != suggestedSchema)
 				{
@@ -542,7 +538,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					var ver = now.Year + Math.Round((now - year1).TotalHours / (year2 - year1).TotalHours, 3);
 					if (lastVer >= ver)
 					{
-						ver = lastVer += 0.001;
+						ver = lastVer + 0.001;
 					}
 					EmergencyLog.Default.Debug("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
 					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
