@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -20,6 +21,8 @@ namespace Synqra.Storage.Jsonl;
 
 public static class StorageExtensions
 {
+	static object _synqraJsonLinesStorageConfiguredKey = new object();
+
 	// For nativeAOT
 	public static void AddJsonLinesStorage<T, TKey>(this IHostApplicationBuilder hostBuilder)
 		// where T : IIdentifiable<TKey>
@@ -36,9 +39,12 @@ public static class StorageExtensions
 		hostBuilder.Services.TryAddSingleton(typeof(IStorage<,>), typeof(JsonLinesStorage<,>));
 	}
 
-	private static void AddJsonLinesStorageCore(this IHostApplicationBuilder hostBuilder)
+	internal static void AddJsonLinesStorageCore(this IHostApplicationBuilder hostBuilder)
 	{
-		hostBuilder.Services.Configure<JsonLinesStorageConfig>(hostBuilder.Configuration.GetSection("Storage:JsonLinesStorage"));
+		if (hostBuilder.Properties.TryAdd(_synqraJsonLinesStorageConfiguredKey, string.Empty))
+		{
+			hostBuilder.Services.Configure<JsonLinesStorageConfig>(hostBuilder.Configuration.GetSection("Storage:JsonLinesStorage"));
+		}
 	}
 
 	internal class JsonLinesStorageConfig // it is internal only because of AOT bindings

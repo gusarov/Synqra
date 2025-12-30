@@ -15,7 +15,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSourceGenerationOptions(
 	  JsonSerializerDefaults.Web
 	, AllowTrailingCommas = true
-	, DefaultBufferSize = 16384
+	, DefaultBufferSize = 16 * 1024
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 	, GenerationMode = JsonSourceGenerationMode.Default
@@ -25,14 +25,14 @@ namespace Synqra.Tests.SampleModels;
 	, PropertyNameCaseInsensitive = true
 	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
 	, ReadCommentHandling = JsonCommentHandling.Skip
-	, Converters = [
-		typeof(ObjectConverter),
-		// typeof(BindableModelConverter),
-	]
 	// , TypeInfoResolver = new TodoPolymorphicTypeResolver()
 #if DEBUG
 	, WriteIndented = true
 #endif
+	, Converters = [
+		typeof(ObjectConverter),
+		// typeof(BindableModelConverter),
+	]
 )]
 [JsonSerializable(typeof(DemoModel))]
 [JsonSerializable(typeof(SampleOnePropertyObject))]
@@ -43,7 +43,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(MyPocoTask))]
 [JsonSerializable(typeof(SampleTaskModel))]
 [JsonSerializable(typeof(TestItem))]
-[JsonSerializable(typeof(SampleTodoTask))]
+[JsonSerializable(typeof(SampleTodoTaskPoco))]
 
 [JsonSerializable(typeof(Synqra.Event))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
@@ -59,10 +59,10 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
 
-[JsonSerializable(typeof(SampleTestData))]
+[JsonSerializable(typeof(SampleTestDataPoco))]
 [JsonSerializable(typeof(TransportOperation))]
 
-[JsonSerializable(typeof(SampleTodoTask))]
+[JsonSerializable(typeof(SampleTodoTaskPoco))]
 [JsonSerializable(typeof(SampleFieldIntModel))]
 [JsonSerializable(typeof(SampleFieldObjectModel))]
 [JsonSerializable(typeof(SampleFieldBaseModel))]
@@ -87,14 +87,14 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(List<SampleSealedModel>))]
 [JsonSerializable(typeof(List<SampleFieldDictionaryStringObjectModel>))]
 
-// [JsonConverter(typeof(ObjectConverter))]
+[JsonConverter(typeof(ObjectConverter))] // re-supplied with extras below
 public partial class SampleJsonSerializerContext : JsonSerializerContext
 {
 	static Type[] _extra =
 	[
 		typeof(SamplePublicModel),
 		typeof(SampleTaskModel),
-		typeof(SampleTodoTask),
+		typeof(SampleTodoTaskPoco),
 	];
 
 	public static JsonSerializerOptions DefaultOptions { get; }
@@ -103,70 +103,16 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 	{
 		DefaultOptions = new JsonSerializerOptions(Default.Options)
 		{
-			Converters =
-			{
-				new ObjectConverter(_extra),
-			},
-			TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
-			/*
-			TypeInfoResolver = new DefaultJsonTypeInfoResolver
-			{
-				Modifiers =
-				{
-					ti =>
-					{
-						if (ti.Type == typeof(object))
-						{
-							ti.PolymorphismOptions = new JsonPolymorphismOptions
-							{
-								TypeDiscriminatorPropertyName = "_t",
-								IgnoreUnrecognizedTypeDiscriminators = true,
-								UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
-							};
-							foreach (var item in _extra)
-							{
-								ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(item, item.Name));
-							}
-							// Register supported runtime types (add as many as you like)
-							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(Uri),          "uri"));
-							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(DateTime),     "dt"));
-							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(DateTime),     "dt"));
-							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MyMessageA),   "A"));
-							// ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MyMessageB),   "B"));
-							// …scan assemblies and add more if desired (see below)
-						}
-					}
-				}
-			},*/
+			TypeInfoResolver = JsonTypeInfoResolver.Combine(Default, new SynqraJsonTypeInfoResolver(_extra)),
 		};
-	}
-
-	/*
-	public override global::System.Text.Json.Serialization.Metadata.JsonTypeInfo? GetTypeInfo(global::System.Type type)
-	{
-		Options.TryGetTypeInfo(type, out global::System.Text.Json.Serialization.Metadata.JsonTypeInfo? typeInfo);
-		if (typeInfo.Type == typeof(IBindableModel))
+		// remove first dups if any (this is better than avoid registration and allow someone to consume it without ObjectConverter at all)
+		for (int i = DefaultOptions.Converters.Count - 1; i >= 0; i--)
 		{
-			typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
+			if (DefaultOptions.Converters[i] is ObjectConverter)
 			{
-				TypeDiscriminatorPropertyName = "_t",
-			};
-			typeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SampleTaskModel), "SampleTaskModel"));
+				DefaultOptions.Converters.RemoveAt(i);
+			}
 		}
-		return typeInfo;
+		DefaultOptions.Converters.Add(new ObjectConverter(_extra));
 	}
-
-	// This partial is discovered by the generator; you implement it.
-	static partial void ModifyJsonTypeInfo(JsonTypeInfo ti)
-	{
-		if (ti.Type == typeof(IBindableModel))
-		{
-			ti.PolymorphismOptions ??= new JsonPolymorphismOptions
-			{
-				TypeDiscriminatorPropertyName = "_t",
-			};
-			ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SampleTaskModel), "SampleTaskModel"));
-		}
-	}
-	*/
 }

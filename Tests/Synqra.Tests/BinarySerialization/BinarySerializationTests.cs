@@ -717,7 +717,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_arbitrary_class_by_field_names_as_object()
 	{
 		// Arrange
-		var testData = new SampleTestData
+		var testData = new SampleTestDataPoco
 		{
 			Id = 1,
 			Name = "Test",
@@ -739,7 +739,7 @@ public class BinarySerializationTests : BaseTest
 
 		pos = 0;
 		ReadOnlySpan<byte> rbuffer = buffer;
-		var de = ser.Deserialize<SampleTestData>(in rbuffer, ref pos);
+		var de = ser.Deserialize<SampleTestDataPoco>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}
@@ -748,7 +748,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_arbitrary_class_by_field_names_as_known()
 	{
 		// Arrange
-		var testData = new SampleTestData
+		var testData = new SampleTestDataPoco
 		{
 			Id = 1,
 			Name = "Test",
@@ -774,7 +774,7 @@ public class BinarySerializationTests : BaseTest
 		// Console.WriteLine(Encoding.UTF8.GetString(buffer.Slice(0, pos)));
 
 		pos = 0;
-		var de = ser.Deserialize<SampleTestData>(in rbuffer, ref pos);
+		var de = ser.Deserialize<SampleTestDataPoco>(in rbuffer, ref pos);
 		await Assert.That(de.Id).IsEqualTo(testData.Id);
 		await Assert.That(de.Name).IsEqualTo(testData.Name);
 	}

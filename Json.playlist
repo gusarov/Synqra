@@ -1,0 +1,125 @@
+<Playlist Version="2.0">
+  <Rule Name="Includes" Match="Any">
+    <Rule Match="All">
+      <Property Name="Solution" />
+      <Rule Match="Any">
+        <Rule Match="All">
+          <Property Name="Project" Value="Synqra.Tests (net10.0)" />
+          <Rule Match="Any">
+            <Rule Match="All">
+              <Property Name="Namespace" Value="" />
+              <Rule Match="Any">
+                <Rule Match="All">
+                  <Property Name="Class" Value="BindingTests" />
+                  <Rule Match="Any">
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_00_allow_set_model_properties" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_00_allow_set_model_properties" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_01_BR_RSet" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_01_BR_RSet" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_01_BR_RSet_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_01_BR_RSet_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_02_BJ_01_Stj_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_02_BJ_01_Stj_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_02_BJ_02_STJx_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_02_BJ_02_STJx_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_03_BC_01_HostConfigBind_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_03_BC_01_HostConfigBind_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_03_BC_02_ConfigBind_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_03_BC_02_ConfigBind_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_03_BC_03_RSetConfigGen_property" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_03_BC_03_RSetConfigGen_property" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_Bind_04_BS_01_Generate_BindableModel" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_Bind_04_BS_01_Generate_BindableModel" />
+                      </Rule>
+                    </Rule>
+                  </Rule>
+                </Rule>
+                <Rule Match="All">
+                  <Property Name="Class" Value="EventsJsonlStorageTests" />
+                  <Rule Match="Any">
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_store_polimorfic_as_jsonl" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_store_polimorfic_as_jsonl" />
+                      </Rule>
+                    </Rule>
+                  </Rule>
+                </Rule>
+                <Rule Match="All">
+                  <Property Name="Class" Value="JsonSerializationTests" />
+                  <Rule Match="Any">
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_05_serialize" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_05_serialize" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_10_serialize_object" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_10_serialize_object" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_20_serialize_event" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_20_serialize_event" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_30_serialize_network_operation" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_30_serialize_network_operation" />
+                      </Rule>
+                    </Rule>
+                    <Rule Match="All">
+                      <Property Name="TestWithNormalizedFullyQualifiedName" Value="Should_20_serialize_event(System.Int32)" />
+                      <Rule Match="Any">
+                        <Property Name="DisplayName" Value="Should_20_serialize_event(1)" />
+                        <Property Name="DisplayName" Value="Should_20_serialize_event(2)" />
+                      </Rule>
+                    </Rule>
+                  </Rule>
+                </Rule>
+              </Rule>
+            </Rule>
+          </Rule>
+        </Rule>
+      </Rule>
+    </Rule>
+  </Rule>
+</Playlist>

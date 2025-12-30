@@ -1,8 +1,8 @@
 namespace Synqra.Tests.BinarySerialization;
 
-public class SampleTestData
+public class SampleTestDataPoco
 {
-	public SampleTestData()
+	public SampleTestDataPoco()
 	{
 
 	}

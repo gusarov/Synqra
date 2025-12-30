@@ -47,12 +47,28 @@ public class PerformanceParameters
 	/// <summary>
 	/// Diagnostic Logging with System.Diagnostics.Trace
 	/// </summary>
-	public bool Trace { get; set; } = true;
+	public bool Trace { get; set; } = false;
 }
 
 
 public class PerformanceTestUtils
 {
+	class ConsoleTraceListener : TraceListener
+	{
+		public override void Write(string? message)
+		{
+			Console.Write(message);
+		}
+		public override void WriteLine(string? message)
+		{
+			Console.WriteLine(message);
+		}
+	}
+
+	static PerformanceTestUtils()
+	{
+		Trace.Listeners.Add(new ConsoleTraceListener());
+	}
 
 	/*
 	protected async Task<double> Measure(Func<Task> action, int batch = 1000)

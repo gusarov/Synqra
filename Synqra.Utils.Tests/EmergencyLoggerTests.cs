@@ -73,7 +73,7 @@ internal class EmergencyLoggerTests : BaseTest
 	}
 
 	[Test]
-	[Explicit("This test no longer make sense, because file is always locked")]
+	[Skip("This test no longer make sense, because file is always locked")]
 	public async Task Should_20_handle_locked_files()
 	{
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))

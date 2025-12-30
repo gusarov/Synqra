@@ -9,7 +9,10 @@ using System.Text.Json.Serialization;
 
 namespace Synqra.Tests;
 
-public class SerializationTests
+/// <summary>
+/// This tests is about STJ serialization and deserialization for network or storage purposes, for Poco or generated mindable models, for nested objects, polymorphic objects, etc.
+/// </summary>
+public class JsonSerializationTests
 {
 	[Test]
 	public async Task Should_05_serialize()
@@ -19,17 +22,18 @@ public class SerializationTests
 #endif
 
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
-		var obj = new SampleTodoTask
+		var obj = new SampleTodoTaskPoco
 		{
 			Subject = subject,
 		};
 		var json = JsonSerializer.Serialize(obj, SampleJsonSerializerContext.DefaultOptions.Indented());
+		using var __ = Assert.Multiple();
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
-{
-	"subject": "{{subject}}"
-}
-""".NormalizeNewLines());
-		var deserializedObj = JsonSerializer.Deserialize(json, SampleJsonSerializerContext.Default.SampleTodoTask);
+		{
+			"subject": "{{subject}}"
+		}
+		""".NormalizeNewLines());
+		var deserializedObj = JsonSerializer.Deserialize(json, SampleJsonSerializerContext.Default.SampleTodoTaskPoco);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
@@ -42,24 +46,29 @@ public class SerializationTests
 #endif
 
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
-		var obj = new SampleTodoTask
+		var obj = new SampleTodoTaskPoco
 		{
 			Subject = subject,
 		};
 		var json = JsonSerializer.Serialize<object>(obj, SampleJsonSerializerContext.DefaultOptions.Indented());
+		using var __ = Assert.Multiple();
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 {
-	"_t": "SampleTodoTask",
+	"_t": "SampleTodoTaskPoco",
 	"subject": "{{subject}}"
 }
 """.NormalizeNewLines());
-		var deserializedObj = (SampleTodoTask)JsonSerializer.Deserialize<object>(json, SampleJsonSerializerContext.DefaultOptions);
+		var deserializedObj = (SampleTodoTaskPoco)JsonSerializer.Deserialize<object>(json, SampleJsonSerializerContext.DefaultOptions);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}
 
 	[Test]
-	public async Task Should_20_serialize_event()
+	[Arguments(1)]
+	[Arguments(2)]
+	// [Arguments(3)]
+	// [Arguments(4)]
+	public async Task Should_20_serialize_event(int ctxId)
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		var obj = new CommandCreatedEvent
@@ -81,9 +90,11 @@ public class SerializationTests
 				},
 			},
 		};
-		async Task Check(JsonSerializerContext ctx)
+		async Task Check(JsonSerializerOptions ctx)
 		{
-			var json = JsonSerializer.Serialize<Event>(obj, ctx.Options.Indented());
+			var json = JsonSerializer.Serialize<Event>(obj, ctx.Indented());
+			// using var __ = Assert.Multiple();
+			Console.WriteLine(json);
 			await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 			{
 				"_t": "CommandCreatedEvent",
@@ -91,7 +102,8 @@ public class SerializationTests
 					"_t": "CreateObjectCommand",
 					"data": {
 						"_t": "SampleTaskModel",
-						"subject": "Test1"
+						"subject": "{{subject}}",
+						"number": 0
 					},
 					"targetTypeId": "00000000-0000-0000-0000-000000000000",
 					"collectionId": "00000000-0000-0000-0000-000000000000",
@@ -103,7 +115,7 @@ public class SerializationTests
 				"commandId": "{{obj.CommandId}}"
 			}
 			""".NormalizeNewLines());
-			var deserializedObj = JsonSerializer.Deserialize<Event>(json, ctx.Options);
+			var deserializedObj = JsonSerializer.Deserialize<Event>(json, ctx);
 			await Assert.That(deserializedObj).IsNotNull();
 			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
 			var createdEvent = (CommandCreatedEvent)deserializedObj;
@@ -113,8 +125,23 @@ public class SerializationTests
 			var taskModel = (SampleTaskModel)createCommand.Data;
 			await Assert.That(taskModel.Subject).IsEqualTo(subject);
 		}
-		await Check(SampleJsonSerializerContext.Default);
-		await Check(AppJsonContext.Default);
+		switch (ctxId)
+		{
+			case 1:
+				await Check(SampleJsonSerializerContext.DefaultOptions);
+				break;
+			case 2:
+				await Check(AppJsonContext.DefaultOptions);
+				break;
+			case 3:
+				await Check(SampleJsonSerializerContext.Default.Options);
+				break;
+			case 4:
+				await Check(AppJsonContext.Default.Options);
+				break;
+			default:
+				throw new Exception();
+		}
 	}
 
 	[Test]
