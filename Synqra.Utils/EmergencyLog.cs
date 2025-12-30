@@ -490,7 +490,7 @@ public static class EmergencyLogExtensions
 	{
 		var sb = new StringBuilder();
 		_hexDumpWriter.HexDump(data, x => sb.Append(x), x => sb.Append(x));
-		log.LogInformation($"[Debug] [HexDump] {sb}");
+		log.LogDebug($"[HexDump] {sb}");
 	}
 
 	[Conditional("DEBUG")]
@@ -499,7 +499,7 @@ public static class EmergencyLogExtensions
 	{
 		var sb = new StringBuilder();
 		_hexDumpWriter.HexDump(data, x => sb.Append(x), x => sb.Append(x));
-		log.LogInformation($"[Debug] [HexDump] {sb}");
+		log.LogDebug($"[HexDump] {sb}");
 	}
 
 	/// <summary>
@@ -509,7 +509,7 @@ public static class EmergencyLogExtensions
 	[Obsolete("Use ILogger")]
 	public static void Debug(this EmergencyLog log, string message)
 	{
-		log.Message($"[Debug] {message}");
+		log.LogDebug($"{message}");
 	}
 
 	/// <summary>
@@ -519,7 +519,7 @@ public static class EmergencyLogExtensions
 	[Obsolete("Use ILogger")]
 	public static void Trace(this EmergencyLog log, string message)
 	{
-		log.Message($"[Trace] {message}");
+		log.LogTrace($"{message}");
 	}
 
 	[Obsolete("Use LogInformation instead")]
@@ -533,11 +533,11 @@ public static class EmergencyLogExtensions
 	{
 		if (ex == null)
 		{
-			log.Message($"[Error] {message}");
+			log.LogError($"{message}");
 		}
 		else
 		{
-			log.Message($"[Error] {message}: {ex}");
+			log.LogError(ex, $"{message}: {ex}");
 		}
 	}
 
@@ -590,6 +590,17 @@ internal class EmergencyLogger : ILogger
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
 	{
-		EmergencyLogImplementation.Default.Message($"[{logLevel}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
+		EmergencyLogImplementation.Default.Message($"[{Level(logLevel)}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
 	}
+
+	static string Level(LogLevel level) => level switch
+	{
+		LogLevel.Trace => "TRC",
+		LogLevel.Debug => "DBG",
+		LogLevel.Information => "INF",
+		LogLevel.Warning => "WRN",
+		LogLevel.Error => "ERR",
+		LogLevel.Critical => "CRT",
+		_ => "None",
+	};
 }
