@@ -37,15 +37,15 @@ public sealed class EmergencyLog : ILogger
 /// This logger can be used in any circumstance where normal logging is not available. E.g. in source generators.
 /// No threads, no async/await, no complex dependencies, no state, no buffers.
 /// Every call synchronized system-wide with a named Mutex.
-/// Every call opens a handle to append to a log file in the temp folder.
-/// No flushing, no caching, no batching.
+/// Every call ~opens a handle~ to append to a log file in the temp folder.
+/// ~No flushing,~ no caching, no batching.
 /// It is not performance efficient but reliable and always ready.
 /// It makes 1MiB file size limit and rolls over between multiple files.
 /// It keeps a logs for 1 week.
 /// It holds 100 files maximum (100MiB total) but expected to cleanup older files sooner.
 /// The encoding is utf8 (no_bom)
 /// </summary>
-sealed file class EmergencyLogImplementation
+internal class EmergencyLogImplementation
 {
 	public static EmergencyLogImplementation Default { get; } = new EmergencyLogImplementation();
 
@@ -71,27 +71,8 @@ sealed file class EmergencyLogImplementation
 			// mutex name uniquiness should corelate with temp folder uniquiness.
 			// When TMP configured per-user, or per-session, or per-machine same would be with mutex name
 			_mutexName = $"Global\\SynqraEmergencyLog_{mutexName}";
-		}
-	}
 
-	private string? _logFilePath;
-	private string? _mutexName;
-	private string? _logFilePathTemplate;
 
-	public string LogPath => _logFilePath ?? "<Disabled>";
-
-	internal void Message(string message)
-	{
-		try
-		{
-			if (_logFilePath == null || _logFilePathTemplate == null)
-			{
-				return;
-			}
-
-			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
-
-			Mutex mutex = null;
 #if NET8_0_OR_GREATER
 			if (OperatingSystem.IsWindows())
 			{
@@ -101,7 +82,7 @@ sealed file class EmergencyLogImplementation
 					var security = new MutexSecurity();
 					security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
 					bool createdNew;
-					mutex = MutexAcl.Create(
+					_mutex = MutexAcl.Create(
 						initiallyOwned: false,
 						name: _mutexName,
 						createdNew: out createdNew,
@@ -117,39 +98,72 @@ sealed file class EmergencyLogImplementation
 #endif
 				}
 			}
-			else if (OperatingSystem.IsBrowser())
+#endif
+			if (_mutex == null)
+			{
+				_mutex = new Mutex(false, _mutexName);
+			}
+		}
+	}
+
+	private string? _logFilePath;
+	private string? _mutexName;
+	private string? _logFilePathTemplate;
+	private Mutex _mutex;
+	private static Random _random =
+#if NET
+		Random.Shared
+#else
+		new Random()
+#endif
+		;
+	static Encoding _encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+
+	public string LogPath => _logFilePath ?? "<Disabled>";
+
+	internal void Message(string message)
+	{
+		try
+		{
+			if (_logFilePath == null || _logFilePathTemplate == null)
+			{
+				return;
+			}
+
+			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
+
+#if NET8_0_OR_GREATER && BROWSER
+			if (OperatingSystem.IsBrowser())
 			{
 				Console.WriteLine("⚠️🚨 SynqraEmergencyLog: " + message);
 				return;
 			}
 #endif
-			if (mutex == null)
+			bool acquired = false;
+			try
 			{
-				mutex = new Mutex(false, _mutexName);
+				acquired = _mutex.WaitOne();
 			}
-			using (mutex)
+			catch (AbandonedMutexException)
 			{
-				bool acquired = false;
-				try
-				{
-					acquired = mutex.WaitOne();
-				}
-				catch (AbandonedMutexException)
-				{
-					// The mutex was abandoned in another process, it will still get acquired. No need to do anything special here, it is normal case.
-					acquired = true;
-				}
-				try
+				// The mutex was abandoned in another process, it will still get acquired. No need to do anything special here, it is normal case.
+				acquired = true;
+			}
+			try
+			{
+				if (_random.Next(1000) == 0) // stateless, so montecarlo
 				{
 					var fi = new FileInfo(_logFilePath);
-					if (fi.Exists && (fi.Length > 20 * 1024 * 1024))
+
+					const int maxSizeBytes = 20 * 1024 * 1024;
+					if (fi.Exists && (fi.Length > maxSizeBytes))
 					{
-						// slide 50% of file inside!
+						// slide 50% of file inside! UPD: slide till maxSize/2
 						try
 						{
 							using var sr = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-							sr.Position = fi.Length / 2;
-							using var sw = new FileStream(_logFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+							sr.Position = Math.Max(fi.Length / 2, fi.Length - maxSizeBytes / 2);
+							using var sw = new FileStream(_logFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
 							sr.CopyTo(sw);
 							sw.SetLength(sw.Position);
 						}
@@ -159,62 +173,62 @@ sealed file class EmergencyLogImplementation
 							Debugger.Break();
 #endif
 							message = Format($"[Error] [EmergencyLog] Can't roll file: " + ex + Environment.NewLine) + message;
-							
+
 						}
 					}
-					var fileName = _logFilePath;
-					Exception? firstEx = null;
-					for (byte i = 0; ; i++) // retry locked file with separate name (should be extremely rare and misuse of storage, but EmergencyLogger guarantees are more important)
+				}
+				var fileName = _logFilePath;
+				Exception? firstEx = null;
+				for (byte i = 0; ; i++) // retry locked file with separate name (should be extremely rare and misuse of storage, but EmergencyLogger guarantees are more important)
+				{
+					try
 					{
-						try
+						FileAppendAllText(fileName, message);
+						break;
+					}
+					catch (IOException ex)
+					{
+						if (firstEx == null)
 						{
-							FileAppendAllText(fileName, message);
-							break;
+							firstEx = ex;
+							message = Format($"[Error] [EmergencyLog] Failed to write to {fileName}, will retry with another file: {ex}") + message;
 						}
-						catch (IOException ex)
+						if (i < 10)
 						{
-							if (firstEx == null)
-							{
-								firstEx = ex;
-								message = Format($"[Error] [EmergencyLog] Failed to write to {fileName}, will retry with another file: {ex}") + message;
-							}
-							if (i < 10)
-							{
-								fileName = string.Format(_logFilePathTemplate, "Locked_" + i);
-							}
-							else if (i == 10)
-							{
-								fileName = string.Format(_logFilePathTemplate
+							fileName = string.Format(_logFilePathTemplate, "Locked_" + i);
+						}
+						else if (i == 10)
+						{
+							fileName = string.Format(_logFilePathTemplate
 #if NET9_0_OR_GREATER
-									, Guid.CreateVersion7() // sortable
+								, Guid.CreateVersion7() // sortable
 #else
-									, Guid.NewGuid()
+								, Guid.NewGuid()
 #endif
-									);
-							}
-							else
-							{
-								throw;
-							}
+								);
+						}
+						else
+						{
+							throw;
 						}
 					}
 				}
-				catch
-				{
+			}
+			catch
+			{
 #if DEBUG
-					// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
-					Debugger.Break();
-					throw;
+				// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
+				Debugger.Break();
+				throw;
 #endif
-				}
-				finally
+			}
+			finally
+			{
+				if (acquired)
 				{
-					if (acquired)
-					{
-						mutex.ReleaseMutex();
-					}
+					_mutex.ReleaseMutex();
 				}
-			} // Dispose() happens here, after ReleaseMutex()
+			}
 		}
 		catch
 		{
@@ -431,12 +445,20 @@ sealed file class EmergencyLogImplementation
 		return message;
 	}
 
+	FileStream? _fileStream;
+	StreamWriter? _streamWriter;
+
 	private void FileAppendAllText(string fileName, string message)
 	{
-			// File.AppendAllText does not share readers, so we do it manually
-		using var file = File.Open(fileName, FileMode.Append, FileAccess.Write, FileShare.Read);
-		file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
-		using var sw = new StreamWriter(file);
+		// File.AppendAllText does not share readers, so we do it manually
+		var file = _fileStream ?? (_fileStream = new FileStream(fileName, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite));
+		if (file.Position != file.Length) // seek is expensive
+		{
+			file.Position = file.Length;
+		}
+		// file.Position = file.Length;
+		// file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
+		var sw = _streamWriter ?? (_streamWriter = new StreamWriter(file));
 			/*
 			using var sw2 = new StreamWriter(fileName, new FileStreamOptions
 			{
@@ -449,6 +471,9 @@ sealed file class EmergencyLogImplementation
 			});
 			*/
 			sw.Write(message);
+			sw.Flush(); // have to do this while under locked mutex
+
+		// file.Unlock(0, 0);
 	}
 }
 
