@@ -355,6 +355,21 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		*/
 	}
 
+	static bool HasIgnoreAttribute(IPropertySymbol p)
+	{
+		foreach (var attr in p.GetAttributes())
+		{
+			var fullName = attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+			if (fullName is "global::System.Text.Json.Serialization.JsonIgnoreAttribute"
+				|| fullName is "global::SbxIgnoreAttribute"
+				|| fullName is "SbxIgnoreAttribute")
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesOfType(INamedTypeSymbol type)
 	{
 		foreach (var p in type.GetMembers().OfType<IPropertySymbol>())
@@ -371,9 +386,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				EmergencyLog.Default.Debug($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 			}
-			if (p.GetAttributes().Any(attr =>
-				attr.AttributeClass?.ToDisplayString() == "System.Text.Json.Serialization.JsonIgnoreAttribute"
-				|| attr.AttributeClass?.ToDisplayString() == "SbxIgnoreAttribute"))
+			if (HasIgnoreAttribute(p))
 			{
 				EmergencyLog.Default.Debug($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 				continue;
