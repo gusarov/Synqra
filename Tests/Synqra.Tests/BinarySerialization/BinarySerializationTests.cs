@@ -2,6 +2,7 @@
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
+using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
@@ -311,11 +312,18 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					Target = null,
 					TargetId = default,
 					TargetTypeId = default,
+					/*
 					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
 					{
 						["subject"] = "Task1",
 						["number"] = 1,
-					}
+					},
+					*/
+					Data = new SampleTaskModel
+					{
+						Subject = "Task1",
+						Number = 1,
+					},
 				},
 			},
 		}, "C301B5010000BF010000000000037375626A65637400075461736B31006E756D626572000302"));
@@ -332,11 +340,18 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
 					ContainerId = default,
 					Target = null,
+					/*
 					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
 					{
 						["subject"] = "Task1",
 						["number"] = 1,
-					}
+					},
+					*/
+					Data = new SampleTaskModel
+					{
+						Subject = "Task1",
+						Number = 1,
+					},
 				},
 				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
 				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),

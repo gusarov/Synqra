@@ -3,6 +3,6 @@ using System.Collections.Generic;
 
 namespace Synqra;
 
-public interface ISynqraCommand
+public interface ISynqraCommand : IBindableModel
 {
 }

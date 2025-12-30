@@ -40,7 +40,6 @@ namespace Synqra;
 [JsonSerializable(typeof(TransportOperation))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
-[JsonConverter(typeof(ObjectConverter))]
 public partial class AppJsonContext : JsonSerializerContext
 {
 }

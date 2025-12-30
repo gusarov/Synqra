@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using Synqra.BinarySerializer;
+using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -10,7 +11,7 @@ abstract class StoreCollection
 {
 	// Remember - this is always client request, not a synchronization!
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
-	private protected readonly JsonSerializerOptions _jsonSerializerOptions;
+	private protected readonly JsonSerializerOptions? _jsonSerializerOptions;
 
 	internal StoreContext Store { get; private init; }
 	internal Guid ContainerId { get; private init; }
@@ -24,10 +25,14 @@ abstract class StoreCollection
 	public IList List => IList;
 #endif
 
-	public StoreCollection(StoreContext storeContext, JsonSerializerOptions jsonSerializerOptions, Guid containerId, Guid collectionId)
+	public StoreCollection(StoreContext storeContext
+		, Guid containerId
+		, Guid collectionId
+		, JsonSerializerOptions? jsonSerializerOptions = null
+		)
 	{
 		Store = storeContext ?? throw new ArgumentNullException(nameof(storeContext));
-		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentNullException(nameof(jsonSerializerOptions));
+		_jsonSerializerOptions = jsonSerializerOptions;
 		ContainerId = containerId;
 		CollectionId = collectionId;
 	}
@@ -45,7 +50,7 @@ abstract class StoreCollection
 	#endregion
 }
 
-class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
+class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
 	where T : class
 {
 	private readonly List<T> _list = new List<T>();
@@ -54,8 +59,16 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 	protected override IList IList => _list;
 	protected override ICollection ICollection => _list;
 
-	public StoreCollection(StoreContext storeContext, JsonSerializerOptions jsonSerializerOptions, Guid containerId, Guid collectionId)
-		: base(storeContext, jsonSerializerOptions, containerId, collectionId)
+	public StoreCollection(StoreContext storeContext
+		, Guid containerId
+		, Guid collectionId
+		, JsonSerializerOptions? jsonSerializerOptions = null
+		)
+		: base(storeContext
+			, containerId
+			, collectionId
+			, jsonSerializerOptions
+			)
 	{
 	}
 
@@ -124,8 +137,9 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 	private int Add(T item)
 	{
 		var o = _list.Count;
-		var dataJson = JsonSerializer.Serialize(item, _jsonSerializerOptions);
-		var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
+
+		// var dataJson = _jsonSerializerOptions == null ? null : JsonSerializer.Serialize(item, _jsonSerializerOptions);
+		// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
 		var attachedData = Store.Attach(item, this);
 		Store.SubmitCommandAsync(new CreateObjectCommand
@@ -135,8 +149,8 @@ class StoreCollection<T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<
 			TargetTypeId = Store.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = attachedData.Id,
-			Data = data?.Count > 0 ? data : null,
-			DataJson = dataJson,
+			Data = item, // data?.Count > 0 ? data : null,
+			// DataJson = dataJson,
 			Target = item,
 		}).GetAwaiter().GetResult();
 		var n = _list.Count;

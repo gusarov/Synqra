@@ -18,15 +18,34 @@ namespace Synqra;
 [Schema(2025.801, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data IDictionary<string, object?>?")]
 [Schema(2025.802, "1 Data IDictionary<string, object?>? DataString string? DataObject object? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2025.803, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data IDictionary<string, object?>?")]
+[Schema(2025.804, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid")]
+[Schema(2025.805, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object?")]
 public partial class ObjectCreatedEvent : SingleObjectEvent
 {
-	public partial IDictionary<string, object?>? Data { get; set; }
+	// public partial IDictionary<string, object?>? Data { get; set; }
+	public partial object? Data { get; set; }
+
+	partial void OnDataChanging(object? oldValue, object? value)
+	{
+		if (value is IDictionary<string, object?> dict)
+		{
+			throw new NotImplementedException();
+		}
+		else if (value is string s)
+		{
+			throw new NotImplementedException();
+		}
+		else
+		{
+			throw new NotImplementedException();
+		}
+	}
+
+	//[JsonIgnore]
+	//public string? DataString { get; set; }
 
 	[JsonIgnore]
-	public partial string? DataString { get; set; }
-
-	[JsonIgnore]
-	public partial object? DataObject { get; set; }
+	public object? DataObject { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

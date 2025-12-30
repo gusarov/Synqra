@@ -1,5 +1,8 @@
-﻿namespace Synqra;
+﻿using System.Text.Json.Serialization;
 
+namespace Synqra;
+
+// [JsonPolymorphic]
 public interface IBindableModel
 {
 	ISynqraStoreContext? Store { get; set; }
@@ -46,6 +49,11 @@ public interface IModelBinder<T> : IModelBinder
 	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
 	void Get(T model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+}
+
+public interface ISBXSerializerFactory
+{
+	ISBXSerializer CreateSerializer();
 }
 
 /// <summary>

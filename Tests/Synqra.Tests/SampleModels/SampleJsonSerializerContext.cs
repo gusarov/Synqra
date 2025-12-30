@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using MongoDB.Bson.Serialization.Attributes;
+using SharpCompress.Common;
 using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
@@ -11,20 +12,22 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace Synqra.Tests.SampleModels;
 
-[JsonSourceGenerationOptions(JsonSerializerDefaults.Web
+[JsonSourceGenerationOptions(
+	  JsonSerializerDefaults.Web
 	, AllowTrailingCommas = true
 	, DefaultBufferSize = 16384
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 	, GenerationMode = JsonSourceGenerationMode.Default
-	, IgnoreReadOnlyFields = false
-	, IgnoreReadOnlyProperties = false
+	, IgnoreReadOnlyFields = true
+	, IgnoreReadOnlyProperties = true
 	, IncludeFields = false
 	, PropertyNameCaseInsensitive = true
 	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
 	, ReadCommentHandling = JsonCommentHandling.Skip
 	, Converters = [
-		typeof(ObjectConverter)
+		typeof(ObjectConverter),
+		// typeof(BindableModelConverter),
 	]
 	// , TypeInfoResolver = new TodoPolymorphicTypeResolver()
 #if DEBUG
@@ -84,6 +87,55 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(List<SampleSealedModel>))]
 [JsonSerializable(typeof(List<SampleFieldDictionaryStringObjectModel>))]
 
+// [JsonConverter(typeof(ObjectConverter))]
 public partial class SampleJsonSerializerContext : JsonSerializerContext
 {
+	static Type[] _extra =
+	[
+		typeof(SamplePublicModel),
+		typeof(SampleTaskModel),
+	];
+
+	public static JsonSerializerOptions DefaultOptions { get; }
+
+	static SampleJsonSerializerContext()
+	{
+		DefaultOptions = new JsonSerializerOptions(Default.Options)
+		{
+			Converters =
+			{
+				new ObjectConverter(_extra),
+			},
+			TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
+		};
+	}
+
+	/*
+	public override global::System.Text.Json.Serialization.Metadata.JsonTypeInfo? GetTypeInfo(global::System.Type type)
+	{
+		Options.TryGetTypeInfo(type, out global::System.Text.Json.Serialization.Metadata.JsonTypeInfo? typeInfo);
+		if (typeInfo.Type == typeof(IBindableModel))
+		{
+			typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
+			{
+				TypeDiscriminatorPropertyName = "_t",
+			};
+			typeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SampleTaskModel), "SampleTaskModel"));
+		}
+		return typeInfo;
+	}
+
+	// This partial is discovered by the generator; you implement it.
+	static partial void ModifyJsonTypeInfo(JsonTypeInfo ti)
+	{
+		if (ti.Type == typeof(IBindableModel))
+		{
+			ti.PolymorphismOptions ??= new JsonPolymorphismOptions
+			{
+				TypeDiscriminatorPropertyName = "_t",
+			};
+			ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SampleTaskModel), "SampleTaskModel"));
+		}
+	}
+	*/
 }

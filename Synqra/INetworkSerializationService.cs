@@ -1,4 +1,5 @@
-﻿using Synqra.BinarySerializer;
+﻿using Microsoft.Extensions.Options;
+using Synqra.BinarySerializer;
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -54,20 +55,26 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 {
 	const ulong _magic = 0xBC8ED5144A534258ul; // "SBX"
 
-	private SBXSerializer _sbxSerializerSenderVerify = new SBXSerializer();
-	private SBXSerializer _sbxSerializerSender = new SBXSerializer();
-	private SBXSerializer _sbxSerializerReceiver = new SBXSerializer();
+	private readonly ISBXSerializerFactory _sbxSerializerFactory;
+	private ISBXSerializer _sbxSerializerSenderVerify;
+	private ISBXSerializer _sbxSerializerSender;
+	private ISBXSerializer _sbxSerializerReceiver;
 
 	public bool IsTextOrBinary => false;
 
 	public ulong Magic => _magic;
 
+	public SbxNetworkSerializationService(ISBXSerializerFactory sbxSerializerFactory)
+	{
+		_sbxSerializerFactory = sbxSerializerFactory;
+		Reinitialize();
+	}
+
 	public void Reinitialize()
 	{
-		_sbxSerializerSender = new SBXSerializer();
-		_sbxSerializerSenderVerify = new SBXSerializer();
-		_sbxSerializerReceiver = new SBXSerializer();
-
+		_sbxSerializerSender = _sbxSerializerFactory.CreateSerializer();
+		_sbxSerializerSenderVerify = _sbxSerializerFactory.CreateSerializer();
+		_sbxSerializerReceiver = _sbxSerializerFactory.CreateSerializer();
 	}
 
 	public ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj, ArraySegment<byte> buffer)

@@ -29,6 +29,8 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Data.Common;
+using Synqra.BinarySerializer;
+using Synqra.Tests.SampleModels.Syncronization;
 
 namespace Synqra.Tests.Simulator;
 
@@ -167,10 +169,44 @@ internal class SynqraTestNode
 		builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
 
 		builder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
+
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.Default.Options);
-		options.Converters.Add(new ObjectConverter());
+		if (options.Converters.Count == 0)
+		{
+			Type[] extra = [
+				typeof(SamplePublicModel),
+				typeof(SampleTaskModel),
+			];
+			options.Converters.Add(new ObjectConverter(extra));
+			// options.Converters.Add(new BindableModelConverter(extra));
+			options.TypeInfoResolver = new SynqraPolymorphicTypeResolver(extra);
+		}
+		else
+		{
+			throw new Exception("Double check why we are here now");
+		}
+		/*
+		var typeInfo = options.GetTypeInfo(typeof(IBindableModel));
+		typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
+		{
+			IgnoreUnrecognizedTypeDiscriminators = false,
+			UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+			TypeDiscriminatorPropertyName = "_t",
+		};
+		typeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SamplePublicModel), "SamplePublicModel"));
+		typeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(SampleTaskModel), "SampleTaskModel"));
+		*/
 		builder.Services.AddSingleton(options);
+
 		builder.Services.AddEmergencyLogger();
+
+		builder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+		{
+			var ser = new SBXSerializer();
+			ser.Map(100, typeof(SamplePublicModel));
+			ser.Map(101, typeof(SampleTaskModel));
+			return ser;
+		}));
 
 		builder.Services.ConfigureHttpJsonOptions(o =>
 		{
@@ -419,6 +455,4 @@ internal class SynqraTestNode
 		{
 		}
 	}
-
-
 }

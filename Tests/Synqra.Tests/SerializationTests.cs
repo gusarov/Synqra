@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Serialization;
+using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.TestHelpers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -50,9 +51,15 @@ public class SerializationTests
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
+				/*
 				Data = new Dictionary<string, object>
 				{
 					["subject"] = "Test1",
+				},
+				*/
+				Data = new SampleTaskModel
+				{
+					Subject = subject,
 				},
 			},
 		};
@@ -101,9 +108,15 @@ public class SerializationTests
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
+				/*
 				Data = new Dictionary<string, object>
 				{
 					["subject"] = "Test1",
+				},
+				*/
+				Data = new SampleTaskModel
+				{
+					Subject = "Test1",
 				},
 			},
 		};
