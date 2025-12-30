@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Concurrent;
@@ -19,10 +20,11 @@ internal class EmergencyLoggerTests : BaseTest
 	[Property("CI", "false")]
 	public async Task Should_do_nothing_for_non_configured_emergency_log()
 	{
-		var ops = MeasureOps(() => SynqraEmergencyLog.Default.LogMessage("This is a test message"));
+		var ops = MeasureOps(() => EmergencyLog.Default.LogInformation("This is a test message"));
 		await Assert.That(ops).IsGreaterThan(10_000_000);
 	}
 	*/
+
 	[Test]
 	public async Task Should_10_save_emergency_log()
 	{
@@ -66,6 +68,7 @@ internal class EmergencyLoggerTests : BaseTest
 	}
 
 	[Test]
+	[Explicit("This test no longer make sense, because file is always locked")]
 	public async Task Should_20_handle_locked_files()
 	{
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -73,14 +76,14 @@ internal class EmergencyLoggerTests : BaseTest
 			// File locking is not supported on Linux and MacOS
 			return;
 		}
-		var keyData = Guid.NewGuid().ToString();
+		var keyData = Guid.NewGuid().ToString("N");
 		var path = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency.log");
 
-		EmergencyLog.Default.Message("Prepare file");
+		EmergencyLog.Default.LogInformation("Prepare file");
 		using var file = File.OpenRead(path); // forgot to share!! So this should cause EmergencyLog to create new file
 		file.Lock(0, 0); // Lock whole file for this stream only, to prevent other writers to corrupt the log. Readers are still allowed.
 
-		EmergencyLog.Default.Message("Should_handle_locked_files test " + keyData);
+		EmergencyLog.Default.LogInformation("Should_handle_locked_files test " + keyData);
 
 		var pathLockedAvoidance = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency_Locked_0.log");
 		await Assert.That(FileReadAllText(pathLockedAvoidance)).Contains(keyData);
@@ -101,20 +104,35 @@ internal class EmergencyLoggerTests : BaseTest
 			{
 				var guid = Guid.NewGuid();
 				guids.Add(guid);
-				EmergencyLog.Default.Message("Should_survive_multithread test " + guid);
+				EmergencyLogImplementation.Default.Message("Should_survive_multithread test " + guid);
 			}
 		}
 		await Task.WhenAll(Thread(), Thread(), Thread(), Thread(), Thread());
 		var log = ReadAllLogs();
 		await Assert.That(log).Contains("Should_survive_multithread");
 		// using var _ = Assert.Multiple();
-		EmergencyLog.Default.Message("Should_survive_multithread verifying...");
+		EmergencyLogImplementation.Default.Message("Should_survive_multithread verifying...");
 
 		foreach (var guid in guids)
 		{
 			await Assert.That(log).Contains(guid.ToString());
 		}
-		EmergencyLog.Default.Message("Should_survive_multithread verifying done.");
+		EmergencyLogImplementation.Default.Message("Should_survive_multithread verifying done.");
+	}
+
+	// before improvements: 2 000 - 6 000
+
+	[Test]
+	[Category("Performance")]
+	public async Task Should_40_measure_single_thread_performance()
+	{
+		var ops = MeasureOps(() => EmergencyLogImplementation.Default.Message("This is a test message " + new string('.', Random.Shared.Next(10))), new PerformanceParameters
+		{
+			// MaxAcceptableDeviationFactor = 1000,
+			// DeviationMeasurementBatches = 7,
+			BatchTime = TimeSpan.FromSeconds(.5),
+		});
+		await Assert.That(ops).IsGreaterThan(100_000);
 	}
 
 	[Test]
