@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;net9.0;net8.0;netstandard2.1;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
+    <!--
+    ;netstandard2.1;netstandard2.0
+    -->
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
@@ -11,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
 

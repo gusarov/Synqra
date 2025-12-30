@@ -326,19 +326,30 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					},
 				},
 			},
-		}, "C301B5010000BF010000000000037375626A65637400075461736B31006E756D626572000302"));
+		}, "C301B5010000BF0100000000001E5461736B310002"));
 
 		yield return () => SP(() => (71, new NewEvent1
 		{
+			// EventId Guid
+			// CommandId Guid
+			// Data Command
 			Event = new CommandCreatedEvent
 			{
+				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf80001"),
+				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83b0002"),
+				//  CommandId Guid
+				//  ContainerId Guid
+				//  TargetTypeId Guid
+				//  CollectionId Guid
+				//  TargetId Guid
+				//  Data object
 				Data = new CreateObjectCommand
 				{
-					TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556297525"),
-					CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770"),
-					TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
-					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
+					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83b0002"),
 					ContainerId = default,
+					TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556290012"),
+					CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc2060013"),
+					TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
 					Target = null,
 					/*
 					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
@@ -353,10 +364,8 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 						Number = 1,
 					},
 				},
-				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
-				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
 			},
-		}, "C301B50104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE683BF0104B8DFD5F8B901B2B1C5AB90B83BE683009849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D77004B6DFD5F8B901DB216DF966E2C9F33D037375626A65637400075461736B31006E756D626572000302"));
+		}, "C301B50104BEDFD5F8B90130602AD9FD1BF8000104B8DFD5F8B901B2B1C5AB90B83B0002BF0104B8DFD5F8B901B2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304B6DFD5F8B901DB216DF966E2C9F33D1E5461736B310002"));
 
 		yield return () => SP(() => (72, new NewEvent1
 		{
@@ -365,10 +374,10 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				PropertyName = "subject",
 				TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556297525"),
 				CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770"),
-				TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
-				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
-				ContainerId = default,
-				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
+				TargetId     = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
+				CommandId    = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
+				ContainerId  = default,
+				EventId      = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
 			},
 		}, "C301BB0104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE68304B6DFD5F8B901DB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
 	}
@@ -377,48 +386,52 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[MethodDataSource(typeof(BinarySerializationObjectPropertyTests), nameof(Should_20_serialize_sample_1_model_source))]
 	public async Task Should_20_serialize_sample_1_model(int id, object model, string expectedHex)
 	{
-		var modelJsonX = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = true });
-		Console.WriteLine(modelJsonX);
+		var options = SampleJsonSerializerContext.DefaultOptions.Indented();
+		var doubleCheckJson = id < 40 || id >= 50; // 40..49 are for object field with a lsit assigned, impossible in JSON
+
+		var modelJson = doubleCheckJson ? JsonSerializer.Serialize(model, options) : null;
+		Console.WriteLine(modelJson);
 
 		var ser = new SBXSerializer();
-		ser.Map( 1, typeof(SampleFieldSealedModel)); // 0z02
-		ser.Map( 2, typeof(SampleSealedModel)); // 0z04
-		ser.Map( 3, typeof(SampleFieldBaseModel)); // 0z06
-		ser.Map( 4, typeof(SampleBaseModel));
-		ser.Map( 5, typeof(SampleDerivedModel)); // 0z1A
-		ser.Map( 6, typeof(SampleFieldObjectModel)); // 0z1C
-		ser.Map( 7, typeof(SampleFieldDerrivedModel));
-		ser.Map( 8, typeof(SampleFieldIntModel));
-		ser.Map( 9, typeof(SampleFieldSealedDerivedModel));
-		ser.Map(10, typeof(SampleFieldListIntModel));
-		ser.Map(11, typeof(SampleFieldListSealedModel));
-		ser.Map(12, typeof(SampleFieldListBaseModel));
-		ser.Map(13, typeof(SampleFieldEnumerableBaseModel));
-		ser.Map(14, typeof(SampleFieldDictionaryStringObjectModel));
+		ser.Map( 1 /* 02 */, typeof(SampleFieldSealedModel));
+		ser.Map( 2 /* 04 */, typeof(SampleSealedModel));
+		ser.Map( 3 /* 06 */, typeof(SampleFieldBaseModel));
+		ser.Map( 4 /* 08 */, typeof(SampleBaseModel));
+		ser.Map( 5 /* 0A */, typeof(SampleDerivedModel));
+		ser.Map( 6 /* 0C */, typeof(SampleFieldObjectModel));
+		ser.Map( 7 /* 0E */, typeof(SampleFieldDerrivedModel));
+		ser.Map( 8 /* 10 */, typeof(SampleFieldIntModel));
+		ser.Map( 9 /* 12 */, typeof(SampleFieldSealedDerivedModel));
+		ser.Map(10 /* 14 */, typeof(SampleFieldListIntModel));
+		ser.Map(11 /* 16 */, typeof(SampleFieldListSealedModel));
+		ser.Map(12 /* 18 */, typeof(SampleFieldListBaseModel));
+		ser.Map(13 /* 1A */, typeof(SampleFieldEnumerableBaseModel));
+		ser.Map(14 /* 1C */, typeof(SampleFieldDictionaryStringObjectModel));
+		ser.Map(15 /* 1E */, typeof(SampleTaskModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
-
 		ser.Serialize<object>(buffer, model, ref pos);
 
 		buffer = buffer[0..pos];
-		HexDump(buffer);
+		Console.WriteLine(Convert.ToHexString(buffer));
+		HexDump(buffer, ser);
+		HexDump(expectedHex.Replace(" ", "").Hex());
 
 		var pos2 = 0;
-		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
 
-		var deserializedJsonX = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = true });
-		Console.WriteLine(deserializedJsonX);
-
-		var modelJson = JsonSerializer.Serialize(model, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = false });
-		var deserializedJson = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { WriteIndented = false });
-
-		Assert.That(deserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
-		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
-
-		EmergencyLog.Default.Debug("HEX DUMP ACTUAL " + Convert.ToHexString(buffer));
+		// EmergencyLog.Default.Debug("HEX DUMP ACTUAL " + Convert.ToHexString(buffer));
+		// EmergencyLog.Default.Debug("HEX DUMP EXPECTED " + Convert.ToHexString(expectedHex.Replace(" ", "").Hex()));
 		Assert.That(Convert.ToHexString(buffer)).IsEqualTo(expectedHex.Replace(" ", "")).GetAwaiter().GetResult();
+
+		if (doubleCheckJson)
+		{
+			var deserialized = ser.Deserialize<object>(buffer, ref pos2);
+			var reeserializedJson = JsonSerializer.Serialize(deserialized, options);
+			Assert.That(reeserializedJson).IsEqualTo(modelJson).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+		}
 	}
 
 	[Test]
