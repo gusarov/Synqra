@@ -66,6 +66,18 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		defaultSeverity: DiagnosticSeverity.Error,
 		isEnabledByDefault: true);
 
+	private const bool TraceLogs = false;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static void DebugLog(Func<string> messageFactory)
+	{
+		if (!TraceLogs)
+		{
+			return;
+		}
+		EmergencyLog.Default.Debug(messageFactory());
+	}
+
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
 		// AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve;
@@ -235,7 +247,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 	static (double, string) GetSchemaData(AttributeData attr)
 	{
-		EmergencyLog.Default.Debug("Schema: " + attr);
+		DebugLog(() => "Schema: " + attr);
 		return ((double)attr.ConstructorArguments[0].Value!, (string)attr.ConstructorArguments[1].Value!);
 	}
 
@@ -256,26 +268,26 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		{
 			// bool useAttribute = false;
 			int i = 0;
-			EmergencyLog.Default.Debug("> AttrNode: " + attr.ToFullString());
+			DebugLog(() => "> AttrNode: " + attr.ToFullString());
 			foreach (var item in attr.ChildNodes())
 			{
-				EmergencyLog.Default.Debug(">> ChildNode: " + item.ToFullString());
+				DebugLog(() => ">> ChildNode: " + item.ToFullString());
 				foreach (var item2 in item.ChildNodes())
 				{
-					EmergencyLog.Default.Debug(">>> ChildNode: " + item2.ToFullString());
+					DebugLog(() => ">>> ChildNode: " + item2.ToFullString());
 					if (item2.ToFullString() == "Schema")
 					{
-						EmergencyLog.Default.Debug("!!! " + i);
+						DebugLog(() => "!!! " + i);
 					}
 					foreach (var item3 in item2.ChildNodes())
 					{
-						EmergencyLog.Default.Debug(">>>> ChildNode: " + item3.ToFullString());
+						DebugLog(() => ">>>> ChildNode: " + item3.ToFullString());
 					}
 					if (i++ == 0)
 					{
 						if (item2.ToFullString() == "Schema")
 						{
-							EmergencyLog.Default.Debug("! SELECTED NEXT AFTER: " + item2.ToFullString());
+							DebugLog(() => "! SELECTED NEXT AFTER: " + item2.ToFullString());
 							i = -1;
 							continue;
 						}
@@ -284,22 +296,22 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						int sc = 0;
 						double ver = 0;
-						EmergencyLog.Default.Debug("! ChildNode: " + item2.ToFullString());
+						DebugLog(() => "! ChildNode: " + item2.ToFullString());
 						foreach (var item3 in item2.ChildNodes())
 						{
-							EmergencyLog.Default.Debug(">>>> ChildNode: " + item3.ToFullString());
+							DebugLog(() => ">>>> ChildNode: " + item3.ToFullString());
 							if (sc++ == 0)
 							{
 								if (double.TryParse(item3.ToFullString(), out ver))
 								{
-									EmergencyLog.Default.Debug("!!! Schema Version: " + ver);
+									DebugLog(() => "!!! Schema Version: " + ver);
 									continue;
 								}
 							}
 							else
 							{
 								var s = item3.ToFullString().Trim('"');
-								EmergencyLog.Default.Debug("!!! Schema String: " + s);
+								DebugLog(() => "!!! Schema String: " + s);
 								yield return (ver, s);
 								break;
 							}
@@ -384,11 +396,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
 			if (p.GetAttributes().Any())
 			{
-				EmergencyLog.Default.Debug($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog(() => $"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 			}
 			if (HasIgnoreAttribute(p))
 			{
-				EmergencyLog.Default.Debug($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog(() => $"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 				continue;
 			}
 
@@ -453,12 +465,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 
 			var classMembers = classData.Clazz.Members;
-			EmergencyLog.Default.Debug($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
+			DebugLog(() => $"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
 			{
-				EmergencyLog.Default.Debug($"{rootType} PARENT IS {rootType.BaseType}");
+				DebugLog(() => $"{rootType} PARENT IS {rootType.BaseType}");
 				rootType = rootType.BaseType;
 			}
 
@@ -521,7 +533,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// EmergencyLog.Default.Debug("[+] Added methods to generated class");
 
 			var originalSourceContent = clazz.SyntaxTree.GetText().ToString();
-			EmergencyLog.Default.Debug($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
+			DebugLog(() => $"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
 			var line = clazz.SyntaxTree.GetLineSpan(clazz.GetLocation().SourceSpan).StartLinePosition.Line;
 
 			var schemas = GetAllSchemasSymbol(classData.Data, classData.Ssa).ToArray();
@@ -553,13 +565,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						ver = lastVer + 0.001;
 					}
-					EmergencyLog.Default.Debug("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
+					DebugLog(() => "*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
 					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
 					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
 				}
 				else
 				{
-					EmergencyLog.Default.Debug("*********** Schema already present as latest: " + lastSchema);
+					DebugLog(() => "*********** Schema already present as latest: " + lastSchema);
 				}
 				// EmergencyLog.Default.Debug(sb.ToString());
 
