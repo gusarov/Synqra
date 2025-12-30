@@ -1,12 +1,17 @@
-﻿using Microsoft.CodeAnalysis;
+// Copy this to a model you need to trace:
+// #define SYNQRA_CODEGEN_TRACE
+
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using Microsoft.Extensions.Logging;
 using Synqra;
 using System;
 using System.Collections.Immutable;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -66,16 +71,15 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		defaultSeverity: DiagnosticSeverity.Error,
 		isEnabledByDefault: true);
 
-	private const bool TraceLogs = false;
+	private static bool _enableTrace = false;
 
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static void DebugLog(Func<string> messageFactory)
+	[Conditional("SYNQRA_CODEGEN_TRACE")]
+	private static void DebugLog(string message)
 	{
-		if (!TraceLogs)
+		if (_enableTrace)
 		{
-			return;
+			EmergencyLog.Default.LogTrace(message);
 		}
-		EmergencyLog.Default.Debug(messageFactory());
 	}
 
 	public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -247,7 +251,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 	static (double, string) GetSchemaData(AttributeData attr)
 	{
-		DebugLog(() => "Schema: " + attr);
+		DebugLog("Schema: " + attr);
 		return ((double)attr.ConstructorArguments[0].Value!, (string)attr.ConstructorArguments[1].Value!);
 	}
 
@@ -268,26 +272,26 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		{
 			// bool useAttribute = false;
 			int i = 0;
-			DebugLog(() => "> AttrNode: " + attr.ToFullString());
+			DebugLog("> AttrNode: " + attr.ToFullString());
 			foreach (var item in attr.ChildNodes())
 			{
-				DebugLog(() => ">> ChildNode: " + item.ToFullString());
+				DebugLog(">> ChildNode: " + item.ToFullString());
 				foreach (var item2 in item.ChildNodes())
 				{
-					DebugLog(() => ">>> ChildNode: " + item2.ToFullString());
+					DebugLog(">>> ChildNode: " + item2.ToFullString());
 					if (item2.ToFullString() == "Schema")
 					{
-						DebugLog(() => "!!! " + i);
+						DebugLog("!!! " + i);
 					}
 					foreach (var item3 in item2.ChildNodes())
 					{
-						DebugLog(() => ">>>> ChildNode: " + item3.ToFullString());
+						DebugLog(">>>> ChildNode: " + item3.ToFullString());
 					}
 					if (i++ == 0)
 					{
 						if (item2.ToFullString() == "Schema")
 						{
-							DebugLog(() => "! SELECTED NEXT AFTER: " + item2.ToFullString());
+							DebugLog("! SELECTED NEXT AFTER: " + item2.ToFullString());
 							i = -1;
 							continue;
 						}
@@ -296,22 +300,22 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						int sc = 0;
 						double ver = 0;
-						DebugLog(() => "! ChildNode: " + item2.ToFullString());
+						DebugLog("! ChildNode: " + item2.ToFullString());
 						foreach (var item3 in item2.ChildNodes())
 						{
-							DebugLog(() => ">>>> ChildNode: " + item3.ToFullString());
+							DebugLog(">>>> ChildNode: " + item3.ToFullString());
 							if (sc++ == 0)
 							{
 								if (double.TryParse(item3.ToFullString(), out ver))
 								{
-									DebugLog(() => "!!! Schema Version: " + ver);
+									DebugLog("!!! Schema Version: " + ver);
 									continue;
 								}
 							}
 							else
 							{
 								var s = item3.ToFullString().Trim('"');
-								DebugLog(() => "!!! Schema String: " + s);
+								DebugLog("!!! Schema String: " + s);
 								yield return (ver, s);
 								break;
 							}
@@ -396,11 +400,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
 			if (p.GetAttributes().Any())
 			{
-				DebugLog(() => $"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 			}
 			if (HasIgnoreAttribute(p))
 			{
-				DebugLog(() => $"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 				continue;
 			}
 
@@ -465,12 +469,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 
 			var classMembers = classData.Clazz.Members;
-			DebugLog(() => $"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
+			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
 			{
-				DebugLog(() => $"{rootType} PARENT IS {rootType.BaseType}");
+				DebugLog($"{rootType} PARENT IS {rootType.BaseType}");
 				rootType = rootType.BaseType;
 			}
 
@@ -511,7 +515,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				EmergencyLog.Default.Error($"Could not find namespace for {clazz.Identifier}", null);
 			}
-			// EmergencyLog.Default.Debug($"Found calcClassNamespace={calcClassNamespace?.Name}");
+			// DebugLog($"Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
@@ -533,13 +537,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// EmergencyLog.Default.Debug("[+] Added methods to generated class");
 
 			var originalSourceContent = clazz.SyntaxTree.GetText().ToString();
-			DebugLog(() => $"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
+			DebugLog($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
 			var line = clazz.SyntaxTree.GetLineSpan(clazz.GetLocation().SourceSpan).StartLinePosition.Line;
 
 			var schemas = GetAllSchemasSymbol(classData.Data, classData.Ssa).ToArray();
 			if (clazz.AttributeLists.Count == 0)
 			{
-				// EmergencyLog.Default.Debug($"GetLineSpan() {line} {clazz.Span.Start}");
+				// DebugLog($"GetLineSpan() {line} {clazz.Span.Start}");
 			}
 			else
 			{
@@ -547,7 +551,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var b = clazz.AttributeLists.First().Span.End;
 				var c = clazz.AttributeLists.Last().Span.Start;
 				var d = clazz.AttributeLists.Last().Span.End;
-				// EmergencyLog.Default.Debug($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
+				// DebugLog($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
 
 				var lastSchemaEntry = schemas.Length == 0
 					? (0d, string.Empty)
@@ -565,13 +569,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						ver = lastVer + 0.001;
 					}
-					DebugLog(() => "*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
+					DebugLog("*********** Schema drift! path= " + clazz.SyntaxTree.FilePath);
 					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
 					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
 				}
 				else
 				{
-					DebugLog(() => "*********** Schema already present as latest: " + lastSchema);
+					DebugLog("*********** Schema already present as latest: " + lastSchema);
 				}
 				// EmergencyLog.Default.Debug(sb.ToString());
 
@@ -921,8 +925,8 @@ $$"""
 			//this will automatically use the path we provided in the target projects csproj file
 			var fileName = $"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs";
 			context.AddSource(fileName, SourceText.From(body.ToString(), Encoding.UTF8));
-			EmergencyLog.Default.Debug($"[+] Added source to context {fileName}");
-			EmergencyLog.Default.Debug($"GENERATED FOR {clazz.Identifier} ({clazz.SyntaxTree.FilePath})");
+			DebugLog($"[+] Added source to context {fileName}");
+			DebugLog($"GENERATED FOR {clazz.Identifier} ({clazz.SyntaxTree.FilePath})");
 		}
 		catch (Exception ex)
 		{
@@ -967,9 +971,9 @@ $$"""
 
 	static string? DeserializeMethod(ITypeSymbol type, string debug)
 	{
-		EmergencyLog.Default.Debug($"[Type {debug}] <DeserializeMethod>: {type} ({type.GetType().Name})");
+		DebugLog($"[Type {debug}] <DeserializeMethod>: {type} ({type.GetType().Name})");
 		var res = DeserializeMethodCore(type, debug: debug);
-		EmergencyLog.Default.Debug($"[Type {debug}] </DeserializeMethod>: {type} => {res}");
+		DebugLog($"[Type {debug}] </DeserializeMethod>: {type} => {res}");
 		return res;
 	}
 	static string? DeserializeMethodCore(ITypeSymbol type, string debug)
@@ -1009,7 +1013,7 @@ $$"""
 				named.TypeArguments.Length == 1 &&
 				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
 			{
-				EmergencyLog.Default.Debug($"[Type {debug}] //// Lsit detected named.Name {named.Name}");
+				DebugLog($"[Type {debug}] //// Lsit detected named.Name {named.Name}");
 
 				var arg = named.TypeArguments[0];
 				// return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
@@ -1017,7 +1021,7 @@ $$"""
 			}
 
 			// Try matching implemented IEnumerable<T> interface
-			EmergencyLog.Default.Debug($"[Type {debug}] °2 {named}");
+			DebugLog($"[Type {debug}] °2 {named}");
 			if (named.ToString().EndsWith("IDictionary<string, object>")
 				|| named.ToString().EndsWith("IDictionary<string, object>?")
 				|| named.ToString().EndsWith("IDictionary<string, object?>")
@@ -1028,13 +1032,13 @@ $$"""
 			}
 			foreach (var i in named.AllInterfaces)
 			{
-				EmergencyLog.Default.Debug($"[Type {debug}] °1 Detected Interface: {i}");
+				DebugLog($"[Type {debug}] °1 Detected Interface: {i}");
 			}
 			foreach (var i in named.AllInterfaces)
 			{
 				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
 				{
-					EmergencyLog.Default.Debug($"[Type {debug}] °1 Selected Interface: {i}");
+					DebugLog($"[Type {debug}] °1 Selected Interface: {i}");
 					return $"List/*SpecialType*/<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
 				}
 			}
@@ -1043,12 +1047,12 @@ $$"""
 
 		if (TryGetIDictionaryKeyAndElement(type, out var keyType, out var elementType1))
 		{
-			EmergencyLog.Default.Debug($"[Type {debug}] //// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
+			DebugLog($"[Type {debug}] //// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
 			return $"Dict<{keyType}, {elementType1}>";
 		}
 		else
 		{
-			EmergencyLog.Default.Debug($"[Type {debug}] //// Unknown collection type detected: {type}");
+			DebugLog($"[Type {debug}] //// Unknown collection type detected: {type}");
 		}
 
 		// Handle IEnumerable<T> (and subclasses like List<T>, T[])
