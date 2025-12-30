@@ -158,6 +158,11 @@ public class SBXSerializer : ISBXSerializer
 
 	public SBXSerializer()
 	{
+		//     ..-129 | Same, but multibyte
+		// -128..-1   | Reserved for system types
+		// 0          | Custom type specified by full name
+		// +1  ..+127 | Positive ids are consumer-driven
+		// +128..     | Same, but multibyte
 		Map(-100, 1, typeof(KeyValuePair<string, object>), new KeyValuePairModelBinder<string, object>());
 		Map(-101, 1, typeof(KeyValuePair<string, string>), new KeyValuePairModelBinder<string, string>());
 		Map(-99, typeof(TransportOperation));
@@ -375,23 +380,43 @@ public class SBXSerializer : ISBXSerializer
 				{
 					var (IdForList, SpecList, ListTSpecified, SharedElementType) = GetTypeIdForList(requestedType, obj);
 					typeId = IdForList;
-					Serialize(in buffer, (long)typeId, ref pos);
+					Serialize(in buffer, (long)typeId, ref pos
+#if DEBUG
+						, $"List TypeId for requested {requestedType.FullName}, actual {actualType?.FullName}, SpecList={SpecList}, ListTSpecified={ListTSpecified}, SharedElementType={SharedElementType}"
+#endif
+						);
 					if (SpecList != null)
 					{
-						Serialize(in buffer, (int)SpecList.Value, ref pos);
+						Serialize(in buffer, (int)SpecList.Value, ref pos
+#if DEBUG
+							, $"SpecList"
+#endif
+							);
 					}
 					if (ListTSpecified != null)
 					{
-						Serialize(in buffer, (int)ListTSpecified.Value, ref pos);
+						Serialize(in buffer, (int)ListTSpecified.Value, ref pos
+#if DEBUG
+							, $"ListTSpecified"
+#endif
+							);
 					}
 					if (SharedElementType != null)
 					{
-						Serialize(in buffer, (int)SharedElementType.Value, ref pos);
+						Serialize(in buffer, (int)SharedElementType.Value, ref pos
+#if DEBUG
+							, $"SharedElementType"
+#endif
+							);
 					}
 				}
 				else
 				{
-					Serialize(in buffer, (long)typeId, ref pos);
+					Serialize(in buffer, (long)typeId, ref pos
+#if DEBUG
+							, $"typeId"
+#endif
+						);
 				}
 				if (typeId == 0)
 				{
@@ -433,11 +458,10 @@ public class SBXSerializer : ISBXSerializer
 			throw new NotSupportedException("Need to track capability of a type to encode null state inside value");
 		}
 
-		if (obj is IBindableModel bm)
+		if (obj is IBindableModel bm && _idByType.TryGetValue(actualType, out var typeInfo1))
 		{
-			_idByType.TryGetValue(actualType, out var typeInfo);
-			EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo.schemaVersion}");
-			bm.Get(this, typeInfo.schemaVersion, buffer, ref pos);
+			EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
+			bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
 		}
 		else if (obj is null)
 		{
@@ -500,9 +524,9 @@ public class SBXSerializer : ISBXSerializer
 				// throw new Exception($"List type expected but typeId is {typeId}");
 			}
 		}
-		else if (_idByType.TryGetValue(actualType, out var typeInfo) && typeInfo.Binder != null)
+		else if (_idByType.TryGetValue(actualType, out var typeInfo2) && typeInfo2.Binder != null)
 		{
-			typeInfo.Binder.Get(obj, this, 0, buffer, ref pos);
+			typeInfo2.Binder.Get(obj, this, 0, buffer, ref pos);
 		}
 		else
 		{
@@ -1420,6 +1444,17 @@ public class SBXSerializer : ISBXSerializer
 	{
 		Serialize(buffer, (long)data, ref pos);
 	}
+
+#if DEBUG
+	public List<(int, int, string)> Tokens = new List<(int, int, string)>();
+
+	public void Serialize(in Span<byte> buffer, in long data, ref int pos, string tokenDebugData)
+	{
+		var start = pos;
+		Serialize(in buffer, in data, ref pos);
+		Tokens.Add((start, pos, tokenDebugData));
+	}
+#endif
 
 	public void Serialize(in Span<byte> buffer, in long data, ref int pos)
 	{

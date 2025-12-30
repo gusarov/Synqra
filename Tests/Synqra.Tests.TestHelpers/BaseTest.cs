@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
+using Synqra.BinarySerializer;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -56,9 +57,26 @@ public class TestUtils : PerformanceTestUtils
 		return sr.ReadToEnd();
 	}
 
-	public void HexDump(ReadOnlySpan<byte> data)
+	public void HexDump(ReadOnlySpan<byte> data, SBXSerializer? serializer = null)
 	{
+		Console.WriteLine();
 		HexDumpWriter.HexDump(data, Console.Write, Console.Write);
+		Console.WriteLine();
+
+#if DEBUG
+		if (serializer is not null)
+		{
+			Console.WriteLine("Tokenized:");
+			foreach (var item in serializer.Tokens)
+			{
+				Console.WriteLine(item.Item3);
+				HexDump(data[item.Item1..(item.Item2-1)]);
+			}
+			Console.WriteLine();
+		}
+#endif
+
+		Console.WriteLine();
 	}
 }
 
