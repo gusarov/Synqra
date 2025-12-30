@@ -54,4 +54,6 @@ public abstract partial class Event : IEvent
 	public override string? ToString()
 	{
 		var ts = base.ToString();
-		return true 
+		return true == ts?.StartsWith("Synqra.") ? ts[7..] : ts;
+	}
+}

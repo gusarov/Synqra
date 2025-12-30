@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra.Storage;
+using Synqra.Storage.Jsonl;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System;
@@ -38,7 +38,7 @@ public class StorageTests<T, TKey> : BaseTest
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
 
-		Configuration["JsonLinesStorage:FileName"] = _fileName = fileName ?? CreateTestFileName("data.jsonl");
+		Configuration["Storage:JsonLinesStorage:FileName"] = _fileName = fileName ?? CreateTestFileName("data.jsonl");
 	}
 
 	[Before(Test)]

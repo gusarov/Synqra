@@ -94,6 +94,7 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 	[
 		typeof(SamplePublicModel),
 		typeof(SampleTaskModel),
+		typeof(SampleTodoTask),
 	];
 
 	public static JsonSerializerOptions DefaultOptions { get; }
@@ -106,7 +107,7 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 			{
 				new ObjectConverter(_extra),
 			},
-			// TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
+			TypeInfoResolver = new SynqraPolymorphicTypeResolver(_extra),
 			/*
 			TypeInfoResolver = new DefaultJsonTypeInfoResolver
 			{

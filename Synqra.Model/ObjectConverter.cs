@@ -38,6 +38,7 @@ public class BindableModelConverter : JsonConverter<IBindableModel>
 	}
 }
 
+
 public class ObjectConverter : JsonConverter<object>
 {
 	private readonly Type[] _extraTypes;
@@ -47,6 +48,11 @@ public class ObjectConverter : JsonConverter<object>
 		_extraTypes = extraTypes;
 		// Microsoft SerializeAsync implementation is very hacky with their custom ObjectConverter. It is not possible to use it as is. As soon as our converter injected, it will serialize IAsyncEnumerable as a value unless I set this internal property.
 		// GetType().GetProperty("CanBePolymorphic", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(this, true);
+	}
+
+	public override bool CanConvert(Type typeToConvert)
+	{
+		return base.CanConvert(typeToConvert);
 	}
 
 	public override object? Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
@@ -74,28 +80,70 @@ public class ObjectConverter : JsonConverter<object>
 			return str;
 		}
 
-		return reader.TokenType switch
+		switch (reader.TokenType)
 		{
-			JsonTokenType.True => true,
-			JsonTokenType.False => false,
-			JsonTokenType.Number when reader.TryGetInt32(out int n) => n,
-			JsonTokenType.Number when reader.TryGetInt64(out long n) => n,
-			JsonTokenType.Number when reader.TryGetUInt64(out ulong n) => n,
-			JsonTokenType.Number => reader.GetDouble(),
-			// JsonTokenType.String when reader.TryGetDateTime(out DateTime datetime) => datetime,
-			// JsonTokenType.String => str(reader.GetString()),
-			JsonTokenType.String => str(reader.GetString()),
-			_ => JsonDocument.ParseValue(ref reader).RootElement.Clone()
+			case JsonTokenType.True: return true;
+			case JsonTokenType.False: return false;
+			case JsonTokenType.Number when reader.TryGetInt32(out int n): return n;
+			case JsonTokenType.Number when reader.TryGetInt64(out long n): return n;
+			case JsonTokenType.Number when reader.TryGetUInt64(out ulong n): return n;
+			case JsonTokenType.Number: return reader.GetDouble();
+			// case // JsonTokenType.String when reader.TryGetDateTime(out DateTime datetime): return datetime,
+			// case // JsonTokenType.String: return str(reader.GetString()),
+			case JsonTokenType.String: return str(reader.GetString());
+			case JsonTokenType.StartObject:
+			{
+				var original = reader;
+				if (!reader.Read()) throw new SynqraJsonException("Can't advance 1");
+				// consume _t property if present, and then deserialize as that type
+				if (reader.TokenType == JsonTokenType.PropertyName && reader.GetString() == "_t")
+				{
+					if (!reader.Read()) throw new SynqraJsonException("Can't advance 2");
+					var typeName = reader.GetString();
+					Type? derivedType = null;
+					foreach (var rootType in SynqraPolymorphicTypeResolver.PolimorficRoots)
+					{
+						var attrs = (JsonDerivedTypeAttribute[])rootType.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), true);
+						foreach (var attr in attrs)
+						{
+							if (attr.DerivedType.Name == typeName)
+							{
+								derivedType = attr.DerivedType;
+								break;
+							}
+						}
+						if (derivedType != null)
+						{
+							break;
+						}
+					}
+					if (derivedType == null)
+					{
+						foreach (var item in _extraTypes)
+						{
+							if (item.Name == typeName)
+							{
+								derivedType = item;
+								break;
+							}
+						}
+					}
+					if (derivedType != null)
+					{
+						var res = JsonSerializer.Deserialize(ref original, derivedType, options);
+						reader = original;
+						return res;
+					}
+					else
+					{
+						throw new SynqraJsonException($"Unknown derived type name: {typeName}");
+					}
+				}
+				break;
+			}
 		};
 
-		// Forward to the JsonElement converter
-		var converter = options.GetConverter(typeof(JsonElement)) as JsonConverter<JsonElement>;
-		if (converter != null)
-		{
-			return converter.Read(ref reader, type, options);
-		}
-
-		throw new SynqraJsonException();
+		throw new SynqraJsonException("Reader did not found a way to deserialzie this json");
 	}
 
 	public override void Write(Utf8JsonWriter w, object value, JsonSerializerOptions options)
@@ -144,11 +192,6 @@ public class ObjectConverter : JsonConverter<object>
 		{
 			var typeName = type?.Name;
 			EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: {typeName}");
-			/*
-			if (typeName?.Contains("Task") == true)
-			{
-				EmergencyLog.Default.Debug($"ObjectConverter.JsonSerializer.Serialize: Stack {new StackTrace()}");
-			}
 			if (rootType == type)
 			{
 				w.WriteStartObject();
@@ -161,10 +204,6 @@ public class ObjectConverter : JsonConverter<object>
 					{
 						p.WriteTo(w);
 					}
-					else
-					{
-						int q = 1;
-					}
 				}
 
 				w.WriteEndObject();
@@ -173,8 +212,12 @@ public class ObjectConverter : JsonConverter<object>
 			{
 				JsonSerializer.Serialize(w, value, rootType, options);
 			}
+			/*
+			var optionsNoObjectConverter = new JsonSerializerOptions(options);
+			var q = optionsNoObjectConverter.Converters.Remove(this);
+			// JsonSerializer.Serialize(w, value, rootType, optionsNoObjectConverter);
+			JsonSerializer.Serialize(w, value, inputType: typeof(object), optionsNoObjectConverter);
 			*/
-			JsonSerializer.Serialize(w, value, rootType, options);
 		}
 	}
 }
@@ -311,6 +354,7 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 							}
 						}
 					}
+					/*
 					var poliOptions = new JsonPolymorphismOptions
 					{
 						TypeDiscriminatorPropertyName = "_t",
@@ -322,6 +366,7 @@ public class SynqraPolymorphicTypeResolver : DefaultJsonTypeInfoResolver
 						poliOptions.DerivedTypes.Add(knownType);
 					}
 					jsonTypeInfo.PolymorphismOptions = poliOptions;
+					*/
 #endif
 				}
 			}
