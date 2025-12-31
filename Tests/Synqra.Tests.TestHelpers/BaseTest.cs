@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
 using Synqra.BinarySerializer;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Text;
 
@@ -55,6 +56,20 @@ public class TestUtils : PerformanceTestUtils
 		// EmergencyLog.Default.Message("FileReadAllText: " + fileName + "\r\n" + new StackTrace());
 		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
 		return sr.ReadToEnd();
+	}
+
+	public List<string> FileReadAllLines(string fileName)
+	{
+		var lines = new List<string>();
+
+		using var sr = new StreamReader(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite /* Main Difference */), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
+		string? line;
+		while ((line = sr.ReadLine()) != null)
+		{
+			lines.Add(line);
+		}
+
+		return lines;
 	}
 
 	public void HexDump(ReadOnlySpan<byte> data, SBXSerializer? serializer = null)
