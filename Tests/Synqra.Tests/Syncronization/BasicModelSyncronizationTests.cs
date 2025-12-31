@@ -24,12 +24,9 @@ internal class BasicModelSyncronizationTests : BaseTest
 	[Before(Test)]
 	public void SetUp()
 	{
-		_nodeMaster = new SynqraTestNode(sp =>
-		{
-
-		}, masterHost: true);
-		_nodeA = new SynqraTestNode(sp => { }) { Port = _nodeMaster.Port, };
-		_nodeB = new SynqraTestNode(sp => { }) { Port = _nodeMaster.Port, };
+		_nodeMaster = new SynqraTestNode(builder => { }, masterHost: true);
+		_nodeA = new SynqraTestNode(builder => { }) { Port = _nodeMaster.Port, };
+		_nodeB = new SynqraTestNode(builder => { }) { Port = _nodeMaster.Port, };
 		// Console.WriteLine("Master: "+ _nodeMaster.Host.Environment.ContentRootPath);
 		// Console.WriteLine("_nodeA: " + _nodeA.Host.Environment.ContentRootPath);
 		// Console.WriteLine("_nodeB: " + _nodeB.Host.Environment.ContentRootPath);

@@ -9,6 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>annotations</Nullable>
     <UseAppHost>true</UseAppHost>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <IsAotCompatible>true</IsAotCompatible>

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Synqra</RootNamespace>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

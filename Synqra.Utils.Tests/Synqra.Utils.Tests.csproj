@@ -9,7 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>annotations</Nullable>
     <UseAppHost>true</UseAppHost>
-    <UserSecretsId>e3a9b10e-820e-4da9-9777-768db7f85353</UserSecretsId>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <IsAotCompatible>true</IsAotCompatible>

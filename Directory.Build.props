@@ -20,4 +20,8 @@
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
 	</PropertyGroup>
+
+	<Target Name="_Synqra_BlockPackOnV1_0_0" BeforeTargets="Pack">
+		<Error Condition="'$(IsPackable)' != 'false' and '$(Version)' == '1.0.0'" Text="Packing is blocked for Version 1.0.0. Please set IsPackable=false or update the Version to 1.0.1 or higher." />
+	</Target>
 </Project>
