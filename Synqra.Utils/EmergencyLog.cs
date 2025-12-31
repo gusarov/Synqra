@@ -550,7 +550,7 @@ public static class EmergencyLogExtensions
 internal class EmergencyLoggerProvider : ILoggerProvider
 {
 	public static EmergencyLoggerProvider DefaultProvider { get; } = new EmergencyLoggerProvider();
-	public static EmergencyLogger DefaultLogger { get; } = (EmergencyLogger)DefaultProvider.CreateLogger("Static");
+	public static EmergencyLogger DefaultLogger { get; } = (EmergencyLogger)DefaultProvider.CreateLogger(string.Empty);
 
 	private ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
 
@@ -571,11 +571,16 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 
 internal class EmergencyLogger : ILogger
 {
-	private readonly string _categoryName;
+	private readonly string _tags;
 
 	public EmergencyLogger(string categoryName)
 	{
-		_categoryName = categoryName;
+		var processName = Process.GetCurrentProcess().ProcessName + ".exe";
+		_tags += $" [{processName}:{Process.GetCurrentProcess().Id}]";
+		if (!string.IsNullOrEmpty(categoryName))
+		{
+			_tags += $" [{ShortCat(categoryName)}]";
+		}
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -585,12 +590,60 @@ internal class EmergencyLogger : ILogger
 
 	public bool IsEnabled(LogLevel logLevel)
 	{
-		return logLevel >= LogLevel.Information;
+		return true;
 	}
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
 	{
-		EmergencyLogImplementation.Default.Message($"[{Level(logLevel)}] [{_categoryName}] {formatter(state, exception)}{(exception != null ? (": " + exception) : "")}");
+		var msg = formatter(state, exception);
+		if (exception != null)
+		{
+			var exStr = exception.ToString();
+			if (!msg.Contains(exStr))
+			{
+				msg += $": {exStr}";
+			}
+		}
+
+		var eventIdStr = eventId.Id != 0 ? $" [{eventId.Id}{(eventId.Name != null ? $":{eventId.Name}" : string.Empty)}]" : string.Empty;
+		EmergencyLogImplementation.Default.Message($"[{Level(logLevel)}]{_tags}{eventIdStr} {msg}");
+	}
+
+	private string ShortCat(string categoryName)
+	{
+		// Replace the category abbreviation logic with a zero-allocation, high-performance version
+		Span<char> catSpan = stackalloc char[categoryName.Length + 10]; // enough for abbreviation + dot + last segment
+		int catLen = 0;
+		int lastDot = -1;
+		for (int i = 0; i < categoryName.Length; i++)
+		{
+			if (categoryName[i] == '.')
+			{
+				lastDot = i;
+			}
+			else if (i == 0 || categoryName[i - 1] == '.')
+			{
+				catSpan[catLen++] = categoryName[i];
+				catSpan[catLen++] = '.';
+			}
+		}
+		if (catLen > 0 && catSpan[catLen - 1] == '.')
+			catLen--; // remove trailing dot
+
+		// Append last segment if there is a dot and it's not empty
+		if (lastDot + 1 < categoryName.Length)
+		{
+			// catSpan[catLen++] = '.';
+			for (int i = lastDot + 2; i < categoryName.Length; i++)
+				catSpan[catLen++] = categoryName[i];
+		}
+#if NETSTANDARD2_0
+		throw new NotSupportedException();
+#else
+		var res = new string(catSpan[0..catLen]);
+		return res;
+#endif
+		// return new string(catSpan[0..catLen]);
 	}
 
 	static string Level(LogLevel level) => level switch
@@ -601,6 +654,6 @@ internal class EmergencyLogger : ILogger
 		LogLevel.Warning => "WRN",
 		LogLevel.Error => "ERR",
 		LogLevel.Critical => "CRT",
-		_ => "None",
+		_ => level.ToString(),
 	};
 }

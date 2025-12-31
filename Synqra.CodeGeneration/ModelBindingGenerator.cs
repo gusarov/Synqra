@@ -440,6 +440,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	/// </summary>
 	static void Execute(SourceProductionContext context, TheCombinedSource combinedData)
 	{
+		var errorBody = new StringBuilder();
+
 		// convey an error message from analyzer:
 		if (combinedData.ClassData.errorMessage is not null || combinedData.ClassData.exception is not null)
 		{
@@ -453,6 +455,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				message));
 			return;
 		}
+		string filePath = string.Empty;
 		try
 		{
 			var classData = combinedData.ClassData;
@@ -467,7 +470,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var doesSupportField = false; // netVer != null && netVer.Major >= 6;
 
 			var clazz = classData.Clazz;
-
+			filePath = clazz.SyntaxTree.FilePath;
 
 			var classMembers = classData.Clazz.Members;
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
@@ -953,8 +956,17 @@ $$"""
 		}
 		catch (Exception ex)
 		{
-			EmergencyLog.Default.Error($"Execute", ex);
-			throw;
+			errorBody.AppendLine("#error CodeGenerationException");
+			errorBody.AppendLine("// ********** ERROR DURING CODE GENERATION **********");
+			errorBody.AppendLine("// " + ex);
+			var fileName = $"{Path.GetFileNameWithoutExtension(filePath)}.Errors.Generated.cs";
+			context.AddSource(fileName, SourceText.From(errorBody.ToString(), Encoding.UTF8));
+			try
+			{
+				EmergencyLog.Default.LogError(ex, $"Execute {ex}");
+			}
+			catch { }
+			// throw;
 		}
 	}
 

@@ -1,3 +1,4 @@
+#define SYNQRA_CODEGEN_TRACE
 using Synqra;
 
 namespace Synqra.Tests.MiniModel;

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Synqra.Tests.TestHelpers;
 using System;
@@ -72,6 +73,58 @@ internal class EmergencyLoggerTests : BaseTest
 		return log;
 	}
 
+	List<string> ReadAllLines()
+	{
+		/*
+#if NET9_0_OR_GREATER
+		return string.Join("", Bro.Viewer.BroViewer.Default.ReadAllLogs());
+#endif
+		*/
+		var path = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency.log");
+		var log = FileReadAllLines(path);
+		var pathTemplate = Path.Combine(Path.GetTempPath(), "Synqra", "Emergency_{0}.log");
+		for (int i = 2; ; i++) // consider all rollovers
+		{
+			var fi = new FileInfo(string.Format(pathTemplate, i));
+			if (fi.Exists && (DateTime.UtcNow - fi.LastWriteTimeUtc).TotalHours < 1)
+			{
+				log.AddRange(FileReadAllLines(fi.FullName));
+			}
+			else
+			{
+				break;
+			}
+
+		}
+		for (int i = 0; ; i++) // consider all locked failures caused by other tests that checks locked file handling
+		{
+			var fi = new FileInfo(string.Format(pathTemplate, "Locked_" + i));
+			if (fi.Exists && (DateTime.UtcNow - fi.LastWriteTimeUtc).TotalHours < 1)
+			{
+				log.AddRange(FileReadAllLines(fi.FullName));
+			}
+			else
+			{
+				break;
+			}
+		}
+		return log;
+	}
+
+	[Test]
+	public async Task Should_11_format_ilog_properly()
+	{
+		var keyData = Guid.NewGuid().ToString();
+		ServiceCollection.AddEmergencyLogger();
+		var logger = ServiceProvider.GetRequiredService<ILogger<EmergencyLoggerTests>>();
+		logger.LogWarning(new EventId(1001, "TheTestEeventId"), "Should_11_format_ilog_properly " + keyData);
+		var log = ReadAllLines();
+		var line = log.FirstOrDefault(l => l.Contains(keyData));
+		Console.WriteLine(line);
+		await Assert.That(line).Contains(" [WRN] ");
+		await Assert.That(line).Contains(" [S.U.T.EmergencyLoggerTests] ");
+	}
+
 	[Test]
 	[Skip("This test no longer make sense, because file is always locked")]
 	public async Task Should_20_handle_locked_files()
@@ -132,6 +185,14 @@ internal class EmergencyLoggerTests : BaseTest
 	public async Task Should_40_measure_single_thread_performance()
 	{
 		var ops = MeasureOps(() => EmergencyLogImplementation.Default.Message("This is a test message " + new string('.', Random.Shared.Next(10))), new PerformanceParameters
+		{
+			// MaxAcceptableDeviationFactor = 1000,
+			// DeviationMeasurementBatches = 7,
+			MaxAcceptableDeviationFactor = 1000,
+			BatchTime = TimeSpan.FromSeconds(.5),
+		});
+		await Assert.That(ops).IsGreaterThan(100_000);
+		ops = MeasureOps(() => EmergencyLog.Default.LogInformation("This is a test message " + new string('.', Random.Shared.Next(10))), new PerformanceParameters
 		{
 			// MaxAcceptableDeviationFactor = 1000,
 			// DeviationMeasurementBatches = 7,
