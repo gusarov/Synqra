@@ -9,6 +9,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Synqra</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks> <!-- GUID Manipulation -->
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

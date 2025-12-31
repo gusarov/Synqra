@@ -22,14 +22,20 @@ RUN dotnet build                       -c $BUILD_CONFIGURATION --no-restore "-cl
 FROM build AS test
 RUN dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
+FROM build AS pack
+RUN dotnet pack -o /out                -c $BUILD_CONFIGURATION --no-restore --no-build
+
 FROM build AS buildaot
 RUN dotnet nuget enable source nuget.org
 RUN dotnet publish -f net10.0 Tests/Synqra.Tests -c Release -r linux-x64
 RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests
 RUN Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
+FROM scratch AS art
+COPY --from=pack /out /
+
 #Sync parallel builds here (should be last stage)
 FROM scratch AS log
-COPY --from=test /src /test
-COPY --from=buildaot /src /buildaot
+COPY --from=test /src /stage/test
+COPY --from=buildaot /src /stage/buildaot
 
