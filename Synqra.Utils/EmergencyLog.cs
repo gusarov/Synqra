@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -130,9 +131,9 @@ internal class EmergencyLogImplementation
 				return;
 			}
 
-			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
-
-#if NET8_0_OR_GREATER && BROWSER
+			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(static x => Format(x))); // multiline prefixing
+// REPLACE || TO && WHEN BROWSER TARGET SUPPORT IS ADDED
+#if NET8_0_OR_GREATER || BROWSER
 			if (OperatingSystem.IsBrowser())
 			{
 				Console.WriteLine("⚠️🚨 SynqraEmergencyLog: " + message);
@@ -161,11 +162,40 @@ internal class EmergencyLogImplementation
 						// slide 50% of file inside! UPD: slide till maxSize/2
 						try
 						{
-							using var sr = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-							sr.Position = Math.Max(fi.Length / 2, fi.Length - maxSizeBytes / 2);
-							using var sw = new FileStream(_logFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-							sr.CopyTo(sw);
-							sw.SetLength(sw.Position);
+							using var rs = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+#if !NETSTANDARD
+							string header;
+							using (var sr = new StreamReader(rs, leaveOpen: true))
+							{
+								header = sr.ReadLine() ?? throw new Exception(); // header line
+							}
+#endif
+							rs.Position = Math.Max(fi.Length / 2, fi.Length - maxSizeBytes / 2);
+							while (rs.ReadByte() != '\n') { }
+							using var ws = new FileStream(_logFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+							// using var sw = new StreamWriter(ws);
+#if !NETSTANDARD
+							using (var sw = new StreamWriter(ws, leaveOpen: true))
+							{
+								const string rollStr = " Roll ";
+								var i = header.IndexOf(rollStr);
+								int roll = 0;
+								if (i > 0)
+								{
+									var ie = header.IndexOf(':', i);
+									if (i >= 0 && ie > 0)
+									{
+										header = header.Substring(i + rollStr.Length, ie - i - rollStr.Length);
+										roll = int.Parse(header);
+									}
+								}
+								roll++;
+								sw.Write(Format($"[INF] [EmergencyLogHeader] Roll {roll}: vSynqra: Previous log file exceeded {maxSizeBytes / (1024 * 1024)}MiB, sliding content"));
+								sw.Flush();
+							}
+#endif
+							rs.CopyTo(ws);
+							ws.SetLength(ws.Position);
 						}
 						catch (Exception ex)
 						{
@@ -263,7 +293,7 @@ internal class EmergencyLogImplementation
 				message = message.Substring(0, message.Length - 1);
 			}
 
-			message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
+			// message = string.Join("", message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n').Select(Format)); // multiline prefixing
 
 			Mutex mutex = null;
 #if NET8_0_OR_GREATER
@@ -439,9 +469,20 @@ internal class EmergencyLogImplementation
 		}
 	}
 
-	private static string Format(string message)
+	static string _processName = Process.GetCurrentProcess().ProcessName
+#if !NETSTANDARD
+		+ (OperatingSystem.IsWindows() ? ".exe" : null)
+#endif
+		+ $":{Process.GetCurrentProcess().Id}"
+		;
+
+	private static string Format(string message, DateTimeOffset at = default)
 	{
-		message = $"[{DateTimeOffset.Now:yyyy'-'MM'-'dd' 'HH':'mm':'ss'.'fffffffzzz}] {message}{Environment.NewLine}"; // {new StackTrace()}{Environment.NewLine}
+		if (at == default)
+		{
+			at = DateTimeOffset.Now;
+		}
+		message = $"[{at:yyyy'-'MM'-'dd' 'HH':'mm':'ss'.'fffffffzzz}] [{_processName}] {message}{Environment.NewLine}"; // {new StackTrace()}{Environment.NewLine}
 		return message;
 	}
 
@@ -575,8 +616,6 @@ internal class EmergencyLogger : ILogger
 
 	public EmergencyLogger(string categoryName)
 	{
-		var processName = Process.GetCurrentProcess().ProcessName + ".exe";
-		_tags += $" [{processName}:{Process.GetCurrentProcess().Id}]";
 		if (!string.IsNullOrEmpty(categoryName))
 		{
 			_tags += $" [{ShortCat(categoryName)}]";
