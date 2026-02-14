@@ -17,29 +17,29 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 
-namespace Synqra.Storage.Jsonl;
+namespace Synqra.AppendStorage.JsonLines;
 
-public static class StorageExtensions
+public static class AppendStorageJsonLinesExtensions
 {
 	static object _synqraJsonLinesStorageConfiguredKey = new object();
 
 	// For nativeAOT
-	public static void AddJsonLinesStorage<T, TKey>(this IHostApplicationBuilder hostBuilder)
+	public static void AddAppendStorageJsonLines<T, TKey>(this IHostApplicationBuilder hostBuilder)
 		// where T : IIdentifiable<TKey>
 	{
 		// _ = typeof(IStorage<T, TKey>);
 		// _ = typeof(JsonLinesStorage<T, TKey>);
-		hostBuilder.AddJsonLinesStorageCore();
-		hostBuilder.Services.TryAddSingleton<IStorage<T, TKey>, JsonLinesStorage<T, TKey>>();
+		hostBuilder.AddAppendStorageJsonLinesCore();
+		hostBuilder.Services.TryAddSingleton<IAppendStorage<T, TKey>, JsonLinesStorage<T, TKey>>();
 	}
 
-	public static void AddJsonLinesStorage(this IHostApplicationBuilder hostBuilder)
+	public static void AddAppendStorageJsonLines(this IHostApplicationBuilder hostBuilder)
 	{
-		hostBuilder.AddJsonLinesStorageCore();
-		hostBuilder.Services.TryAddSingleton(typeof(IStorage<,>), typeof(JsonLinesStorage<,>));
+		hostBuilder.AddAppendStorageJsonLinesCore();
+		hostBuilder.Services.TryAddSingleton(typeof(IAppendStorage<,>), typeof(JsonLinesStorage<,>));
 	}
 
-	internal static void AddJsonLinesStorageCore(this IHostApplicationBuilder hostBuilder)
+	internal static void AddAppendStorageJsonLinesCore(this IHostApplicationBuilder hostBuilder)
 	{
 		if (hostBuilder.Properties.TryAdd(_synqraJsonLinesStorageConfiguredKey, string.Empty))
 		{
@@ -52,7 +52,7 @@ public static class StorageExtensions
 		public string FileName { get; set; } = "[TypeName].jsonl";
 	}
 
-	private class JsonLinesStorage<T, TKey> : IStorage<T, TKey>, IDisposable, IAsyncDisposable
+	private class JsonLinesStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, IAsyncDisposable
 		//where T : IIdentifiable<TKey>
 	{
 		private readonly ILogger _logger;
@@ -103,22 +103,28 @@ public static class StorageExtensions
 			}
 		}
 
-		public IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken? cancellationToken = default)
+		public IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken cancellationToken = default)
 		{
-			return new JsonLinesAsyncEnumerable(this);
+			return new JsonLinesAsyncEnumerable(this, cancellationToken);
 		}
 
 		private class JsonLinesAsyncEnumerable : IAsyncEnumerable<T>
 		{
 			private readonly JsonLinesStorage<T, TKey> _storage;
+			private readonly CancellationToken _cancellationToken;
 
-			public JsonLinesAsyncEnumerable(JsonLinesStorage<T, TKey> storage)
+			public JsonLinesAsyncEnumerable(JsonLinesStorage<T, TKey> storage, CancellationToken cancellationToken)
 			{
 				_storage = storage;
+				_cancellationToken = cancellationToken;
 			}
 
 			public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
 			{
+				if (cancellationToken == default)
+				{
+					cancellationToken = _cancellationToken;
+				}
 				return new JsonLinesAsyncEnumerator(_storage.FileName, _storage._serializerOptions, cancellationToken);
 			}
 		}
@@ -212,7 +218,7 @@ public static class StorageExtensions
 			}
 		}
 
-		public async Task AppendAsync(T item)
+		public async Task AppendAsync(T item, CancellationToken cancellationToken = default)
 		{
 			if (item == null)
 			{
@@ -341,7 +347,7 @@ public static class StorageExtensions
 #endif
 		}
 
-		public async Task FlushAsync()
+		public async Task FlushAsync(CancellationToken cancellationToken = default)
 		{
 #if LOCK
 			lock (_lock)

@@ -1,11 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Synqra.Storage;
-
+using Synqra.AppendStorage;
+using Synqra.Projection.InMemory;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Text.Json;
@@ -14,13 +15,13 @@ using System.Threading.Tasks;
 
 namespace Synqra.Tests;
 
-using IStorage = IStorage<Event, Guid>;
+using IAppendStorage = IAppendStorage<Event, Guid>;
 
-public class StateManagementTests : BaseTest<ISynqraStoreContext>
+public class StateManagementTests : BaseTest<IProjection>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
-	FakeStorage _fakeStorage => ServiceProvider.GetService<FakeStorage>() ?? (FakeStorage)ServiceProvider.GetService<IStorage<Event, Guid>>() ?? (FakeStorage)ServiceProvider.GetService<IStorage>();
+	FakeAppendStorage _fakeStorage => ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
 	ISynqraCollection<MyPocoTask> _tasks => _sut.GetCollection<MyPocoTask>();
 
 	public StateManagementTests()
@@ -29,11 +30,11 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
-		HostBuilder.Services.AddSingleton<FakeStorage>();
+		HostBuilder.Services.AddSingleton<FakeAppendStorage>();
 		// HostBuilder.Services.AddSingleton(typeof(IStorage<,>), typeof(FakeStorage<,>));
 		// HostBuilder.Services.AddSingleton<IStorage<Event, Guid>, FakeStorage<Event, Guid>>();
-		HostBuilder.Services.AddSingleton<IStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeStorage>());
-		HostBuilder.Services.AddSingleton<IStorage>(sp => sp.GetRequiredService<FakeStorage>());
+		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
+		HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
 
 		// HostBuilder.AddJsonLinesStorage();
 
@@ -111,8 +112,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		// reopen
 		var bt = new StateManagementTests();
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
-		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
+		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
+		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
 
 		tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
@@ -144,8 +145,8 @@ public class StateManagementTests : BaseTest<ISynqraStoreContext>
 		// reopen
 		var bt = new StateManagementTests();
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
-		bt.ServiceCollection.AddSingleton<IStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<ISynqraStoreContext>();
+		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
+		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
 
 		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
@@ -180,16 +181,16 @@ public class MyPocoTask
 	public string Subject { get; set; }
 }
 
-public class FakeStorage : FakeStorage<Event, Guid>, IStorage
+public class FakeAppendStorage : FakeAppendStorage<Event, Guid>, IAppendStorage
 {
 }
 
-public class FakeStorage<T, TKey> : IStorage<T, TKey>
+public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	// where T : IIdentifiable<TKey>
 {
 	public List<T> Items { get; } = new List<T>();
 
-	public Task AppendAsync(T item)
+	public Task AppendAsync(T item, CancellationToken cancellationToken = default)
 	{
 		Items.Add(item);
 		return Task.CompletedTask;
@@ -204,12 +205,12 @@ public class FakeStorage<T, TKey> : IStorage<T, TKey>
 		return default;
 	}
 
-	public Task FlushAsync()
+	public Task FlushAsync(CancellationToken cancellationToken = default)
 	{
 		return Task.CompletedTask;
 	}
 
-	public async IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken? cancellationToken = null)
+	public async IAsyncEnumerable<T> GetAll(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
 		foreach (T item in Items)
 		{

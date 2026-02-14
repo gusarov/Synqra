@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 
-namespace Synqra;
+namespace Synqra.Projection.InMemory;
 
 public static class SynqraPocoTrackingExtensions
 {
@@ -41,10 +41,10 @@ public static class SynqraPocoTrackingExtensions
 
 		void AddCore(object item)
 		{
-			_storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
+			_storeCollection.Projection.GetId(item, null, GetMode.RequiredId); // ensure attached
 			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type
 #if NET8_0_OR_GREATER
-				, _storeCollection.Store._jsonSerializerOptions
+				, ((InMemoryProjection)_storeCollection.Projection)._jsonSerializerOptions
 #endif
 				);
 		}
@@ -62,7 +62,7 @@ public static class SynqraPocoTrackingExtensions
 				// serialzie again
 				var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type
 #if NET8_0_OR_GREATER
-					, ((StoreContext)_storeCollection.Store)._jsonSerializerOptions
+					, ((InMemoryProjection)_storeCollection.Projection)._jsonSerializerOptions
 #endif
 					);
 				if (json != kvp.Value)
@@ -70,12 +70,12 @@ public static class SynqraPocoTrackingExtensions
 					// changed!!
 					var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value
 #if NET8_0_OR_GREATER
-						, ((StoreContext)_storeCollection.Store)._jsonSerializerOptions
+						, ((InMemoryProjection)_storeCollection.Projection)._jsonSerializerOptions
 #endif
 						);
 					var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json
 #if NET8_0_OR_GREATER
-						, ((StoreContext)_storeCollection.Store)._jsonSerializerOptions
+						, ((InMemoryProjection)_storeCollection.Projection)._jsonSerializerOptions
 #endif
 						);
 					foreach (var item in original.Keys.Union(updated.Keys))
@@ -84,15 +84,15 @@ public static class SynqraPocoTrackingExtensions
 						var newValue = updated.TryGetValue(item, out var nv) ? nv : null;
 						if (oldValue != newValue)
 						{
-							await _storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+							await _storeCollection.Projection.SubmitCommandAsync(new ChangeObjectPropertyCommand
 							{
 								CommandId = GuidExtensions.CreateVersion7(),
 								ContainerId = _storeCollection.ContainerId,
-								TargetTypeId = ((StoreContext)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
+								TargetTypeId = ((InMemoryProjection)_storeCollection.Projection).GetTypeMetadata(_storeCollection.Type).TypeId,
 								PropertyName = item,
 								OldValue = oldValue,
 								NewValue = newValue,
-								TargetId = _storeCollection.Store.GetId(kvp.Key, null, GetMode.RequiredId),
+								TargetId = _storeCollection.Projection.GetId(kvp.Key, null, GetMode.RequiredId),
 							});
 						}
 					}

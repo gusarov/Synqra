@@ -315,7 +315,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 
 	class ConfiguredMarker : IBindableModel
 	{
-		ISynqraStoreContext? IBindableModel.Store
+		IProjection? IBindableModel.Store
 		{
 			get => throw new NotImplementedException();
 			set => throw new NotImplementedException();

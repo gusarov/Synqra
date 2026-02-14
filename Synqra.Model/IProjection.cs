@@ -1,6 +1,6 @@
 ﻿namespace Synqra;
 
-public interface ISynqraStoreContext : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	/// <summary>
 	/// Get Id of the model instance. If model is not tracked, throw exception.

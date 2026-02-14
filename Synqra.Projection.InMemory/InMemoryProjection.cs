@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using Synqra.AppendStorage;
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -9,13 +10,13 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
-using IStorage = IStorage<Event, Guid>;
+using IAppendStorage = IAppendStorage<Event, Guid>;
 
-public static class StoreContextExtensions
+public static class InMemoryStoreContextExtensions
 {
-	public static bool IsOnline(this ISynqraStoreContext storeContext)
+	public static bool IsOnline(this IProjection storeContext)
 	{
-		if (storeContext is StoreContext sc)
+		if (storeContext is InMemoryProjection sc)
 		{
 			return sc.IsOnline;
 		}
@@ -41,7 +42,7 @@ public class StrongReference
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 
@@ -50,8 +51,8 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
-	private readonly IStorage _storage;
-	private readonly EventReplicationService? _eventReplicationService;
+	private readonly IAppendStorage _eventStorage;
+	private readonly IEventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -61,19 +62,19 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
-	static StoreContext()
+	static InMemoryProjection()
 	{
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
-	public StoreContext(
-		  IStorage storage
-		, EventReplicationService? eventReplicationService = null
+	public InMemoryProjection(
+		  IAppendStorage eventStorage
+		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		)
 	{
-		_storage = storage;
+		_eventStorage = eventStorage;
 		_eventReplicationService = eventReplicationService;
 		_jsonSerializerOptions = jsonSerializerOptions;
 		if (jsonSerializerContext != null)
@@ -308,12 +309,12 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 #endif
 	}
 
-	ISynqraCollection ISynqraStoreContext.GetCollection(Type type)
+	ISynqraCollection IProjection.GetCollection(Type type)
 	{
 		return (ISynqraCollection)GetCollectionInternal(type);
 	}
 
-	public StoreCollection GetCollection(Type type)
+	internal StoreCollection GetCollection(Type type)
 	{
 		return GetCollectionInternal(type);
 	}
@@ -424,7 +425,7 @@ internal class StoreContext : ISynqraStoreContext, ICommandVisitor<CommandHandle
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
-			await _storage.AppendAsync(@event); // store event in storage and trigger replication
+			await _eventStorage.AppendAsync(@event); // store event in storage and trigger replication
 		}
 		_eventReplicationService?.Trigger(commandHandlingContext.Events);
 	}
@@ -792,18 +793,18 @@ internal enum GetMode : byte
 
 internal static class SynqraStoreContextInternalExtensions
 {
-	internal static Guid GetId(this ISynqraStoreContext ctx, object model, StoreCollection? collection, GetMode mode)
+	internal static Guid GetId(this IProjection ctx, object model, StoreCollection? collection, GetMode mode)
 	{
-		return ((StoreContext)ctx).GetId(model, collection, mode);
+		return ((InMemoryProjection)ctx).GetId(model, collection, mode);
 	}
 
-	internal static AttachedObjectData Attach(this ISynqraStoreContext ctx, object model, StoreCollection collection)
+	internal static AttachedObjectData Attach(this IProjection ctx, object model, StoreCollection collection)
 	{
-		return ((StoreContext)ctx).Attach(model, collection);
+		return ((InMemoryProjection)ctx).Attach(model, collection);
 	}
 
-	internal static (bool IsJustCreated, Guid Id) GetOrCreateId(this ISynqraStoreContext ctx, object model, StoreCollection collection)
+	internal static (bool IsJustCreated, Guid Id) GetOrCreateId(this IProjection ctx, object model, StoreCollection collection)
 	{
-		return ((StoreContext)ctx).GetOrCreateId(model, collection);
+		return ((InMemoryProjection)ctx).GetOrCreateId(model, collection);
 	}
 }
