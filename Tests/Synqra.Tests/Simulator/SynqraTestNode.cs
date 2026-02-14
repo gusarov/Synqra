@@ -8,7 +8,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
-using Synqra.Storage.Jsonl;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.Helpers;
 using Synqra.Tests.TestHelpers;
@@ -31,6 +30,9 @@ using System.Text.Json.Serialization;
 using System.Data.Common;
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels.Syncronization;
+using Synqra.Projection.InMemory;
+using Synqra.AppendStorage.JsonLines;
+using Synqra.AppendStorage;
 
 namespace Synqra.Tests.Simulator;
 
@@ -89,13 +91,13 @@ internal class SynqraTestNode
 #else
 	public Microsoft.AspNetCore.Builder.WebApplication Host { get; private set; }
 #endif
-	ISynqraStoreContext __storeContext;
+	IProjection __storeContext;
 
-	public ISynqraStoreContext StoreContext { get =>
+	public IProjection StoreContext { get =>
 #if NETFRAMEWORK
 			throw new NotImplementedException();
 #else
-			__storeContext ??= Host.Services.GetRequiredService<ISynqraStoreContext>();
+			__storeContext ??= Host.Services.GetRequiredService<IProjection>();
 #endif
 	}
 
@@ -163,7 +165,7 @@ internal class SynqraTestNode
 		});
 
 		builder.AddSynqraStoreContext();
-		builder.AddJsonLinesStorage<Event, Guid>();
+		builder.AddAppendStorageJsonLines<Event, Guid>();
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
 		builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
@@ -239,10 +241,9 @@ internal class SynqraTestNode
 		}
 		else
 		{
-			builder.Services.AddHostedService<EventReplicationService>(x => x.GetRequiredService<EventReplicationService>());
-
-			builder.Services.AddSingleton<EventReplicationService>(); // x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
-			// builder.Services.AddSingleton<EventReplicationService>(x => x.GetServices<IHostedService>().OfType<EventReplicationService>().Single());
+			builder.Services.AddSingleton<EventReplicationService>();
+			builder.Services.AddSingleton<IEventReplicationService>(x => x.GetRequiredService<EventReplicationService>());
+			builder.Services.AddHostedService(x => x.GetRequiredService<EventReplicationService>());
 
 			builder.Services.AddSingleton<EventReplicationState>();
 			// builder.Services.Configure<EventReplicationConfig>(builder.Configuration.GetSection(nameof(EventReplicationConfig)));
@@ -318,7 +319,7 @@ internal class SynqraTestNode
 						// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
 						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
 
-						var storeCtx = app.Services.GetRequiredService<ISynqraStoreContext>();
+						var storeCtx = app.Services.GetRequiredService<IProjection>();
 						if (operation is NewEvent1 newEvent1)
 						{
 							if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
@@ -333,7 +334,7 @@ internal class SynqraTestNode
 								var ev = newEvent1.Event;
 								// ev.MasterSeq
 								await ev.AcceptAsync(storeCtx, null);
-								var storage = app.Services.GetRequiredService<IStorage<Event, Guid>>();
+								var storage = app.Services.GetRequiredService<IAppendStorage<Event, Guid>>();
 								await storage.AppendAsync(ev);
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try

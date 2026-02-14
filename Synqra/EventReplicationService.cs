@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Synqra.AppendStorage;
 using System;
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
@@ -13,14 +14,14 @@ namespace Synqra;
 /// <summary>
 /// Client-side service that connect to WS Master
 /// </summary>
-public class EventReplicationService : IHostedService
+public class EventReplicationService : IHostedService, IEventReplicationService
 {
 	public const int DefaultFrameSize = 8192;
 
-	private readonly IStorage<Event, Guid> _storage;
+	private readonly IAppendStorage<Event, Guid> _storage;
 	private readonly EventReplicationState _eventReplicationState;
 	private readonly JsonSerializerContext? _jsonSerializerContext;
-	private readonly Lazy<ISynqraStoreContext> _synqraStoreContext;
+	private readonly Lazy<IProjection> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
 
 	private ClientWebSocket? _connection;
@@ -34,9 +35,9 @@ public class EventReplicationService : IHostedService
 
 	public EventReplicationService(
 		  IOptions<EventReplicationConfig> options
-		, IStorage<Event, Guid> storage
+		, IAppendStorage<Event, Guid> storage
 		, EventReplicationState eventReplicationState
-		, Lazy<ISynqraStoreContext> synqraStoreContext
+		, Lazy<IProjection> synqraStoreContext
 		, INetworkSerializationService networkSerializationService
 		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
@@ -248,7 +249,7 @@ public class EventReplicationService : IHostedService
 		// return Task.CompletedTask;
 	}
 
-	internal void Trigger(IReadOnlyList<Event> events)
+	public void Trigger(IReadOnlyList<Event> events)
 	{
 		_autoResetEvent.Set();
 	}

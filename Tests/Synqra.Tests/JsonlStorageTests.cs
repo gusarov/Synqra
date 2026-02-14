@@ -1,9 +1,11 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Synqra.Storage.Jsonl;
+using Synqra.AppendStorage;
+using Synqra.AppendStorage.JsonLines;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using TUnit.Assertions.Extensions;
+using static Synqra.AppendStorage.JsonLines.AppendStorageJsonLinesExtensions;
 
 namespace Synqra.Tests;
 
@@ -17,16 +19,16 @@ public class TestItem //: IIdentifiable<int>
 public class StorageTests<T, TKey> : BaseTest
 	//where T //: IIdentifiable<TKey>
 {
-	private IStorage<T, TKey>? __storage;
+	private IAppendStorage<T, TKey>? __storage;
 
-	protected IStorage<T, TKey> _storage => __storage ?? (__storage = ServiceProvider.GetRequiredService<IStorage<T, TKey>>());
+	protected IAppendStorage<T, TKey> _storage => __storage ?? (__storage = ServiceProvider.GetRequiredService<IAppendStorage<T, TKey>>());
 
 	protected string _fileName;
 
 	public void SetupCore(string? fileName = null)
 	{
-		HostBuilder.AddJsonLinesStorage<TestItem, int>();
-		HostBuilder.AddJsonLinesStorage<Event, Guid>();
+		HostBuilder.AddAppendStorageJsonLines<TestItem, int>();
+		HostBuilder.AddAppendStorageJsonLines<Event, Guid>();
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
 
@@ -66,11 +68,11 @@ public class JsonLinesStorageRegistrationPerformance : BaseTest
 
 		var cnt = ServiceCollection.Count;
 
-		HostBuilder.AddJsonLinesStorageCore();
+		HostBuilder.AddAppendStorageJsonLinesCore();
 
 		await Assert.That(MeasureOps(() =>
 		{
-			HostBuilder.AddJsonLinesStorageCore();
+			HostBuilder.AddAppendStorageJsonLinesCore();
 			/*
 			for (int i = ServiceCollection.Count - 1; i >= cnt; i--)
 			{
@@ -81,7 +83,7 @@ public class JsonLinesStorageRegistrationPerformance : BaseTest
 
 		await Assert.That(ServiceCollection.Count).IsEqualTo(cnt + 2);
 
-		var cfg = ServiceProvider.GetRequiredService<IOptions<StorageExtensions.JsonLinesStorageConfig>>();
+		var cfg = ServiceProvider.GetRequiredService<IOptions<JsonLinesStorageConfig>>();
 		await Assert.That(cfg.Value.FileName).IsEqualTo("test1");
 	}
 }

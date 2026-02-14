@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
     <!--
-    ;netstandard2.1;netstandard2.0
+    ;netstandard2.0
     -->
     <ImplicitUsings>enable</ImplicitUsings>
     <Version>0.1.0</Version>
@@ -28,8 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Synqra.Abstractions\Synqra.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
+    <ProjectReference Include="..\Synqra.Projection.Abstractions\Synqra.Projection.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
 

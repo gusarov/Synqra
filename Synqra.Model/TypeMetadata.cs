@@ -1,6 +1,6 @@
 namespace Synqra;
 
-class TypeMetadata
+public class TypeMetadata
 {
 	public Type Type { get; set; }
 	public Guid TypeId { get; set; }
