@@ -1,7 +1,49 @@
 ﻿@page "/"
+@using Contoso.Model
+@using Contoso.Projection.InMemory
+@using Synqra
+@*inject ContosoInMemoryProjection localOnlyProjection*@
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Synqra Contoso Playwright</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>This page tests Synqra on WASM</h1>
 
-Welcome to your new app.
+<h2>Test 001 - Add element to collection</h2>
+<InputText @bind-Value="itemName" data-testid="itemName" />
+<button @onclick="AddElement" data-testid="btnAdd">Add element to collection</button>
+<table>
+    <thead>
+        <tr>
+            <th>Id</th>
+            <th>Item Name</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in localOnlyProjection.GetCollection<ContosoItem>())
+        {
+            <tr>
+                <td><code>@localOnlyProjection.GetId(item)</code></td>
+                <td>@item.ItemName</td>
+            </tr>
+        }
+    </tbody>
+</table>
+@code {
+
+    IProjection localOnlyProjection;
+
+    public Home([FromKeyedServices("localOnlyProjection")] IProjection localOnlyProjection)
+    {
+        this.localOnlyProjection = localOnlyProjection;
+    }
+
+    string itemName = string.Empty;
+
+    private void AddElement(MouseEventArgs args)
+    {
+        localOnlyProjection.GetCollection<ContosoItem>().Add(new ContosoItem
+        {
+            ItemName = itemName,
+        });
+    }
+}
