@@ -13,4 +13,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Contoso.Projection.InMemory\Contoso.Projection.InMemory.csproj" />
+  </ItemGroup>
+
 </Project>

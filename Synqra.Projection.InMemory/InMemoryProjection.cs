@@ -51,7 +51,7 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
-	private readonly IAppendStorage _eventStorage;
+	private readonly IAppendStorage? _eventStorage;
 	private readonly IEventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
@@ -68,7 +68,7 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 	}
 
 	public InMemoryProjection(
-		  IAppendStorage eventStorage
+		  IAppendStorage? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
@@ -425,7 +425,10 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
-			await _eventStorage.AppendAsync(@event); // store event in storage and trigger replication
+			if (_eventStorage != null)
+			{
+				await _eventStorage.AppendAsync(@event); // store event in storage and trigger replication
+			}
 		}
 		_eventReplicationService?.Trigger(commandHandlingContext.Events);
 	}

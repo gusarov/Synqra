@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Contoso.Model\Contoso.Model.csproj" />
+    <ProjectReference Include="..\..\Synqra.Model\Synqra.Model.csproj" />
+    <ProjectReference Include="..\..\Synqra.Projection.Abstractions\Synqra.Projection.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Synqra.Projection.InMemory\Synqra.Projection.InMemory.csproj" />
+  </ItemGroup>
+
+</Project>
