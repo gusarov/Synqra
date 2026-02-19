@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.SampleModels.Syncronization;
@@ -30,7 +30,7 @@ public class JsonSerializationTests
 		using var __ = Assert.Multiple();
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 		{
-			"subject": "{{subject}}"
+			"Subject": "{{subject}}"
 		}
 		""".NormalizeNewLines());
 		var deserializedObj = JsonSerializer.Deserialize(json, SampleJsonSerializerContext.Default.SampleTodoTaskPoco);
@@ -55,7 +55,7 @@ public class JsonSerializationTests
 		await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 {
 	"_t": "SampleTodoTaskPoco",
-	"subject": "{{subject}}"
+	"Subject": "{{subject}}"
 }
 """.NormalizeNewLines());
 		var deserializedObj = (SampleTodoTaskPoco)JsonSerializer.Deserialize<object>(json, SampleJsonSerializerContext.DefaultOptions);
@@ -98,21 +98,21 @@ public class JsonSerializationTests
 			await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
 			{
 				"_t": "CommandCreatedEvent",
-				"data": {
+				"Data": {
 					"_t": "CreateObjectCommand",
-					"data": {
+					"Data": {
 						"_t": "SampleTaskModel",
-						"subject": "{{subject}}",
-						"number": 0
+						"Subject": "{{subject}}",
+						"Number": 0
 					},
-					"targetTypeId": "00000000-0000-0000-0000-000000000000",
-					"collectionId": "00000000-0000-0000-0000-000000000000",
-					"targetId": "00000000-0000-0000-0000-000000000000",
-					"commandId": "{{obj.Data.CommandId}}",
-					"containerId": "00000000-0000-0000-0000-000000000000"
+					"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+					"CollectionId": "00000000-0000-0000-0000-000000000000",
+					"TargetId": "00000000-0000-0000-0000-000000000000",
+					"CommandId": "{{obj.Data.CommandId}}",
+					"ContainerId": "00000000-0000-0000-0000-000000000000"
 				},
-				"eventId": "{{obj.EventId}}",
-				"commandId": "{{obj.CommandId}}"
+				"EventId": "{{obj.EventId}}",
+				"CommandId": "{{obj.CommandId}}"
 			}
 			""".NormalizeNewLines());
 			var deserializedObj = JsonSerializer.Deserialize<Event>(json, ctx);
@@ -186,23 +186,23 @@ public class JsonSerializationTests
 			await Assert.That(json2.NormalizeNewLines()).IsEqualTo($$"""
 	{
 		"_t": "NewEvent1",
-		"event": {
+		"Event": {
 			"_t": "CommandCreatedEvent",
-			"data": {
+			"Data": {
 				"_t": "CreateObjectCommand",
-				"data": {
+				"Data": {
 					"_t": "SampleTaskModel",
-					"subject": "Test1",
-					"number": 1
+					"Subject": "Test1",
+					"Number": 1
 				},
-				"targetTypeId": "00000000-0000-0000-0000-000000000000",
-				"collectionId": "00000000-0000-0000-0000-000000000000",
-				"targetId": "00000000-0000-0000-0000-000000000000",
-				"commandId": "{{@event.Data.CommandId}}",
-				"containerId": "00000000-0000-0000-0000-000000000000"
+				"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+				"CollectionId": "00000000-0000-0000-0000-000000000000",
+				"TargetId": "00000000-0000-0000-0000-000000000000",
+				"CommandId": "{{@event.Data.CommandId}}",
+				"ContainerId": "00000000-0000-0000-0000-000000000000"
 			},
-			"eventId": "{{@event.EventId}}",
-			"commandId": "{{@event.CommandId}}"
+			"EventId": "{{@event.EventId}}",
+			"CommandId": "{{@event.CommandId}}"
 		}
 	}
 	""".NormalizeNewLines());

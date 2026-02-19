@@ -414,21 +414,29 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	}
 
 	// Enumerate instance properties across the full inheritance chain, most-base first, no duplicates by name.
-	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesWithAncestors(INamedTypeSymbol type)
+	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesWithAncestors(INamedTypeSymbol type, ISet<INamedTypeSymbol> except)
 	{
 		var seen = new HashSet<string>(StringComparer.Ordinal);
 		var types = new List<INamedTypeSymbol>();
+
 		for (var t = type; t != null; t = t.BaseType)
 		{
-			types.Add(t);
+			if (!except.Contains(t))
+			{
+				types.Add(t);
+			}
 		}
+
 		types.Reverse(); // base types first
 
 		foreach (var t in types)
 		{
 			foreach (var p in GetAllInstancePropertiesOfType(t))
 			{
-				yield return p;
+				if (seen.Add(p.Name) && !p.Name.Contains("IBindableModel"))
+				{
+					yield return p;
+				}
 			}
 		}
 	}
@@ -459,6 +467,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		try
 		{
 			var classData = combinedData.ClassData;
+
+			var exclude = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default)
+			{
+				classData.Ibm,
+			};
+
 			string tfm = combinedData.BuildProps.Tfm;
 			string SynqraBuildBox = combinedData.BuildProps.SynqraBuildBox;
 			if (tfm == null || classData.Clazz is null)
@@ -499,8 +513,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					usingsList.Add(usingStatement);
 				}
 			}
-			Add("using Synqra;");
+			Add("using System;");
 			Add("using System.ComponentModel;");
+			Add("using Synqra;");
+			Add("using Synqra.BinarySerializer;");
 			foreach (var usingStatement in clazz.SyntaxTree.GetCompilationUnitRoot().Usings)
 			{
 				Add(usingStatement.ToString());
@@ -539,7 +555,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			#region SchemaDetection
 			string suggestedSchema = "1";
 			// Append inherited properties to schema suggestion (minimally qualified to keep it compact)
-			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data)/*.Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default))*/)
+			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude)/*.Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default))*/)
 			{
 				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 			}
@@ -649,7 +665,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		{
 """);
 				// Include properties from this class and all base classes that have a setter
-				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data).Where(p => p.SetMethod is not null))
+				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null))
 				{
 					if (pro.Type.ToString() == "int")
 					{
@@ -701,7 +717,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 					body.AppendLine($"\t\t\t// Positional Fields:");
 					// Serialize all readable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
 					{
 						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
 						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
@@ -736,7 +752,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						body.AppendLine($"\t\t{{");
 						body.AppendLine($"\t\t\t// Positional Fields:");
 						// Deserialize into all writable instance properties (this type + base types)
-						foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+						foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
 						{
 							var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 								? GetFieldName(pro)
@@ -807,7 +823,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 					body.AppendLine($"\t\t\t// Positional Fields:");
 					// Serialize all readable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data))
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
 					{
 						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
 						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
@@ -841,7 +857,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\t{{");
 					body.AppendLine($"\t\t\t// Positional Fields:");
 					// Deserialize into all writable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data).Where(p => p.SetMethod is not null))
+					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null))
 					{
 						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro)
@@ -918,7 +934,7 @@ $$"""
 			{
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
-				_store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				var task = _store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
 					ContainerId = default,
@@ -932,7 +948,11 @@ $$"""
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
 					NewValue = value
-				}).GetAwaiter().GetResult();
+				});
+				if (!OperatingSystem.IsBrowser())
+				{
+					task.GetAwaiter().GetResult();
+				}
 			}
 		}
 	}

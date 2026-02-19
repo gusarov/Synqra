@@ -111,7 +111,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 	async Task StartWorker()
 	{
 		var ctx = _synqraStoreContext.Value ?? throw new ArgumentException();
-		await foreach (var ev in _storage.GetAll(from: default))
+		await foreach (var ev in _storage.GetAllAsync(from: default))
 		{
 			await ev.AcceptAsync(ctx, null);
 		}
@@ -193,7 +193,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 			ArrayPool<byte>.Shared.Return(buffer);
 		}
 		#endregion
-		var myEnumerable = _storage.GetAll(from: _eventReplicationState.LastEventIdFromMe);
+		var myEnumerable = _storage.GetAllAsync(from: _eventReplicationState.LastEventIdFromMe);
 		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
 		{

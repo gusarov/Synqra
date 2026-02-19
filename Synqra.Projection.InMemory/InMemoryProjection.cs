@@ -1,9 +1,13 @@
-﻿using Synqra.AppendStorage;
+﻿using Microsoft.Extensions.Logging;
+using Synqra.AppendStorage;
+using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -44,7 +48,7 @@ public class StrongReference
 /// </summary>
 public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
-	static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
+	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
@@ -96,6 +100,45 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 			{
 				throw new Exception("Something is wrong! We require JsonSerializerOptions to have converters registered!");
 			}
+		}
+
+		// since it is in-memory, we have to roll state in
+		_ = LoadStateAsync();
+	}
+
+	public string ProjectionStatus { get; set; }
+
+	Task? _loading;
+
+	public Task LoadStateAsync()
+	{
+		return _loading ??= LoadStateCoreAsync();
+	}
+
+	async Task LoadStateCoreAsync()
+	{
+		try
+		{
+			if (_eventStorage != null)
+			{
+				ProjectionStatus = "Loading...";
+				var sw = Stopwatch.StartNew();
+				var ctx = new EventVisitorContext();
+				long cnt = 0;
+				await foreach (var item in _eventStorage.GetAllAsync())
+				{
+					await item.AcceptAsync(this, ctx);
+					cnt++;
+				}
+				ProjectionStatus = $"Loaded ({sw.Elapsed.TotalMilliseconds:F0} ms for {cnt} items)";
+				CommandProcessed?.Invoke(this, EventArgs.Empty);
+			}
+		}
+		catch (Exception ex)
+		{
+			ProjectionStatus = $"Error: {ex.Message}";
+			Console.Error.WriteLine($"{ex}");
+			throw;
 		}
 	}
 
@@ -406,6 +449,7 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 		return ProcessCommandAsync(newCommand);
 	}
 
+	[UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
 		ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
@@ -425,13 +469,16 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
-			if (_eventStorage != null)
-			{
-				await _eventStorage.AppendAsync(@event); // store event in storage and trigger replication
-			}
 		}
+		if (_eventStorage != null)
+		{
+			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
+		}
+		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(commandHandlingContext.Events);
 	}
+
+	public event EventHandler<EventArgs>? CommandProcessed;
 
 	/// <summary>
 	/// Process and apply it locally

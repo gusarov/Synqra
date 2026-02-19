@@ -143,18 +143,21 @@ public class SBXSerializer : ISBXSerializer
 	}
 
 	static UTF8Encoding _utf8 = new(false, true);
+	static Guid _guidMax = new Guid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
 
 	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
 	DateTime _streamBaseTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
-	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
 
 	// Let's use UTF8 continuation ranges (0x80...0xBF) for string interning. This way, we can always distinguish between real first character and a pointer to dictionary.
-	static byte _startNextStringInternId = 0x80;
+	const byte _startNextStringInternId = 0x80;
 	byte _nextStringId = _startNextStringInternId;
 	Dictionary<byte, string> _stringById = new();
 	Dictionary<string, (byte Id, LinkedListNode<string> Node)> _stringByValue = new();
 	LinkedList<string> _strings = new LinkedList<string>();
+
+	// TypeIds are not needed to be snapshotted
+	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
+	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
 
 	public SBXSerializer()
 	{
@@ -174,6 +177,38 @@ public class SBXSerializer : ISBXSerializer
 		Map(-93, typeof(Event));
 		Map(-92, typeof(Command));
 		Map(-91, typeof(CommandCreatedEvent));
+	}
+
+	SBXSerializer? _spanshotPrimitives;
+
+	public void Snapshot()
+	{
+		// Remember state if never remembered before, and make it usable for reset
+
+		if (_spanshotPrimitives != null)
+		{
+			throw new Exception("Snapshot already exists");
+		}
+		_spanshotPrimitives = (SBXSerializer)MemberwiseClone();
+		if (_stringById.Count > 0) throw new Exception("Strings must be empty");
+		if (_stringByValue.Count > 0) throw new Exception("Strings must be empty");
+		if (_strings.Count > 0) throw new Exception("Strings must be empty");
+	}
+
+	public void Reset()
+	{
+		if (_spanshotPrimitives == null)
+		{
+			throw new Exception("Snapshot does not exist");
+		}
+		// Primitives:
+		_nextStringId = _spanshotPrimitives._nextStringId;
+		_streamBaseTime = _spanshotPrimitives._streamBaseTime;
+
+		// Collections: Asserted to be emmpty!!
+		_stringById.Clear();
+		_stringByValue.Clear();
+		_strings.Clear();
 	}
 
 	class KeyValuePairModelBinder<TK, TV> : IModelBinder<KeyValuePair<TK, TV>>
@@ -538,6 +573,7 @@ public class SBXSerializer : ISBXSerializer
 				&& name != "xx"
 				&& name != "xx"
 				&& name?.StartsWith("Synqra.Tests") == false
+				// && name?.StartsWith("Contoso.Model") == false
 				&& name?.Contains("Sample") == false
 				&& name?.EndsWith("Poco") == false
 				)
@@ -1315,7 +1351,12 @@ public class SBXSerializer : ISBXSerializer
 	{
 		var b = buffer[pos];
 
-		if (b >= 0x80 && b <= 0xC1)
+		if (b == 255) // special value for null string. This value is outside of legit UTF8 space
+		{
+			pos++;
+			return null!;
+		}
+		else if (b >= 0x80 && b <= 0xC1)
 		{
 			pos++;
 			return _stringById[b];
@@ -1354,6 +1395,11 @@ public class SBXSerializer : ISBXSerializer
 	
 	public void Serialize(in Span<byte> buffer, string data, ref int pos)
 	{
+		if (data == null)
+		{
+			buffer[pos++] = 255; // special value for null string. This value is outside of legit UTF8 space
+			return;
+		}
 		var id = Intern(data);
 		if (id == 0)
 		{
@@ -1749,8 +1795,6 @@ public class SBXSerializer : ISBXSerializer
 			}
 		}
 	}
-
-	static Guid _guidMax = new Guid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
 
 	public unsafe Guid DeserializeGuid(in ReadOnlySpan<byte> buffer, ref int pos)
 	{

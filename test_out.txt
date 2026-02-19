@@ -1,0 +1,1586 @@
+  Run tests: 'C:\Users\xkip\source\repos\Synqra\Tests\Synqra.Tests\bin\Debug\net10.0\Synqra.Tests.dll' [net10.0|x64]
+  
+  ████████╗██╗   ██╗███╗   ██╗██╗████████╗
+  ╚══██╔══╝██║   ██║████╗  ██║██║╚══██╔══╝
+     ██║   ██║   ██║██╔██╗ ██║██║   ██║   
+     ██║   ██║   ██║██║╚██╗██║██║   ██║   
+     ██║   ╚██████╔╝██║ ╚████║██║   ██║   
+     ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝   
+     
+     TUnit v0.20.0.0 | 64-bit | Microsoft Windows 10.0.26100 | win-x64 | .NET 10.0.3 | Microsoft Testing Platform v1.6.3
+     
+     Engine Mode: SourceGenerated
+     
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  02 0028 01 07 BC 0201 BB  46 31 33 53  4704  81 9F 65  
+  8D ?  8D ¼   ? E3  »  96  F  1  3  S   GE3   ?  ?  e  
+  
+  
+  
+   37 00 
+   54 68E3 71  96 71
+  
+   . 
+  
+  
+   (
+    7  . 
+  
+  E3  9672  65 65  71  00DB  0C00  80  
+  FD ?  T  h  r   e  e  .  .   ? 
+  
+  
+  
+  DB   DB 0C FD 15   15  AC C096  DA 7194  AB C2 D5 DF  DC 
+   ?  a  ? 0C FD 15   ? 
+  
+  
+  
+  
+  AC
+   0D   DB 5A 94  0CAB C2 D5 DF  DC 
+    ? FD a  q  4C U   ? 5A 94 AB  C2 D5  
+   ? 01 49 64  q00  03   02 4E 61  6D 65 00DF 07  54  65 73 74  00 00 
+  DC ?  I  d  .  15   U4C   ?5A  94 AB   yC2  D5  ?  00 ¬  A  00 U   
+   ? ?    a «  A   O ?   ß q     Ü  U
+  
+   
+   ? 
+   y  ?  
+   y ?   ?   a  ¬  ?  ? q    Z U   ?  ?   y  «  ? A    O  ß L  Z  ?  «   A  O  .  L  Z  ?   Ü   ?  .  
+  
+  
+  
+   ?   N  a   m «   A   O  ß  Ü  
+  
+  
+  
+  
+  
+  
+    e  .  ?
+     T  e  s  t   .  . 
+  
+  
+  
+  
+  7B 22 49 64  22 3A 31 2C  22 4E 61 6D  65 22 3A 22  {"Id ":1, "Nam e":" 
+  54 65 73 74  22 7D                                  Test "}
+  
+  
+  D0 BF 00 
+   D  ¿  . 
+  
+  
+  
+  
+  04 4F 6E 65  00 54 77 6F  00 54 68 72  65 65 00 
+   ?  O  n  e   .  T  w  o   .  T  h  r   e  e  . 
+  
+  
+  
+  
+  08 
+   ? 
+  
+  
+  
+  
+  04 4B 65 79  31 00 56 61  6C 75 65 31  00 4B 65 79  ?Key 1.Va lue1 .Key 
+  32 00 56 61  6C 75 65 32  00 4B 65 79  33 00 56 61  2.Va lue2 .Key 3.Va 
+  6C 75 65 33  00                                     lue3 .
+  
+  
+  04 01 02 03  
+   ?  ?  ?  ?  
+  
+  
+  
+  
+  
+  01 08 
+   ?  ? 
+  
+  
+  
+  
+  {
+  	"_t": "CommandCreatedEvent",
+  	"Data": {
+  		"_t": "CreateObjectCommand",
+  		"Data": {
+  			"_t": "SampleTaskModel",
+  			"Subject": "Test Subject c2fbf8d6c6fd4f1a86b9e5153b6c9ebf",
+  			"Number": 0
+  		},
+  		"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+  		"CollectionId": "00000000-0000-0000-0000-000000000000",
+  		"TargetId": "00000000-0000-0000-0000-000000000000",
+  		"CommandId": "019c7406-77b1-76f8-a631-866142370e28",
+  		"ContainerId": "00000000-0000-0000-0000-000000000000"
+  	},
+  	"EventId": "97e5a66b-c9a1-4b5a-8aff-6f445776d2ca",
+  	"CommandId": "cd95d61f-d9f1-4cc9-aeba-bc971e719ace"
+  }
+  0C1908030A0A
+  
+  0C 19 08 03  0A 0A 
+   ?  ?  ?  ?   ?  ? 
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Object, actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=4, SharedElementType=
+  
+  
+  
+  
+  
+  
+  ListTSpecified
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  0C 19 08 03  0A 0A 
+  0C1B080A030A000A00
+  
+   ? 0C 1B 08 0A  03 0A 00 0A   ?00 
+    ? ?  ?    ?  ? 
+  
+  
+  
+   ?  ?  ?   ?  ?  .  ?   . 
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Object, actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=4, SharedElementType=5
+  
+  
+  
+  
+  
+  
+  ListTSpecified
+  
+  
+  
+  
+  
+  
+  SharedElementType
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  0C 1B 08 0A  03 0A 00 0A  00 
+   ?  ?  ?  ?   ?  ?  .  ?   . 
+  
+  
+  
+  
+  00 53 79 6E.
+    71 72 61 2E  54 65 73 74  73 2E 42 69  .Syn qra. Test s.Bi 
+  6E 61 72 79  53 65 72 69  61 6C 69 7A  61 74 69 6F  nary Seri aliz atio 
+  6E 2E 53 61  6D 70 6C 65  54 65 73 74  44 61 74 61  n.Sa mple Test Data 
+  50 6F 63 6F  2C 20 53 79  6E 71 72 61  2E 54 65 73  Poco , Sy nqra .Tes 
+  74 73 00 49  64 00 03 02  4E 61 6D 65  00 07 54 65  ts.I d.?? Name .?Te 
+  73 74 00 00                                         st.. 
+  
+   0     List_R_E <-->  -8 0z0F     List_R_E
+  {
+  	"_t": "SampleFieldListBaseModel",
+  	"Data": []
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": []
+  }
+  {
+  	"_t": "SampleFieldListBaseModel",
+  	"Data": [
+  		{
+  			"Id": 5
+  		},
+  		{
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldObjectModel",
+  	"Data": {
+  		"_t": "SampleBaseModel",
+  		"Id": 5
+  	}
+  }
+  {
+  	"_t": "SampleFieldBaseModel",
+  	"Data": {
+  		"Id": 5
+  	}
+  }
+  {
+  	"_t": "SampleFieldListBaseModel",
+  	"Data": [
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 0,
+  			"Id": 5
+  		},
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 0,
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldListBaseModel",
+  	"Data": [
+  		{
+  			"Id": -1
+  		},
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 0,
+  			"Id": 6
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldBaseModel",
+  	"Data": {
+  		"$type": "SampleDerivedModel",
+  		"DerId": 4,
+  		"Id": 6
+  	}
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": [
+  		{
+  			"Id": 5
+  		},
+  		{
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": [
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 0,
+  			"Id": 5
+  		},
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 0,
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel"
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": [
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 3,
+  			"Id": 5
+  		},
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 3,
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldSealedModel",
+  	"Data": {
+  		"Id": 5
+  	}
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": []
+  }
+  {
+  	"_t": "SampleFieldEnumerableBaseModel",
+  	"Data": [
+  		{
+  			"Id": 5
+  		},
+  		{
+  			"$type": "SampleDerivedModel",
+  			"DerId": 2,
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldListSealedModel",
+  	"Data": [
+  		{
+  			"Id": 5
+  		}
+  	]
+  }
+  {
+  	"_t": "SampleFieldDictionaryStringObjectModel",
+  	"Data": {
+  		"A": 1,
+  		"B": {
+  			"_t": "SampleSealedModel",
+  			"Id": 5
+  		}
+  	}
+  }
+  {
+  	"_t": "SampleFieldListIntModel",
+  	"Data": []
+  }
+  {
+  	"_t": "CommandCreatedEvent",
+  	"Data": {
+  		"_t": "CreateObjectCommand",
+  		"Data": {
+  			"_t": "SampleTaskModel",
+  			"Subject": "Test Subject 05502ba401d6487b9f7d35a35ea7dcef",
+  			"Number": 0
+  		},
+  		"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+  		"CollectionId": "00000000-0000-0000-0000-000000000000",
+  		"TargetId": "00000000-0000-0000-0000-000000000000",
+  		"CommandId": "019c7406-7796-7505-8f72-4d47eecff91e",
+  		"ContainerId": "00000000-0000-0000-0000-000000000000"
+  	},
+  	"EventId": "b0b4fcac-389a-4e59-9eba-d852bc0c72d2",
+  	"CommandId": "6b8829bd-4752-4fd2-a1fe-d1400c7085f8"
+  }
+  {
+  	"_t": "SampleFieldListIntModel",
+  	"Data": [
+  		1,
+  		2,
+  		3
+  	]
+  }
+  0C080A
+  
+  0C 08 0A 
+   ?  ?  ? 
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  0C 08 0A 
+   ?  ?  ? 
+  
+  
+  
+  180F
+  
+  18 0F 1A170A
+  
+  
+   ?  ?1A  
+  17 
+  
+  0A 
+  Tokenized:
+  typeId
+  
+  
+   ?
+  
+   
+   ? 
+   ? List TypeId for requested System.Collections.Generic.IList`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  18Tokenized:
+   typeId
+  0F 
+  
+  
+   ?
+   
+   ?
+  
+  List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleDerivedModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=5, SharedElementType=
+  
+  
+   
+  
+  
+  1A0B
+  
+  1A
+  
+  ListTSpecified
+   0B
+  
+  
+  
+  
+  1A0F
+  
+   
+   ?
+  
+  1A   ?
+  
+  
+  
+  
+   
+  0F 1A 17 0A 
+   ? 
+  
+  
+   ? ? Tokenized:
+  typeId
+  06010A
+  
+    ? 
+  
+   ?
+   
+  Tokenized:
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+  
+  
+  
+  
+  
+  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  1A 06 01
+  
+  
+  
+  
+  0B 
+   0A 1A  ? 
+   ?0F 
+   ? 
+  
+   060A0C08
+   ? ?  ?
+  06  ? 
+   
+  
+   {
+  	"_t": "NewEvent1",
+  	"Event": {
+  		"_t": "CommandCreatedEvent",
+  		"Data": {
+  			"_t": "CreateObjectCommand",
+  			"Data": {
+  				"_t": "SampleTaskModel",
+  				"Subject": "Test1",
+  				"Number": 1
+  			},
+  			"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+  			"CollectionId": "00000000-0000-0000-0000-000000000000",
+  			"TargetId": "00000000-0000-0000-0000-000000000000",
+  			"CommandId": "019c7406-77b4-740d-9d64-797c21f73a2b",
+  			"ContainerId": "00000000-0000-0000-0000-000000000000"
+  		},
+  		"EventId": "47a7d7c5-ff45-4987-9776-687addabc996",
+  		"CommandId": "80a10012-9f7e-416b-bacd-11ecdcb7beaa"
+  	}
+  }
+  
+  
+  
+  
+  
+  
+  0A 0C 08  
+   ?Tokenized:
+  typeId
+  
+  
+  
+   
+   ? 
+   ?
+   
+  
+   ?
+    
+  06 
+  01 0A 
+  
+  Tokenized:
+   ?  ? typeId
+   ? 
+  
+  
+  
+  
+  
+  
+  
+  1401
+  
+  03 08 
+  
+  14 01 
+  
+   ? typeId
+   ?
+   
+  
+  
+  
+  
+  
+  
+  
+  1404020406
+  
+  
+  06 14 040A  02 04  06 
+   ?  ? 
+   ? ?   ? 
+   ?  
+  
+  
+   ? 
+  
+  
+  Tokenized:
+  typeId
+  
+  0C 
+  
+  Tokenized:
+  
+  
+  
+  08  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  14  ? 
+  
+  
+  
+  14 01 04  ?02 04 
+   ?  ? 
+  
+    
+  
+  06 
+   ? ?   ? ?    ?
+  
+   
+   ?
+     ? 
+  
+  
+  
+  16020A
+  
+  16 02 020A
+  
+  0A 
+  02 0A  ? 
+   ? ?   ? 
+  
+   ? 
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  16 02 0A 
+   ?  ?  ? 
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  02 0A 
+   ?  ? 
+  
+  
+  
+  1C03410003024200040A
+  
+  1C 03 41 00  03 02 42 00  04 0A 
+   ?  ?  A  .   ?  ?  B  .   ?  ? 
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  1C {
+  	"_t": "SampleFieldListIntModel",
+  	"Data": [
+  		5,
+  		6
+  	]
+  }
+  03 41 00  03 02 42 00  04 0A 1811030A0A
+  
+  18 11 03
+   0A  0A ?  
+   ?  ?  A  ?  .   ?  ? ?{
+  	"_t": "SampleFieldListSealedModel",
+  	"Data": []
+  }
+  {
+  	"_t": "SampleFieldListSealedModel",
+  	"Data": [
+  		{
+  			"Id": 5
+  		},
+  		{
+  			"Id": 5
+  		}
+  	]
+  }
+    ?  B  .   ?    ? ? 
+   
+  
+  
+  
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Collections.Generic.IList`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  18 11 03 0A  0A 
+   ?  ?  ?  ?   ? 
+  
+  
+  
+  1A11030A0A
+  
+  1A 11 03 0A  0A 
+   ?  ?  ?  ?   ? 
+  
+  
+  Tokenized:
+  typeId
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+  18150308010A0C00
+  
+  
+  
+  
+  18 15 
+  
+  03{
+  	"_t": "NewEvent1",
+  	"Event": {
+  		"_t": "CommandCreatedEvent",
+  		"Data": {
+  			"_t": "CreateObjectCommand",
+  			"Data": {
+  				"_t": "SampleTaskModel",
+  				"Subject": "Task1",
+  				"Number": 1
+  			},
+  			"TargetTypeId": "00000000-0000-0000-0000-000000000000",
+  			"CollectionId": "00000000-0000-0000-0000-000000000000",
+  			"TargetId": "00000000-0000-0000-0000-000000000000",
+  			"CommandId": "00000000-0000-0000-0000-000000000000",
+  			"ContainerId": "00000000-0000-0000-0000-000000000000"
+  		},
+  		"EventId": "00000000-0000-0000-0000-000000000000",
+  		"CommandId": "00000000-0000-0000-0000-000000000000"
+  	}
+  }
+  
+  
+  
+  1A 11 03  08  0A  0A {
+  	"_t": "NewEvent1",
+  	"Event": {
+  		"_t": "CommandCreatedEvent",
+  		"Data": {
+  			"_t": "CreateObjectCommand",
+  			"Data": {
+  				"_t": "SampleTaskModel",
+  				"Subject": "Task1",
+  				"Number": 1
+  			},
+  			"TargetTypeId": "bdb0fa49-b78b-56a4-98de-154556290012",
+  			"CollectionId": "7a8aa4c5-8dbe-58f9-bd0c-63fbc2060013",
+  			"TargetId": "0199eeb4-33db-70db-a16d-f966e2c9f33d",
+  			"CommandId": "0199eeb4-33dc-78b2-b1c5-ab90b83b0002",
+  			"ContainerId": "00000000-0000-0000-0000-000000000000"
+  		},
+  		"EventId": "0199eeb4-33df-7430-a02a-d9fd1bf80001",
+  		"CommandId": "0199eeb4-33dc-78b2-b1c5-ab90b83b0002"
+  	}
+  }
+  01 
+   ?0A 0C  ?  00   ?  ?
+     ? ?  
+  
+   ? 
+  01{
+  	"_t": "NewEvent1",
+  	"Event": {
+  		"_t": "ObjectPropertyChangedEvent",
+  		"PropertyName": "subject",
+  		"TargetId": "0199eeb4-33db-70db-a16d-f966e2c9f33d",
+  		"TargetTypeId": "bdb0fa49-b78b-56a4-98de-154556297525",
+  		"CollectionId": "7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770",
+  		"EventId": "0199eeb4-33df-7430-a02a-d9fd1bf847f8",
+  		"CommandId": "0199eeb4-33dc-78b2-b1c5-ab90b83be683"
+  	}
+  }
+  
+  
+  18130A030A000A00
+  
+  18  0E  ? 13 54 68 ?1A1503080A0A0A04
+    
+   ?1A   ?15 03  08 ?   0A .  
+   0A 0A 
+  04
+    
+  Tokenized:
+   ?typeId
+  
+   
+   ? 
+  
+  
+  
+   ?  ?  List TypeId for requested System.Collections.Generic.IList`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+   ?  ? 
+   ? 
+  
+  
+   ?
+    typeId
+  
+  
+  
+  
+  
+  Tokenized:
+  
+  
+  
+  
+  typeId
+  
+  
+  1A190A030A000A00
+  
+  1A0A typeId
+  
+  
+    1A130A030A060A06
+  0C1708
+  
+  0C 17 08 
+   ?  ?  ? 
+  
+  
+  Tokenized:
+   typeId
+  
+  
+  
+  
+  
+  1903  
+  0A 
+  
+  
+  00List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=
+  
+   0A 
+  00  
+  
+  
+  
+  typeId
+  
+  
+  
+   ? 
+   ?
+  65 00
+  
+  
+   0A
+  List TypeId for requested System.Object, actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=4, SharedElementType=
+    ? 
+  
+  typeId
+  
+  1A  
+  
+  
+  
+   03  0A 00 
+  0A 00  
+  
+  
+   ? 
+  
+  
+   ? ListTSpecified
+   ?  ?  
+   ? 
+   . 
+  
+  
+  
+  
+  
+  
+   ?0C  14030A0C
+  
+  
+  14
+   
+  
+  
+  03
+   
+  0A 
+  0C  
+  
+   ?1A 15 0313 08 1601
+  
+   ?16  01 ?  T 
+    ?  h   ?
+  18 15 03 ?  .  ?  .  ?0A   0A 
+   e  . ?  08 17  
+    ?03    1     List_R_R <-->  -9 0z11     List_R_R
+  
+  
+  Tokenized:
+  typeId
+   
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  16 01 
+   .   ?
+     01 08 
+  
+  Tokenized:
+    2     List_R_S <--> -10 0z13     List_R_S
+  0A 060A 3     List_R_H <--> -11 0z15     List_R_H
+    4     List_S_E <--> -12 0z17     List_S_E
+  0A 5     List_S_R <--> -13 0z19     List_S_R
+   04
+   6     List_S_S <--> -14 0z1B     List_S_S
+  
+  Tokenized:
+   7     List_S_H <--> -15 0z1D     List_S_H
+  typeId
+   8 SpecList_R_E <--> -16 0z1F SpecList_R_E
+  
+  Commands:
+   9 SpecList_R_R <--> -17 0z21 SpecList_R_R
+   10 SpecList_R_S <--> -18 0z23 SpecList_R_S
+  0A
+   0C 00 ?    ?
+    ?  ? ? 
+   
+  
+  
+   ? typeId
+   ?  
+   ?
+  
+  
+   
+  
+   ? List TypeId for requested System.Collections.Generic.IList`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=5
+  
+  0C1D0803080A0A0A00
+  
+  16030A0A
+  
+   16 03 0A 0A06  
+    
+   ? 
+  
+  
+  
+  
+  
+  
+  
+  
+  List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleDerivedModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=5, SharedElementType=
+  11 SpecList_R_H <--> -19 0z25 SpecList_R_H
+   ? 
+  
+  
+  
+  
+   ?  12 SpecList_S_E <--> -20 0z27 SpecList_S_E
+  
+  
+  
+  Tokenized:
+   0A   ?13 SpecList_S_R <--> -21 0z29 SpecList_S_R
+    ?  ? {
+    "_t": "CommandCreatedEvent",
+    "Data": {
+      "_t": "CreateObjectCommand",
+      "Data": {
+        "_t": "MyPocoTask",
+        "Subject": "Test Task"
+      },
+      "TargetTypeId": "f1f0d493-dfda-57ab-b3f1-9ac2290510e3",
+      "CollectionId": "b6b3e60e-92d0-5e3d-a3a9-3e5e10721866",
+      "TargetId": "019c7406-77bc-734b-b8a4-f45ef809295a",
+      "CommandId": "019c7406-77bd-712a-9b98-4baa64bd153a",
+      "ContainerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "EventId": "019c7406-77bf-79b8-9553-bb6fadc1781e",
+    "CommandId": "019c7406-77bd-712a-9b98-4baa64bd153a"
+  }
+  
+  
+  
+   .  
+  SharedElementType
+  {} // CreateObjectCommand // Synqra.CreateObjectCommand
+  0C{} // ChangeObjectPropertyCommand // Synqra.ChangeObjectPropertyCommand
+   Commands Done
+  1D 08typeId
+  
+  
+  
+   ?  ?  ?  14 SpecList_S_S <--> -22 0z2B SpecList_S_S
+  
+  
+  
+  
+  
+  
+  
+  
+  15 SpecList_S_H <--> -23 0z2D SpecList_S_H
+   03
+  
+  
+  
+  
+  
+   ?  ?  ? ? ListTSpecified
+  
+  
+  
+  
+  
+  
+    {
+    "_t": "ObjectCreatedEvent",
+    "TargetId": "019c7406-77bc-734b-b8a4-f45ef809295a",
+    "TargetTypeId": "f1f0d493-dfda-57ab-b3f1-9ac2290510e3",
+    "CollectionId": "b6b3e60e-92d0-5e3d-a3a9-3e5e10721866",
+    "EventId": "019c7406-77c0-7677-984e-1e63856ed0a2",
+    "CommandId": "019c7406-77bd-712a-9b98-4baa64bd153a"
+  }
+   ?{
+    "_t": "ObjectPropertyChangedEvent",
+    "PropertyName": "Subject",
+    "NewValue": "Test Task",
+    "TargetId": "019c7406-77bc-734b-b8a4-f45ef809295a",
+    "TargetTypeId": "f1f0d493-dfda-57ab-b3f1-9ac2290510e3",
+    "CollectionId": "b6b3e60e-92d0-5e3d-a3a9-3e5e10721866",
+    "EventId": "019c7406-77c0-7719-9022-a9b8023c9aa7",
+    "CommandId": "019c7406-77bd-712a-9b98-4baa64bd153a"
+  }
+  
+  14 03 0A 0C    
+   ?  ? ?   ? ?   ?  ?   ?  
+  
+  
+  
+  
+  
+  
+  
+   ?  ?
+  
+  
+  
+  
+  08   ?  ?
+  
+  18 13 0A   ?  
+  
+  
+  Tokenized:
+  0A 030A 0A  
+  
+  
+  
+  typeId
+  
+  
+    0A   00 
+  Tokenized:
+  typeId
+  
+  1A
+  
+  
+  
+  List TypeId for requested System.Collections.Generic.IEnumerable`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=, SharedElementType=5
+  00
+   
+  
+  
+  
+  
+  SharedElementType
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  1A 13 0A 03  0A 06 0A 06  
+  
+   ? ?  
+   ?
+   
+   ?
+  
+  
+   C301BB0104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE68304B6DFD5F8B901DB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B
+  0A 00 ?   ?
+  
+  1904  0A 06 00 03  00  00 22 00 01  00 
+  0BC3  
+  01 ?  BB  ? 01   .04 BE   DF
+    ?D5   F8  ?B9  01 ?   ?30     ?60  2A .   ?  .  D9
+   CommandCreatedEvent CommandCreatedEvent
+   ? ObjectCreatedEvent ObjectCreatedEvent
+   ?ObjectPropertyChangedEvent ObjectPropertyChangedEvent
+    CommandCreatedEvent CommandCreatedEvent
+   ?   ObjectPropertyChangedEvent ObjectPropertyChangedEvent
+   ? ?
+   
+   ?  ?16    . 03 
+  0A 0A  
+  FD  A
+  
+  
+    ? 0A 
+  
+  Tokenized:
+  typeId
+   
+   .  
+  
+  
+  
+   .
+  List TypeId for requested System.Object, actual System.Collections.Generic.List`1[[Synqra.Tests.SampleModels.Serialization.SampleBaseModel, Synqra.Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]], SpecList=, ListTSpecified=4, SharedElementType=
+  
+  
+  
+  
+  
+  
+  ListTSpecified
+   ?
+   
+   ? ?»? ?_ßO o ? 00 0A   "
+  
+  
+  
+   ? 1?0 ?  
+  00  
+    . typeId
+  
+  
+   ?  
+   `*Uy 
+   ?  ?  
+  
+  
+  
+  typeId
+  
+  
+  
+  1B F8 ?  . 
+  
+  
+  
+  
+  
+  
+  
+   47  ?  ?   ?
+  
+  
+  F8   ? 
+  
+  
+  
+    .
+  0C04 B8  ? 1D DF   .   08D5  F8 
+  
+  
+  
+   03  B9 08 0A 010A  0A  B2  00 B1 C5 AB 90
+     ? ? ?oGo ?,ßO o 1?² ?   ?  ±Å«?  ?
+   B8  ? 3B E6 83 ?   04  ?B6    . 
+  
+  
+  
+  DF D5  F8 B9 01 DB  21 6D F9 66  ,;æ? ?ßO o1?U !mùf 
+  E2 C9 F3 3D  98 49 FA B0  BD 8B B7 A4  56 DE 15 45  âÉó= ?Iú° ½?· V_?E 
+  56 29 75 25  BD C5 A4 8A  7A BE 8D F9  58 0C 63 FB  V)u% ½Å? z_?ù X?cû 
+  C2 06 D7 70  73 75C301B5010000BF0100000000001E5461736B310002
+  
+  C3 C301B50104BEDFD5F8B90130602AD9FD1BF8000104B8DFD5F8B901B2B1C5AB90B83B0002BF0104B8DFD5F8B901B2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304B6DFD5F8B901DB216DF966E2C9F33D1E5461736B310002
+  
+   01 62 C3 01 B5 01  046A   BE 65 DF63  74 00  B50B  0B01          00 00A? D5BF 01  00 00 00 xp s  F8 00  u00 b1E j54  e61  ctA. ??µ?? 
+  .Tokenized:
+  .¿typeId
+  ? 
+  .C3... .B9?Ta 
+   73 
+  6B  A31  
+  
+  
+  00  
+  02   typeId
+     
+     BB 
+        » 
+  
+  
+  
+  typeId
+  
+    
+   
+                   
+      
+  
+  sktypeId
+  1
+  . 
+  ?
+  
+  
+  
+  
+  
+  Tokenized:
+  
+  typeId
+  
+  
+  C3C3  
+  01 A 
+  
+  
+  01 
+  30typeId
+  
+  B5 
+    µBB  
+  01  
+  
+  
+  typeId
+  
+  BF 
+   ¿ 
+  
+  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  C3 01 B5 01  00 00 BF 01  00 00 00 00  00 1E 54 61  A?µ? ..¿? .... .?Ta 
+  73 6B 31 00  02                                     sk1. ?
+  
+    60 2A D9 FD  04A ?µ?BE  DF ?D5  _ßO o1?0 `*UyF8  B9
+   1B01  30  60F8  00 01  2A04 B8  DF D5  F8 B9 01 B2  B1 C5 D9 AB 90  FD?o.? ?,ß  OA o1??»?² ?_ ±ßO Å«? 
+  B8 3B 00 02  BF 01 04o B8  DF D5 F8 1B9  01 ?B2 B1 C50   `*U,y 
+  ;.? ¿1B ?F8?, ßOo1  ?²±Å 47 
+  F8info: Microsoft.AspNetCore.Mvc.Infrastructure.DefaultActionDescriptorCollectionProvider[1]
+        No action descriptors found. This may indicate an incorrectly configured application or missing application parts. To learn more, visit https://aka.ms/aspnet/mvc/app-parts
+  info: Microsoft.AspNetCore.Mvc.Infrastructure.DefaultActionDescriptorCollectionProvider[1]
+        No action descriptors found. This may indicate an incorrectly configured application or missing application parts. To learn more, visit https://aka.ms/aspnet/mvc/app-parts
+    04AB  B8 90 DF B8 D5  F83B  00  B9 02 0001  B298    49B1 C5 AB 90  ?oGo ? ,ßOFA  oB0 1?² ±Å«? 
+  B8 3B E6 83BD  8B B7 A4  04  56B6   «?DF ,D5  ;F8  B9 .?.? I01 ú°DB  21 ½6D ?·V  F9 
+  66DE   ,15 ;45æ ? ?56  ß29 00 O12 o1?U  !BDm  C5ùf  A4 
+  8A E2 7AC9  BE  8DF3  F9 58  _?EV ).?½3D   Å?z _?ùX 98
+   0C 63 FB 49C2   06 FA B0  00 13 04  B6 DFBD  D5 F8  B9 01 DB 21  8B?cûA  ?.?? B7 ßA4  56 DE Oo 1?15U !45  âÉó =
+   ?I6D úF9 ° 66 E2  C9 F3 3D ½1E?  ·54  V_?61 E 
+  73 6B  31 00 0256      29 75m ùfâ 25  Éó=? TaBD C5s kA4  8A  7A BE1 .?8D 
+  F9  Tokenized:
+  58 typeId
+  0C 
+  63 C3 
+  FB  V A)u%  
+  
+  
+  
+  typeId
+  ½
+  ÅB5 ? 
+  z µ_? ù X?cû
+   
+  
+  
+  C2 
+  06typeId
+   
+  D7 70BF   73 
+   ¿75 62 
+  
+   6A  
+  
+  typeId
+  
+  
+  
+  
+  
+  
+  65 
+  
+  
+  63 C374  00  0B01 B5  0B01  04 BE    DF    D5    F8A?xp  subB9j e ct. ??01 
+  
+  30  60 2A D9 FD  A?µ? ?_ßO o1?0 `*Uy 
+  1B F8 00 01  04 B8 DF D5  F8 B9 01 B2  B1 C5 AB 90  ?o.? ?,ßO o1?² ±Å«? 
+  B8 3B 00 02  BF 01 04 B8  DF D5 F8 B9  01 B2 B1 C5  ,;.? ¿??, ßOo1 ?²±Å 
+  AB 90 B8 3B  00 02 00 98  49 FA B0 BD  8B B7 A4 56  «?,; .?.? Iú°½ ?·V 
+  DE 15 45 56  29 00 12 BD  C5 A4 8A 7A  BE 8D F9 58  _?EV ).?½ Å?z _?ùX 
+  0C 63 FB C2  06 00 13 04  B6 DF D5 F8  B9 01 DB 21  ?cûA ?.?? ßOo 1?U! 
+  6D F9 66 E2  C9 F3 3D 1E  54 61 73 6B  31 00 02     mùfâ Éó=? Task 1.?
+  
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53668
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53669
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\c3a10e56-7033-4a48-b2d4-5e5170658640
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\74703f42-4305-4f0b-84c6-216668739b6a
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53672
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53673
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53670
+  info: Microsoft.Hosting.Lifetime[14]
+        Now listening on: http://[::]:53671
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Application started. Press Ctrl+C to shut down.
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Hosting environment: Development
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\65755d5e-8b7f-47af-ac3c-b6a53bf919e2
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\c4fa81ad-1fc6-48ea-9ba2-88004575a7ae
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\b8d08684-e13b-444a-b23c-d915212c0814
+  info: Microsoft.Hosting.Lifetime[0]
+        Content root path: C:\Users\xkip\AppData\Local\Temp\SynqraTests\2026-02-18_22-00\73d58aca-19d0-44dc-bc92-40087bdc6857
+  info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+        Request starting HTTP/1.1 GET http://localhost:53669/api/synqra/ws - - -
+  info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+        Request starting HTTP/1.1 GET http://localhost:53669/api/synqra/ws - - -
+  info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+        Request starting HTTP/1.1 GET http://localhost:53668/api/synqra/ws - - -
+  info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+        Request starting HTTP/1.1 GET http://localhost:53668/api/synqra/ws - - -
+  info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+        Executing endpoint '/api/synqra/ws'
+  info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+        Executing endpoint '/api/synqra/ws'
+  info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+        Executing endpoint '/api/synqra/ws'
+  info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+        Executing endpoint '/api/synqra/ws'
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  ops=96,457,784 deviation=2.78% FinalBatchSize=12903914 BatchCount=5 AutoBatchBumps=2 ms=668 count=64519570
+  [+114/x0/?0] Synqra.Tests.dll - Should_Bind_04_BS_01_Generate_BindableModel (3s)
+  
+  ops=65,370,941 deviation=0.53% FinalBatchSize=18015754 BatchCount=5 AutoBatchBumps=2 ms=1377 count=90078770
+  RSetGen ops: 65370940.52200948
+  [+115/x0/?0] Synqra.Tests.dll - Should_Bind_03_BC_03_RSetConfigGen_property (6s)
+  
+  ops=20,661,132 deviation=1.98% FinalBatchSize=6148884 BatchCount=5 AutoBatchBumps=2 ms=1488 count=30744420
+  [+116/x0/?0] Synqra.Tests.dll - Should_Bind_03_BC_02_ConfigBind_property (9s)
+  
+  ops=25,816,182 deviation=0.96% FinalBatchSize=7677687 BatchCount=5 AutoBatchBumps=2 ms=1486 count=38388435
+  [+117/x0/?0] Synqra.Tests.dll - Should_Bind_03_BC_01_HostConfigBind_property (12s)
+  
+  ops=6,615,971 deviation=1.45% FinalBatchSize=2011621 BatchCount=5 AutoBatchBumps=4 ms=1520 count=10058105
+  [+118/x0/?0] Synqra.Tests.dll - Should_Bind_02_BJ_02_STJx_property (15s)
+  
+  ops=14,273,410 deviation=0.95% FinalBatchSize=4251874 BatchCount=5 AutoBatchBumps=4 ms=1489 count=21259370
+  [+119/x0/?0] Synqra.Tests.dll - Should_Bind_02_BJ_01_Stj_property (18s)
+  
+  ops=209,787,467 deviation=1.46% FinalBatchSize=61820884 BatchCount=5 AutoBatchBumps=2 ms=1473 count=309104420
+  [+119/x0/?0] Synqra.Tests.dll - Should_Bind_02_BJ_01_Stj_property (21s)
+  
+  [+119/x0/?0] Synqra.Tests.dll - Should_Bind_02_BJ_01_Stj_property (24s)
+  
+  ops=313,708 deviation=3.06% FinalBatchSize=154979 BatchCount=5 AutoBatchBumps=2 ms=2470 count=774895
+  OPS1=209,787,466.82 OPS2=313,708.47 D=99.85%
+  [+120/x0/?0] Synqra.Tests.dll - Should_Bind_01_BR_RSet_quickly (27s)
+  
+  ops=6,677,171 deviation=0.93% FinalBatchSize=1999928 BatchCount=5 AutoBatchBumps=2 ms=1497 count=9999640
+  RSetReflection ops: 6677170.679434588
+  [+121/x0/?0] Synqra.Tests.dll - Should_Bind_01_BR_RSet_property (30s)
+  
+  ops=210,701,562 deviation=0.74% FinalBatchSize=63190393 BatchCount=5 AutoBatchBumps=2 ms=1499 count=315951965
+  [+121/x0/?0] Synqra.Tests.dll - Should_Bind_01_BR_RSet_property (33s)
+  
+  ops=6,745,906 deviation=0.93% FinalBatchSize=2024930 BatchCount=5 AutoBatchBumps=2 ms=1500 count=10124650
+  OPS1=210,701,562.15 OPS2=6,745,905.76 D=96.80%
+  [+122/x0/?0] Synqra.Tests.dll - Should_Bind_faster_than_reflection_and_faster_than_minimum_expectations (36s)
+  
+  ops=6,741,376 deviation=1.22% FinalBatchSize=2006527 BatchCount=5 AutoBatchBumps=2 ms=1488 count=10032635
+  RSetReflection ops: 6741376.395494852
+  [+122/x0/?0] Synqra.Tests.dll - Should_Bind_faster_than_reflection_and_faster_than_minimum_expectations (39s)
+  
+  ops=70,196,032 deviation=1.50% FinalBatchSize=21180100 BatchCount=5 AutoBatchBumps=2 ms=1508 count=105900500
+  IBindableModel.Set ops: 70196032.26589468
+  [+125/x0/?0] Synqra.Tests.dll - Should_write_quickly2 (42s)
+  
+  ops=471,873 deviation=2.00% FinalBatchSize=135976 BatchCount=5 AutoBatchBumps=2 ms=1440 count=679880
+  [+126/x0/?0] Synqra.Tests.dll - Should_write_quickly (45s)
+  
+  ops=449,074 deviation=0.79% FinalBatchSize=139874 BatchCount=5 AutoBatchBumps=2 ms=1557 count=699370
+  Passed! - Failed: 0, Passed: 128, Skipped: 0, Total: 128, Duration: 46s 120ms
+  
+  Test run summary: Passed! - C:\Users\xkip\source\repos\Synqra\Tests\Synqra.Tests\bin\Debug\net10.0\Synqra.Tests.dll
+    total: 128
+    failed: 0
+    succeeded: 128
+    skipped: 0
+    duration: 46s 164ms
+  Tests succeeded: 'C:\Users\xkip\source\repos\Synqra\Tests\Synqra.Tests\bin\Debug\net10.0\Synqra.Tests.dll' [net10.0|x64]

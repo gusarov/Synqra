@@ -2,15 +2,24 @@
 @using Contoso.Model
 @using Contoso.Projection.InMemory
 @using Synqra
-@*inject ContosoInMemoryProjection localOnlyProjection*@
+@using Synqra.AppendStorage
+@using System.Diagnostics
 
 <PageTitle>Synqra Contoso Playwright</PageTitle>
 
+<div>@(OperatingSystem.IsWasi() ? "Running on WASI" : "Not running on WASI")</div>
+<div>@(OperatingSystem.IsBrowser() ? "Running on Browser" : "Not running on Browser")</div>
+
 <h1>This page tests Synqra on WASM</h1>
+
+<div>@projection.ProjectionStatus</div>
 
 <h2>Test 001 - Add element to collection</h2>
 <InputText @bind-Value="itemName" data-testid="itemName" />
 <button @onclick="AddElement" data-testid="btnAdd">Add element to collection</button>
+<button @onclick="TestInterop" data-testid="btnTest">Test Interop</button>
+<button @onclick="TestBatch" data-testid="btnTest">Test Batch</button>
+<button @onclick="StressTest" data-testid="btnStress">Stress Test</button>
 <table>
     <thead>
         <tr>
@@ -19,10 +28,10 @@
         </tr>
     </thead>
     <tbody>
-        @foreach (var item in localOnlyProjection.GetCollection<ContosoItem>())
+        @foreach (var item in projection.GetCollection<ContosoItem>())
         {
             <tr>
-                <td><code>@localOnlyProjection.GetId(item)</code></td>
+                <td><code>@projection.GetId(item)</code></td>
                 <td>@item.ItemName</td>
             </tr>
         }
@@ -30,20 +39,81 @@
 </table>
 @code {
 
-    IProjection localOnlyProjection;
+    private string stressLabel = "Stress Test";
+    private readonly ContosoInMemoryProjection projection;
+    private readonly IAppendStorage<Event, Guid> appendStorage;
 
-    public Home([FromKeyedServices("localOnlyProjection")] IProjection localOnlyProjection)
+    public Home(ContosoInMemoryProjection projection, IAppendStorage<Event, Guid> appendStorage)
     {
-        this.localOnlyProjection = localOnlyProjection;
+        this.projection = projection;
+        this.appendStorage = appendStorage;
+        projection.CommandProcessed += (sender, args) =>
+        {
+            StateHasChanged();
+        };
     }
 
     string itemName = string.Empty;
 
     private void AddElement(MouseEventArgs args)
     {
-        localOnlyProjection.GetCollection<ContosoItem>().Add(new ContosoItem
+        projection.GetCollection<ContosoItem>().Add(new ContosoItem
         {
             ItemName = itemName,
         });
+    }
+
+    private async void TestInterop(MouseEventArgs args)
+    {
+        var res = await appendStorage.TestAsync("asd");
+        Console.WriteLine(res);
+    }
+
+    private async void TestBatch(MouseEventArgs args)
+    {
+        await appendStorage.AppendBatchAsync([
+            new FooContosoEvent
+            {
+                CommandId = GuidExtensions.CreateVersion7(),
+                EventId = GuidExtensions.CreateVersion7(),
+            },
+            new FooContosoEvent
+            {
+                CommandId = GuidExtensions.CreateVersion7(),
+                EventId = GuidExtensions.CreateVersion7(),
+            },
+        ]);
+    }
+
+    private async void StressTest(MouseEventArgs args)
+    {
+        int cnt = 10_000;
+        int batch = 100;
+
+        var sw = Stopwatch.StartNew();
+        stressLabel = "Processing...";
+        StateHasChanged();
+
+        for (int i = 0; i < cnt / batch; i++)
+        {
+            var item = new ContosoItem
+            {
+                ItemName = itemName,
+            };
+            projection.GetCollection<ContosoItem>().Add(item);
+            for (int j = 0; j < batch; j++)
+            {
+                item.ItemName2 = Guid.NewGuid().ToString("N");
+            }
+
+            if (sw.ElapsedMilliseconds > 50)
+            {
+                await Task.Yield();
+                sw.Restart();
+            }
+        }
+
+        stressLabel = "Stress Test";
+        StateHasChanged();
     }
 }

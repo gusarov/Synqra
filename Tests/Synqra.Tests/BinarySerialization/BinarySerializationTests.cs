@@ -156,7 +156,10 @@ internal class BinarySerializationStringTests : BaseTest
 	[Test]
 	// [Arguments("Hi", "024869")]
 	[Arguments("Hi", "486900")]
-	public void Should_serialize_strings_with_test_vectors(string data, string hex)
+	[Arguments(" ", "2000")]
+	[Arguments("", "00")]
+	[Arguments(null, "FF")]
+	public void Should_serialize_strings_with_test_vectors(string? data, string hex)
 	{
 		var ser = new SBXSerializer();
 		Span<byte> buffer = stackalloc byte[20];

@@ -103,7 +103,7 @@ public static class AppendStorageJsonLinesExtensions
 			}
 		}
 
-		public IAsyncEnumerable<T> GetAll(TKey? from = default, CancellationToken cancellationToken = default)
+		public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
 		{
 			return new JsonLinesAsyncEnumerable(this, cancellationToken);
 		}
@@ -215,6 +215,15 @@ public static class AppendStorageJsonLinesExtensions
 
 				_currentLine = await _streamReader.ReadLineAsync();
 				return _currentLine != null;
+			}
+		}
+
+		public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+		{
+			// TODO: optimize this by writing batch instead of line by line
+			foreach (var item in items)
+			{
+				await AppendAsync(item, cancellationToken);
 			}
 		}
 
@@ -369,6 +378,11 @@ public static class AppendStorageJsonLinesExtensions
 				_semaphore.Release();
 			}
 #endif
+		}
+
+		public Task<string> TestAsync(string input)
+		{
+			throw new NotImplementedException();
 		}
 
 		~JsonLinesStorage()

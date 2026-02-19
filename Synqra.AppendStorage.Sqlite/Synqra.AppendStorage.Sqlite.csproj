@@ -1,21 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
-    <!--
-    TODO: Introduce BinarySerializer.Abstractions instead
-    TODO: Make SBX to work in browser
-    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
-    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
-    <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 
 </Project>

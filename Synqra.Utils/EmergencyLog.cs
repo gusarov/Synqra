@@ -58,6 +58,21 @@ internal class EmergencyLogImplementation
 		{
 			isEnabled = true;
 		}
+#if NET8_0_OR_GREATER || BROWSER
+		if (OperatingSystem.IsBrowser())
+		{
+			_processName = "browser_process";
+			return;
+		}
+#endif
+
+		_processName = Process.GetCurrentProcess().ProcessName
+#if !NETSTANDARD
+		+ (OperatingSystem.IsWindows() ? ".exe" : null)
+#endif
+		+ $":{Process.GetCurrentProcess().Id}"
+		;
+
 		if (isEnabled)
 		{
 			var dir = Path.Combine(Path.GetTempPath(), "Synqra");
@@ -469,12 +484,7 @@ internal class EmergencyLogImplementation
 		}
 	}
 
-	static string _processName = Process.GetCurrentProcess().ProcessName
-#if !NETSTANDARD
-		+ (OperatingSystem.IsWindows() ? ".exe" : null)
-#endif
-		+ $":{Process.GetCurrentProcess().Id}"
-		;
+	static string _processName;
 
 	private static string Format(string message, DateTimeOffset at = default)
 	{

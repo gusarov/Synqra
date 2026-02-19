@@ -95,6 +95,23 @@ namespace System.Runtime.CompilerServices
 
 #endif
 
+
+// OperatingSystem
+#if NETSTANDARD2_0 || NETSTANDARD2_1
+
+namespace System
+{
+    internal static class OperatingSystem
+    {
+        public static bool IsBrowser()
+        {
+            throw new NotSupportedException("This method is a polyfill and should not be called directly. It is expected to be replaced by the actual implementation in supported frameworks.");
+        }
+    }
+}
+
+#endif
+
 #if NETSTANDARD2_0 || NETSTANDARD2_1
 
 namespace System.Runtime.CompilerServices

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Synqra.BinarySerializer;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;

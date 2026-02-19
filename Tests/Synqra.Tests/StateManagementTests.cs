@@ -147,8 +147,9 @@ public class StateManagementTests : BaseTest<IProjection>
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
+		await ((InMemoryProjection)reopened).LoadStateAsync();
 
-		var tasks = _sut.GetCollection<MyPocoTask>();
+		var tasks = reopened.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
 		await Assert.That(tasks[0].Subject).IsEqualTo("123");
 	}
@@ -196,6 +197,12 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		return Task.CompletedTask;
 	}
 
+	public Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+	{
+		Items.AddRange(items);
+		return Task.CompletedTask;
+	}
+
 	public void Dispose()
 	{
 	}
@@ -210,7 +217,7 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		return Task.CompletedTask;
 	}
 
-	public async IAsyncEnumerable<T> GetAll(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
 		foreach (T item in Items)
 		{
@@ -221,6 +228,10 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		}
 	}
 
+	public Task<string> TestAsync(string input)
+	{
+		throw new NotImplementedException();
+	}
 }
 
 public partial class DemoModel

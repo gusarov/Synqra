@@ -50,10 +50,10 @@
          IncludeRuntimeDependency="false" />
       <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Model.dll" IncludeRuntimeDependency="false" />
       -->
-         <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Utils.dll" IncludeRuntimeDependency="true" />
-         <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Microsoft.Extensions.Logging.Abstractions.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)Microsoft.Extensions.Logging.Abstractions.dll')" />
-         <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Microsoft.Extensions.DependencyInjection.Abstractions.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
-         <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\System.Threading.AccessControl.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)System.Threading.AccessControl.dll')" />
+      <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Utils.dll" IncludeRuntimeDependency="true" />
+      <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Microsoft.Extensions.Logging.Abstractions.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)Microsoft.Extensions.Logging.Abstractions.dll')" />
+      <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Microsoft.Extensions.DependencyInjection.Abstractions.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+      <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\System.Threading.AccessControl.dll" IncludeRuntimeDependency="true" Condition="Exists('$(TargetDir)System.Threading.AccessControl.dll')" />
     </ItemGroup>
   </Target>
 </Project>

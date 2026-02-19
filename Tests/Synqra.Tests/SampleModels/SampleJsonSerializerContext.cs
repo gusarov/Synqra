@@ -13,8 +13,7 @@ using System.Text.Json.Serialization.Metadata;
 namespace Synqra.Tests.SampleModels;
 
 [JsonSourceGenerationOptions(
-	  JsonSerializerDefaults.Web
-	, AllowTrailingCommas = true
+	  AllowTrailingCommas = true
 	, DefaultBufferSize = 16 * 1024
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
@@ -23,7 +22,6 @@ namespace Synqra.Tests.SampleModels;
 	, IgnoreReadOnlyProperties = true
 	, IncludeFields = false
 	, PropertyNameCaseInsensitive = true
-	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
 	, ReadCommentHandling = JsonCommentHandling.Skip
 	// , TypeInfoResolver = new TodoPolymorphicTypeResolver()
 #if DEBUG

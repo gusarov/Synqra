@@ -1,10 +1,18 @@
-#syntax=docker/dockerfile:1-labs
+﻿#syntax=docker/dockerfile:1-labs
 
 #FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
 #USER $APP_UID
 #WORKDIR /app
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# wasm-tools/emscripten glue scripts expects python3 in PATH
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    ca-certificates \
+    curl \
+    git \
+ && rm -rf /var/lib/apt/lists/*
+RUN dotnet workload install wasm-tools
 ARG BUILD_CONFIGURATION=Release
 RUN apt-get update && apt-get install -y --no-install-recommends mc clang zlib1g-dev curl
 # && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
@@ -23,7 +31,7 @@ FROM build AS test
 RUN dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM build AS pack
-RUN dotnet pack -o /out                -c $BUILD_CONFIGURATION --no-restore --no-build
+RUN dotnet pack -o /out                -c $BUILD_CONFIGURATION --no-restore --no-build -clp:ErrorsOnly -nologo -tl:off
 
 FROM build AS buildaot
 RUN dotnet nuget enable source nuget.org
@@ -38,4 +46,3 @@ COPY --from=pack /out /
 FROM scratch AS log
 COPY --from=test /src /stage/test
 COPY --from=buildaot /src /stage/buildaot
-

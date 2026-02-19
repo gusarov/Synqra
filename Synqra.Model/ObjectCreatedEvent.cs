@@ -27,6 +27,7 @@ public partial class ObjectCreatedEvent : SingleObjectEvent
 
 	partial void OnDataChanging(object? oldValue, object? value)
 	{
+		/*
 		if (value is IDictionary<string, object?> dict)
 		{
 			throw new NotImplementedException();
@@ -39,6 +40,7 @@ public partial class ObjectCreatedEvent : SingleObjectEvent
 		{
 			throw new NotImplementedException();
 		}
+		*/
 	}
 
 	//[JsonIgnore]
