@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net9.0;net8.0;netstandard2.1;netstandard2.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Synqra.BinarySerializer</RootNamespace>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Synqra.Utils\_Polyfill.cs" Link="_Polyfill.cs" />
+
+    <PackageReference Include="System.Memory" Version="4.6.3" Condition="'$(TargetFramework)'=='netstandard2.0'" />
+  </ItemGroup>
+
+</Project>

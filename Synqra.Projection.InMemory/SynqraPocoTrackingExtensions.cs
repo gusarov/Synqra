@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace Synqra.Projection.InMemory;
@@ -51,7 +52,11 @@ public static class SynqraPocoTrackingExtensions
 
 		public void Dispose()
 		{
-			DisposeAsync().GetAwaiter().GetResult();
+			var disposeAsync = DisposeAsync();
+			if (!OperatingSystem.IsBrowser())
+			{
+				disposeAsync.GetAwaiter().GetResult();
+			}
 		}
 
 		public async ValueTask DisposeAsync()

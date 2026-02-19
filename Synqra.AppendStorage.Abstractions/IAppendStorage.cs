@@ -9,11 +9,14 @@ namespace Synqra.AppendStorage;
 /// Low-level storage interface for storing and retrieving events
 /// </summary>
 public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
-	//where T : IIdentifiable<TKey>
+	// where T : IIdentifiable<TKey>
 {
-	Task AppendAsync(T item, CancellationToken cancellationToken = default);
+	Task<string> TestAsync(string input);
 
-	IAsyncEnumerable<T> GetAll(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
+	Task AppendAsync(T item, CancellationToken cancellationToken = default);
+	Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default);
+
+	IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
 
 	[EditorBrowsable(EditorBrowsableState.Advanced)]
 	Task FlushAsync(CancellationToken cancellationToken = default)

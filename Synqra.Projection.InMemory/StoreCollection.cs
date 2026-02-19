@@ -141,7 +141,7 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 		// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
 		var attachedData = Projection.Attach(item, this);
-		Projection.SubmitCommandAsync(new CreateObjectCommand
+		var task = Projection.SubmitCommandAsync(new CreateObjectCommand
 		{
 			ContainerId = ContainerId,
 			CollectionId = CollectionId,
@@ -149,9 +149,13 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = attachedData.Id,
 			Data = item, // data?.Count > 0 ? data : null,
-			// DataJson = dataJson,
+						 // DataJson = dataJson,
 			Target = item,
-		}).GetAwaiter().GetResult();
+		});
+		if (!OperatingSystem.IsBrowser())
+		{
+			task.GetAwaiter().GetResult();
+		}
 		var n = _list.Count;
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}

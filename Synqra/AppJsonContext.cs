@@ -1,21 +1,18 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 namespace Synqra;
 
 [JsonSourceGenerationOptions(
-	  JsonSerializerDefaults.Web
-	, AllowTrailingCommas = true
+	  AllowTrailingCommas = true
 	, DefaultBufferSize = 16 * 1024
 	, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-	, DictionaryKeyPolicy = JsonKnownNamingPolicy.CamelCase
 	, GenerationMode = JsonSourceGenerationMode.Default
 	, IgnoreReadOnlyFields = true
 	, IgnoreReadOnlyProperties = true
 	, IncludeFields = false
 	, PropertyNameCaseInsensitive = true
-	, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase
 	, ReadCommentHandling = JsonCommentHandling.Skip
 	// , TypeInfoResolver = new TodoPolymorphicTypeResolver()
 #if DEBUG

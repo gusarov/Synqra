@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.JsonLines;
@@ -99,7 +99,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 
 		await ReopenAsync();
 
-		var items = _storage.GetAll().ToBlockingEnumerable().ToList();
+		var items = _storage.GetAllAsync().ToBlockingEnumerable().ToList();
 
 		await Assert.That(items).HasCount(2);
 
@@ -118,8 +118,8 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 		_storage.Dispose();
 		await Assert.That(FileReadAllText(_fileName).Replace("\r\n", "\n")).IsEqualTo("""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Tests.TestItem"}
-{"id":1,"name":"Test Item 1"}
-{"id":2,"name":"Test Item 2"}
+{"Id":1,"Name":"Test Item 1"}
+{"Id":2,"Name":"Test Item 2"}
 
 """.Replace("\r\n", "\n"));
 	}
@@ -153,7 +153,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	{
 		await _storage.AppendAsync(new TestItem { Id = 0, Name = "For iterator", });
 
-		var iterator = _storage.GetAll().GetAsyncEnumerator();
+		var iterator = _storage.GetAllAsync().GetAsyncEnumerator();
 
 		await Assert.That(await iterator.MoveNextAsync()).IsTrue();
 		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end
@@ -184,7 +184,7 @@ public class EventsJsonlStorageTests : StorageTests<Event, Guid>
 		_storage.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo("""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{"_t":"ObjectCreatedEvent","targetId":"00000000-0000-0000-0000-000000000000","targetTypeId":"00000000-0000-0000-0000-000000000000","collectionId":"00000000-0000-0000-0000-000000000000","eventId":"00000000-0000-0000-0000-000000000000","commandId":"00000000-0000-0000-0000-000000000000"}
+{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"00000000-0000-0000-0000-000000000000","CommandId":"00000000-0000-0000-0000-000000000000"}
 
 """.NormalizeNewLines());
 	}

@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using Synqra.BinarySerializer;
+using System.Text.Json.Serialization;
 
 namespace Synqra;
 
@@ -49,33 +50,6 @@ public interface IModelBinder<T> : IModelBinder
 	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
 	void Get(T model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
-}
-
-public interface ISBXSerializerFactory
-{
-	ISBXSerializer CreateSerializer();
-}
-
-/// <summary>
-/// Synqra Binary eXchange serializer // or // Syncron
-/// </summary>
-public interface ISBXSerializer
-{
-	void Serialize<T>(in Span<byte> buffer, T value, ref int pos);
-
-	void Serialize(in Span<byte> buffer, string value, ref int pos);
-	void Serialize(in Span<byte> buffer, in long value, ref int pos);
-	void Serialize(in Span<byte> buffer, ulong value, ref int pos);
-	// it will go <T> route and will emit proper prefixes
-	// void Serialize<T>(in Span<byte> buffer, in IEnumerable<T> value, ref int pos);
-
-	T Deserialize<T>(in ReadOnlySpan<byte> buffer, ref int pos);
-
-	string? DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos);
-	long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos);
-	ulong DeserializeUnsigned(in ReadOnlySpan<byte> buffer, ref int pos);
-	IList<T> DeserializeList<T>(in ReadOnlySpan<byte> buffer, ref int pos);
-	IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos);
 }
 
 public static class BinderModes
