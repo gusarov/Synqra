@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using Synqra.BinarySerializer;
 
 namespace Synqra.AppendStorage.Sqlite;
@@ -14,16 +15,15 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
     private readonly SqliteConnection _connection;
     private readonly ISBXSerializer _serializer;
     private readonly Func<T, Guid> _getKey;
-    private readonly object _lock = new();
 
     public SqliteAppendStorage(
-        string connectionString,
+        IOptions<SqliteAppendStorageOptions> options,
         ISBXSerializerFactory serializerFactory,
         Func<T, Guid> getKey)
     {
         _serializer = serializerFactory.CreateSerializer();
         _getKey = getKey;
-        _connection = new SqliteConnection(connectionString);
+        _connection = new SqliteConnection(options.Value.ConnectionString);
         _connection.Open();
 
         using var cmd = _connection.CreateCommand();
@@ -48,44 +48,35 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
 
     public Task AppendAsync(T item, CancellationToken cancellationToken = default)
     {
-        var guid = _getKey(item);
-        var keyBytes = GuidToBigEndianBytes(guid);
-        var dataBytes = SerializeItem(item);
-
-        lock (_lock)
-        {
-            using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "INSERT INTO events (id, data) VALUES (@id, @data)";
-            cmd.Parameters.AddWithValue("@id", keyBytes);
-            cmd.Parameters.AddWithValue("@data", dataBytes);
-            cmd.ExecuteNonQuery();
-        }
-
+        AppendCore(item);
         return Task.CompletedTask;
     }
 
     public Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
     {
-        lock (_lock)
+        using var tx = _connection.BeginTransaction();
+        foreach (var item in items)
         {
-            using var tx = _connection.BeginTransaction();
-            using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "INSERT INTO events (id, data) VALUES (@id, @data)";
-            var idParam = cmd.Parameters.Add("@id", SqliteType.Blob);
-            var dataParam = cmd.Parameters.Add("@data", SqliteType.Blob);
-
-            foreach (var item in items)
-            {
-                var guid = _getKey(item);
-                idParam.Value = GuidToBigEndianBytes(guid);
-                dataParam.Value = SerializeItem(item);
-                cmd.ExecuteNonQuery();
-            }
-
-            tx.Commit();
+            AppendCore(item);
         }
-
+        tx.Commit();
         return Task.CompletedTask;
+    }
+
+    private void AppendCore(T item)
+    {
+        Span<byte> keyBytes = stackalloc byte[16];
+        WriteBigEndianGuid(_getKey(item), keyBytes);
+
+        Span<byte> buffer = stackalloc byte[4096];
+        int pos = 0;
+        _serializer.Serialize(buffer, item, ref pos);
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "INSERT INTO events (id, data) VALUES (@id, @data)";
+        cmd.Parameters.AddWithValue("@id", keyBytes.ToArray());
+        cmd.Parameters.AddWithValue("@data", buffer.Slice(0, pos).ToArray());
+        cmd.ExecuteNonQuery();
     }
 
     public async IAsyncEnumerable<T> GetAllAsync(
@@ -96,8 +87,10 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
 
         if (from is Guid g && g != Guid.Empty)
         {
+            Span<byte> fromBytes = stackalloc byte[16];
+            WriteBigEndianGuid(g, fromBytes);
             cmd.CommandText = "SELECT data FROM events WHERE id >= @from ORDER BY id";
-            cmd.Parameters.AddWithValue("@from", GuidToBigEndianBytes(g));
+            cmd.Parameters.AddWithValue("@from", fromBytes.ToArray());
         }
         else
         {
@@ -118,14 +111,6 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
         return Task.CompletedTask;
     }
 
-    private byte[] SerializeItem(T item)
-    {
-        var buffer = new byte[4096]; // TODO: pool / resize
-        int pos = 0;
-        _serializer.Serialize(buffer.AsSpan(), item, ref pos);
-        return buffer.AsSpan(0, pos).ToArray();
-    }
-
     private T DeserializeItem(byte[] data)
     {
         int pos = 0;
@@ -133,12 +118,11 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
     }
 
     /// <summary>
-    /// Converts Guid to big-endian 16 bytes so SQLite BLOB comparison
+    /// Writes Guid as big-endian 16 bytes so SQLite BLOB comparison
     /// preserves v7 chronological order.
     /// </summary>
-    private static byte[] GuidToBigEndianBytes(Guid guid)
+    private static void WriteBigEndianGuid(Guid guid, Span<byte> bytes)
     {
-        Span<byte> bytes = stackalloc byte[16];
         guid.TryWriteBytes(bytes);
         // .NET Guid layout on little-endian: int(LE) short(LE) short(LE) 8-bytes(BE)
         // Swap first 4 bytes
@@ -149,7 +133,6 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
         // Swap bytes 6-7
         (bytes[6], bytes[7]) = (bytes[7], bytes[6]);
         // Bytes 8-15 are already big-endian
-        return bytes.ToArray();
     }
 
     public void Dispose()
@@ -159,7 +142,6 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
 
     public ValueTask DisposeAsync()
     {
-        _connection.Dispose();
-        return default;
+        return _connection.DisposeAsync();
     }
 }
