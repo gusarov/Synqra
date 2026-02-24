@@ -561,4 +561,16 @@ public class GuidExtensionsTests3 : BaseTest
 		DateTime now = DateTime.UtcNow;
 		await Assert.That((now - time).TotalSeconds).IsLessThan(1);
 	}
+
+	[Test]
+	public async Task Should_create_shorter_guid_v7()
+	{
+		var guidGenerator = new GuidExtensions.Generator(guidLen: 12);
+		var guid = guidGenerator.CreateVersion7();
+		await Assert.That(guid.GetVariant()).IsEqualTo(1);
+		await Assert.That(guid.GetVersion()).IsEqualTo(7);
+		await Assert.That(guid).IsNotEqualTo(default);
+		await Assert.That(guid.ToString("N")).EndsWith("00000000");
+		Console.WriteLine(guid);
+	}
 }

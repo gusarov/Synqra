@@ -1,6 +1,8 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
@@ -34,63 +36,75 @@ public static class GuidExtensions
 	/// <summary>
 	/// This is default state of counters. If you want to have a dedicated one - create your own instance of State class.
 	/// </summary>
-	public static State Default { get; } = new State();
+	public static Generator Default { get; } = new Generator();
 
-	public class State
+	public class Generator
 	{
 		// For v1 & v6: Same as Mongo ObjectID, it is reset on client start, not saved
-		private readonly ulong _nodeId; // actually only 6 bytes (48 bit) is in use
+		private readonly ulong _v1v6nodeId; // actually only 6 bytes (48 bit) is in use
+		private readonly byte _guidLen;
 		private int _clockSeq; // actually only 1.5 bytes (12 bits) is in use but Interlocked works with int
 
 		// For v7 monotonicy
 		private long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
 
-		public unsafe State(ulong nodeId)
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="nodeId">V1 and V6 has Node Id field. When zero - it Random for every generator. Default genertor will have randmo on every application start.</param>
+		/// <param name="guidLen">Guids are 16 byte by default. This setting allows you to make shorter v7 guids, zero ending, e.g. 12 is mongo guids length (but not same semantic!)</param>
+		public unsafe Generator(ulong nodeId = 0, byte guidLen = 16)
 		{
-			_nodeId = nodeId;
+			if (nodeId == 0)
+			{
+				try
+				{
+					var rng = RandomNumberGenerator.Create();
+#if NETSTANDARD2_0
+					var buffer = new byte[8];
+					rng.GetBytes(buffer);
+					nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+					var span = new Span<byte>((byte*)&nodeId, 8);
+					rng.GetBytes(span);
+#endif
+				}
+				catch (Exception ex)
+				{
+					EmergencyLog.Default.LogError(ex.ToString());
+					// fallback in case of crypto configuration problems
+#if NETSTANDARD
+					var buffer = new byte[8];
+					new Random().NextBytes(buffer);
+					nodeId = BitConverter.ToUInt64(buffer, 0);
+#else
+					nodeId = unchecked((ulong)Random.Shared.NextInt64());
+#endif
+				}
+			}
+			_v1v6nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000; // set multicast bit to avoid using real MAC address (See RFC spec)
+			_guidLen = guidLen;
+			if (guidLen < 10 || guidLen > 16)
+			{
+				throw new ArgumentException("Guid v7 length must be between 10 and 16 bytes. This feature truncates higher byes to zero and requires adequate random space.", nameof(guidLen));
+			}
 		}
 
-		public unsafe State()
+		public unsafe Generator()
+			: this(0)
 		{
-			try
-			{
-				var rng = RandomNumberGenerator.Create();
-#if NETSTANDARD2_0
-				var buffer = new byte[8];
-				rng.GetBytes(buffer);
-				ulong nodeId = BitConverter.ToUInt64(buffer, 0);
-#else
-				ulong nodeId = 0;
-				var span = new Span<byte>((byte*)&nodeId, 8);
-				rng.GetBytes(span);
-#endif
-				_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000; // set multicast bit to avoid using real MAC address (See RFC spec)
-			}
-			catch (Exception ex)
-			{
-				EmergencyLog.Default.Message(ex.ToString());
-				// fallback in case of crypto configuration problems
-#if NETSTANDARD
-				var buffer = new byte[8];
-				new Random().NextBytes(buffer);
-				var nodeId = BitConverter.ToUInt64(buffer, 0);
-#else
-				var nodeId = (ulong)Random.Shared.NextInt64();
-#endif
-				_nodeId = nodeId & 0x0000FFFFFFFFFFFF | 0x0000010000000000;
-			}
 		}
 
 		[Obsolete("Use CreateVersion7 instead")]
 		public unsafe Guid CreateVersion1()
 		{
-			return GuidExtensions.CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
+			return GuidExtensions.CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _v1v6nodeId);
 		}
 
 		[Obsolete("Use CreateVersion7 instead")]
 		public unsafe Guid CreateVersion6()
 		{
-			return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _nodeId);
+			return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _v1v6nodeId);
 		}
 
 		[Obsolete("Use CreateVersion7 instead")]
@@ -191,6 +205,19 @@ public static class GuidExtensions
 				*(uint*)bytes = a;
 				*(ushort*)(bytes + 4) = b;
 				*(ushort*)(bytes + 6) = c;
+
+				// Also randomize random part!!
+				var ng = Guid.NewGuid();
+				byte* ngBytes = (byte*)&ng;
+				for (int i = 8; i < _guidLen; i++)
+				{
+					bytes[i] = ngBytes[i];
+				}
+				for (int i = _guidLen; i < 16; i++)
+				{
+					bytes[i] = 0;
+				}
+
 			}
 			return example; // all good, return as is
 		}
@@ -206,14 +233,14 @@ public static class GuidExtensions
 			// Option 2: random_b is random first time in ms, but after that it increments like bigint or BigEndian Long (guessable in 1 ms space)
 			// Option 3: use rand_a for high precision time (DateTime already has 100ns precision) This can be combined with other options. E.g. very good combo with option 0.
 
-			// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds.
+			// DECISION: Option 3+0. This also aligns well with anti-rollover requirement and leap seconds. Code name - "omnistamp"
 
 			// The change from 3 ticks increment to 4 ticks increment:
 			// 1) Allows to avoid floating arithmetics and just do x>>2
 			// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
 			// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
 
-			var g = Guid.NewGuid();
+			var g = Guid.NewGuid(); // extreamly optimized
 
 			ticks -= UnixEpochTicks;
 
@@ -245,6 +272,10 @@ public static class GuidExtensions
 
 			bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // variant 1, 0x10: RFC 4122
 
+			for (int i = _guidLen; i < 16; i++)
+			{
+				bytes[i] = 0;
+			}
 
 			return g;
 		}
