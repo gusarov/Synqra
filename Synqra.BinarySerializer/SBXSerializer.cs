@@ -145,7 +145,9 @@ public class SBXSerializer : ISBXSerializer
 	static UTF8Encoding _utf8 = new(false, true);
 	static Guid _guidMax = new Guid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
 
-	// This is to compress time in streams. All time can now be calculatead as varbinary of this custom epoch (when stream started). This is to save space.
+	/// <summary>
+	/// Version/Schema specific epoch for compression. All time can now be calculatead as varbinary of s/ms from this custom epoch (when stream started). This is to save space.
+	/// </summary>
 	DateTime _streamBaseTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 	// Let's use UTF8 continuation ranges (0x80...0xBF) for string interning. This way, we can always distinguish between real first character and a pointer to dictionary.
@@ -273,44 +275,6 @@ public class SBXSerializer : ISBXSerializer
 		var schemaVersionF = (float)schemaVersion;
 		_typeById[typeId] = (schemaVersionF, type, binder);
 		_idByType[type] = (typeId, schemaVersionF, binder);
-	}
-
-	/// <summary>
-	/// The utf8 byte that represents either 0 or a string intern id (0x80...0xC1)
-	/// </summary>
-	/// <param name="value"></param>
-	/// <returns></returns>
-	byte Intern(string value)
-	{
-		if (value.Length == 0)
-		{
-			return 0;
-		}
-		if (!_stringByValue.TryGetValue(value, out var metadata))
-		{
-			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
-			{
-				var first = _strings.First!;
-				_strings.Remove(first);
-				var (code, _) = _stringByValue[first.Value];
-				_stringByValue.Remove(first.Value);
-				_stringById[code] = value;
-				_stringByValue[value] = (code, _strings.AddLast(value));
-			}
-			else
-			{
-				var id = _nextStringId++; // first allocated point is 0x80, last is 0xC1
-				_stringById[id] = value;
-				_stringByValue[value] = (id, _strings.AddLast(value));
-			}
-			return 0;
-		}
-		else
-		{
-			_strings.Remove(metadata.Node);
-			_strings.AddLast(metadata.Node);
-			return metadata.Id;
-		}
 	}
 
 	/*
@@ -1351,64 +1315,97 @@ public class SBXSerializer : ISBXSerializer
 	{
 		var b = buffer[pos];
 
-		if (b == 255) // special value for null string. This value is outside of legit UTF8 space
+		if (b == 0xFF) // special value for null string. This value is outside of legit UTF8 space
 		{
 			pos++;
 			return null!;
 		}
-		else if (b >= 0x80 && b <= 0xC1)
-		{
-			pos++;
-			return _stringById[b];
-		}
-		else if (b == 0)
+		else if (b == 0x00)
 		{
 			pos++;
 			return "";
 		}
-
-		int length = buffer[pos..].IndexOf<byte>(0); // todo: it probably allocates array here :(
-		if (length < 0)
+		else if (b >= 0x80 && b <= 0xC1) // 64+2 positions possible. C0 and C1 are prohibited as overlong encoding, so this could be there for glyphs as we do not declare this as true UTF8.
 		{
-			throw new ArgumentException("Buffer too small for string decoding.");
+			pos++;
+			var istr = _stringById[b];
+			PopIntern(istr, b);
+			return istr;
 		}
 
-		var str = _utf8.GetString(buffer[pos..][..length]);
+		// Zero will never be part of valid utf8 string, thanks to UTF8 design. Every multibyte space starts from zero, which is excessive but much more robust.
+		int length = buffer[pos..].IndexOf<byte>(0);
+		if (length < 0)
+		{
+			throw new ArgumentException("Buffer too small for string decoding. Null terminator not found.");
+		}
+
+		var str = _utf8.GetString(buffer[pos..][..length]); // The entire string is valid utf8 except for 1st byte. We have handled special values above.v
+		PopIntern(str);
 		pos += length + 1;
 		return str;
 	}
 
-	/*
-	public string DeserializeString(ref ReadOnlySpan<byte> buffer) // 37 38 00
+	void PopIntern(string value, byte g = 0)
 	{
-		int length = buffer.IndexOf<byte>(0); // todo: it probably allocates array here :(
-		// var length = (int)DeserializeUnsigned(ref buffer);
-		if (length < 0)
+		if (g == 0)
 		{
-			throw new ArgumentException("Buffer too small for string decoding.");
+			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
+			{
+				// NEW INTERNED STRING 2 - buffer full, make place for new one bu evicting oldest.
+				var first = _strings.First!;
+				_strings.Remove(first);
+				var (code, _) = _stringByValue[first.Value];
+				_stringByValue.Remove(first.Value);
+				_stringById[code] = value;
+				_stringByValue[value] = (code, _strings.AddLast(value));
+			}
+			else
+			{
+				// NEW INTERNED STRING 1 - buffer space, just add it to the end of cycle buffer
+				// this field is only used while filling up cycle buffer of strings
+				var id = _nextStringId++; // first allocated point is 0x80, last is 0xC1 (because _strings.Count >= 66)
+				_stringById[id] = value;
+				_stringByValue[value] = (id, _strings.AddLast(value));
+			}
 		}
-		var str = _utf8.GetString(buffer[0..length]);
-		buffer = buffer[(length + 1)..];
-		return str;
+		else
+		{
+			// KNOWN INTERNED STRING, just pop it to the end of cycle buffer for survivability
+			if (!_stringByValue.TryGetValue(value, out var metadata))
+			{
+				throw new Exception("Interned string not found in metadata: " + value);
+			}
+			if (g != metadata.Id)
+			{
+				throw new Exception($"Interned string id mismatch for value '{value}': expected {metadata.Id}, got {g}");
+			}
+			_strings.Remove(metadata.Node);
+			_strings.AddLast(metadata.Node);
+		}
 	}
-	*/
-	
+
 	public void Serialize(in Span<byte> buffer, string data, ref int pos)
 	{
 		if (data == null)
 		{
-			buffer[pos++] = 255; // special value for null string. This value is outside of legit UTF8 space
+			buffer[pos++] = 0xFF; // special value for null string. This value is outside of legit UTF8 space
 			return;
 		}
-		var id = Intern(data);
-		if (id == 0)
+		if (data.Length == 0)
+		{
+			buffer[pos++] = 0x00; // same as null terminator but a safe short cut
+			return;
+		}
+		var glyph = Intern(data);
+		if (glyph == 0) // it is remembered for interning, but now we have to write it in full.
 		{
 			pos += _utf8.GetBytes(data, buffer[pos..]);
 			buffer[pos++] = 0; // null terminator
 		}
-		else if (id >= 0x80 && id <=0xC1)
+		else if (glyph >= 0x80 && glyph <=0xC1) // it is known before, 64+2 positions possible
 		{
-			buffer[pos++] = (byte)id;
+			buffer[pos++] = (byte)glyph;
 		}
 		else
 		{
@@ -1416,6 +1413,43 @@ public class SBXSerializer : ISBXSerializer
 		}
 	}
 
+	/// <summary>
+	/// The utf8 byte that represents either 0 or a string intern id (0x80...0xC1)
+	/// </summary>
+	/// <param name="value"></param>
+	/// <returns></returns>
+	byte Intern(string value)
+	{
+		if (!_stringByValue.TryGetValue(value, out var metadata))
+		{
+			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
+			{
+				// NEW INTERNED STRING 2 - buffer full, make place for new one bu evicting oldest.
+				var first = _strings.First!;
+				_strings.Remove(first);
+				var (code, _) = _stringByValue[first.Value];
+				_stringByValue.Remove(first.Value);
+				_stringById[code] = value;
+				_stringByValue[value] = (code, _strings.AddLast(value));
+			}
+			else
+			{
+				// NEW INTERNED STRING 1 - buffer space, just add it to the end of cycle buffer
+				// this field is only used while filling up cycle buffer of strings
+				var id = _nextStringId++; // first allocated point is 0x80, last is 0xC1 (because _strings.Count >= 66)
+				_stringById[id] = value;
+				_stringByValue[value] = (id, _strings.AddLast(value));
+			}
+			return 0;
+		}
+		else
+		{
+			// KNOWN INTERNED STRING, just pop it to the end of cycle buffer for survivability
+			_strings.Remove(metadata.Node);
+			_strings.AddLast(metadata.Node);
+			return metadata.Id;
+		}
+	}
 	/*
 	public void Serialize(ref Span<byte> buffer, string data)
 	{
@@ -1424,13 +1458,13 @@ public class SBXSerializer : ISBXSerializer
 		buffer[pos++] = 0; // null terminator
 		buffer = buffer[pos..];
 	}
-	*/
 
 	public static int IndexOfNull(in ReadOnlySpan<byte> span)
 	{
 		// TODO: it probably allocates array here :( need more optimization
 		return Array.IndexOf(span.ToArray(), (byte)0);
 	}
+	*/
 
 	#endregion
 
@@ -1670,7 +1704,12 @@ public class SBXSerializer : ISBXSerializer
 
 	public unsafe void Serialize(in Span<byte> buffer, Guid data, ref int pos)
 	{
-		// glyph byte corresponds to 8th byte of the GUID
+		// In scope of Synqra and SBX we only use Guid v4, v7, v8
+		// In guid v4 there is nothing to compress
+		// In guid v7 we can only compress time
+		// In guid v8 we can only compress sequences of zero bytes if any (otherwise drop compression and store as is, e.g. SHA256 guids)
+
+		// "glyph" byte corresponds to 8th byte of the GUID
 		// but it is more powerful, because it makes use of unused or legacy space
 		// Legacy guids (Apollo 1980, Microsoft COM 1990-2000) are still supported but it will take 1 extra byte space as a cost to support this nonsense.
 		// For Apollo - this immediately gives back all values 0-127 that can be used for special meanings in the future.
