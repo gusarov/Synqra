@@ -7,9 +7,11 @@ using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using TUnit.Assertions.Exceptions;
 using TUnit.Assertions.Extensions;
 using static Synqra.BinarySerializer.SBXSerializer;
 
@@ -156,6 +158,7 @@ internal class BinarySerializationStringTests : BaseTest
 	[Test]
 	// [Arguments("Hi", "024869")]
 	[Arguments("Hi", "486900")]
+	[Arguments("123", "31323300")]
 	[Arguments(" ", "2000")]
 	[Arguments("", "00")]
 	[Arguments(null, "FF")]
@@ -165,17 +168,82 @@ internal class BinarySerializationStringTests : BaseTest
 		Span<byte> buffer = stackalloc byte[20];
 		int pos = 0;
 		ser.Serialize(buffer, data, ref pos);
-		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+		Assert.That(pos).IsEqualTo(hex.Length / 2).GetAwaiter().GetResult();
+
 		var pos2 = 0;
 		var deserialized = ser.DeserializeString(buffer, ref pos2);
 		Assert.That(deserialized).IsEqualTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
-
 		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
 
+		var deser = new SBXSerializer();
+		var deserPos = 0;
+		var deserialized2 = deser.DeserializeString(buffer, ref deserPos);
+		Assert.That(deserialized2).IsEqualTo(data).GetAwaiter().GetResult();
+		Assert.That(deserPos).IsEqualTo(pos).GetAwaiter().GetResult();
+
 		var serBuf = buffer;
-		int pos3 = 0;
-		ser.Serialize(serBuf, data, ref pos3);
+		int pos4 = pos;
+		ser.Serialize(serBuf, data, ref pos4);
+		if (hex.Length > 2) // 1 byte strings are not interned, it's a glyph or char or special value, so useless to intern
+		{
+			Assert.That(pos4).IsEqualTo(pos + 1).GetAwaiter().GetResult(); // interning
+			Assert.That((int)buffer[pos]).IsEqualTo(0x80).GetAwaiter().GetResult(); // interning
+			Console.WriteLine("Interned");
+		}
+		else
+		{
+			Assert.That(pos4).IsEqualTo(pos * 2 ).GetAwaiter().GetResult(); // no interning
+			Console.WriteLine("Not Interned");
+		}
+	}
+
+	[Test]
+	public async Task Should_serialize_strings_with_heavy_interning()
+	{
+		var ser = new SBXSerializer();
+		var deser = new SBXSerializer();
+
+		var iterations = 3000;
+
+		Span<byte> buffer = new byte[iterations * 4];
+		var stat = new Dictionary<int, int>();
+		int pos = 0;
+		var rpos = 0;
+
+		for (int i = 0; i < iterations; i++)
+		{
+			try
+			{
+				var str = Random.Shared.Next(200).ToString("000"); // 200 strings should be shufled between 66 interning slots, so we will have some hits and some misses
+				var prePos = pos;
+				ser.Serialize(buffer, str, ref pos);
+				ref var cnt = ref CollectionsMarshal.GetValueRefOrAddDefault(stat, pos - prePos, out _);
+				cnt++;
+
+				var back = deser.DeserializeString(buffer, ref rpos);
+				using (Assert.Multiple())
+				{
+
+					Assert.That(back).IsEqualTo(str).GetAwaiter().GetResult();
+					Assert.That(rpos).IsEqualTo(pos).GetAwaiter().GetResult();
+				}
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine("Iteration " + i);
+				throw;
+			}
+		}
+
+		foreach (var item in stat.OrderBy(x => x.Key))
+		{
+			Console.WriteLine($"Len {item.Key} count {item.Value}");
+		}
+		if (stat.Count == 2)
+		{
+			Console.WriteLine($"{stat[1] * 1.0 / (stat[4] + stat[1]):P0} of interning");
+		}
 	}
 }
 
