@@ -21,3 +21,17 @@ public partial class MyBaseModel
 {
 	public partial int Id { get; set; }
 }
+
+[SynqraModel]
+[Schema(2026.152, "1 Id int Subject string?")]
+public sealed partial class MySealedDerrivedMiniModel : MyBaseModel
+{
+	public partial string? Subject { get; set; }
+}
+
+[SynqraModel]
+[Schema(2026.152, "1 Subject string?")]
+public sealed partial class MySealedFlatMiniModel
+{
+	public partial string? Subject { get; set; }
+}

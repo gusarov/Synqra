@@ -27,9 +27,10 @@ internal class BinarySerializationGuidTests : BaseTest
 	[Arguments(3, "DB7196E3-FD0C-4C15-8D5A-94ABC2D5DFDC", "8D E39671DB 0CFD 154C 5A 94ABC2D5DFDC")] // regular Guid v4
 	[Arguments(4, "DB7196E3-FD0C-4C15-8D5A-94ABC2D50000", "8D E39671DB 0CFD 154C 5A 94ABC2D50000")] // TODO compress it!
 	[Arguments(5, "0199bf3f-deae-77bb-8631-335347819f65", "07 BC01 BB 46 31335347819F65")] // v7 compressed related to known time base
-	[Arguments(6, "00000000-0037-8000-8000-000000000000", "28 3700")] // compress with presence mask
-	[Arguments(7, "DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")] // Apollo 1980 Guid
-	[Arguments(8, "DB7196E3-FD0C-AC15-C0DA-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC C0DA 94ABC2D5DFDC")] // Microsoft 1990 Guid
+	[Arguments(6, "00000000-0000-8000-8001-000000000000", "22 0001")] // compress with presence mask
+	[Arguments(7, "00000000-0037-8000-8000-000000000000", "28 3700")] // compress with presence mask
+	[Arguments(8, "DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")] // Apollo 1980 Guid
+	[Arguments(9, "DB7196E3-FD0C-AC15-C0DA-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC C0DA 94ABC2D5DFDC")] // Microsoft 1990 Guid
 	public void Should_serialize_guid_with_test_vectors(int id, string guidString, string hex)
 	{
 #if NET9_0_OR_GREATER
@@ -949,7 +950,7 @@ public class BinarySerializationTests : BaseTest
 		};
 		ser.Map(1, 2025.785, typeof(TransportOperation));
 		ser.Map(2, 2025.785, typeof(NewEvent1));
-		ser.Map(3, 2025.789, typeof(ObjectCreatedEvent));
+		ser.Map(3, 2025.805, typeof(ObjectCreatedEvent));
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
@@ -972,7 +973,74 @@ public class BinarySerializationTests : BaseTest
 	}
 }
 
-public class BinarySerializationInterningTests : BaseTest
+public class BinarySerializationSchemaEvolutionTests : BaseTest
 {
+	byte[] _buffer = new byte[10240];
+	int pos = 0;
+	int depos = 0;
+	SBXSerializer _ser = new SBXSerializer();
+	SBXSerializer _deser = new SBXSerializer();
+	byte[] _v1Test = "5465737400".Hex(); // see Should_10_serialize_simple_field
+
+	[Test]
+	public async Task Should_10_serialize_simple_field()
+	{
+		_ser.Map(1, 1.0, typeof(SampleOldSchemaEvolutionModel));
+		var item = new SampleOldSchemaEvolutionModel
+		{
+			OldName = "Test",
+		};
+
+		_ser.Serialize(_buffer, item, ref pos);
+		var hex = _buffer.Hex(0, pos);
+
+		Console.WriteLine(hex);
+		Console.WriteLine(pos);
+		// 54 65 73 74 00
+		// T  e  s  t  \0
+
+		Assert.That(hex).IsEqualTo("5465737400").GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public async Task Should_11_deserialize_after_rename_field()
+	{
+		// preserve versions and HEX data from before upgrade
+		_ser.Map(1, 1.0, typeof(SampleNewSchemaEvolutionModel));
+		var item = _ser.Deserialize<SampleNewSchemaEvolutionModel>(_v1Test, ref pos);
+		var hex = _buffer.Hex(0, pos);
+
+		await Assert.That(item).IsNotNull();
+		await Assert.That(item.NewName).IsEqualTo("Test");
+		// nothing needs to be done here, because there is no field names in perfect positional binary form. So field rename survives automatically
+	}
+
+
+	[Test]
+	public async Task Should_12_deserialize_after_adding_field()
+	{
+		// preserve versions and HEX data from before upgrade
+		_ser.Map(1, 1.0, typeof(SampleNewSchemaEvolutionModel));
+		var item = _ser.Deserialize<SampleNewSchemaEvolutionModel>(_v1Test, ref pos);
+		var hex = _buffer.Hex(0, pos);
+
+		await Assert.That(item).IsNotNull();
+		await Assert.That(item.NewName).IsEqualTo("Test");
+		await Assert.That(item.NewProperty2).IsEqualTo(null);
+	}
+
+
+	[Test]
+	public async Task Should_12_deserialize_after_reorder_fields()
+	{
+		// preserve versions and HEX data from before upgrade
+		_ser.Map(1, 1.0, typeof(SampleNewSchemaEvolutionModel));
+		var item = _ser.Deserialize<SampleNewSchemaEvolutionModel>(_v1Test, ref pos);
+		var hex = _buffer.Hex(0, pos);
+
+		await Assert.That(item).IsNotNull();
+		await Assert.That(item.NewName).IsEqualTo("Test");
+		await Assert.That(item.NewProperty2).IsEqualTo(null);
+	}
 
 }
