@@ -16,12 +16,12 @@ public interface IBindableModel
 	void Set(string propertyName, object? value);
 
 	/// <summary>
-	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow in a buffer, this is only for schema-driven fields.
 	/// </summary>
 	void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
 
 	/// <summary>
-	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
+	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow in a buffer, this is only for schema-driven fields.
 	/// </summary>
 	void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
 }

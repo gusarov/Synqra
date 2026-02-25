@@ -825,6 +825,7 @@ internal class AttachedObjectData
 	public required bool IsJustCreated { get; set; }
 }
 
+// It is not flags, as all possible permutations are defined explicitly
 internal enum GetMode : byte
 {
 	// 0b_0000_0000
