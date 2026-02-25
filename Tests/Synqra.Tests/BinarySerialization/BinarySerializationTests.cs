@@ -199,6 +199,41 @@ internal class BinarySerializationStringTests : BaseTest
 	}
 
 	[Test]
+	public void Should_17_make_string_interning()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+		var data = new List<string> { "Three", "", "Three" };
+		ser.Serialize(buffer, data, ref pos);
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var deser = new SBXSerializer();
+		var pos2 = 0;
+		var deserialized = deser.Deserialize<List<string>>(buffer, ref pos2);
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_18_make_string_interning()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+		var data = new List<string> { "Three", "", "Three" };
+		ser.Serialize(buffer, data, ref pos);
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<List<string>>(buffer, ref pos2);
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+	}
+
+	[Test]
 	public async Task Should_serialize_strings_with_heavy_interning()
 	{
 		var ser = new SBXSerializer();
@@ -935,4 +970,9 @@ public class BinarySerializationTests : BaseTest
 		await Assert.That(te.TargetTypeId).IsEqualTo(te2.TargetTypeId);
 		await Assert.That(te.CollectionId).IsEqualTo(te2.CollectionId);
 	}
+}
+
+public class BinarySerializationInterningTests : BaseTest
+{
+
 }
