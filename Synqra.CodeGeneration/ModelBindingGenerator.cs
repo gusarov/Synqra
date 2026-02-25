@@ -401,11 +401,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
 			if (p.GetAttributes().Any())
 			{
-				DebugLog($"Syncron Serializing Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog($"SBX Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 			}
 			if (HasIgnoreAttribute(p))
 			{
-				DebugLog($"Syncron Serializing Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
+				DebugLog($"SBX Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
 				continue;
 			}
 
@@ -497,6 +497,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			}
 
 			bool isRootType = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
+			bool isSealed = classData.Data.IsSealed;
+			var virtualKeyword = isSealed ? "" : " virtual";
 
 			// check if the methods we want to add exist already 
 			// var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
@@ -608,9 +610,19 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			}
 			#endregion
 
+			// Build property lookup and schema field mapping for per-version serialization
+			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).ToArray();
+			var propertyLookup = new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal);
+			foreach (var p in allProperties)
+				propertyLookup[p.Name] = p;
+			var currentPropertyNames = new HashSet<string>(propertyLookup.Keys, StringComparer.Ordinal);
+			var schemaFieldMapping = BuildSchemaFieldMapping(
+				schemas.Select(s => (s.Item1, s.Item2)).ToArray(),
+				currentPropertyNames);
+
 			if (isRootType)
 			{
-				body.AppendLine("""
+				body.AppendLine($$"""
 	[ThreadStatic]
 	protected static bool _assigning; // when true, the source of the change is model binding due to new events reaching the context, so it is external change. This way, when setter see false here - it means the source is a client code, direct property change by consumer.
 
@@ -659,7 +671,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		SetCore(serializer, version, in buffer, ref pos);
 	}
 
-	protected virtual void SetCore(string name, object? value)
+	protected{{virtualKeyword}} void SetCore(string name, object? value)
 	{
 		switch (name)
 		{
@@ -690,16 +702,16 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					}
 				}
 				body.AppendLine(
-	"""
+	$$"""
 		}
 	}
 
-	protected virtual void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	protected{{virtualKeyword}} void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 """);
 				string? els = null;
 				FormattableString x;
-				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
+				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get\");");
 
 #if DEBUG
 				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
@@ -714,12 +726,18 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					any = true;
 					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Serialize all readable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
+					// Serialize fields in the order defined by this schema version
+					var getCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
+					foreach (var (schemaName, pro) in getCoreFields)
 					{
-						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+						if (pro is null)
+						{
+							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
+							continue;
+						}
+						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
 						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
 						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro, doesSupportField: false)
@@ -733,15 +751,15 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				{
 					body.AppendLine($"\t\telse");
 					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
 					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
 					body.AppendLine($"\t\t}}");
 				}
-				body.AppendLine("""
+				body.AppendLine($$"""
 	}
 
 
-	protected virtual void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	protected{{virtualKeyword}} void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 """);
 					els = null;
@@ -751,14 +769,20 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 						body.AppendLine($"\t\t{{");
 						body.AppendLine($"\t\t\t// Positional Fields:");
-						// Deserialize into all writable instance properties (this type + base types)
-						foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
+					// Deserialize fields in the order defined by this schema version
+					var setCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
+					foreach (var (schemaName, pro) in setCoreFields)
+					{
+						if (pro is null)
 						{
-							var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-								? GetFieldName(pro)
-								: "this." + pro.Name;
-							body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
+							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
+							continue;
 						}
+						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
+							? GetFieldName(pro)
+							: "this." + pro.Name;
+						body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
+					}
 						body.AppendLine($"\t\t}}");
 						els = "else ";
 					}
@@ -767,7 +791,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						body.AppendLine($"\t\telse");
 					}
 					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
 					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
 					body.AppendLine($"\t\t}}");
 
@@ -805,7 +829,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 """);
 				string? els = null;
 				FormattableString x;
-				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get\");");
+				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get\");");
 
 #if DEBUG
 				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
@@ -820,15 +844,21 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					any = true;
 					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Serialize all readable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
+					// Serialize fields in the order defined by this schema version
+					var getCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
+					foreach (var (schemaName, pro) in getCoreFields)
 					{
-						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+						if (pro is null)
+						{
+							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
+							continue;
+						}
+						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
 						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
 						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-							? GetFieldName(pro)
+							? GetFieldName(pro, doesSupportField: false)
 							: "this." + pro.Name;
 						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
 					}
@@ -839,7 +869,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				{
 					body.AppendLine($"\t\telse");
 					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
 					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
 					body.AppendLine($"\t\t}}");
 				}
@@ -856,9 +886,15 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
 					body.AppendLine($"\t\t{{");
 					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Deserialize into all writable instance properties (this type + base types)
-					foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null))
+					// Deserialize fields in the order defined by this schema version
+					var setCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
+					foreach (var (schemaName, pro) in setCoreFields)
 					{
+						if (pro is null)
+						{
+							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
+							continue;
+						}
 						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro)
 							: "this." + pro.Name;
@@ -872,7 +908,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($"\t\telse");
 				}
 				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"Syncron Serializing {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
+				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
 				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
 				body.AppendLine($"\t\t}}");
 
@@ -1420,6 +1456,113 @@ $$"""
 		}
 	}
 	*/
+
+	/// <summary>
+	/// Parses a schema string like "1 OldName string NewProp int" into ordered (name, type) pairs.
+	/// The first token is the schema format version prefix and is skipped.
+	/// </summary>
+	static List<(string Name, string Type)> ParseSchemaFields(string schemaString)
+	{
+		var result = new List<(string, string)>();
+		if (string.IsNullOrWhiteSpace(schemaString))
+			return result;
+
+		var tokens = schemaString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+		// First token is the schema format prefix (e.g. "1"), skip it.
+		// Remaining tokens are pairs: Name Type Name Type ...
+		for (int i = 1; i + 1 < tokens.Length; i += 2)
+		{
+			result.Add((tokens[i], tokens[i + 1]));
+		}
+		return result;
+	}
+
+	/// <summary>
+	/// Builds a mapping from any schema field name (including old/renamed names) to the current property name.
+	/// Walks consecutive schema versions: if a name disappears and a new name appears at the same position
+	/// with the same type, it is treated as a rename.
+	/// </summary>
+	static Dictionary<string, string> BuildSchemaFieldMapping(
+		(double Version, string SchemaString)[] schemas,
+		HashSet<string> currentPropertyNames)
+	{
+		var map = new Dictionary<string, string>(StringComparer.Ordinal);
+
+		// Add identity mappings for all current properties
+		foreach (var name in currentPropertyNames)
+			map[name] = name;
+
+		if (schemas.Length == 0)
+			return map;
+
+		var sorted = schemas.OrderBy(s => s.Version).ToArray();
+		var parsedSchemas = sorted.Select(s => (s.Version, Fields: ParseSchemaFields(s.SchemaString))).ToArray();
+
+		// Walk from oldest to newest, tracking renames between consecutive versions
+		for (int i = 0; i < parsedSchemas.Length - 1; i++)
+		{
+			var olderFields = parsedSchemas[i].Fields;
+			var newerFields = parsedSchemas[i + 1].Fields;
+
+			var newerNames = new HashSet<string>(newerFields.Select(f => f.Name), StringComparer.Ordinal);
+
+			for (int pos = 0; pos < olderFields.Count; pos++)
+			{
+				var oldField = olderFields[pos];
+				if (newerNames.Contains(oldField.Name))
+					continue; // name still exists in newer version, no rename
+
+				// Name disappeared — check if same position in newer has a new name with same type
+				if (pos < newerFields.Count && newerFields[pos].Type == oldField.Type)
+				{
+					var newName = newerFields[pos].Name;
+					// Only treat as rename if the new name wasn't in the older schema
+					var olderNames = new HashSet<string>(olderFields.Select(f => f.Name), StringComparer.Ordinal);
+					if (!olderNames.Contains(newName))
+					{
+						map[oldField.Name] = newName;
+					}
+				}
+			}
+		}
+
+		// Resolve transitive renames: A→B, B→C becomes A→C
+		foreach (var key in map.Keys.ToList())
+		{
+			var resolved = map[key];
+			var visited = new HashSet<string>(StringComparer.Ordinal) { key };
+			while (map.TryGetValue(resolved, out var next) && next != resolved && visited.Add(next))
+			{
+				resolved = next;
+			}
+			map[key] = resolved;
+		}
+
+		return map;
+	}
+
+	/// <summary>
+	/// For a given schema version, returns the ordered list of fields to serialize/deserialize,
+	/// each resolved to the current property symbol. Returns null entries for fields that
+	/// cannot be mapped (removed fields).
+	/// </summary>
+	static List<(string SchemaFieldName, IPropertySymbol? Property)> ResolveSchemaFieldsForVersion(
+		string schemaString,
+		Dictionary<string, string> fieldMapping,
+		Dictionary<string, IPropertySymbol> propertyLookup)
+	{
+		var schemaFields = ParseSchemaFields(schemaString);
+		var result = new List<(string, IPropertySymbol?)>(schemaFields.Count);
+
+		foreach (var (name, type) in schemaFields)
+		{
+			string currentName = fieldMapping.TryGetValue(name, out var mapped) ? mapped : name;
+			propertyLookup.TryGetValue(currentName, out var prop);
+			result.Add((name, prop));
+		}
+
+		return result;
+	}
 }
 
 /*

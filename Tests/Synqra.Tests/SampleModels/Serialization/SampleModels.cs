@@ -184,3 +184,21 @@ public sealed partial class SampleSealedModel : SampleBaseModel
 {
 	 // public partial int Sealed{ get; set; }
 }
+
+[SynqraModel]
+[Schema(1.0, "1 OldName string")]
+public sealed partial class SampleOldSchemaEvolutionModel // before refactoring
+{
+	public partial string OldName { get; set; }
+}
+
+[SynqraModel]
+[Schema(1.0, "1 OldName string")]
+[Schema(2.0, "1 NewName string")] // rename
+[Schema(3.0, "1 NewName string NewProperty2 string")] // add new property at the end
+[Schema(4.0, "1 NewProperty2 string NewName string")] // reorder properties
+public sealed partial class SampleNewSchemaEvolutionModel // after refactoring
+{
+	public partial string NewProperty2 { get; set; }
+	public partial string NewName { get; set; }
+}
