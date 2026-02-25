@@ -1348,7 +1348,7 @@ public class SBXSerializer : ISBXSerializer
 
 	void PopIntern(string value, byte g = 0)
 	{
-		if (g == 0)
+		if (!_stringByValue.TryGetValue(value, out var metadata))
 		{
 			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
 			{
@@ -1372,14 +1372,16 @@ public class SBXSerializer : ISBXSerializer
 		else
 		{
 			// KNOWN INTERNED STRING, just pop it to the end of cycle buffer for survivability
-			if (!_stringByValue.TryGetValue(value, out var metadata))
+			/*
+			if (g != 0)
 			{
+				if (g != metadata.Id)
+				{
+					throw new Exception($"Interned string id mismatch for value '{value}': expected {metadata.Id}, got {g}");
+				}
 				throw new Exception("Interned string not found in metadata: " + value);
 			}
-			if (g != metadata.Id)
-			{
-				throw new Exception($"Interned string id mismatch for value '{value}': expected {metadata.Id}, got {g}");
-			}
+			*/
 			_strings.Remove(metadata.Node);
 			_strings.AddLast(metadata.Node);
 		}
