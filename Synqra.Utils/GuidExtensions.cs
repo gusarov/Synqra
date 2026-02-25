@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -581,10 +583,10 @@ public static class GuidExtensions
 		return CreateHashBased(sha256, 8, namespaceId, input);
 	}
 
-	public static Guid CreateHashBased(HashAlgorithm hashAlgorithm, byte version, Guid namespaceId, byte[] input)
+	public static unsafe Guid CreateHashBased(HashAlgorithm hashAlgorithm, byte version, Guid namespaceId, byte[] input)
 	{
 		ValidateNamespaceId(namespaceId);
-
+#if TRUE || NETSTANDARD2_0
 		var namespaceBuf = namespaceId.ToByteArray();
 		if (BitConverter.IsLittleEndian)
 		{
@@ -608,6 +610,72 @@ public static class GuidExtensions
 		}
 
 		return new Guid(hash[..16]);
+#else
+		var len = 16 + input.Length;
+		const int StackLimit = 10240; // 10 KB
+		byte[] rented = null;
+		Span<byte> hash = stackalloc byte[hashAlgorithm.HashSize / 8];
+		// TODO: Do not rent for large buffers! Do blocks instead!
+		Span<byte> buf = len <= StackLimit ? stackalloc byte[len] : (rented = ArrayPool<byte>.Shared.Rent(len));
+		try
+		{
+			if (BitConverter.IsLittleEndian)
+			{
+				//    int         - short - short - by-by - by-by-by-by-by-by
+				//    int         - int           - int          -int
+				//    short-short - short - short - short - short-short-short
+				// 0x 00 00 00 00 - 00 00 - 00 00 - 00 00 - 00 00 00 00 00 00
+				//     0  1  2  3    4  5    6  7    8  9   10 11 12 13 14 15
+
+				byte* bytes = (byte*)&namespaceId;
+				(bytes[0], bytes[1], bytes[2], bytes[3]) = (bytes[3], bytes[2], bytes[1], bytes[0]);
+				(bytes[4], bytes[5]) = (bytes[5], bytes[4]);
+				(bytes[6], bytes[7]) = (bytes[7], bytes[6]);
+
+				/*
+				int* ints = (int*)&namespaceId;
+				short* shorts = (short*)&namespaceId;
+				ints[0] = BinaryPrimitives.ReverseEndianness(ints[0]);
+				shorts[2] = BinaryPrimitives.ReverseEndianness(shorts[2]);
+				shorts[3] = BinaryPrimitives.ReverseEndianness(shorts[3]);
+				*/
+			}
+
+			MemoryMarshal.Write(buf, ref namespaceId);
+			for (int i = 0, m = input.Length; i < m; i++)
+			{
+				buf[i + 16] = input[i];
+			}
+			if (!hashAlgorithm.TryComputeHash(buf, hash, out int bytesWritten))
+			{
+				throw new Exception($"Failed to hash");
+			}
+			if (bytesWritten != hash.Length)
+			{
+				throw new Exception($"Unexpected hash length {bytesWritten} but expected {hash.Length}");
+			}
+
+			hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // Set Variant to 0b10xx
+			hash[6] = (byte)((hash[6] & 0x0F) | (version << 4)); // Set version
+
+			if (BitConverter.IsLittleEndian)
+			{
+				byte* bytes = (byte*)&hash;
+				(hash[0], hash[1], hash[2], hash[3]) = (hash[3], hash[2], hash[1], hash[0]);
+				(hash[4], hash[5]) = (hash[5], hash[4]);
+				(hash[6], hash[7]) = (hash[7], hash[6]);
+			}
+
+			return new Guid(hash[..16]);
+		}
+		finally
+		{
+			if (rented != null)
+			{
+				ArrayPool<byte>.Shared.Return(rented);
+			}
+		}
+#endif
 	}
 
 	public static Guid Create(int version)
