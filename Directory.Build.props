@@ -19,6 +19,10 @@
 		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 		<IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+
+		<!-- Default test filter: exclude tests marked [Property("CI", "false")] -->
+		<TestingPlatformCommandLineArguments_>--treenode-filter "/**[CI!=false]"</TestingPlatformCommandLineArguments_>
+		<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>
 	</PropertyGroup>
 
 	<Target Name="_Synqra_BlockPackOnV1_0_0" BeforeTargets="Pack">

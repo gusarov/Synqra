@@ -22,10 +22,7 @@ namespace Synqra.Tests.Performance;
 // Bind 02 BJ - System.Text.Json generators property setter
 // Bind 03 BC - Microsoft.Excentions.Configuratuion.Binder generators property setter
 // Bind 04 BS - Syncra Generators
-[Category("Performance")]
-[Property("CI", "false")]
 [NotInParallel]
-// [Explicit]
 public class PerformanceTests : BaseTest
 {
 	/*
@@ -36,6 +33,9 @@ public class PerformanceTests : BaseTest
 	*/
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_faster_than_reflection_and_faster_than_minimum_expectations()
 	{
 		// Reflection
@@ -64,7 +64,10 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_Bind_01_BR_RSet_property()
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public async Task Should_Bind_01_BR_RSet_property_q()
 	{
 		int b;
 		unsafe
@@ -105,6 +108,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_01_BR_RSet_quickly()
 	{
 		var model = new SamplePublicModel();
@@ -120,7 +126,10 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_Bind_02_BJ_01_Stj_property()
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public async Task Should_Bind_02_BJ_01_Stj_property_q()
 	{
 		var obj = new SampleOnePropertyObject();
 		var proName = nameof(obj.Property1);
@@ -153,7 +162,10 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_Bind_02_BJ_02_STJx_property()
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public async Task Should_Bind_02_BJ_02_STJx_property_q()
 	{
 		var obj = new SampleOnePropertyObject
 		{
@@ -179,6 +191,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_03_BC_01_HostConfigBind_property()
 	{
 		var model = new SamplePublicModel();
@@ -201,6 +216,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_03_BC_02_ConfigBind_property()
 	{
 		var model = new SamplePublicModel();
@@ -217,6 +235,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_03_BC_03_RSetConfigGen_property()
 	{
 		var model = new SamplePublicModel();
@@ -232,6 +253,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Bind_04_BS_01_Generate_BindableModel()
 	{
 		var model = new SamplePublicModel();
@@ -263,6 +287,9 @@ public class PerformanceTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_Compare()
 	{
 

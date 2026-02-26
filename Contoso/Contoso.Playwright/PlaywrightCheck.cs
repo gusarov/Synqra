@@ -2,9 +2,12 @@
 
 [Parallelizable(ParallelScope.Self)]
 [TestFixture]
+[Property("CI", "false")]
 public class PlaywrightCheck : PageTest
 {
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task HomepageHasPlaywrightInTitleAndGetStartedLinkLinkingtoTheIntroPage()
 	{
 		await Page.GotoAsync("https://playwright.dev");

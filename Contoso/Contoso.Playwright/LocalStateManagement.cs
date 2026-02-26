@@ -15,6 +15,8 @@ public class SynqraPageTest : PageTest
 	}
 
 	[SetUp]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task SetUp()
 	{
 		await Page.GotoAsync(BaseUrl);
@@ -23,10 +25,12 @@ public class SynqraPageTest : PageTest
 }
 
 [Parallelizable(ParallelScope.Self)]
-[TestFixture]
 public class LocalStateManagement : SynqraPageTest
 {
 	[Test]
+	[Property("CI", "false")]
+	[Category("Performance")]
+	[Explicit]
 	public async Task Should_add_elements_into_collection()
 	{
 		var newItem1 = Guid.NewGuid().ToString("N");

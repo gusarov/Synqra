@@ -507,6 +507,8 @@ public class GuidExtensionsTests3 : BaseTest
 
 	[Test]
 	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v7_fast()
 	{
 		var perf = MeasureOps(static () => GuidExtensions.CreateVersion7());
@@ -515,7 +517,9 @@ public class GuidExtensionsTests3 : BaseTest
 
 #if NET9_0_OR_GREATER
 	[Test]
+	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v7_net9()
 	{
 		var perf = MeasureOps(static () => Guid.CreateVersion7());

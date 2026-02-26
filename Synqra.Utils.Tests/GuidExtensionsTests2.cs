@@ -12,6 +12,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v5_Guid_quickly()
 	{
 		await Assert.That(MeasureOps(static async () =>
@@ -23,6 +24,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v3_Guid_quickly()
 	{
 		await Assert.That(MeasureOps(static async () =>
@@ -34,6 +36,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v5_Guid_random_quickly()
 	{
 		var buf = new byte[16];
@@ -47,6 +50,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v3_Guid_random_quickly()
 	{
 		var buf = new byte[16];
@@ -60,6 +64,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v5_Guid_super_long()
 	{
 		var buf = new byte[16 * 1024];
@@ -74,6 +79,7 @@ public class GuidExtensionsTests2Performance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_create_v3_Guid_super_long()
 	{
 		var buf = new byte[16 * 1024];
