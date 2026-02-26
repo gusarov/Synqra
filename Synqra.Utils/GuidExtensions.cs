@@ -242,7 +242,7 @@ public static class GuidExtensions
 			// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
 			// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
 
-			var g = Guid.NewGuid(); // extreamly optimized
+			var g = Guid.NewGuid(); // extremely optimized
 
 			ticks -= UnixEpochTicks;
 
