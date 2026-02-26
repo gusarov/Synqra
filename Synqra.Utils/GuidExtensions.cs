@@ -53,7 +53,7 @@ public static class GuidExtensions
 		/// <summary>
 		/// 
 		/// </summary>
-		/// <param name="nodeId">V1 and V6 has Node Id field. When zero - it Random for every generator. Default genertor will have randmo on every application start.</param>
+		/// <param name="nodeId">V1 and V6 has Node Id field. When zero - it Random for every generator. Default generator will have random on every application start.</param>
 		/// <param name="guidLen">Guids are 16 byte by default. This setting allows you to make shorter v7 guids, zero ending, e.g. 12 is mongo guids length (but not same semantic!)</param>
 		public unsafe Generator(ulong nodeId = 0, byte guidLen = 16)
 		{
