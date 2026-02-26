@@ -88,7 +88,7 @@ public static class GuidExtensions
 			_guidLen = guidLen;
 			if (guidLen < 10 || guidLen > 16)
 			{
-				throw new ArgumentException("Guid v7 length must be between 10 and 16 bytes. This feature truncates higher byes to zero and requires adequate random space.", nameof(guidLen));
+				throw new ArgumentException("Guid v7 length must be between 10 and 16 bytes. This feature truncates higher bytes to zero and requires adequate random space.", nameof(guidLen));
 			}
 		}
 
