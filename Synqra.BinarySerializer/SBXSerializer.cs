@@ -1426,7 +1426,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			if (_strings.Count >= 66) // 0xC1-0x80+1 = 66 (64 continuations + 2 unused values from overlong encoding)
 			{
-				// NEW INTERNED STRING 2 - buffer full, make place for new one bu evicting oldest.
+				// NEW INTERNED STRING 2 - buffer full, make place for new one by evicting oldest.
 				var first = _strings.First!;
 				_strings.Remove(first);
 				var (code, _) = _stringByValue[first.Value];
