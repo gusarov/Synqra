@@ -146,7 +146,7 @@ public class SBXSerializer : ISBXSerializer
 	static Guid _guidMax = new Guid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
 
 	/// <summary>
-	/// Version/Schema specific epoch for compression. All time can now be calculatead as varbinary of s/ms from this custom epoch (when stream started). This is to save space.
+	/// Version/Schema specific epoch for compression. All time can now be calculated as varbinary of s/ms from this custom epoch (when stream started). This is to save space.
 	/// </summary>
 	DateTime _streamBaseTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
