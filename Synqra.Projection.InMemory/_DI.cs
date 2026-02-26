@@ -12,7 +12,7 @@ public static class InMemorySynqraExtensions
 		_ = typeof(IAppendStorage<Event, Guid>);
 	}
 
-	public static IHostApplicationBuilder AddSynqraStoreContext(this IHostApplicationBuilder builder)
+	public static IHostApplicationBuilder AddInMemorySynqraStore(this IHostApplicationBuilder builder)
 	{
 		builder.Services.AddSingleton<InMemoryProjection>();
 		builder.Services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<InMemoryProjection>());

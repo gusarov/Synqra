@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\..\Synqra.Projection.InMemory\Synqra.Projection.InMemory.csproj" />
+    <ProjectReference Include="..\..\Synqra.Projection.Sqlite\Synqra.Projection.Sqlite.csproj" />
     <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
     <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\Synqra.Tests.TestHelpers\Synqra.Tests.TestHelpers.csproj" />
@@ -40,6 +41,10 @@
     <PackageReference Include="MongoDB.Driver" Version="3.5.0" />
     <PackageReference Include="TUnit" Version="0.20" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Sqlite\" />
   </ItemGroup>
 
 </Project>
