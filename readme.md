@@ -35,7 +35,7 @@ Commands are actions that sent to CQRS system in order to introduce a changeset 
 Virtual Synchrony.
 Every command is processed individually and parallely both at the client side and server side, to avoid any network delay and to work in offline. They should give equal change set and as a result the model state should match.
 
-IAppedStorage - is storage abstractions that is suitable for append log, like events
+IAppendStorage - is storage abstractions that is suitable for append log, like events
 IProjection - is abstraction that can be used to build projections, e.g. read models, inmemory or indatabase without any guarantees about real objects
 IObjectStore - it abstraction that manages real object instances, caches them, tracks changes, propageate automatic commands and so on
 
