@@ -160,7 +160,7 @@ public class SqliteStorageTests : BaseTest
 		await Task.Delay(1);
 		var id2 = GuidExtensions.CreateVersion7();
 
-		// This must not throw — each item has its own unique key
+		// This must not throw - each item has its own unique key
 		await _storage!.AppendBatchAsync([
 			new SqliteTestItem { Id = id1, Name = "X" },
 			new SqliteTestItem { Id = id2, Name = "Y" },
