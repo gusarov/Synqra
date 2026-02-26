@@ -1026,7 +1026,7 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 
 
 	[Test]
-	public async Task Should_12_deserialize_after_reorder_fields()
+	public async Task Should_13_deserialize_after_reorder_fields()
 	{
 		// preserve versions and HEX data from before upgrade
 		_ser.Map(1, 1.0, typeof(SampleNewSchemaEvolutionModel));
