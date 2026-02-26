@@ -6,7 +6,7 @@ namespace Synqra;
 // [JsonPolymorphic]
 public interface IBindableModel
 {
-	IProjection? Store { get; set; }
+	IObjectStore? Store { get; set; }
 
 	/// <summary>
 	/// Dedicated access to set a property by name, without using reflection.

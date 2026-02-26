@@ -14,9 +14,9 @@ public static class InMemorySynqraExtensions
 
 	public static IHostApplicationBuilder AddSynqraStoreContext(this IHostApplicationBuilder builder)
 	{
-		// builder.Services.AddSingleton<StoreContext>();
-		// builder.Services.AddSingleton<IStoreContext>(sp => sp.GetRequiredService<StoreContext>());
-		builder.Services.AddSingleton<IProjection, InMemoryProjection>();
+		builder.Services.AddSingleton<InMemoryProjection>();
+		builder.Services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<InMemoryProjection>());
+		builder.Services.AddSingleton<IProjection>(sp => sp.GetRequiredService<InMemoryProjection>());
 		// builder.Services.AddSingleton(typeof(IStoreCollection<>), (sp, s) => sp.GetRequiredService<IStoreContext>().Get<>); // Example storage implementation
 		return builder;
 	}

@@ -18,7 +18,7 @@ public class SampleFieldListBaseModel_ : IBindableModel
 {
 	public IList<SampleBaseModel> Data { get; set; }
 
-	public IProjection? Store { get; set; }
+	public IObjectStore? Store { get; set; }
 
 	public void Set(string propertyName, object? value)
 	{
@@ -42,7 +42,7 @@ public class SampleFieldEnumerableBaseModel_ : IBindableModel
 {
 	public IEnumerable<SampleBaseModel> Data { get; set; }
 
-	public IProjection? Store { get; set; }
+	public IObjectStore? Store { get; set; }
 
 	public void Set(string propertyName, object? value)
 	{
@@ -78,9 +78,9 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	partial void OnNameChanged(string? newValue);
 	partial void OnNameChanged(string? oldValue, string? newValue);
 
-	IProjection __store;
+	IObjectStore __store;
 
-	IProjection IBindableModel.Store
+	IObjectStore IBindableModel.Store
 	{
 		get => __store;
 		set => __store = value;

@@ -12,7 +12,7 @@ abstract class StoreCollection
 	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
 	private protected readonly JsonSerializerOptions? _jsonSerializerOptions;
 
-	internal IProjection Projection { get; private init; }
+	internal IObjectStore Store { get; private init; }
 	internal Guid ContainerId { get; private init; }
 	internal Guid CollectionId { get; private init; }
 
@@ -24,13 +24,13 @@ abstract class StoreCollection
 	public IList List => IList;
 #endif
 
-	public StoreCollection(IProjection projection
+	public StoreCollection(IObjectStore store
 		, Guid containerId
 		, Guid collectionId
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
 	{
-		Projection = projection ?? throw new ArgumentNullException(nameof(projection));
+		Store = store ?? throw new ArgumentNullException(nameof(store));
 		_jsonSerializerOptions = jsonSerializerOptions;
 		ContainerId = containerId;
 		CollectionId = collectionId;
@@ -58,12 +58,12 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 	protected override IList IList => _list;
 	protected override ICollection ICollection => _list;
 
-	public StoreCollection(IProjection projection
+	public StoreCollection(IObjectStore store
 		, Guid containerId
 		, Guid collectionId
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
-		: base(projection
+		: base(store
 			, containerId
 			, collectionId
 			, jsonSerializerOptions
@@ -140,12 +140,12 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 		// var dataJson = _jsonSerializerOptions == null ? null : JsonSerializer.Serialize(item, _jsonSerializerOptions);
 		// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
-		var attachedData = Projection.Attach(item, this);
-		var task = Projection.SubmitCommandAsync(new CreateObjectCommand
+		var attachedData = Store.Attach(item, this);
+		var task = Store.SubmitCommandAsync(new CreateObjectCommand
 		{
 			ContainerId = ContainerId,
 			CollectionId = CollectionId,
-			TargetTypeId = ((InMemoryProjection)Projection).GetTypeMetadata(typeof(T)).TypeId,
+			TargetTypeId = ((InMemoryProjection)Store).GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = attachedData.Id,
 			Data = item, // data?.Count > 0 ? data : null,
@@ -272,11 +272,11 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 
 internal static class SynqraCollectionInternalExtensions
 {
-	public static IProjection GetProjection(this ISynqraCollection collection)
+	public static IObjectStore GetStore(this ISynqraCollection collection)
 	{
 		if (collection is StoreCollection internalCollection)
 		{
-			return internalCollection.Projection;
+			return internalCollection.Store;
 		}
 		throw new InvalidOperationException("Collection does not implement StoreCollection");
 	}

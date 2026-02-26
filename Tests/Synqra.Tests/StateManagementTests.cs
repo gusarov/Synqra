@@ -17,7 +17,7 @@ namespace Synqra.Tests;
 
 using IAppendStorage = IAppendStorage<Event, Guid>;
 
-public class StateManagementTests : BaseTest<IProjection>
+public class StateManagementTests : BaseTest<IObjectStore>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
@@ -146,7 +146,7 @@ public class StateManagementTests : BaseTest<IProjection>
 		var bt = new StateManagementTests();
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
+		var reopened = bt.ServiceProvider.GetRequiredService<IObjectStore>();
 		await ((InMemoryProjection)reopened).LoadStateAsync();
 
 		var tasks = reopened.GetCollection<MyPocoTask>();
