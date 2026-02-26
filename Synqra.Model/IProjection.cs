@@ -1,6 +1,6 @@
 ﻿namespace Synqra;
 
-public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public interface IObjectStore
 {
 	/// <summary>
 	/// Get Id of the model instance. If model is not tracked, throw exception.
@@ -8,7 +8,6 @@ public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVis
 	/// <param name="model"></param>
 	/// <returns></returns>
 	Guid GetId(object model);
-
 	ISynqraCollection GetCollection(Type type);
 
 	ISynqraCollection<T> GetCollection<T>()
@@ -25,18 +24,8 @@ public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVis
 	/// Submit command both locally and to the other participants.
 	/// </summary>
 	Task SubmitCommandAsync(ISynqraCommand newCommand);
+}
 
-	/*
-	[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-	[System.Obsolete("Not part of this API. Use assertion methods instead.", true)]
-	public new bool Equals(object? obj) => throw new NotSupportedException();
-
-	[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-	[System.Obsolete("Not part of this API. Use assertion methods instead.", true)]
-	public new int GetHashCode() => throw new NotSupportedException();
-
-	[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-	[System.Obsolete("Not part of this API. Use assertion methods instead.", true)]
-	public new string? ToString() => throw new NotSupportedException();
-	*/
+public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+{
 }

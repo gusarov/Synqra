@@ -632,9 +632,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 	protected void OnPropertyChanging(string propertyName) => PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(propertyName));
 
-	protected global::Synqra.IProjection? _store;
+	protected global::Synqra.IObjectStore? _store;
 
-	global::Synqra.IProjection? IBindableModel.Store
+	global::Synqra.IObjectStore? IBindableModel.Store
 	{
 		get => _store;
 		set

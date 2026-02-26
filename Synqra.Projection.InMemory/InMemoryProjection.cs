@@ -18,7 +18,7 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 
 public static class InMemoryStoreContextExtensions
 {
-	public static bool IsOnline(this IProjection storeContext)
+	public static bool IsOnline(this IObjectStore storeContext)
 	{
 		if (storeContext is InMemoryProjection sc)
 		{
@@ -46,7 +46,7 @@ public class StrongReference
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 
@@ -352,7 +352,7 @@ public class InMemoryProjection : IProjection, ICommandVisitor<CommandHandlerCon
 #endif
 	}
 
-	ISynqraCollection IProjection.GetCollection(Type type)
+	ISynqraCollection IObjectStore.GetCollection(Type type)
 	{
 		return (ISynqraCollection)GetCollectionInternal(type);
 	}
@@ -844,17 +844,17 @@ internal enum GetMode : byte
 
 internal static class SynqraStoreContextInternalExtensions
 {
-	internal static Guid GetId(this IProjection ctx, object model, StoreCollection? collection, GetMode mode)
+	internal static Guid GetId(this IObjectStore ctx, object model, StoreCollection? collection, GetMode mode)
 	{
 		return ((InMemoryProjection)ctx).GetId(model, collection, mode);
 	}
 
-	internal static AttachedObjectData Attach(this IProjection ctx, object model, StoreCollection collection)
+	internal static AttachedObjectData Attach(this IObjectStore ctx, object model, StoreCollection collection)
 	{
 		return ((InMemoryProjection)ctx).Attach(model, collection);
 	}
 
-	internal static (bool IsJustCreated, Guid Id) GetOrCreateId(this IProjection ctx, object model, StoreCollection collection)
+	internal static (bool IsJustCreated, Guid Id) GetOrCreateId(this IObjectStore ctx, object model, StoreCollection collection)
 	{
 		return ((InMemoryProjection)ctx).GetOrCreateId(model, collection);
 	}

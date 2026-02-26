@@ -91,13 +91,13 @@ internal class SynqraTestNode
 #else
 	public Microsoft.AspNetCore.Builder.WebApplication Host { get; private set; }
 #endif
-	IProjection __storeContext;
+	IObjectStore __storeContext;
 
-	public IProjection StoreContext { get =>
+	public IObjectStore StoreContext { get =>
 #if NETFRAMEWORK
 			throw new NotImplementedException();
 #else
-			__storeContext ??= Host.Services.GetRequiredService<IProjection>();
+			__storeContext ??= Host.Services.GetRequiredService<IObjectStore>();
 #endif
 	}
 
