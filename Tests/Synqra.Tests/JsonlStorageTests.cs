@@ -62,6 +62,7 @@ public class JsonLinesStorageRegistrationPerformance : BaseTest
 	[Test]
 	[Category("Performance")]
 	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_register_quickly()
 	{
 		Configuration["Storage:JsonLinesStorage:FileName"] = "test1";
@@ -125,7 +126,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	}
 
 	[Test]
-	// [Explicit]
+	[Explicit]
 	[Category("Performance")]
 	[Property("CI", "false")]
 	public async Task Should_write_quickly()
@@ -137,7 +138,7 @@ public class TestItemJsonlStorageTests : StorageTests<TestItem, int>
 	}
 
 	[Test]
-	// [Explicit]
+	[Explicit]
 	[Category("Performance")]
 	[Property("CI", "false")]
 	public async Task Should_write_quickly2()

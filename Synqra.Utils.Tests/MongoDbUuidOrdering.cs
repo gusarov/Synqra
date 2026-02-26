@@ -29,6 +29,7 @@ internal class MongoDbUuidOrdering : BaseTest
 	}
 
 	[Test]
+	[Explicit]
 	public async Task Should_preserve_uuid7_order_in_mongo()
 	{
 		var mongoClient = new MongoClient("mongodb://localhost:27017");

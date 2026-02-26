@@ -542,7 +542,6 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
 	public void Should_reserve_list_type_id_range()
 	{
 		Console.WriteLine(".");
@@ -642,8 +641,6 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	// [Explicit] NEVER MARK AS EXPLICIT
 	public void Should_20_serialize_dictionary_of_string()
 	{
 		var ser = new SBXSerializer();
@@ -931,8 +928,6 @@ public class BinarySerializationTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	// [Explicit] NEVER MARK AS EXPLICIT
 	public async Task Should_serialize_well_known_class_by_field_names_as_known2()
 	{
 		// Arrange

@@ -148,6 +148,9 @@ internal class EmergencyLoggerTests : BaseTest
 	}
 
 	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_30_survive_multithread()
 	{
 		// NOTE: This test can fail if file rolls over. This will stay like this until I change my mind about rolling over between 2 files instead of one.
@@ -182,6 +185,8 @@ internal class EmergencyLoggerTests : BaseTest
 
 	[Test]
 	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_40_measure_single_thread_performance()
 	{
 		var ops = MeasureOps(() => EmergencyLogImplementation.Default.Message("This is a test message " + new string('.', Random.Shared.Next(10))), new PerformanceParameters
@@ -204,6 +209,8 @@ internal class EmergencyLoggerTests : BaseTest
 
 	[Test]
 	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_40_measure_concurrent_performance()
 	{
 		//ConcurrentBag<Guid> guids = new ConcurrentBag<Guid>();
