@@ -33,6 +33,7 @@ using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Projection.InMemory;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.AppendStorage;
+using Synqra.Projection.Sqlite;
 
 namespace Synqra.Tests.Simulator;
 
@@ -164,7 +165,7 @@ internal class SynqraTestNode
 			["URLS"] = "http://*:" + port,
 		});
 
-		builder.AddSynqraStoreContext();
+		builder.AddInMemorySynqraStore();
 		builder.AddAppendStorageJsonLines<Event, Guid>();
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();

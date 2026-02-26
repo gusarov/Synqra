@@ -1,6 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Synqra.AppendStorage;
 using Synqra.Projection.InMemory;
+using Synqra.Projection.Sqlite;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -17,7 +19,29 @@ namespace Synqra.Tests;
 
 using IAppendStorage = IAppendStorage<Event, Guid>;
 
-public class StateManagementTests : BaseTest<IObjectStore>
+[InheritsTests]
+public class InMemoryStateManageementTests : StateManagementTests
+{
+	protected override void Registration(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		hostApplicationBuilder.AddInMemorySynqraStore();
+	}
+}
+
+/*
+
+[InheritsTests]
+public class SqliteStateManageementTests : StateManagementTests
+{
+	protected override void Registration(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		hostApplicationBuilder.AddSqliteSynqraStore();
+	}
+}
+
+*/
+
+public abstract class StateManagementTests : BaseTest<IObjectStore>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
@@ -26,7 +50,7 @@ public class StateManagementTests : BaseTest<IObjectStore>
 
 	public StateManagementTests()
 	{
-		HostBuilder.AddSynqraStoreContext();
+		Registration(HostBuilder);
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
@@ -42,6 +66,8 @@ public class StateManagementTests : BaseTest<IObjectStore>
 		// Configuration["Storage:JsonLinesStorage:FileName"] = _fileName = $"TestData/data_{Guid.NewGuid():N}_[TypeName].jsonl";
 		// Directory.CreateDirectory(Path.GetDirectoryName(_fileName));
 	}
+
+	protected abstract void Registration(IHostApplicationBuilder hostApplicationBuilder);
 
 	[Test]
 	public async Task Should_emit_command_by_setting_property()
@@ -110,7 +136,7 @@ public class StateManagementTests : BaseTest<IObjectStore>
 		await Assert.That(tasks[0].Subject).IsEqualTo("Test Task");
 
 		// reopen
-		var bt = new StateManagementTests();
+		var bt = (StateManagementTests)Activator.CreateInstance(GetType());
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
@@ -143,7 +169,7 @@ public class StateManagementTests : BaseTest<IObjectStore>
 		await Assert.That(_tasks[0].Subject).IsEqualTo("123");
 
 		// reopen
-		var bt = new StateManagementTests();
+		var bt = (StateManagementTests)Activator.CreateInstance(GetType());
 		bt.ServiceCollection.AddSingleton(_fakeStorage);
 		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
 		var reopened = bt.ServiceProvider.GetRequiredService<IObjectStore>();
