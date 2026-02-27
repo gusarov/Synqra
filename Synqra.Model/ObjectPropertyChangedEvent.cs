@@ -7,6 +7,8 @@ namespace Synqra;
 [Schema(2025.797, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2025.798, "1 PropertyName string OldValue object? NewValue object? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2025.799, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.156, "1 EventId Guid CommandId Guid ContainerId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.157, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 public partial class ObjectPropertyChangedEvent : SingleObjectEvent
 {
 	public ObjectPropertyChangedEvent()
