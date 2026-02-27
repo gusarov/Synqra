@@ -28,13 +28,14 @@
 
   <ItemGroup>
     <Compile Remove="Migrations\*.cs" />
-    <Compile Include="Migrations\*.cs" Condition="'$(TargetFramework)'=='net10.0' and '$(Sqlite)' == 'true'"/>
+    <Compile Include="Migrations\*.cs" Condition="'$(TargetFramework)'=='net10.0' and '$(Sqlite)' == 'true'" />
     <Compile Remove="CompiledModels\*.cs" />
-    <Compile Include="CompiledModels\*.cs" Condition="'$(TargetFramework)'=='net10.0' and '$(Sqlite)' == 'true'"/>
+    <Compile Include="CompiledModels\*.cs" Condition="'$(TargetFramework)'=='net10.0' and '$(Sqlite)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Synqra.AppendStorage.File\Synqra.AppendStorage.File.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.JsonLines\Synqra.AppendStorage.JsonLines.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.Sqlite\Synqra.AppendStorage.Sqlite.csproj" />
     <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />

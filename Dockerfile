@@ -11,10 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
+    clang \
+    zlib1g-dev \
+    mc \
  && rm -rf /var/lib/apt/lists/*
 RUN dotnet workload install wasm-tools
 ARG BUILD_CONFIGURATION=Release
-RUN apt-get update && apt-get install -y --no-install-recommends mc clang zlib1g-dev curl
 # && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
 # && chmod +x /tmp/dotnet-install.sh \
 # && /tmp/dotnet-install.sh --install-dir /usr/share/dotnet --runtime dotnet --channel 8.0 \
