@@ -1,6 +1,7 @@
 ﻿using Contoso.Model;
 using Synqra;
 using Synqra.AppendStorage;
+using Synqra.BinarySerializer;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -9,7 +10,8 @@ namespace Contoso.Projection.InMemory;
 public class LocalOnlyContosoInMemoryProjection : ContosoInMemoryProjection
 {
 	public LocalOnlyContosoInMemoryProjection() : base(
-		  eventStorage: null
+		  serializerFactory: new SBXSerializerFactory()
+		, eventStorage: null
 		, eventReplicationService: null
 		, jsonSerializerOptions: null
 		, jsonSerializerContext: null
@@ -21,13 +23,15 @@ public class LocalOnlyContosoInMemoryProjection : ContosoInMemoryProjection
 public class ContosoInMemoryProjection : InMemoryProjection, IContosoCommandVisitor<CommandHandlerContext>, IContosoEventVisitor<EventVisitorContext>
 {
 	public ContosoInMemoryProjection(
-		  IAppendStorage<Event, Guid>? eventStorage = null
+		  ISBXSerializerFactory serializerFactory
+		, IAppendStorage<Event, Guid>? eventStorage = null
 		, IAppendStorage<ProjectionSnapshot, Guid>? snapshotStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		) : base(
-			  eventStorage
+			  serializerFactory
+			, eventStorage
 			, eventReplicationService
 			, jsonSerializerOptions
 			, jsonSerializerContext

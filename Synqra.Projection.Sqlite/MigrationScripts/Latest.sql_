@@ -1,0 +1,32 @@
+﻿CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+    "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
+    "ProductVersion" TEXT NOT NULL
+);
+
+BEGIN TRANSACTION;
+INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+VALUES ('20260226181045_v1', '10.0.3');
+
+COMMIT;
+
+BEGIN TRANSACTION;
+CREATE TABLE "Command" (
+    "CommandId" TEXT NOT NULL CONSTRAINT "PK_Command" PRIMARY KEY,
+    "ContainerId" TEXT NOT NULL,
+    "Discriminator" TEXT NOT NULL,
+    "TargetTypeId" TEXT NULL,
+    "CollectionId" TEXT NULL,
+    "TargetId" TEXT NULL
+);
+
+INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+VALUES ('20260226183432_v2', '10.0.3');
+
+COMMIT;
+
+BEGIN TRANSACTION;
+INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+VALUES ('20260226195255_vRenamemeRenameme', '10.0.3');
+
+COMMIT;
+

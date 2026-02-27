@@ -2,7 +2,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Synqra.AppendStorage;
 using Synqra.Projection.InMemory;
+#if Sqlite && NET10_0_OR_GREATER
+using Microsoft.EntityFrameworkCore;
 using Synqra.Projection.Sqlite;
+#endif
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -14,6 +17,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Synqra.BinarySerializer;
 
 namespace Synqra.Tests;
 
@@ -28,18 +34,62 @@ public class InMemoryStateManageementTests : StateManagementTests
 	}
 }
 
-/*
-
+#if Sqlite && NET10_0_OR_GREATER
 [InheritsTests]
 public class SqliteStateManageementTests : StateManagementTests
 {
 	protected override void Registration(IHostApplicationBuilder hostApplicationBuilder)
 	{
+		hostApplicationBuilder.Configuration["ConnectionStrings:SynqraProjectionSqlite"] = ":memory:"; // DataStore:sqlite_test.db
 		hostApplicationBuilder.AddSqliteSynqraStore();
+		hostApplicationBuilder.Services.AddSingleton<SqliteDatabaseContext, TestExtendedSqliteDatabaseContext>();
 	}
 }
 
-*/
+public class TestExtendedSqliteDatabaseContext : SqliteDatabaseContext
+{
+	ILogger _logger;
+
+	public TestExtendedSqliteDatabaseContext()
+	{
+		
+	}
+
+	
+	public TestExtendedSqliteDatabaseContext(
+		  DbContextOptions<TestExtendedSqliteDatabaseContext> options
+		, IConfiguration configuration
+		, ILogger<TestExtendedSqliteDatabaseContext> logger
+		) : base(
+		  true
+		, options
+		, configuration
+		, logger
+		)
+	{
+		_logger = logger;
+	}
+
+	protected override void OnModelCreating(ModelBuilder modelBuilder)
+	{
+		base.OnModelCreating(modelBuilder);
+
+		modelBuilder.Entity<MyPocoTask>(b =>
+		{
+			b.HasKey(t => t.Id);
+			b.Property("Subject");
+		});
+
+		modelBuilder.Entity<DemoModel>(b =>
+		{
+			b.HasKey(t => t.Id);
+			b.Property("Name");
+			b.Property("Prprpr");
+		});
+	}
+}
+
+#endif
 
 public abstract class StateManagementTests : BaseTest<IObjectStore>
 {
@@ -59,6 +109,14 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		// HostBuilder.Services.AddSingleton<IStorage<Event, Guid>, FakeStorage<Event, Guid>>();
 		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
 		HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
+
+		HostBuilder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+		{
+			var ser = new SBXSerializer();
+			ser.Map(100, -1, typeof(MyPocoTask));
+			ser.Snapshot();
+			return ser;
+		}));
 
 		// HostBuilder.AddJsonLinesStorage();
 
@@ -205,6 +263,7 @@ public class MyPocoTask
 	{
 		
 	}
+	public Guid Id { get; set; }
 	public string Subject { get; set; }
 }
 
@@ -260,8 +319,13 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	}
 }
 
+[SynqraModel]
+[Schema(2026.155, "1 Name string Prprpr string")]
+[Schema(2026.156, "1 Name string Prprpr string")]
 public partial class DemoModel
 {
+	public Guid Id => ((IBindableModel)this).Store.GetId(this);
+
 	public partial string Name { get; set; }
 	public partial string Prprpr { get; set; }
 }

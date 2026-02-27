@@ -1,4 +1,6 @@
-﻿namespace Synqra;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace Synqra;
 
 public interface IObjectStore
 {
@@ -10,6 +12,7 @@ public interface IObjectStore
 	Guid GetId(object model);
 	ISynqraCollection GetCollection(Type type);
 
+	// [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
 	ISynqraCollection<T> GetCollection<T>()
 		where T : class
 #if NET8_0_OR_GREATER

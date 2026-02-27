@@ -9,6 +9,10 @@ namespace Synqra;
 [Schema(2025.799, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 public partial class ObjectPropertyChangedEvent : SingleObjectEvent
 {
+	public ObjectPropertyChangedEvent()
+	{
+			
+	}
 	public required partial string PropertyName { get; set; }
 	public partial object? OldValue { get; set; }
 	public partial object? NewValue { get; set; }

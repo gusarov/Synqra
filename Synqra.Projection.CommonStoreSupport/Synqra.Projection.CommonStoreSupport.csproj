@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Synqra.Projection</RootNamespace>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Synqra.Projection.InMemory"/>
+    <InternalsVisibleTo Include="Synqra.Projection.Sqlite"/>
+    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
+  </ItemGroup>
+
+</Project>

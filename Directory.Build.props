@@ -23,6 +23,7 @@
 		<!-- Default test filter: exclude tests marked [Property("CI", "false")] -->
 		<TestingPlatformCommandLineArguments_>--treenode-filter "/**[CI!=false]"</TestingPlatformCommandLineArguments_>
 		<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>
+		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
 	</PropertyGroup>
 
 	<Target Name="_Synqra_BlockPackOnV1_0_0" BeforeTargets="Pack">

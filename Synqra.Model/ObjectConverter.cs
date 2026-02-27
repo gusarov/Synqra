@@ -142,7 +142,7 @@ public class ObjectConverter : JsonConverter<object>
 	public override void Write(Utf8JsonWriter w, object value, JsonSerializerOptions options)
 	{
 		var type = value.GetType();
-		if (type == typeof(string) || type.IsPrimitive || value is JsonElement)
+		if (type == typeof(Guid) || type == typeof(string) || type.IsPrimitive || value is JsonElement)
 		{
 			JsonSerializer.Serialize(w, value, type, options);
 			return;
