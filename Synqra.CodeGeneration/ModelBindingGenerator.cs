@@ -178,7 +178,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					try
 					{
 						var exp = node is ClassDeclarationSyntax classDeclaration
-							&& (classDeclaration.Identifier.ToString().EndsWith("Model") || classDeclaration.AttributeLists.Any(al => al.Attributes.Any(a => a.Name.ToString() == "SynqraModel")))
+							&& (classDeclaration.AttributeLists.Any(al => al.Attributes.Any(a => a.Name.ToString() == "SynqraModel"))) // TestExtendedSqliteDatabaseContextModel
 							&& classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword
 							);
 						// GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
@@ -399,6 +399,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			// if (!seen.Add(p.Name)) continue; // prefer most-base
 
 			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
+			if (p.SetMethod == null || p.GetMethod == null)
+			{
+				continue;
+			}
 			if (p.GetAttributes().Any())
 			{
 				DebugLog($"SBX Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
@@ -517,6 +521,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			}
 			Add("using System;");
 			Add("using System.ComponentModel;");
+			Add("using System.Diagnostics;");
 			Add("using Synqra;");
 			Add("using Synqra.BinarySerializer;");
 			foreach (var usingStatement in clazz.SyntaxTree.GetCompilationUnitRoot().Usings)
@@ -970,6 +975,7 @@ $$"""
 			{
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
+				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
 				var task = _store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),

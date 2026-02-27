@@ -33,7 +33,9 @@ using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Projection.InMemory;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.AppendStorage;
+#if NET10_0_OR_GREATER
 using Synqra.Projection.Sqlite;
+#endif
 
 namespace Synqra.Tests.Simulator;
 

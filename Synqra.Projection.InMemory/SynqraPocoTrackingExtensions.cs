@@ -1,4 +1,7 @@
+using Synqra.BinarySerializer;
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -20,17 +23,26 @@ public static class SynqraPocoTrackingExtensions
 	{
 		private readonly StoreCollection _storeCollection;
 
-		ConcurrentDictionary<object, string> _originalsSerialized = new();
+		ConcurrentDictionary<object, byte[]> _originalsSerialized = new();
+		ConcurrentDictionary<Type, bool> _typeIds = new();
+
+		private readonly ISBXSerializer _serializer;
 
 		public TrackingSessionImplementation(StoreCollection storeCollection, IEnumerable<object> items)
 		{
+			var serializerFactory = storeCollection._serializerFactory;
 			_storeCollection = storeCollection;
+
+			_serializer = serializerFactory.CreateSerializer();
+			// _serializer.Snapshot();
 
 			foreach (var item in items)
 			{
 				AddCore(item);
 			}
 		}
+
+		int _nextTypeId;
 
 		public void Add(object item)
 		{
@@ -42,12 +54,20 @@ public static class SynqraPocoTrackingExtensions
 
 		void AddCore(object item)
 		{
-			_storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
-			_originalsSerialized[item] = JsonSerializer.Serialize(item, _storeCollection.Type
-#if NET8_0_OR_GREATER
-				, ((InMemoryProjection)_storeCollection.Store)._jsonSerializerOptions
-#endif
-				);
+			var id = _storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
+
+			/*
+			if (_typeIds.TryAdd(item.GetType(), false))
+			{
+				_serializer.Map(++_nextTypeId, item.GetType());
+			}
+			*/
+
+			_serializer.Reset();
+			Span<byte> buffer = stackalloc byte[10240];
+			var pos = 0;
+			_serializer.Serialize(buffer, item, ref pos);
+			_originalsSerialized[item] = buffer[..pos].ToArray();
 		}
 
 		public void Dispose()
@@ -61,40 +81,33 @@ public static class SynqraPocoTrackingExtensions
 
 		public async ValueTask DisposeAsync()
 		{
+			var buffer = new byte[1024];
+
 			// compare and submit changes
 			foreach (var kvp in _originalsSerialized)
 			{
 				// serialzie again
-				var json = JsonSerializer.Serialize(kvp.Key, _storeCollection.Type
-#if NET8_0_OR_GREATER
-					, ((InMemoryProjection)_storeCollection.Store)._jsonSerializerOptions
-#endif
-					);
-				if (json != kvp.Value)
+				_serializer.Reset();
+				var pos = 0;
+				_serializer.Serialize(buffer, kvp.Key, ref pos);
+				if (!buffer[..pos].SequenceEqual(kvp.Value))
 				{
 					// changed!!
-					var original = JsonSerializer.Deserialize<IDictionary<string, object?>>(kvp.Value
-#if NET8_0_OR_GREATER
-						, ((InMemoryProjection)_storeCollection.Store)._jsonSerializerOptions
-#endif
-						);
-					var updated = JsonSerializer.Deserialize<IDictionary<string, object?>>(json
-#if NET8_0_OR_GREATER
-						, ((InMemoryProjection)_storeCollection.Store)._jsonSerializerOptions
-#endif
-						);
-					foreach (var item in original.Keys.Union(updated.Keys))
+					_serializer.Reset();
+					pos = 0;
+					var original = _serializer.Deserialize<object>(kvp.Value, ref pos);
+					foreach (var pi in kvp.Key.GetType().GetProperties())
 					{
-						var oldValue = original.TryGetValue(item, out var ov) ? ov : null;
-						var newValue = updated.TryGetValue(item, out var nv) ? nv : null;
-						if (oldValue != newValue)
+						var oldValue = pi.GetValue(original);
+						var newValue = pi.GetValue(kvp.Key);
+						if (!Equals(oldValue, newValue))
 						{
 							await _storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 							{
 								CommandId = GuidExtensions.CreateVersion7(),
 								ContainerId = _storeCollection.ContainerId,
 								TargetTypeId = ((InMemoryProjection)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
-								PropertyName = item,
+								PropertyName = pi.Name,
 								OldValue = oldValue,
 								NewValue = newValue,
 								TargetId = _storeCollection.Store.GetId(kvp.Key, null, GetMode.RequiredId),

@@ -7,7 +7,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
+    <ProjectReference Include="..\Synqra.Projection.CommonStoreSupport\Synqra.Projection.CommonStoreSupport.csproj" />
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 

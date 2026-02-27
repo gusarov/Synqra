@@ -102,5 +102,10 @@ public partial class ChangeObjectPropertyCommand : SingleObjectCommand
 
 	public partial object? NewValue { get; set; }
 
+	public ChangeObjectPropertyCommand()
+	{
+		Console.WriteLine();
+	}
+
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

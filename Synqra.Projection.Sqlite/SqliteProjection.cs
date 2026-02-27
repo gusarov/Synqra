@@ -1,4 +1,19 @@
-﻿using Synqra.AppendStorage;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Synqra.AppendStorage;
+using Synqra.BinarySerializer;
+using System.Collections;
+using System.Collections.Concurrent;
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Synqra.Projection.Sqlite;
 
@@ -24,38 +39,297 @@ internal static class SynqraStoreContextInternalExtensions
 	*/
 }
 
-internal class AttachedObjectData
+public static class SqliteNativeAotMigrations
 {
-	public required Guid Id { get; init; }
-	public required ISynqraCollection Collection { get; init; }
-	public required bool IsJustCreated { get; set; }
+	public static void MigrateNative(this DatabaseFacade database)
+	{
+		var assembly = typeof(SqliteNativeAotMigrations).Assembly;
+		var stream = assembly.GetManifestResourceStream("Synqra.Projection.Sqlite.MigrationScripts.Latest.sql_");
+		if (stream == null)
+		{
+			throw new Exception($"Available resource names: {Environment.NewLine}{string.Join(Environment.NewLine, assembly.GetManifestResourceNames())}");
+		}
+		using (stream)
+		{
+			using var reader = new StreamReader(stream);
+			var sqlString = reader.ReadToEnd();
+
+			var stages = sqlString.Split("COMMIT;").Select(x => x + "COMMIT;");
+
+			foreach (var item in stages)
+			{
+				EmergencyLog.Default.LogWarning("Executing migration stage: " + item.Substring(0, Math.Min(100, item.Length)).ReplaceLineEndings(" "));
+				// EmergencyLog.Default.LogWarning("Executing migration stage: " + item);
+			}
+
+			database.ExecuteSqlRaw(sqlString);
+		}
+	}
 }
 
-// It is not flags, as all possible permutations are defined explicitly
-internal enum GetMode : byte
+public class SqliteDatabaseContext : DbContext
 {
-	// 0b_0000_0000
-	//          MME
-	// E - Behavior for existing object (0 - throw, 1 - return)
-	// MM - Behavior for missing object (0 - throw, 1 - zero_default, 2 - create_id)
+	internal string _connectionString;
+	internal ILogger<SqliteDatabaseContext>? _logger;
 
-	// 0b_MM_E
-	Invalid,     // 00 0
-	RequiredId,  // 00 1
-	MustAbsent,  // 01 0
-	TryGet,      // 01 1
-	RequiredNew, // 10 0
-	GetOrCreate, // 10 1
+	public DbSet<Command> Command { get; set; }
+	public DbSet<CreateObjectCommand> CreateObjectCommand { get; set; }
+
+	protected override void OnModelCreating(ModelBuilder modelBuilder)
+	{
+		base.OnModelCreating(modelBuilder);
+
+		// todo Use JsonIgnore attribute, and use it in SBX as well
+		modelBuilder.Entity<CreateObjectCommand>(b =>
+		{
+			b.Ignore("Data");
+			b.Ignore("Target");
+		});
+		EmergencyLog.Default.LogWarning("SqliteDatabaseContext OnModelCreating Done");
+	}
+
+	public SqliteDatabaseContext()
+	{
+		/*
+		foreach (var item in Environment.GetCommandLineArgs())
+		{
+			EmergencyLog.Default.LogWarning(item);
+		}
+
+		// Migrations
+		var tempMigrationsFile = Path.Combine(Path.GetTempPath(), "migrations.db");
+
+		// This trick allows to use normal migrations and also generate non-idempotent script for EF. Each run will be based on previous schema, so script needs to be reliable migrated
+		if (Environment.GetCommandLineArgs().Any(x=>x == "script"))
+		{
+			tempMigrationsFile = Path.Combine(Path.GetTempPath(), "migrations_script.db");
+		}
+
+		if (File.Exists(tempMigrationsFile))
+		{
+			try
+			{
+				File.Delete(tempMigrationsFile);
+				EmergencyLog.Default.LogWarning("SqliteDatabaseContext Temp deleted successfully: " + tempMigrationsFile);
+			}
+			catch (Exception ex)
+			{
+				tempMigrationsFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N)}_migrations.db");
+				EmergencyLog.Default.LogWarning(ex, "SqliteDatabaseContext Temp delete failed. Changing to: " + tempMigrationsFile);
+			}
+		}
+		else
+		{
+			EmergencyLog.Default.LogWarning("Default temp migrations database file does not exist: " + tempMigrationsFile);
+		}
+		*/
+		_connectionString = "Data Source=:memory:" /*+ tempMigrationsFile*/;
+		EmergencyLog.Default.LogWarning("SqliteDatabaseContext DefaultCtor + " + _connectionString);
+	}
+
+
+	public SqliteDatabaseContext(
+	  DbContextOptions<SqliteDatabaseContext> options
+	, IConfiguration configuration
+	, ILogger<SqliteDatabaseContext> logger
+	)
+	: this(
+	  true
+	, options
+	, configuration
+	, logger
+	)
+	{
+
+	}
+	protected SqliteDatabaseContext(
+		  bool _
+		, DbContextOptions options
+		, IConfiguration configuration
+		, ILogger<SqliteDatabaseContext> logger
+		)
+	: base(options)
+	{
+		_logger = logger;
+		var csb = new SqliteConnectionStringBuilder(configuration.GetConnectionString("SynqraProjectionSqlite"));
+		var file = Environment.ExpandEnvironmentVariables(csb.DataSource);
+		csb.DataSource = file;
+		Directory.CreateDirectory(Path.GetDirectoryName(file));
+		_connectionString = csb.ToString();
+	}
+
+	protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+	{
+		base.OnConfiguring(optionsBuilder);
+		optionsBuilder.EnableDetailedErrors();
+		optionsBuilder.UseSqlite(_connectionString, x =>
+		{
+			x.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+		});
+		optionsBuilder.EnableSensitiveDataLogging();
+		optionsBuilder.ConfigureWarnings(w => w.Throw(RelationalEventId.MultipleCollectionIncludeWarning));
+		EmergencyLog.Default.LogWarning("SqliteDatabaseContext OnConfiguring Done");
+	}
+
+	public async Task EnsureSchemaAsync()
+	{
+		try
+		{
+			// Attempt to open a transaction to check if the database is writable
+			_logger?.LogInformation("Opening database...");
+
+			await using var transaction = await Database.BeginTransactionAsync();
+			await transaction.RollbackAsync();
+
+			// Proceed with migration if the database is writable
+			// await Database.EnsureCreatedAsync();
+			Database.MigrateNative();
+			// await Database.MigrateAsync();
+		}
+		catch (SqliteException ex) when (ex.SqliteErrorCode == 8) // SQLite Error 8: 'attempt to write a readonly database'
+		{
+			_logger?.LogWarning(ex, "The database is in read-only mode and cannot be migrated.");
+		}
+	}
+
+	public void Vacuum()
+	{
+		Database.ExecuteSqlRaw("VACUUM");
+	}
 }
-
 
 public class SqliteStore : IObjectStore
 {
-	public ISynqraCollection GetCollection(Type type)
+	static SqliteStore()
 	{
-		throw new NotImplementedException();
+		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceIdHashChain", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
 	}
 
+	private readonly SqliteDatabaseContext _databaseContext;
+	private readonly ISBXSerializerFactory _serializerFactory;
+	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
+
+	private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
+	private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
+	private readonly Dictionary<Guid, StoreCollection> _collections = new();
+	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
+	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
+
+	public SqliteStore(
+	  SqliteDatabaseContext databaseContext
+	, ISBXSerializerFactory serializerFactory
+	, IAppendStorage? eventStorage = null
+	, IEventReplicationService? eventReplicationService = null
+	, JsonSerializerOptions? jsonSerializerOptions = null
+	, JsonSerializerContext? jsonSerializerContext = null
+	)
+	{
+		_databaseContext = databaseContext;
+		_serializerFactory = serializerFactory;
+		_jsonSerializerOptions = jsonSerializerOptions;
+
+		databaseContext.EnsureSchemaAsync().GetAwaiter().GetResult();
+	}
+
+	ISynqraCollection IObjectStore.GetCollection(Type type)
+	{
+		return (ISynqraCollection)GetCollectionInternal(type);
+	}
+
+	ISynqraCollection<T> IObjectStore.GetCollection<T>()
+		where T : class
+	{
+		var collectionId = GetCollectionId(typeof(T), name: null);
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
+#if NET7_0_OR_GREATER
+		if (!exists || slot == null)
+		{
+			slot = new SqliteStoreCollection<T>(
+				  /* databaseContext */ _databaseContext
+				, /* store */ _databaseContext.Set<T>()
+				, /* store */ this
+				, /* containerId */ ContainerId
+				, /* collectionId */ collectionId
+				, /* serializerFactory */ _serializerFactory
+#if NET8_0_OR_GREATER
+				, /* jsonSerializerOptions */ _jsonSerializerOptions
+#endif
+				);
+		}
+		return (ISynqraCollection<T>)slot;
+#else
+		throw new Exception("Not implemented for older frameworks");
+#endif
+	}
+
+	internal StoreCollection GetCollection(Type type)
+	{
+		return GetCollectionInternal(type);
+	}
+
+	internal StoreCollection GetCollectionInternal(Type type, string? collectionName = null)
+	{
+		var collectionId = GetCollectionId(type, collectionName);
+		var gtype = typeof(SqliteStoreCollection<>).MakeGenericType(type);
+#if NET7_0_OR_GREATER
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
+		if (!exists || slot == null)
+		{
+			slot = (StoreCollection)Activator.CreateInstance(gtype, [
+				  /* databaseContext */ _databaseContext
+				, /* store */ _databaseContext.Set<Command>()
+				, /* store */ this
+				, /* containerId */ ContainerId
+				, /* collectionId */ collectionId
+				, /* serializerFactory */ _serializerFactory
+#if NET8_0_OR_GREATER
+				, /* jsonSerializerOptions */ _jsonSerializerOptions
+#endif
+				])!;
+		}
+		return slot;
+#else
+		throw new Exception("Not implemented for older frameworks");
+#endif
+	}
+
+
+	Guid GetCollectionId(Type rootType, string? name = null)
+	{
+		var typeId = GetTypeMetadata(rootType).TypeId;
+		return GuidExtensions.CreateVersion5(typeId, name ?? "");
+	}
+
+	internal TypeMetadata GetTypeMetadata(Type type)
+	{
+#if NET7_0_OR_GREATER
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
+		if (!exists)
+		{
+			slot = new TypeMetadata
+			{
+				Type = type,
+				// To pass validation - change id to v1
+				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
+			};
+			_typeMetadataByType[type] = slot;
+			_typeMetadataByTypeId[slot.TypeId] = slot;
+		}
+		return slot;
+#else
+		if (!_typeMetadataByType.TryGetValue(type, out var metadata))
+		{
+			metadata = new TypeMetadata
+			{
+				Type = type,
+				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
+			};
+			_typeMetadataByType[type] = metadata;
+			_typeMetadataByTypeId[metadata.TypeId] = metadata;
+		}
+		return metadata;
+#endif
+	}
 	public Guid GetId(object model)
 	{
 		throw new NotImplementedException();
@@ -64,6 +338,8 @@ public class SqliteStore : IObjectStore
 	public async Task SubmitCommandAsync(ISynqraCommand newCommand)
 	{
 	}
+
+	public Guid ContainerId { get; }
 }
 
 public class SqliteProjection : IProjection

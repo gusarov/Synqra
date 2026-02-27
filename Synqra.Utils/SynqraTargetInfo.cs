@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Text;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Synqra;

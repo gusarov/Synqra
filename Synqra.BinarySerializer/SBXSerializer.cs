@@ -774,7 +774,7 @@ public class SBXSerializer : ISBXSerializer
 			throw new Exception("Primitives supposed to be handled by now");
 		}
 		value = Activator.CreateInstance(type) ?? throw new Exception("Could not create instance of type " + type.FullName);
-		if (schemaVersion != 0)
+		if (schemaVersion > 0)
 		{
 			if (value is IBindableModel bm)
 			{

@@ -501,11 +501,17 @@ public static class GuidExtensions
 	}
 
 	const string SwitchValidateNamespaceIdKey = "Synqra.GuidExtensions.ValidateNamespaceId";
+	const string SwitchValidateNamespaceIdHashChainKey = "Synqra.GuidExtensions.ValidateNamespaceIdHashChain";
 
 #if NET9_0_OR_GREATER
 	[FeatureSwitchDefinition(SwitchValidateNamespaceIdKey)] // hint for AOT trimmer
 #endif
 	internal static bool SwitchValidateNamespaceId => AppContext.TryGetSwitch(SwitchValidateNamespaceIdKey, out var v) ? v : true;
+
+#if NET9_0_OR_GREATER
+	[FeatureSwitchDefinition(SwitchValidateNamespaceIdKey)] // hint for AOT trimmer
+#endif
+	internal static bool SwitchValidateNamespaceIdHashChain => AppContext.TryGetSwitch(SwitchValidateNamespaceIdHashChainKey, out var v) ? v : true;
 
 	static unsafe void ValidateNamespaceId(Guid namespaceId)
 	{
@@ -541,9 +547,10 @@ public static class GuidExtensions
 		{
 			case 0: // not recommended
 			case 2: // not recommended
-			case 3: // hashbased for ns? no...
-			case 5: // hashbased for ns? no...
-				throw new ArgumentException("Do not use version 0, 2, 3, 5 as namespace ID" + disclaimer, nameof(namespaceId));
+				throw new ArgumentException($"Do not use version {namespaceId.GetVersion()} (as well as 0, 2, 3, 5) as namespace ID" + disclaimer, nameof(namespaceId));
+			case 3 when (SwitchValidateNamespaceIdHashChain): // hashbased for ns? no...
+			case 5 when (SwitchValidateNamespaceIdHashChain): // hashbased for ns? no...
+				throw new ArgumentException($"Do not use version {namespaceId.GetVersion()} (as well as 3, 5) as namespace ID because this creates a chain of hash-based IDs" + disclaimer.Replace(SwitchValidateNamespaceIdKey, SwitchValidateNamespaceIdHashChainKey), nameof(namespaceId));
 			case 1: // only legal list, others are not recommended (use v4 or v7 instead)
 			{
 				// RFC pattern: xxxxxxxx-9dad-11d1-80b4-00c04fd430c8

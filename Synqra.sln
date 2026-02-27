@@ -23,6 +23,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		Directory.Build.props = Directory.Build.props
 		Dockerfile = Dockerfile
 		global.json = global.json
+		migrate.cmd = migrate.cmd
 		readme.md = readme.md
 	EndProjectSection
 EndProject
@@ -89,6 +90,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Contoso.Model", "Contoso\Contoso.Model\Contoso.Model.csproj", "{545FD355-7DEF-3348-A01A-8D53E252D28E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Projection.Sqlite", "Synqra.Projection.Sqlite\Synqra.Projection.Sqlite.csproj", "{780296A2-13F3-DA88-1F74-9B6AC2C86AD5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synqra.Projection.CommonStoreSupport", "Synqra.Projection.CommonStoreSupport\Synqra.Projection.CommonStoreSupport.csproj", "{4BC64DC2-02DF-498C-9AF9-0EE198059848}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -448,6 +451,18 @@ Global
 		{780296A2-13F3-DA88-1F74-9B6AC2C86AD5}.Release|x64.Build.0 = Release|Any CPU
 		{780296A2-13F3-DA88-1F74-9B6AC2C86AD5}.Release|x86.ActiveCfg = Release|Any CPU
 		{780296A2-13F3-DA88-1F74-9B6AC2C86AD5}.Release|x86.Build.0 = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|x64.Build.0 = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Debug|x86.Build.0 = Debug|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|x64.ActiveCfg = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|x64.Build.0 = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|x86.ActiveCfg = Release|Any CPU
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -473,6 +488,7 @@ Global
 		{B4FA544D-BFCA-4BFC-B7C6-D629A51A68E8} = {1DEC7408-FC0F-49F6-B130-ACC91B689804}
 		{545FD355-7DEF-3348-A01A-8D53E252D28E} = {7608FB56-24AB-407E-8158-B0826034D4C2}
 		{780296A2-13F3-DA88-1F74-9B6AC2C86AD5} = {82EB4812-942F-45C4-8A81-7B9CCAF77B9D}
+		{4BC64DC2-02DF-498C-9AF9-0EE198059848} = {82EB4812-942F-45C4-8A81-7B9CCAF77B9D}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B771E5A2-6BE9-4340-BF65-4ED99CCDD586}

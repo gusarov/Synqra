@@ -1,8 +1,13 @@
 ﻿using Microsoft.Extensions.Logging;
 using Synqra.AppendStorage;
+using Synqra.BinarySerializer;
+using Synqra.Projection;
+using Synqra.Projection.InMemory;
 using System;
 using System.Collections.Concurrent;
+using System.ComponentModel.Design;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -28,19 +33,6 @@ public static class InMemoryStoreContextExtensions
 	}
 }
 
-public class StrongReference
-{
-	public StrongReference(object target)
-	{
-		Target = target;
-	}
-	public StrongReference()
-	{
-	}
-	public object Target { get; set; }
-	public bool IsAlive => Target != null;
-}
-
 /// <summary>
 /// StoreContext is a replayer, it is StateProcessor that also holds all processed objects in memory and reacts on any new events.
 /// It can be used to replay events from scratch
@@ -49,6 +41,10 @@ public class StrongReference
 public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
+	static InMemoryProjection()
+	{
+		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceIdHashChain", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
+	}
 
 	// Client could fetch a list of objects and keep it pretty much forever, it will be live and synced
 	// Or client can fetch something just temporarily, like and then release it to free up memory and notification pressure
@@ -56,6 +52,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
 	private readonly IAppendStorage? _eventStorage;
+	private readonly ISBXSerializerFactory _serializerFactory;
 	private readonly IEventReplicationService? _eventReplicationService;
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
@@ -66,18 +63,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
-	static InMemoryProjection()
-	{
-		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceId", false); // I use deterministic hash guids for named collections per type ids, and type id is also hash based by type name, so namespace id for collection is v5
-	}
-
 	public InMemoryProjection(
-		  IAppendStorage? eventStorage = null
+		  ISBXSerializerFactory serializerFactory
+		, IAppendStorage? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		)
 	{
+		_serializerFactory = serializerFactory;
 		_eventStorage = eventStorage;
 		_eventReplicationService = eventReplicationService;
 		_jsonSerializerOptions = jsonSerializerOptions;
@@ -371,7 +365,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	internal StoreCollection GetCollectionInternal(Type type, string? collectionName = null)
 	{
 		var collectionId = GetCollectionId(type, collectionName);
-		var gtype = typeof(StoreCollection<>).MakeGenericType(type);
+		var gtype = typeof(InMemoryStoreCollection<>).MakeGenericType(type);
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
 		if (!exists || slot == null)
@@ -379,6 +373,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			slot = (StoreCollection)Activator.CreateInstance(gtype, [this
 				, /*containerId*/ ContainerId
 				, collectionId/*collectionId*/
+				, _serializerFactory
 #if NET8_0_OR_GREATER
 				, _jsonSerializerOptions
 #endif
@@ -604,10 +599,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		else
 		{
-			var pros = cmd.Data.GetType().GetProperties();
-			foreach (var item in pros)
+			var pros = cmd.Data.GetType().GetProperties().Where(x => x.CanWrite && x.CanRead);
+			foreach (var pro in pros)
 			{
-				var value = item.GetValue(cmd.Data);
+				var value = pro.GetValue(cmd.Data);
+				// SynqraTypeExtensions
+				if (Equals(value, pro.PropertyType.GetDefault()))
+				{
+					continue;
+				}
 				if (value != null)
 				{
 					ctx.Events.Add(new ObjectPropertyChangedEvent
@@ -618,7 +618,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 						EventId = GuidExtensions.CreateVersion7(),
 						TargetTypeId = cmd.TargetTypeId,
 						TargetId = cmd.TargetId,
-						PropertyName = item.Name,
+						PropertyName = pro.Name,
 						OldValue = null,
 						NewValue = value,
 					});
@@ -790,7 +790,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		else if (data.Model is not null)
 		{
 			// throw new Exception($"The type '{data.Model.GetType().Name}' is not IBindableModel. Please add 'partial' keyword for generator to work.");
-			data.Model.GetType().GetProperty(ev.PropertyName)?.SetValue(data.Model, ev.NewValue);
+			var pi = data.Model.GetType().GetProperty(ev.PropertyName) ?? throw new Exception("Property not found");
+			var value = ev.NewValue;
+			if (ev.NewValue is IConvertible c)
+			{
+				value = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+			}
+			pi?.SetValue(data.Model, Convert.ChangeType(value, pi.PropertyType));
 		}
 		else
 		{

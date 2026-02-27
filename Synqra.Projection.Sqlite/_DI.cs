@@ -14,8 +14,9 @@ public static class SqliteSynqraExtensions
 
 	public static IHostApplicationBuilder AddSqliteSynqraStore(this IHostApplicationBuilder builder)
 	{
-		builder.Services.AddSingleton<SqliteProjection>();
+		builder.Services.AddSingleton<SqliteDatabaseContext>();
 		builder.Services.AddSingleton<SqliteStore>();
+		builder.Services.AddSingleton<SqliteProjection>();
 		builder.Services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<SqliteStore>());
 		builder.Services.AddSingleton<IProjection>(sp => sp.GetRequiredService<SqliteProjection>());
 		// builder.Services.AddSingleton(typeof(IStoreCollection<>), (sp, s) => sp.GetRequiredService<IStoreContext>().Get<>); // Example storage implementation

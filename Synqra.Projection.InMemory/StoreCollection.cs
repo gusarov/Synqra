@@ -3,53 +3,12 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Synqra.BinarySerializer;
+using Synqra.Projection;
 
-namespace Synqra;
+namespace Synqra.Projection.InMemory;
 
-abstract class StoreCollection
-{
-	// Remember - this is always client request, not a synchronization!
-	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
-	private protected readonly JsonSerializerOptions? _jsonSerializerOptions;
-
-	internal IObjectStore Store { get; private init; }
-	internal Guid ContainerId { get; private init; }
-	internal Guid CollectionId { get; private init; }
-
-	public abstract Type Type { get; }
-	protected abstract IList IList { get; }
-	protected abstract ICollection ICollection { get; }
-
-#if DEBUG
-	public IList List => IList;
-#endif
-
-	public StoreCollection(IObjectStore store
-		, Guid containerId
-		, Guid collectionId
-		, JsonSerializerOptions? jsonSerializerOptions = null
-		)
-	{
-		Store = store ?? throw new ArgumentNullException(nameof(store));
-		_jsonSerializerOptions = jsonSerializerOptions;
-		ContainerId = containerId;
-		CollectionId = collectionId;
-	}
-
-	#region COUNT
-
-	public int Count => IList.Count;
-
-	#endregion
-
-	#region Add
-
-	internal abstract void AddByEvent(object item);
-
-	#endregion
-}
-
-class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
+class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
 	where T : class
 {
 	private readonly List<T> _list = new List<T>();
@@ -58,14 +17,16 @@ class StoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes
 	protected override IList IList => _list;
 	protected override ICollection ICollection => _list;
 
-	public StoreCollection(IObjectStore store
+	public InMemoryStoreCollection(IObjectStore store
 		, Guid containerId
 		, Guid collectionId
+		, ISBXSerializerFactory serializerFactory
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
 		: base(store
 			, containerId
 			, collectionId
+			, serializerFactory
 			, jsonSerializerOptions
 			)
 	{
