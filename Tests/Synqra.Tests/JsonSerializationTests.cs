@@ -253,6 +253,15 @@ public class AotTests
 		var r = System.Reflection.Assembly.LoadFile(Path.GetFullPath("Synqra.Storage.Jsonl.dll"));
 	}
 	*/
+
+	[Test]
+	public async Task Should_no_be()
+	{
+		if (!BitConverter.IsLittleEndian)
+		{
+			Assert.Fail("This test is only for little-endian platforms");
+		}
+	}
 }
 
 public record Person(string Name, int Age, int Height)
