@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Options;
 using MongoDB.Bson.Serialization.Attributes;
 using SharpCompress.Common;
+using Synqra.Projection.File;
 using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
@@ -42,6 +43,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(SampleTaskModel))]
 [JsonSerializable(typeof(TestItem))]
 [JsonSerializable(typeof(SampleTodoTaskPoco))]
+[JsonSerializable(typeof(Item))] // Synqra.File
 
 [JsonSerializable(typeof(Synqra.Event))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
@@ -93,6 +95,7 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(SamplePublicModel),
 		typeof(SampleTaskModel),
 		typeof(SampleTodoTaskPoco),
+		typeof(Item),
 	];
 
 	public static JsonSerializerOptions DefaultOptions { get; }

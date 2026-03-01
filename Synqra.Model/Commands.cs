@@ -62,7 +62,7 @@ public abstract partial class SingleObjectCommand : Command
 	public partial Guid TargetId { get; set; }
 
 	[JsonIgnore]
-	public object? Target { get; set; }
+	public object? TargetObject { get; set; }
 }
 
 [SynqraModel]

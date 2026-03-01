@@ -3,13 +3,14 @@ using System.Collections;
 
 namespace Synqra;
 
-public interface ISynqraCollection //: IList //, ICollection//, IQueryable, INotifyCollectionChanged
+public interface ISynqraCollection : IEnumerable //: IList //, ICollection//, IQueryable, INotifyCollectionChanged
 {
 }
 
-public interface ISynqraCollection<T> : ISynqraCollection, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
+public interface ISynqraCollection<T> : ISynqraCollection, IEnumerable<T>, ICollection<T>//, IQueryable<T>, INotifyCollectionChanged
 	where T : class
 {
+	/*
 #if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	T this[int index]
 	{
@@ -19,4 +20,5 @@ public interface ISynqraCollection<T> : ISynqraCollection, ICollection<T>//, IQu
 #else
 	new T this[int index] { get; set; }
 #endif
+	*/
 }

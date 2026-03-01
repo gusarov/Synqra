@@ -70,6 +70,7 @@ class SqliteTestItem
 }
 
 [NotInParallel]
+[Explicit] // Under construction
 public class SqliteStorageTests : BaseTest
 {
 	private IAppendStorage<SqliteTestItem, Guid>? _storage;

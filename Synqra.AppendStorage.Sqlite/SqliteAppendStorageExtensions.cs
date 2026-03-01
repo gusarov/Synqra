@@ -16,6 +16,7 @@ public static class SqliteAppendStorageExtensions
 	static object _synqraSqliteStorageConfiguredKey = new object();
 
 	public static void AddAppendStorageSqlite<T, TKey>(this IHostApplicationBuilder hostBuilder, Func<T, Guid> getKey)
+		where T : class
 	{
 		hostBuilder.AddAppendStorageSqliteCore();
 		hostBuilder.Services.AddSingleton(getKey);

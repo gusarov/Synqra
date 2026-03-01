@@ -19,6 +19,13 @@ public class SampleFieldListBaseModel_ : IBindableModel
 	public IList<SampleBaseModel> Data { get; set; }
 
 	public IObjectStore? Store { get; set; }
+	public Guid? CollectionId { get; private set; }
+
+	public void Attach(IObjectStore store, Guid collectionId)
+	{
+		Store = store;
+		CollectionId = collectionId;
+	}
 
 	public void Set(string propertyName, object? value)
 	{
@@ -42,7 +49,14 @@ public class SampleFieldEnumerableBaseModel_ : IBindableModel
 {
 	public IEnumerable<SampleBaseModel> Data { get; set; }
 
-	public IObjectStore? Store { get; set; }
+	public IObjectStore? Store { get; private set; }
+	public Guid? CollectionId { get; private set; }
+
+	public void Attach(IObjectStore store, Guid collectionId)
+	{
+		Store = store;
+		CollectionId = collectionId;
+	}
 
 	public void Set(string propertyName, object? value)
 	{
@@ -60,6 +74,7 @@ public class SampleFieldEnumerableBaseModel_ : IBindableModel
 		// Deserialize<IList<SampleBaseModel>> - executed when there is not way to guarantee the list type or element types
 		Data = serializer.Deserialize<IEnumerable<SampleBaseModel>>(in buffer, ref pos); // TODO need to pass weather this list requires typeId or not
 	}
+
 }
 
 /// <summary>
@@ -78,12 +93,24 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	partial void OnNameChanged(string? newValue);
 	partial void OnNameChanged(string? oldValue, string? newValue);
 
-	IObjectStore __store;
+	IObjectStore? __store;
 
-	IObjectStore IBindableModel.Store
+	IObjectStore? IBindableModel.Store
 	{
 		get => __store;
-		set => __store = value;
+	}
+
+	Guid? __collectionId;
+
+	Guid? IBindableModel.CollectionId
+	{
+		get => __collectionId;
+	}
+
+	public void Attach(IObjectStore store, Guid collectionId)
+	{
+		__store = store;
+		__collectionId = collectionId;
 	}
 
 	void IBindableModel.Set(string propertyName, object? value)
@@ -151,7 +178,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 					ContainerId = default,
 					CollectionId = default,
 
-					Target = this,
+					TargetObject = this,
 					TargetId = __store.GetId(this, null, GetMode.RequiredId),
 					TargetTypeId = default,
 					// TargetTypeId = __store.GetId(this, null, GetMode.RequiredId),
@@ -163,6 +190,8 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 			}
 		}
 	}
+
+	public Guid? CollectionId => throw new NotImplementedException();
 
 	/// <summary>
 	/// This class represents both a command and an event.

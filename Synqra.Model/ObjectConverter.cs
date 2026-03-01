@@ -319,7 +319,12 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 		IObjectStore? IBindableModel.Store
 		{
 			get => throw new NotImplementedException();
-			set => throw new NotImplementedException();
+		}
+		Guid? IBindableModel.CollectionId => throw new NotImplementedException();
+
+		public void Attach(IObjectStore store, Guid collectionId)
+		{
+			throw new NotImplementedException();
 		}
 
 		void IBindableModel.Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
@@ -383,7 +388,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 					jsonTypeInfo.PolymorphismOptions = poliOptions;
 				}
 			}
-			else*/
+			else */
 			if (typeof(IBindableModel) == type)
 			{
 				if (jsonTypeInfo.PolymorphismOptions == null)
@@ -402,6 +407,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 					foreach (var knownType in _bindableModels)
 					{
 						jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(knownType, knownType.Name));
+						EmergencyLog.Default.LogDebug($"jsonTypeInfo.PolymorphismOptions.DerivedTypes Added {knownType.Name}");
 					}
 					jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(ConfiguredMarker), nameof(ConfiguredMarker)));
 				}

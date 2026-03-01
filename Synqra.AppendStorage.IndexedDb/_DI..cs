@@ -8,6 +8,7 @@ namespace Synqra.AppendStorage.IndexedDb;
 public static class IndexedDbAppendStorageExtensions
 {
 	public static void AddIndexedDbAppendStorage<T, TKey>(this IServiceCollection services)
+		where T : class
 	{
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER")))
 		{

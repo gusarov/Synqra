@@ -72,19 +72,21 @@ public class SqliteDatabaseContext : DbContext
 	internal string _connectionString;
 	internal ILogger<SqliteDatabaseContext>? _logger;
 
-	public DbSet<Command> Command { get; set; }
-	public DbSet<CreateObjectCommand> CreateObjectCommand { get; set; }
+	// public DbSet<Command> Command { get; set; }
+	// public DbSet<CreateObjectCommand> CreateObjectCommand { get; set; }
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{
 		base.OnModelCreating(modelBuilder);
 
 		// todo Use JsonIgnore attribute, and use it in SBX as well
+		/*
 		modelBuilder.Entity<CreateObjectCommand>(b =>
 		{
 			b.Ignore("Data");
 			b.Ignore("Target");
 		});
+		*/
 		EmergencyLog.Default.LogWarning("SqliteDatabaseContext OnModelCreating Done");
 	}
 
@@ -207,10 +209,9 @@ public class SqliteStore : IObjectStore
 
 	private readonly SqliteDatabaseContext _databaseContext;
 	private readonly ISBXSerializerFactory _serializerFactory;
+	public ITypeMetadataProvider TypeMetadataProvider { get; }
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
-	private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
-	private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
 	private readonly Dictionary<Guid, StoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -218,6 +219,7 @@ public class SqliteStore : IObjectStore
 	public SqliteStore(
 	  SqliteDatabaseContext databaseContext
 	, ISBXSerializerFactory serializerFactory
+	, ITypeMetadataProvider typeMetadataProvider
 	, IAppendStorage? eventStorage = null
 	, IEventReplicationService? eventReplicationService = null
 	, JsonSerializerOptions? jsonSerializerOptions = null
@@ -226,65 +228,39 @@ public class SqliteStore : IObjectStore
 	{
 		_databaseContext = databaseContext;
 		_serializerFactory = serializerFactory;
+		TypeMetadataProvider = typeMetadataProvider;
 		_jsonSerializerOptions = jsonSerializerOptions;
 
 		databaseContext.EnsureSchemaAsync().GetAwaiter().GetResult();
 	}
 
-	ISynqraCollection IObjectStore.GetCollection(Type type)
+	ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)
 	{
-		return (ISynqraCollection)GetCollectionInternal(type);
+		return GetCollection(type, collectionName ?? "");
 	}
 
-	ISynqraCollection<T> IObjectStore.GetCollection<T>()
+	ISynqraCollection<T> IObjectStore.GetCollection<T>(string? collectionName)
 		where T : class
 	{
-		var collectionId = GetCollectionId(typeof(T), name: null);
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
-#if NET7_0_OR_GREATER
-		if (!exists || slot == null)
-		{
-			slot = new SqliteStoreCollection<T>(
-				  /* databaseContext */ _databaseContext
-				, /* store */ _databaseContext.Set<T>()
-				, /* store */ this
-				, /* containerId */ ContainerId
-				, /* collectionId */ collectionId
-				, /* serializerFactory */ _serializerFactory
-#if NET8_0_OR_GREATER
-				, /* jsonSerializerOptions */ _jsonSerializerOptions
-#endif
-				);
-		}
-		return (ISynqraCollection<T>)slot;
-#else
-		throw new Exception("Not implemented for older frameworks");
-#endif
+		return GetCollection<T>(collectionName ?? "");
 	}
 
-	internal StoreCollection GetCollection(Type type)
+	internal StoreCollection GetCollection(Type type, string collectionName)
 	{
-		return GetCollectionInternal(type);
-	}
-
-	internal StoreCollection GetCollectionInternal(Type type, string? collectionName = null)
-	{
-		var collectionId = GetCollectionId(type, collectionName);
-		var gtype = typeof(SqliteStoreCollection<>).MakeGenericType(type);
+		var collectionId = GetCollectionId(type, collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
 		if (!exists || slot == null)
 		{
+			var gtype = typeof(SqliteStoreCollection<>).MakeGenericType(type);
 			slot = (StoreCollection)Activator.CreateInstance(gtype, [
 				  /* databaseContext */ _databaseContext
-				, /* store */ _databaseContext.Set<Command>()
+				// , /* store */ _databaseContext.Set<Command>() // TODO this is a problem
+				, /* set */ null
 				, /* store */ this
 				, /* containerId */ ContainerId
 				, /* collectionId */ collectionId
 				, /* serializerFactory */ _serializerFactory
-#if NET8_0_OR_GREATER
-				, /* jsonSerializerOptions */ _jsonSerializerOptions
-#endif
 				])!;
 		}
 		return slot;
@@ -293,43 +269,39 @@ public class SqliteStore : IObjectStore
 #endif
 	}
 
-
-	Guid GetCollectionId(Type rootType, string? name = null)
+	internal SqliteStoreCollection<T> GetCollection<T>(string collectionName)
+		where T : class
 	{
-		var typeId = GetTypeMetadata(rootType).TypeId;
-		return GuidExtensions.CreateVersion5(typeId, name ?? "");
-	}
-
-	internal TypeMetadata GetTypeMetadata(Type type)
-	{
+		var collectionId = GetCollectionId(typeof(T), collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
-		if (!exists)
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
+		if (!exists || slot == null)
 		{
-			slot = new TypeMetadata
-			{
-				Type = type,
-				// To pass validation - change id to v1
-				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
-			};
-			_typeMetadataByType[type] = slot;
-			_typeMetadataByTypeId[slot.TypeId] = slot;
+			var col = new SqliteStoreCollection<T>(
+				  /* databaseContext */ _databaseContext
+				// , /* store */ _databaseContext.Set<T>()
+				, null
+				, /* store */ this
+				, /* containerId */ ContainerId
+				, /* collectionId */ collectionId
+				, /* serializerFactory */ _serializerFactory
+				);
+			slot = col;
+			return col;
+
 		}
-		return slot;
+		return (SqliteStoreCollection<T>)slot;
 #else
-		if (!_typeMetadataByType.TryGetValue(type, out var metadata))
-		{
-			metadata = new TypeMetadata
-			{
-				Type = type,
-				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
-			};
-			_typeMetadataByType[type] = metadata;
-			_typeMetadataByTypeId[metadata.TypeId] = metadata;
-		}
-		return metadata;
+		throw new Exception("Not implemented for older frameworks");
 #endif
 	}
+
+
+	Guid GetCollectionId(Type rootType, string collectionName)
+	{
+		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
+	}
+
 	public Guid GetId(object model)
 	{
 		throw new NotImplementedException();

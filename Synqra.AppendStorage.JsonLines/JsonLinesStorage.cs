@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -25,6 +26,7 @@ public static class AppendStorageJsonLinesExtensions
 
 	// For nativeAOT
 	public static void AddAppendStorageJsonLines<T, TKey>(this IHostApplicationBuilder hostBuilder)
+		where T : class
 		// where T : IIdentifiable<TKey>
 	{
 		// _ = typeof(IStorage<T, TKey>);
@@ -53,6 +55,7 @@ public static class AppendStorageJsonLinesExtensions
 	}
 
 	private class JsonLinesStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, IAsyncDisposable
+		where T : class
 		//where T : IIdentifiable<TKey>
 	{
 		private readonly ILogger _logger;
@@ -249,6 +252,7 @@ public static class AppendStorageJsonLinesExtensions
 #endif
 				if (_streamWriter == null)
 				{
+					Directory.CreateDirectory(Path.GetDirectoryName(FileName));
 					_stream = new FileStream(FileName, FileMode.Append, FileAccess.Write, FileShare.Read, bufferSize: 1024 * 4, options: FileOptions.SequentialScan
 #if SEMAPHORE
 | FileOptions.Asynchronous
@@ -381,6 +385,11 @@ public static class AppendStorageJsonLinesExtensions
 		}
 
 		public Task<string> TestAsync(string input)
+		{
+			throw new NotImplementedException();
+		}
+
+		public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			throw new NotImplementedException();
 		}

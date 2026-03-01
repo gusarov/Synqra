@@ -36,6 +36,7 @@ internal record struct EventItem
 }
 
 internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
+		where T : class
 {
 	private readonly Func<T, TKey> _keyAccessor;
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -148,5 +149,10 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 				fromExcluding = _keyAccessor(lastItem);
 			}
 		} while (any);
+	}
+
+	public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		throw new NotImplementedException();
 	}
 }

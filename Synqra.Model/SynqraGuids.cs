@@ -25,6 +25,7 @@ public static class SynqraGuids
 	 */
 
 	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // This id is never visible and already in use
+	public static Guid SynqraRootContainerId = new("00000000-000C-8000-8000-C0DE2A21B27D"); // This id is never visible and already in use
 	// public static Guid SynqraTypeNamespaceId = new("00000001-0000-8000-8000-C0DE2A21B27D"); //
 
 	/*

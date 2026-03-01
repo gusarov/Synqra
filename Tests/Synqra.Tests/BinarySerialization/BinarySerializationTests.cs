@@ -416,7 +416,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					CommandId = default,
 					ContainerId = default,
 					CollectionId = default,
-					Target = null,
+					TargetObject = null,
 					TargetId = default,
 					TargetTypeId = default,
 					/*
@@ -457,7 +457,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556290012"),
 					CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc2060013"),
 					TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
-					Target = null,
+					TargetObject = null,
 					/*
 					Data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
 					{

@@ -20,7 +20,10 @@ public sealed class SynqraModelAttribute : Attribute
 		
 	}
 
-	public SynqraModelAttribute(Type type)
+	public SynqraModelAttribute(Guid synqraTypeId)
 	{
+		SynqraTypeId = synqraTypeId;
 	}
+
+	public Guid? SynqraTypeId { get; init; }
 }
