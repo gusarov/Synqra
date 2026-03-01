@@ -1,12 +1,17 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.File;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.BinarySerializer;
+using Synqra.Projection.File;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
+using System.Runtime.ConstrainedExecution;
+using System.Runtime.InteropServices;
+using System.Text.Json.Serialization;
 using TUnit.Assertions.Extensions;
 using static Synqra.AppendStorage.JsonLines.AppendStorageJsonLinesExtensions;
 
@@ -21,37 +26,72 @@ public class TestItem //: IIdentifiable<int>
 [InheritsTests]
 public class JsonAppendStorageTests : AppendStorageTests
 {
+	string _file;
+
 	[Before(Test)]
 	public void Setup()
 	{
+		_file = CreateTestFileName("[TypeName]");
+	}
+
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+
 		HostBuilder.AddAppendStorageJsonLines<TestItem, int>();
 		HostBuilder.AddAppendStorageJsonLines<Event, Guid>();
+		HostBuilder.AddAppendStorageJsonLines<StorableModel, string>();
+
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
 
-		Configuration["Storage:JsonLinesStorage:FileName"] = CreateTestFileName("[TypeName]");
+		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
+		Configuration["Storage:JsonLinesStorage:FileName"] = _file;
 	}
 }
 
 [InheritsTests]
 public class FileAppendStorageTests : AppendStorageTests
 {
+	string _folder;
+
 	[Before(Test)]
 	public void Setup()
 	{
-		// HostBuilder.AddAppendStorageFile<TestItem, int>(x => x.Id);
-		HostBuilder.AddAppendStorageFile<Event, Guid>(x => x.EventId);
-		HostBuilder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
-		{
-			var ser = new SBXSerializer();
-			ser.Map(100, typeof(Event));
-			ser.Map(101, typeof(ObjectCreatedEvent));
-			ser.Snapshot();
-			return ser;
-		}));
-		Configuration["Storage:FileStorage:Folder"] = CreateTestFileName("store") + Path.DirectorySeparatorChar;
+		_folder = CreateTestFolder();
 	}
 
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+		// HostBuilder.AddAppendStorageFile<TestItem, int>(x => x.Id);
+		HostBuilder.AddAppendStorageFile<Event>(x => x.EventId);
+		HostBuilder.AddAppendStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
+		HostBuilder.AddAppendStorageFile<Item>(x => (x.CollectionId, x.ObjectId));
+		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
+		Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
+	}
+
+	[Test]
+	public async Task Should_F00_stringify_guid_in_portable_way()
+	{
+		var guid = Guid.Parse("019ca6ce-d93b-7802-86bf-60d00e8ec15b");
+		await Assert.That(guid.ToString()).IsEqualTo("019ca6ce-d93b-7802-86bf-60d00e8ec15b");
+	}
+
+	[Test]
+	[Arguments(1, "alice", "al/ice")]
+	[Arguments(2, "0709D3B1B1F64DF79BC941178E32E530", "070/9D3B1B1F64DF79BC941178E32E530")] // 3 chars 1.5 bytes - v4 high entropy
+	[Arguments(3, "0709D3B1B1F64DF79BC941178E32E5300709D3B1B1F64DF79BC941178E32E530", "070/9D3B1B1F64DF79BC941178E32E530/070/9D3B1B1F64DF79BC941178E32E530")] // nested
+	// 019ca6ce-d93b-7802-86bf-60d00e8ec15b
+	[Arguments(4, "019ca6ced93b780286bf60d00e8ec15b", "019ca6/ced93b780286bf60d00e8ec15b")] // 6 chars 3.0 bytes - v7 gives a folder every 4.66h and 1880 folders a year
+	[Arguments(5, "1EC9414C232A6B00B3C89F6BDECED846", "1EC94/14C232A6B00B3C89F6BDECED846")] // 5 chars 2.5 bytes - v6 gives a folder every  1.2d and  288 folders a year
+	public async Task Should_F10_prepare_file_name(int num, string key, string expectedPath)
+	{
+		expectedPath = expectedPath.Replace('/', Path.DirectorySeparatorChar);
+		var storage = Get<StorableModel, string>();
+		await Assert.That(((FileAppendStorage<StorableModel, string>)storage).GetFileNameFor(key, false)).EndsWith(expectedPath);
+	}
 }
 
 [NotInParallel]
@@ -59,14 +99,38 @@ public abstract class AppendStorageTests : BaseTest
 //where T //: IIdentifiable<TKey>
 {
 	// class
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+		HostBuilder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+		{
+			var ser = new SBXSerializer();
+			ser.Map(100, typeof(Event));
+			ser.Map(101, typeof(ObjectCreatedEvent));
+			ser.Map(102, typeof(StorableModel));
+			ser.Map(99, 3000.0, typeof(Item));
+			ser.Snapshot();
+			return ser;
+		}));
 
+		hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
+		hostApplicationBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
+	}
+
+	protected virtual void Reopen()
+	{
+		Restart(); // restart host builder - useful with virtual Register()
+		Console.WriteLine("Reopened");
+	}
 
 	protected IAppendStorage<T, TKey> Get<T, TKey>()
+		where T : class
 	{
 		return ServiceProvider.GetRequiredService<IAppendStorage<T, TKey>>();
 	}
 
 	protected IAppendStorage<T, Guid> Get<T>()
+		where T : class
 	{
 		return ServiceProvider.GetRequiredService<IAppendStorage<T, Guid>>();
 	}
@@ -96,6 +160,13 @@ public abstract class AppendStorageTests : BaseTest
 		var items = storage.GetAllAsync().ToBlockingEnumerable().ToArray();
 		await Assert.That(items.Count()).IsEqualTo(1);
 		var theItem = items[0];
+		await Assert.That(theItem).IsEquivalentTo(item);
+
+		Reopen();
+		storage = Get<Event>();
+		items = storage.GetAllAsync().ToBlockingEnumerable().ToArray();
+		await Assert.That(items.Count()).IsEqualTo(1);
+		theItem = items[0];
 		await Assert.That(theItem).IsEquivalentTo(item);
 	}
 
@@ -136,11 +207,213 @@ public abstract class AppendStorageTests : BaseTest
 		var theItem2 = items[1];
 		await Assert.That(theItem2).IsEquivalentTo(item2);
 		await Assert.That(theItem2).IsEquivalentTo(item2);
+
+		Reopen();
+		storage = Get<Event>();
+		items = storage.GetAllAsync().ToBlockingEnumerable().ToArray();
+		await Assert.That(items.Count()).IsEqualTo(2);
+		theItem1 = items[0];
+		await Assert.That(theItem1).IsEquivalentTo(item1);
+		await Assert.That(theItem1).IsEquivalentTo(item1);
+		theItem2 = items[1];
+		await Assert.That(theItem2).IsEquivalentTo(item2);
+		await Assert.That(theItem2).IsEquivalentTo(item2);
+
+	}
+
+	[Test]
+	public async Task Should_13_allow_custom_string_not_guid()
+	{
+		var storage = Get<StorableModel, string>();
+
+		await storage.AppendAsync(new StorableModel
+		{
+			Key = "alice",
+			Title = "Alice",
+		});
+
+		await storage.AppendAsync(new StorableModel
+		{
+			Key = "bob",
+			Title = "Bob",
+		});
+		Console.WriteLine();
+	}
+
+	[Test]
+	[Explicit] // have to add support in jsonlines
+	public async Task Should_14_give_object_by_key()
+	{
+		var storage = Get<Event, Guid>();
+
+		var ev = new ObjectCreatedEvent
+		{
+			CollectionId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
+			TargetId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = GuidExtensions.CreateVersion7(),
+			ContainerId = GuidExtensions.CreateVersion7(),
+			Data = new StorableModel
+			{
+				Title = "Alice",
+			},
+		};
+		await storage.AppendAsync(ev);
+
+		var back = await storage.GetAsync(ev.EventId);
+		await Assert.That(back.EventId).IsEqualTo(back.EventId);
+		await Assert.That(back.ContainerId).IsEqualTo(back.ContainerId);
+		await Assert.That(back.CommandId).IsEqualTo(back.CommandId);
+
+		Reopen();
+		storage = Get<Event, Guid>();
+		back = await storage.GetAsync(ev.EventId);
+		await Assert.That(back.EventId).IsEqualTo(back.EventId);
+		await Assert.That(back.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(back.CommandId).IsEqualTo(back.CommandId);
+	}
+
+	[Test]
+	[Explicit] // have to add support in jsonlines
+	public async Task Should_15_give_objecT_by_key_among_two()
+	{
+		var storage = Get<Event>();
+
+		var ev = new ObjectCreatedEvent
+		{
+			CollectionId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
+			TargetId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = GuidExtensions.CreateVersion7(),
+			ContainerId = GuidExtensions.CreateVersion7(),
+			Data = new StorableModel
+			{
+				Title = "Alice",
+			},
+		};
+		await storage.AppendAsync(ev);
+
+		var ev2 = new ObjectCreatedEvent
+		{
+			CollectionId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			EventId = Guid.Parse("00000002-0001-8000-8000-000000000000"),
+			TargetId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = GuidExtensions.CreateVersion7(),
+			ContainerId = GuidExtensions.CreateVersion7(),
+			Data = new StorableModel
+			{
+				Title = "Bob",
+			},
+		};
+		await storage.AppendAsync(ev2);
+
+		var back = await storage.GetAsync(ev.EventId);
+		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
+		await Assert.That(back.ContainerId).IsEqualTo(ev.ContainerId);
+		await Assert.That(back.CommandId).IsEqualTo(ev.CommandId);
+
+		var back2 = await storage.GetAsync(ev2.EventId);
+		await Assert.That(back2.EventId).IsEqualTo(ev2.EventId);
+		await Assert.That(back2.ContainerId).IsEqualTo(ev2.ContainerId);
+		await Assert.That(back2.CommandId).IsEqualTo(ev2.CommandId);
+
+		Reopen();
+		storage = Get<Event>();
+
+		var Rback = await storage.GetAsync(ev.EventId);
+		await Assert.That(Rback).IsNotSameReferenceAs(back);
+		await Assert.That(Rback.EventId).IsEqualTo(ev.EventId);
+		await Assert.That(Rback.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(Rback.CommandId).IsEqualTo(ev.CommandId);
+
+		var Rback2 = await storage.GetAsync(ev2.EventId);
+		await Assert.That(Rback2).IsNotSameReferenceAs(back2);
+		await Assert.That(Rback2.EventId).IsEqualTo(ev2.EventId);
+		await Assert.That(Rback2.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(Rback2.CommandId).IsEqualTo(ev2.CommandId);
+	}
+
+	[Test]
+	[Explicit] // have to add support in jsonlines
+	public async Task Should_16_give_from_to_range_query()
+	{
+		var storage = Get<Item, (Guid, Guid)>();
+
+		var item0 = new Item
+		{
+			CollectionId = GuidExtensions.CreateVersion7(), // different collection
+			ObjectId = GuidExtensions.CreateVersion7(),
+			Blob = new MyPocoTask
+			{
+				Subject = "test" + GuidExtensions.CreateVersion7(),
+			},
+		};
+		await storage.AppendAsync(item0);
+
+		var collectionId1 = GuidExtensions.CreateVersion7();
+		var item1 = new Item
+		{
+			CollectionId = collectionId1,
+			ObjectId = GuidExtensions.CreateVersion7(),
+			Blob = new MyPocoTask
+			{
+				Subject = "test" + GuidExtensions.CreateVersion7(),
+			},
+		};
+		await storage.AppendAsync(item1);
+
+		var item2 = new Item
+		{
+			CollectionId = collectionId1,
+			ObjectId = GuidExtensions.CreateVersion7(),
+			Blob = new MyPocoTask
+			{
+				Subject = "test" + GuidExtensions.CreateVersion7(),
+			},
+		};
+		await storage.AppendAsync(item2);
+
+		var item3 = new Item
+		{
+			CollectionId = GuidExtensions.CreateVersion7(), // different collection
+			ObjectId = GuidExtensions.CreateVersion7(),
+			Blob = new MyPocoTask
+			{
+				Subject = "test"+ GuidExtensions.CreateVersion7(),
+			},
+		};
+		await storage.AppendAsync(item3);
+
+		Reopen();
+
+		Console.WriteLine("ByID");
+		var back = await storage.GetAsync((collectionId1, item2.ObjectId));
+		await Assert.That(((MyPocoTask)back.Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
+
+		Console.WriteLine("ByPrefix");
+		var allRange = storage.GetAllAsync((collectionId1, default)).ToBlockingEnumerable().ToArray();
+
+		await Assert.That(allRange).HasCount(2);
+		await Assert.That(((MyPocoTask)allRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item1.Blob).Subject);
+		await Assert.That(((MyPocoTask)allRange[1].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
+
+		Console.WriteLine("ByExactRange");
+		var hitRange = storage.GetAllAsync((collectionId1, item2.ObjectId)).ToBlockingEnumerable().ToArray();
+		foreach (var item in hitRange)
+		{
+			EmergencyLog.Default.LogDebug($"ByExactRange: {item.CollectionId} {item.ObjectId} {item.Blob}");
+		}
+		await Assert.That(hitRange).HasCount(1);
+		await Assert.That(((MyPocoTask)hitRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
 	}
 }
 
 [NotInParallel]
 public abstract class JsonAppendStorageTests<T, TKey> : BaseTest
+	where T : class
 	//where T //: IIdentifiable<TKey>
 {
 	// class 

@@ -12,15 +12,16 @@ public static class SynqraTypeExtensions
 		{
 			return null;
 		}
-#if NET7_0_OR_GREATER
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_defaults, type, out _);
-		if (slot == null)
+		if (!_defaults.TryGetValue(type, out var value))
 		{
-			slot = Activator.CreateInstance(type);
+			lock (_defaults)
+			{
+				if (!_defaults.TryGetValue(type, out value))
+				{
+					_defaults[type] = value = Activator.CreateInstance(type);
+				}
+			}
 		}
-		return slot;
-#else
-		return null;
-#endif
+		return value;
 	}
 }

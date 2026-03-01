@@ -115,6 +115,7 @@ internal class SynqraTestNode
 
 		var utils = new TestUtils();
 		var synqraTestsCurrentPath = utils.CreateTestFolder();
+		Directory.CreateDirectory(synqraTestsCurrentPath);
 
 		#endregion
 
@@ -205,6 +206,10 @@ internal class SynqraTestNode
 		*/
 		builder.Services.AddSingleton(options);
 
+		builder.AddTypeMetadataProvider([
+			typeof(DemoModel),
+			typeof(MyPocoTask),
+		]);
 		builder.Services.AddEmergencyLogger();
 
 		builder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
@@ -449,16 +454,4 @@ internal class SynqraTestNode
 		return port;
 	}
 
-	private class Lazier<
-#if !NETFRAMEWORK
-		[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-#endif
-		T> : Lazy<T>
-		where T : class
-	{
-		public Lazier(IServiceProvider serviceProvider)
-			: base(() => serviceProvider.GetRequiredService<T>())
-		{
-		}
-	}
 }

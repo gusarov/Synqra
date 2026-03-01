@@ -457,10 +457,17 @@ public class SBXSerializer : ISBXSerializer
 			throw new NotSupportedException("Need to track capability of a type to encode null state inside value");
 		}
 
-		if (obj is IBindableModel bm && _idByType.TryGetValue(actualType, out var typeInfo1))
+		if (obj is IBindableModel bm)
 		{
-			EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
-			bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
+			if (_idByType.TryGetValue(actualType, out var typeInfo1))
+			{
+				EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
+				bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
+			}
+			else
+			{
+				throw new Exception($"BindableModel {obj.GetType().Name} type id is not registered");
+			}
 		}
 		else if (obj is null)
 		{

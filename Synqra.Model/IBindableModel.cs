@@ -6,7 +6,10 @@ namespace Synqra;
 // [JsonPolymorphic]
 public interface IBindableModel
 {
-	IObjectStore? Store { get; set; }
+	Guid? CollectionId { get; }
+	IObjectStore? Store { get; }
+
+	void Attach(IObjectStore store, Guid collectionId);
 
 	/// <summary>
 	/// Dedicated access to set a property by name, without using reflection.

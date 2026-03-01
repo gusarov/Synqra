@@ -20,6 +20,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Synqra.BinarySerializer;
+using Synqra.Projection.File;
+using Synqra.AppendStorage.File;
+using Synqra.Projection;
 
 namespace Synqra.Tests;
 
@@ -28,9 +31,40 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 [InheritsTests]
 public class InMemoryStateManageementTests : StateManagementTests
 {
-	protected override void Registration(IHostApplicationBuilder hostApplicationBuilder)
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
+		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.AddInMemorySynqraStore();
+	}
+}
+
+[InheritsTests]
+public class FileStateManageementTests : StateManagementTests
+{
+	string _folder;
+
+	[Before(Test)]
+	public void Setup()
+	{
+		_folder = CreateTestFolder();
+	}
+
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+		hostApplicationBuilder.AddFileSynqraStore();
+		hostApplicationBuilder.AddAppendStorageFile<Event>(e => e.EventId);
+		hostApplicationBuilder.AddAppendStorageFile<Command>(e => e.CommandId);
+		hostApplicationBuilder.AddAppendStorageFile<Item>(e =>
+		{
+			if (e.CollectionId == default)
+			{
+				throw new Exception("Unknown collection id");
+			}
+			return (e.CollectionId, e.ObjectId);
+		});
+
+		hostApplicationBuilder.Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
 	}
 }
 
@@ -95,18 +129,28 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
-	FakeAppendStorage _fakeStorage => ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
+	FakeAppendStorage _fakeStorage => (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>(); // ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
 	ISynqraCollection<MyPocoTask> _tasks => _sut.GetCollection<MyPocoTask>();
 
-	public StateManagementTests()
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
-		Registration(HostBuilder);
+		base.Register(hostApplicationBuilder);
 		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
+		HostBuilder.AddTypeMetadataProvider([
+			typeof(DemoModel),
+			typeof(MyPocoTask),
+			typeof(Command),
+			typeof(CreateObjectCommand),
+			typeof(ChangeObjectPropertyCommand),
+			typeof(Item),
+		]);
+		var q1 = new Item(); // must register polimorfic before serializaiton
+		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
+		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
+
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();
-		// HostBuilder.Services.AddSingleton(typeof(IStorage<,>), typeof(FakeStorage<,>));
-		// HostBuilder.Services.AddSingleton<IStorage<Event, Guid>, FakeStorage<Event, Guid>>();
 		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
 		HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
 
@@ -114,6 +158,8 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		{
 			var ser = new SBXSerializer();
 			ser.Map(100, -1, typeof(MyPocoTask));
+			ser.Map(101, 3000.0, typeof(Item));
+			ser.Map(102, 3000.0, typeof(DemoModel));
 			ser.Snapshot();
 			return ser;
 		}));
@@ -125,11 +171,23 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		// Directory.CreateDirectory(Path.GetDirectoryName(_fileName));
 	}
 
-	protected abstract void Registration(IHostApplicationBuilder hostApplicationBuilder);
+	public void Reopen()
+	{
+		var fakeAppendStorage = ServiceProvider.GetRequiredService<FakeAppendStorage>();
+		Restart();
+		ServiceCollection.AddSingleton(fakeAppendStorage);
+	}
 
 	[Test]
-	public async Task Should_emit_command_by_setting_property()
+	public async Task Should_00_have_proper_container()
 	{
+		Console.WriteLine(_sut);
+	}
+
+	[Test]
+	public async Task Should_20_emit_command_by_setting_property()
+	{
+		Console.WriteLine("v2");
 		// HostBuilder.AddJsonLinesStorage();
 		// HostBuilder.AddSynqraStoreContext();
 
@@ -139,7 +197,7 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 
 		model.Name = "TestName"; // this should emit a command and broadcast it
 
-		var commands = _sut.GetCollection<ISynqraCommand>().ToArray();
+		var commands = _sut.GetCollection<Command>().ToArray();
 
 		var jso = ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 		Console.WriteLine("Commands:");
@@ -163,8 +221,18 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 	}
 
 	[Test]
-	public async Task Should_10_create_object()
+	public async Task Should_10_create_object_by_adding_to_list()
 	{
+		foreach (var item in ServiceCollection.Skip(_origServiceCount))
+		{
+			Console.WriteLine($"{item.ServiceType.Name} '{item.ServiceKey}' = {(item.IsKeyedService ? item.KeyedImplementationInstance : item.ImplementationInstance)}");
+		}
+		Console.WriteLine("/////////");
+		foreach (var item in _tasks)
+		{
+			Console.WriteLine(item);
+		}
+		Console.WriteLine("=======================");
 		var t = new MyPocoTask { Subject = "Test Task" };
 		_tasks.Add(t);
 
@@ -174,11 +242,18 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			Console.WriteLine(JsonSerializer.Serialize(item, _jsonSerializerOptions));
 		}
 
+		Console.WriteLine("=======================");
+		foreach (var item in _tasks)
+		{
+			Console.WriteLine(item .Subject+ " " + item.Id + " " + _sut.GetId(item));
+		}
+		Console.WriteLine("=======================");
+
 		// objects
 		await Assert.That(_tasks).HasCount(1);
-		await Assert.That(_tasks[0].Subject).IsEqualTo("Test Task");
-		await Assert.That(_tasks[0]).IsEquivalentTo(t);
-		await Assert.That(ReferenceEquals(_tasks[0], t)).IsTrue();
+		await Assert.That(_tasks.First().Subject).IsEqualTo("Test Task");
+		await Assert.That(_tasks.First()).IsEquivalentTo(t);
+		await Assert.That(ReferenceEquals(_tasks.First(), t)).IsTrue();
 
 		// events
 		await Assert.That(events).HasCount(3);
@@ -191,21 +266,27 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 
 		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
-		await Assert.That(tasks[0].Subject).IsEqualTo("Test Task");
+		await Assert.That(tasks.First().Subject).IsEqualTo("Test Task");
 
 		// reopen
-		var bt = (StateManagementTests)Activator.CreateInstance(GetType());
-		bt.ServiceCollection.AddSingleton(_fakeStorage);
-		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
+		Reopen();
+		if (_sut is InMemoryProjection imp)
+		{
+			await imp.LoadStateAsync();
+		}
+
+		//var bt = (StateManagementTests)Activator.CreateInstance(GetType());
+		//bt.ServiceCollection.AddSingleton(_fakeStorage);
+		//bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
+		//var reopened = bt.ServiceProvider.GetRequiredService<IProjection>();
 
 		tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
-		await Assert.That(tasks[0].Subject).IsEqualTo("Test Task");
+		await Assert.That(tasks.First().Subject).IsEqualTo("Test Task");
 	}
 
 	[Test]
-	public async Task Should_20_change_object()
+	public async Task Should_25_change_object()
 	{
 		var t = new MyPocoTask { Subject = "Test Task" };
 		_tasks.Add(t);
@@ -224,28 +305,28 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		await Assert.That(events[4]).IsTypeOf<ObjectPropertyChangedEvent>();
 
 		await Assert.That(_tasks).HasCount(1);
-		await Assert.That(_tasks[0].Subject).IsEqualTo("123");
+		await Assert.That(_tasks.First().Subject).IsEqualTo("123");
 
 		// reopen
-		var bt = (StateManagementTests)Activator.CreateInstance(GetType());
-		bt.ServiceCollection.AddSingleton(_fakeStorage);
-		bt.ServiceCollection.AddSingleton<IAppendStorage>(_fakeStorage);
-		var reopened = bt.ServiceProvider.GetRequiredService<IObjectStore>();
-		await ((InMemoryProjection)reopened).LoadStateAsync();
+		Reopen();
+		if (_sut is InMemoryProjection imp)
+		{
+			await imp.LoadStateAsync();
+		}
 
-		var tasks = reopened.GetCollection<MyPocoTask>();
+		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
-		await Assert.That(tasks[0].Subject).IsEqualTo("123");
+		await Assert.That(tasks.First().Subject).IsEqualTo("123");
 	}
 
 	[Test]
-	public async Task Should_instantiate_collection_by_ctor()
+	public async Task Should_30_instantiate_collection_by_ctor()
 	{
 		var tasks = _sut.GetCollection<MyPocoTask>();
 	}
 
 	[Test]
-	public async Task Should_instantiate_collection_by_type()
+	public async Task Should_30_instantiate_collection_by_type()
 	{
 		var tasks = _sut.GetCollection(typeof(MyPocoTask));
 	}
@@ -272,6 +353,7 @@ public class FakeAppendStorage : FakeAppendStorage<Event, Guid>, IAppendStorage
 }
 
 public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
+	where T : class
 	// where T : IIdentifiable<TKey>
 {
 	public List<T> Items { get; } = new List<T>();
@@ -313,6 +395,11 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		}
 	}
 
+	public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		throw new NotImplementedException();
+	}
+
 	public Task<string> TestAsync(string input)
 	{
 		throw new NotImplementedException();
@@ -321,11 +408,31 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 
 [SynqraModel]
 [Schema(2026.155, "1 Name string Prprpr string")]
-[Schema(2026.156, "1 Name string Prprpr string")]
+[Schema(3000.0, "1 Name string Prprpr string")]
 public partial class DemoModel
 {
 	public Guid Id => ((IBindableModel)this).Store.GetId(this);
 
 	public partial string Name { get; set; }
 	public partial string Prprpr { get; set; }
+}
+
+[SynqraModel]
+[Schema(2026.164, "1 Key string Title string")]
+public partial class StorableModel
+{
+	public partial string Key { get; set; }
+
+	public partial string Title { get; set; }
+}
+
+[SynqraModel]
+[Schema(2026.164, "1 Title string")]
+public partial class CollectionElementModel
+{
+	public Guid ObjectId => ((IBindableModel)this).Store.GetId(this);
+	[JsonIgnore]
+	public Guid CollectionId { get; set; }
+
+	public partial string Title { get; set; }
 }

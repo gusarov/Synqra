@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-namespace Synqra.Projection.InMemory;
+namespace Synqra.Projection;
 
 public static class SynqraPocoTrackingExtensions
 {
@@ -30,7 +30,7 @@ public static class SynqraPocoTrackingExtensions
 
 		public TrackingSessionImplementation(StoreCollection storeCollection, IEnumerable<object> items)
 		{
-			var serializerFactory = storeCollection._serializerFactory;
+			var serializerFactory = storeCollection.SerializerFactory;
 			_storeCollection = storeCollection;
 
 			_serializer = serializerFactory.CreateSerializer();
@@ -54,7 +54,7 @@ public static class SynqraPocoTrackingExtensions
 
 		void AddCore(object item)
 		{
-			var id = _storeCollection.Store.GetId(item, null, GetMode.RequiredId); // ensure attached
+			var id = _storeCollection.Store.GetId(item); // ensure attached
 
 			/*
 			if (_typeIds.TryAdd(item.GetType(), false))
@@ -106,11 +106,12 @@ public static class SynqraPocoTrackingExtensions
 							{
 								CommandId = GuidExtensions.CreateVersion7(),
 								ContainerId = _storeCollection.ContainerId,
-								TargetTypeId = ((InMemoryProjection)_storeCollection.Store).GetTypeMetadata(_storeCollection.Type).TypeId,
+								CollectionId = _storeCollection.CollectionId,
+								TargetTypeId = _storeCollection.Store.TypeMetadataProvider.GetTypeMetadata(_storeCollection.Type).TypeId,
 								PropertyName = pi.Name,
 								OldValue = oldValue,
 								NewValue = newValue,
-								TargetId = _storeCollection.Store.GetId(kvp.Key, null, GetMode.RequiredId),
+								TargetId = _storeCollection.Store.GetId(kvp.Key),
 							});
 						}
 					}

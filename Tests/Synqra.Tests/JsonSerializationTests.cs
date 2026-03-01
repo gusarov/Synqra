@@ -238,6 +238,13 @@ public class AotTests
 	{
 		await Assert.That(RuntimeFeature.IsDynamicCodeSupported).IsFalse();
 	}
+	/*
+	[Test]
+	public async Task Should_aot5()
+	{
+		await Assert.That(SynqraNativeAOT.IsNativeAOT).IsTrue();
+	}
+	*/
 #endif
 	/*
 	[Test]

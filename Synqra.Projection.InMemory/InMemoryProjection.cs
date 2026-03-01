@@ -53,18 +53,20 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	private readonly IAppendStorage? _eventStorage;
 	private readonly ISBXSerializerFactory _serializerFactory;
+	public ITypeMetadataProvider TypeMetadataProvider { get; }
+
 	private readonly IEventReplicationService? _eventReplicationService;
-	private readonly Dictionary<Guid, StoreCollection> _collections = new();
+	private readonly Dictionary<Guid, InMemoryStoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
-	private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
-	private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
 	private byte _attachedMaintain;
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
+
 	public InMemoryProjection(
 		  ISBXSerializerFactory serializerFactory
+		, ITypeMetadataProvider typeMetadataProvider
 		, IAppendStorage? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
@@ -72,6 +74,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		)
 	{
 		_serializerFactory = serializerFactory;
+		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
 		_eventReplicationService = eventReplicationService;
 		_jsonSerializerOptions = jsonSerializerOptions;
@@ -80,7 +83,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			foreach (var supportedTypeData in jsonSerializerContext.GetType().GetCustomAttributesData().Where(x => x.AttributeType == typeof(JsonSerializableAttribute)))
 			{
 				var type = (Type)supportedTypeData.ConstructorArguments[0].Value;
-				GetTypeMetadata(type);
+				TypeMetadataProvider.RegisterType(type);
 			}
 		}
 		else
@@ -235,7 +238,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 								throw new Exception("The model is already attached to store. It is same store but still, inconsistent.");
 							}
 						}
-						bm.Store = this;
+						bm.Attach(this, collection.CollectionId);
 					}
 					if (!_attachedObjectsById.TryAdd(id, new StrongReference(model)))
 					{
@@ -346,31 +349,27 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 #endif
 	}
 
-	ISynqraCollection IObjectStore.GetCollection(Type type)
-	{
-		return (ISynqraCollection)GetCollectionInternal(type);
-	}
-
-	internal StoreCollection GetCollection(Type type)
-	{
-		return GetCollectionInternal(type);
-	}
-
 	Guid GetCollectionId(Type rootType, string? name = null)
 	{
-		var typeId = GetTypeMetadata(rootType).TypeId;
-		return GuidExtensions.CreateVersion5(typeId, name ?? "");
+		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(name);
 	}
 
-	internal StoreCollection GetCollectionInternal(Type type, string? collectionName = null)
+	public Guid ContainerId { get; } = SynqraGuids.SynqraRootContainerId;
+
+	ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)
 	{
-		var collectionId = GetCollectionId(type, collectionName);
-		var gtype = typeof(InMemoryStoreCollection<>).MakeGenericType(type);
+		return GetCollection(type, collectionName ?? "");
+	}
+
+	internal InMemoryStoreCollection GetCollection(Type type, string collectionName)
+	{
+		var collectionId = GetCollectionId(type, collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
 		if (!exists || slot == null)
 		{
-			slot = (StoreCollection)Activator.CreateInstance(gtype, [this
+			var gtype = typeof(InMemoryStoreCollection<>).MakeGenericType(type);
+			slot = (InMemoryStoreCollection)Activator.CreateInstance(gtype, [this
 				, /*containerId*/ ContainerId
 				, collectionId/*collectionId*/
 				, _serializerFactory
@@ -385,11 +384,35 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 #endif
 	}
 
-	public Guid ContainerId { get; }
-
-	public ISynqraCollection<T> GetCollection<T>() where T : class
+	public ISynqraCollection<T> GetCollection<T>(string? collectionName = null)
+		where T : class
 	{
-		return (ISynqraCollection<T>)GetCollectionInternal(typeof(T));
+		return GetCollectionInternal<T>(collectionName ?? "");
+	}
+
+	internal InMemoryStoreCollection<T> GetCollectionInternal<T>(string? collectionName = null) where T : class
+	{
+		var collectionId = GetCollectionId(typeof(T), collectionName ?? "");
+#if NET7_0_OR_GREATER
+		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
+		if (!exists || slot == null)
+		{
+			var col = new InMemoryStoreCollection<T>(
+				  /* store */ this
+				, /*containerId*/ ContainerId
+				, collectionId/*collectionId*/
+				, _serializerFactory
+#if NET8_0_OR_GREATER
+				, _jsonSerializerOptions
+#endif
+				);
+			slot = col;
+			return col;
+		}
+		return (InMemoryStoreCollection<T>)slot;
+#else
+		throw new Exception("Not implemented for older frameworks");
+#endif
 	}
 
 	public Task SubmitCommandAsync(ISynqraCommand newCommand)
@@ -407,9 +430,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		if (newCommand is SingleObjectCommand soc)
 		{
-			if (soc.Target != null)
+			if (soc.TargetObject != null)
 			{
-				var attached = GetAttachedData(soc.Target, default, null, GetMode.RequiredId);
+				var attached = GetAttachedData(soc.TargetObject, default, null, GetMode.RequiredId);
 				// TargetId
 				if (soc.TargetId == default)
 				{
@@ -429,7 +452,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 					throw new Exception("The target object Collection has different id");
 				}
 				// TargetTypeId
-				var typeId = GetTypeMetadata(soc.Target.GetType()).TypeId; // TODO this might differ from root for hierarchy, do I need root here or a concrete type?
+				var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId; // TODO this might differ from root for hierarchy, do I need root here or a concrete type?
 				if (soc.TargetTypeId == default)
 				{
 					soc.TargetTypeId = typeId;
@@ -444,7 +467,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return ProcessCommandAsync(newCommand);
 	}
 
-	[UnsupportedOSPlatform("browser")]
+	// [UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
 		ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
@@ -470,7 +493,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
-		_eventReplicationService?.Trigger(commandHandlingContext.Events);
+		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
 	}
 
 	public event EventHandler<EventArgs>? CommandProcessed;
@@ -481,49 +504,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	private async Task ProcessEventAsync(Event newEvent)
 	{
 		await newEvent.AcceptAsync(this, null);
-	}
-
-	internal TypeMetadata GetTypeMetadata(Type type)
-	{
-#if NET7_0_OR_GREATER
-		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
-		if (!exists)
-		{
-			slot = new TypeMetadata
-			{
-				Type = type,
-				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
-			};
-			_typeMetadataByType[type] = slot;
-			_typeMetadataByTypeId[slot.TypeId] = slot;
-		}
-		return slot;
-#else
-		if (!_typeMetadataByType.TryGetValue(type, out var metadata))
-		{
-			metadata = new TypeMetadata
-			{
-				Type = type,
-				TypeId = GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName), // it is not a secret, so for type identification SHA1 is totally fine
-			};
-			_typeMetadataByType[type] = metadata;
-			_typeMetadataByTypeId[metadata.TypeId] = metadata;
-		}
-		return metadata;
-#endif
-	}
-
-	internal TypeMetadata GetTypeMetadata(Guid typeId)
-	{
-		if (typeId == default)
-		{
-			throw new ArgumentException("typeId is empty", nameof(typeId));
-		}
-		if (_typeMetadataByTypeId.TryGetValue(typeId, out var metadata))
-		{
-			return metadata;
-		}
-		throw new Exception("Type id is unknown");
 	}
 
 	#region Command Handler
@@ -559,7 +539,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(CreateObjectCommand cmd, CommandHandlerContext ctx)
 	{
-		var type = GetTypeMetadata(cmd.TargetTypeId);
+		var type = TypeMetadataProvider.GetTypeMetadata(cmd.TargetTypeId);
 		if (type is null)
 		{
 			throw new Exception("Unknown TypeId");
@@ -589,7 +569,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			TargetId = cmd.TargetId,
 			// Data = cmd.Data,
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
-			DataObject = cmd.Target, // or may be entire object
+			DataObject = cmd.TargetObject, // or may be entire object
 		};
 		ctx.Events.Add(created);
 
@@ -712,8 +692,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 	{
-		var typeMetadata = GetTypeMetadata(ev.TargetTypeId);
-		var collection = GetCollectionInternal(GetTypeMetadata(ev.TargetTypeId).Type);
+		var typeMetadata = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId);
+		var collection = GetCollection(TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type, "");
 
 		if (ev.TargetId == default)
 		{
@@ -770,7 +750,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			if (ibm.Store == null)
 			{
-				ibm.Store = this;
+				ibm.Attach(this, collection.CollectionId);
 			}
 		}
 		collection.AddByEvent(newItem);
@@ -779,8 +759,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		var tm = GetTypeMetadata(ev.TargetTypeId);
-		var col = GetCollectionInternal(tm.Type);
+		var tm = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId);
+		var col = GetCollection(tm.Type, "");
 
 		TryGetModel(ev.TargetId, out var data);
 		if (data.Model is IBindableModel bm)
@@ -813,7 +793,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 	{
-		var commands = GetCollectionInternal(typeof(ISynqraCommand));
+		var commands = GetCollection(typeof(Command), "");
 		commands.AddByEvent(ev.Data);
 		return Task.CompletedTask;
 		// throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");

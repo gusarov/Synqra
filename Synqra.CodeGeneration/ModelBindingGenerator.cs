@@ -636,20 +636,31 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 	protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 	protected void OnPropertyChanging(string propertyName) => PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(propertyName));
+	partial void OnAttached();
 
-	protected global::Synqra.IObjectStore? _store;
+	protected global::Synqra.IObjectStore? __store;
 
 	global::Synqra.IObjectStore? IBindableModel.Store
 	{
-		get => _store;
-		set
+		get => __store;
+	}
+
+	protected Guid? __collectionId;
+	Guid? IBindableModel.CollectionId => __collectionId;
+
+	void IBindableModel.Attach(global::Synqra.IObjectStore store, Guid collectionId)
+	{
+		if (__store is not null && __store != store)
 		{
-			if (_store is not null && _store != value)
-			{
-				throw new global::System.InvalidOperationException("Store can only be set once.");
-			}
-			_store = value;
+			throw new global::System.InvalidOperationException("Store can only be set once.");
 		}
+		if (__collectionId != default && __collectionId != collectionId)
+		{
+			throw new global::System.InvalidOperationException("CollectionId can only be set once.");
+		}
+		__store = store;
+		__collectionId = collectionId;
+		OnAttached();
 	}
 
 	void IBindableModel.Set(string name, object? value)
@@ -961,7 +972,7 @@ $$"""
 		set
 		{
 			var oldValue = {{(doesSupportField ? "field" : GetFieldName(pro))}};
-			if (_assigning || _store is null)
+			if (_assigning || __store is null)
 			{
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
@@ -976,16 +987,15 @@ $$"""
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
-				var task = _store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				var task = __store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
-					ContainerId = default,
-					CollectionId = default,
+					ContainerId = SynqraGuids.SynqraRootContainerId,
+					CollectionId = __collectionId ?? Guid.Empty,
 
-					Target = this,
-					TargetId = _store.GetId(this),
-					TargetTypeId = default,
-					// TargetTypeId = _store.GetId(this),
+					TargetObject = this,
+					TargetId = __store.GetId(this),
+					TargetTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId, // todo this should be collection type id
 
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,

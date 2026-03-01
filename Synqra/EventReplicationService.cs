@@ -249,7 +249,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 		// return Task.CompletedTask;
 	}
 
-	public void Trigger(IReadOnlyList<Event> events)
+	public void Trigger(Command command, IReadOnlyList<Event> events)
 	{
 		_autoResetEvent.Set();
 	}

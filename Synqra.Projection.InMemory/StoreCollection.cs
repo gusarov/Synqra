@@ -8,28 +8,55 @@ using Synqra.Projection;
 
 namespace Synqra.Projection.InMemory;
 
-class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : StoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
+internal abstract class InMemoryStoreCollection : StoreCollection, ISynqraCollection
+{
+	public InMemoryStoreCollection(
+		  IObjectStore store
+		, Guid containerId
+		, Guid collectionId
+		, ISBXSerializerFactory serializerFactory
+		) : base(
+		  store
+		, containerId
+		, collectionId
+		, serializerFactory
+		)
+	{
+	}
+
+	internal abstract void AddByEvent(object item);
+}
+
+internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : InMemoryStoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
 	where T : class
 {
 	private readonly List<T> _list = new List<T>();
 
 	public override Type Type => typeof(T);
+	/*
 	protected override IList IList => _list;
 	protected override ICollection ICollection => _list;
+	*/
 
-	public InMemoryStoreCollection(IObjectStore store
+	public int Count => _list.Count;
+
+	InMemoryProjection _store;
+
+	public InMemoryStoreCollection(
+		  IObjectStore store
 		, Guid containerId
 		, Guid collectionId
 		, ISBXSerializerFactory serializerFactory
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
-		: base(store
+		: base(
+			  store
 			, containerId
 			, collectionId
 			, serializerFactory
-			, jsonSerializerOptions
 			)
 	{
+		_store = (InMemoryProjection)store;
 	}
 
 	#region BY INDEX
@@ -44,11 +71,13 @@ class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 
 	T IReadOnlyList<T>.this[int index] => _list[index];
 
+	/*
 	T ISynqraCollection<T>.this[int index]
 	{
 		get => _list[index];
 		set => throw new NotImplementedException();
 	}
+	*/
 
 	#endregion
 
@@ -68,7 +97,7 @@ class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 
 	bool ICollection<T>.IsReadOnly => throw new NotImplementedException();
 
-#endregion
+	#endregion
 
 	#region Add
 
@@ -106,12 +135,12 @@ class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 		{
 			ContainerId = ContainerId,
 			CollectionId = CollectionId,
-			TargetTypeId = ((InMemoryProjection)Store).GetTypeMetadata(typeof(T)).TypeId,
+			TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = attachedData.Id,
 			Data = item, // data?.Count > 0 ? data : null,
 						 // DataJson = dataJson,
-			Target = item,
+			TargetObject = item,
 		});
 		if (!OperatingSystem.IsBrowser())
 		{
@@ -221,6 +250,11 @@ class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 		return _list.GetEnumerator();
 	}
 
+	public override IEnumerator GetEnumerator()
+	{
+		throw new NotImplementedException();
+	}
+
 #if ILIST
 	int IList.IndexOf(object? value)
 	{
@@ -229,25 +263,4 @@ class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 #endif
 
 	#endregion
-}
-
-internal static class SynqraCollectionInternalExtensions
-{
-	public static IObjectStore GetStore(this ISynqraCollection collection)
-	{
-		if (collection is StoreCollection internalCollection)
-		{
-			return internalCollection.Store;
-		}
-		throw new InvalidOperationException("Collection does not implement StoreCollection");
-	}
-
-	public static Type GetType(this ISynqraCollection collection)
-	{
-		if (collection is StoreCollection internalCollection)
-		{
-			return internalCollection.Type;
-		}
-		throw new InvalidOperationException("Collection does not implement StoreCollection");
-	}
 }

@@ -1,4 +1,6 @@
-﻿using Synqra.BinarySerializer;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Synqra.BinarySerializer;
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -7,43 +9,67 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
-internal abstract class StoreCollection : ISynqraCollection
+public abstract class StoreCollection : ISynqraCollection
 {
-	// Remember - this is always client request, not a synchronization!
-	// Client requests are converted to commands and then processed to events and then aggregated here in state processor
-	private protected readonly JsonSerializerOptions? _jsonSerializerOptions;
-
-	internal IObjectStore Store { get; private init; }
-	internal Guid ContainerId { get; private init; }
-	internal Guid CollectionId { get; private init; }
-
-	internal readonly ISBXSerializerFactory _serializerFactory;
+	public IObjectStore Store { get; }
+	public Guid ContainerId { get; }
+	public Guid CollectionId { get; }
+	public ISBXSerializerFactory SerializerFactory { get; }
 
 	public abstract Type Type { get; }
+
+	/*
 	protected abstract IList IList { get; }
 	protected abstract ICollection ICollection { get; }
 
 #if DEBUG
 	internal IList DebugList => IList;
 #endif
+	*/
 
-	public StoreCollection(IObjectStore store
+	public StoreCollection(
+		  IObjectStore store
 		, Guid containerId
 		, Guid collectionId
 		, ISBXSerializerFactory serializerFactory
-#if NET8_0_OR_GREATER
-		, JsonSerializerOptions? jsonSerializerOptions = null
-#endif
 		)
 	{
 		Store = store ?? throw new ArgumentNullException(nameof(store));
 		ContainerId = containerId;
 		CollectionId = collectionId;
-		_serializerFactory = serializerFactory ?? throw new ArgumentNullException(nameof(serializerFactory)); ;
-		_jsonSerializerOptions = jsonSerializerOptions;
+		if (containerId == default)
+		{
+			throw new ArgumentException("", nameof(containerId));
+		}
+		if (collectionId == default)
+		{
+			throw new ArgumentException("", nameof(collectionId));
+		}
+		SerializerFactory = serializerFactory ?? throw new ArgumentNullException(nameof(serializerFactory)); ;
 	}
 
-	public int Count => IList.Count;
+	// public int Count => IList.Count;
 
-	internal abstract void AddByEvent(object item);
+	public abstract IEnumerator GetEnumerator();
+}
+
+internal static class SynqraCollectionInternalExtensions
+{
+	public static IObjectStore GetStore(this ISynqraCollection collection)
+	{
+		if (collection is StoreCollection internalCollection)
+		{
+			return internalCollection.Store;
+		}
+		throw new InvalidOperationException("Collection does not implement StoreCollection");
+	}
+
+	public static Type GetElementType(this ISynqraCollection collection)
+	{
+		if (collection is StoreCollection internalCollection)
+		{
+			return internalCollection.Type;
+		}
+		throw new InvalidOperationException("Collection does not implement StoreCollection");
+	}
 }

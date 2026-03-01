@@ -11,8 +11,9 @@ using Synqra.BinarySerializer;
 namespace Synqra.AppendStorage.Sqlite;
 
 public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, IAsyncDisposable
+		where T : class
 {
-    private readonly SqliteConnection _connection;
+	private readonly SqliteConnection _connection;
     private readonly ISBXSerializer _serializer;
     private readonly Func<T, Guid> _getKey;
 
@@ -144,4 +145,9 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
     {
         return _connection.DisposeAsync();
     }
+
+	public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		throw new NotImplementedException();
+	}
 }

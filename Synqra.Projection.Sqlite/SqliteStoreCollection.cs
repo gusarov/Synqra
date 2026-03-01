@@ -20,17 +20,11 @@ internal class SqliteStoreCollection<[DynamicallyAccessedMembers(DynamicallyAcce
 		, Guid containerId
 		, Guid collectionId
 		, ISBXSerializerFactory serializerFactory
-#if NET8_0_OR_GREATER
-		, JsonSerializerOptions? jsonSerializerOptions = null
-#endif
 		) : base(
 		  store ?? throw new ArgumentNullException(nameof(store))
 		, containerId
 		, collectionId
 		, serializerFactory
-#if NET8_0_OR_GREATER
-		, jsonSerializerOptions
-#endif
 		)
 	{
 		_databaseContext = databaseContext ?? throw new ArgumentNullException(nameof(databaseContext));
@@ -41,17 +35,16 @@ internal class SqliteStoreCollection<[DynamicallyAccessedMembers(DynamicallyAcce
 
 	public override Type Type => throw new NotImplementedException();
 
-	protected override IList IList => throw new NotImplementedException();
+	// protected override IList IList => throw new NotImplementedException();
 
-	protected override ICollection ICollection => throw new NotImplementedException();
+	// protected override ICollection ICollection => throw new NotImplementedException();
 
 	int ICollection<T>.Count => throw new NotImplementedException();
 
 	int IReadOnlyCollection<T>.Count => throw new NotImplementedException();
 
 	bool ICollection<T>.IsReadOnly => throw new NotImplementedException();
-
-	internal override void AddByEvent(object item)
+	public override IEnumerator GetEnumerator()
 	{
 		throw new NotImplementedException();
 	}

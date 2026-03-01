@@ -20,14 +20,18 @@ namespace Synqra;
 [Schema(2025.803, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data IDictionary<string, object?>?")]
 [Schema(2025.804, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid")]
 [Schema(2025.805, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object?")]
+[Schema(2026.161, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object? DataObject object?")]
+[Schema(2026.162, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object?")]
 public partial class ObjectCreatedEvent : SingleObjectEvent
 {
 	// public partial IDictionary<string, object?>? Data { get; set; }
 	public partial object? Data { get; set; }
 
+	[JsonIgnore]
+	public object? DataObject { get; set; } // InMemory materialized object
+
 	partial void OnDataChanging(object? oldValue, object? value)
 	{
-		/*
 		if (value is IDictionary<string, object?> dict)
 		{
 			throw new NotImplementedException();
@@ -36,18 +40,17 @@ public partial class ObjectCreatedEvent : SingleObjectEvent
 		{
 			throw new NotImplementedException();
 		}
+		else if (value is IBindableModel bm)
+		{
+			// This is allowed for now. Caution - it is not read only and might be changed after the event is created, which can lead to unexpected behavior.
+			// It is recommended to use immutable data structures for event data to ensure consistency and reliability.
+		}
 		else
 		{
-			throw new NotImplementedException();
+			// PoCo is also allowed for now, because there are already existing tests
+			// throw new NotImplementedException();
 		}
-		*/
 	}
-
-	//[JsonIgnore]
-	//public string? DataString { get; set; }
-
-	[JsonIgnore]
-	public object? DataObject { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }
