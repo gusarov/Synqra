@@ -269,14 +269,22 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 
 	static Dictionary<string, Type> _descriminators = new ();
 
+	public static void RegisterGeneratedModel(Type type)
+	{
+		if (!type.IsAbstract)
+		{
+			lock (_bindableModels)
+			{
+				_bindableModels.Add(type);
+			}
+			_descriminators[type.Name] = type;
+		}
+	}
+
 	public static void RegisterGeneratedModel<T>()
 	{
 		var type = typeof(T);
-		if (!type.IsAbstract)
-		{
-			_bindableModels.Add(type);
-			_descriminators[type.Name] = type;
-		}
+		RegisterGeneratedModel(type);
 	}
 
 	public static Type? GetByDiscriminator(string discriminator)
@@ -404,10 +412,18 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 				var cnt = jsonTypeInfo.PolymorphismOptions.DerivedTypes.Count;
 				if (cnt == 0 || jsonTypeInfo.PolymorphismOptions.DerivedTypes[cnt - 1].DerivedType != typeof(ConfiguredMarker))
 				{
-					foreach (var knownType in _bindableModels)
+					Type[] items;
+					lock (_bindableModels)
 					{
-						jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(knownType, knownType.Name));
-						EmergencyLog.Default.LogDebug($"jsonTypeInfo.PolymorphismOptions.DerivedTypes Added {knownType.Name}");
+						items = _bindableModels.ToArray();
+					}
+					foreach (var knownType in items)
+					{
+						if (typeof(IBindableModel).IsAssignableFrom(knownType))
+						{
+							jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(knownType, knownType.Name));
+							EmergencyLog.Default.LogDebug($"jsonTypeInfo.PolymorphismOptions.DerivedTypes Added {knownType.Name}");
+						}
 					}
 					jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(ConfiguredMarker), nameof(ConfiguredMarker)));
 				}

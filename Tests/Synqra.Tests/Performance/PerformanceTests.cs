@@ -149,10 +149,10 @@ public class PerformanceTests : BaseTest
 		var ops1 = MeasureOps(() => obj.Property1 = next());
 		await Assert.That(ops1 > 1_000_000).IsTrue();
 
-		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.Default);
+		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.DefaultOptions);
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 
-		var ops2 = MeasureOps(() => obj.RSetSTJ(proName, next(), SampleJsonSerializerContext.Default), new PerformanceParameters
+		var ops2 = MeasureOps(() => obj.RSetSTJ(proName, next(), SampleJsonSerializerContext.DefaultOptions), new PerformanceParameters
 		{
 			MaxAcceptableDeviationFactor = 1,
 			BatchTime = TimeSpan.FromSeconds(1),

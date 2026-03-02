@@ -108,11 +108,15 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 
 		EventuallyMaintain();
 		var key = _getKeyFromItem(item);
-		if (!_attachedObjectsById.TryAdd(key, new WeakReference(item)))
+		if (_attachedObjectsById.TryGetValue(key, out var wr))
 		{
-			// This mean - just write same object over again
-			// throw new Exception("Object already tracked by AppendStorage, it is not new!");
+			var target = wr.Target;
+			if (target != null && ReferenceEquals(target, item))
+			{
+				throw new Exception("Another object already tracked by AppendStorage, it is not new and not same!");
+			}
 		}
+		_attachedObjectsById[key] = new WeakReference(item);
 
 		Span<byte> buffer = stackalloc byte[BufferSizeForObject];
 		int pos = 0;
@@ -226,10 +230,18 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 		{
 			throw new Exception("Object is not found");
 		}
+
+		if (_attachedObjectsById.TryGetValue(key, out var obj))
+		{
+			return (T)obj.Target!;
+		}
+
 		var buf = System.IO.File.ReadAllBytes(fileName);
 		_serializer.Reset();
 		int pos = 0;
-		return _serializer.Deserialize<T>(buf, ref pos);
+		var des = _serializer.Deserialize<T>(buf, ref pos);
+		_attachedObjectsById[key] = new WeakReference(des);
+		return des;
 	}
 
 	public async IAsyncEnumerable<T> GetAllAsync(

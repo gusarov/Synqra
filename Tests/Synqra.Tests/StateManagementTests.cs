@@ -23,6 +23,8 @@ using Synqra.BinarySerializer;
 using Synqra.Projection.File;
 using Synqra.AppendStorage.File;
 using Synqra.Projection;
+using Synqra.AppendStorage.JsonLines;
+using Synqra.Tests.SampleModels.Syncronization;
 
 namespace Synqra.Tests;
 
@@ -65,6 +67,38 @@ public class FileStateManageementTests : StateManagementTests
 		});
 
 		hostApplicationBuilder.Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
+	}
+}
+
+[InheritsTests]
+public class JsonLinesStateManageementTests : StateManagementTests
+{
+	string _fileName;
+
+	[Before(Test)]
+	public void Setup()
+	{
+		_fileName = CreateTestFileName("[Type].jsonl");
+	}
+
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+
+
+		hostApplicationBuilder.AddFileSynqraStore();
+		hostApplicationBuilder.AddAppendStorageJsonLines<Event>("", e => e.EventId);
+		hostApplicationBuilder.AddAppendStorageJsonLines<Command>("", e => e.CommandId);
+		hostApplicationBuilder.AddAppendStorageJsonLines<Item>("", e =>
+		{
+			if (e.CollectionId == default)
+			{
+				throw new Exception("Unknown collection id");
+			}
+			return (e.CollectionId, e.ObjectId);
+		});
+
+		hostApplicationBuilder.Configuration["Storage:JsonLinesStorage:FileName"] = _fileName;
 	}
 }
 
@@ -135,11 +169,12 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
+		// HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
 		HostBuilder.AddTypeMetadataProvider([
 			typeof(DemoModel),
+			typeof(SampleTaskModel),
 			typeof(MyPocoTask),
 			typeof(Command),
 			typeof(CreateObjectCommand),

@@ -128,6 +128,17 @@ public static class FileSynqraExtensions
 			GuidGenerator = generator ?? new GuidExtensions.Generator();
 		}
 
+		private void EventuallyMaintain()
+		{
+			if (++_attachedMaintain == 0 || Random.Shared.Next(1024) == 0)
+			{
+				foreach (var deadKey in _attachedObjectsById.Where(x => !x.Value.IsAlive).Select(x => x.Key))
+				{
+					_attachedObjectsById.TryRemove(deadKey, out _);
+				}
+			}
+		}
+
 		ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)
 		{
 			return GetCollection(type, collectionName ?? "");
@@ -226,6 +237,7 @@ public static class FileSynqraExtensions
 							Collection = collection ?? throw new Exception("Collection is not specified for new object"),
 						}))
 						{
+							EventuallyMaintain();
 							_attachedObjectsById[attachedData.Id] = new WeakReference(model);
 						}
 						;
@@ -249,6 +261,7 @@ public static class FileSynqraExtensions
 
 		internal object? GetAttachedObject(Guid id, FileObjectCollection? collection = null)
 		{
+			EventuallyMaintain();
 			if (_attachedObjectsById.TryGetValue(id, out var weakRef))
 			{
 				var target = weakRef.Target;
@@ -316,22 +329,16 @@ public static class FileSynqraExtensions
 							}
 							bm.Attach(this, collection.CollectionId);
 						}
-						if (!_attachedObjectsById.TryAdd(id, new WeakReference(model)))
+						EventuallyMaintain();
+						if (_attachedObjectsById.TryGetValue(id, out var wr))
 						{
-							throw new Exception("This id is already used in the store. Pass default to generate new or make sure your id is fresh indeed");
-						}
-						if (++_attachedMaintain == 0)
-						{
-							// clean up weak references
-							foreach (var key in _attachedObjectsById.Keys.ToArray())
+							var target = wr.Target;
+							if (target != null)
 							{
-								if (_attachedObjectsById.TryGetValue(key, out var weakRef) && !weakRef.IsAlive)
-								{
-									_attachedObjects.Remove(key);
-									_attachedObjectsById.Remove(key, out _);
-								}
+								throw new Exception("This id is already used in the store. Pass default to generate new or make sure your id is fresh indeed");
 							}
 						}
+
 						if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 						{
 							Id = id,
@@ -339,9 +346,9 @@ public static class FileSynqraExtensions
 							Collection = collection,
 						}))
 						{
-							_attachedObjectsById[id] = new WeakReference(model);
 						}
 						;
+						_attachedObjectsById[id] = new WeakReference(model);
 						return attachedData;
 					default:
 						throw new IndexOutOfRangeException($"Unknown mode <{mode}>");

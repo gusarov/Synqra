@@ -90,7 +90,7 @@ public class BindingTests : BaseTest
 		obj.Property1 = "test1";
 		await Assert.That(obj.Property1).IsEqualTo("test1");
 
-		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.Default);
+		obj.RSetSTJ(proName, "test2", SampleJsonSerializerContext.DefaultOptions);
 		await Assert.That(obj.Property1).IsEqualTo("test2");
 	}
 

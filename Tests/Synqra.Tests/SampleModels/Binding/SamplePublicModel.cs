@@ -8,6 +8,11 @@ namespace Synqra.Tests.SampleModels;
 [Schema(2026.156, "1 Name string Property2 string Property3 string")]
 public partial class SamplePublicModel
 {
+	public SamplePublicModel()
+	{
+		
+	}
+
 	public partial string Name { get; set; }
 	public partial string Property2 { get; set; }
 	public partial string Property3 { get; set; }

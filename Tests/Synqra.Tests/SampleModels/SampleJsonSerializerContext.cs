@@ -34,6 +34,7 @@ namespace Synqra.Tests.SampleModels;
 	]
 )]
 [JsonSerializable(typeof(DemoModel))]
+[JsonSerializable(typeof(StorableModel))]
 [JsonSerializable(typeof(SampleOnePropertyObject))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
@@ -55,6 +56,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(Synqra.ChangeObjectPropertyCommand))]
 
 [JsonSerializable(typeof(Guid))]
+[JsonSerializable(typeof((Guid, Guid)))]
 [JsonSerializable(typeof(Int64))]
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
@@ -95,25 +97,49 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(SamplePublicModel),
 		typeof(SampleTaskModel),
 		typeof(SampleTodoTaskPoco),
+		typeof(StorableModel),
 		typeof(Item),
+		typeof(MyPocoTask),
 	];
 
-	public static JsonSerializerOptions DefaultOptions { get; }
+	static readonly object __sync = new object();
 
-	static SampleJsonSerializerContext()
+
+	public static JsonSerializerOptions DefaultOptions
 	{
-		DefaultOptions = new JsonSerializerOptions(Default.Options)
+		get
 		{
-			TypeInfoResolver = JsonTypeInfoResolver.Combine(Default, new SynqraJsonTypeInfoResolver(_extra)),
-		};
-		// remove first dups if any (this is better than avoid registration and allow someone to consume it without ObjectConverter at all)
-		for (int i = DefaultOptions.Converters.Count - 1; i >= 0; i--)
-		{
-			if (DefaultOptions.Converters[i] is ObjectConverter)
+			// Default
+			if (field == null)
 			{
-				DefaultOptions.Converters.RemoveAt(i);
+				lock (__sync)
+				{
+					if (field == null)
+					{
+						foreach (var type in _extra)
+						{
+							SynqraJsonTypeInfoResolver.RegisterGeneratedModel(type);
+							// Activator.CreateInstance(type);
+						}
+						var options = new JsonSerializerOptions(Default.Options)
+						{
+							TypeInfoResolver = new SynqraJsonTypeInfoResolver(_extra),
+							// TypeInfoResolver = JsonTypeInfoResolver.Combine(new SynqraJsonTypeInfoResolver(_extra), Default),
+						};
+						// remove first dups if any (this is better than avoid registration and allow someone to consume it without ObjectConverter at all)
+						for (int i = options.Converters.Count - 1; i >= 0; i--)
+						{
+							if (options.Converters[i] is ObjectConverter)
+							{
+								options.Converters.RemoveAt(i);
+							}
+						}
+						options.Converters.Add(new ObjectConverter(_extra));
+						field = options;
+					}
+				}
 			}
+			return field;
 		}
-		DefaultOptions.Converters.Add(new ObjectConverter(_extra));
 	}
 }
