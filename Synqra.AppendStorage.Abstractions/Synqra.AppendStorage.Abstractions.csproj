@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;net9.0;net8.0;netstandard2.1</TargetFrameworks>
-    <Version>0.2.0</Version>
+    <Version>0.2.2</Version>
     <RootNamespace>Synqra.AppendStorage</RootNamespace>
   </PropertyGroup>
 
