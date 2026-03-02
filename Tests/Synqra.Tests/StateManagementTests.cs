@@ -23,6 +23,7 @@ using Synqra.BinarySerializer;
 using Synqra.Projection.File;
 using Synqra.AppendStorage.File;
 using Synqra.Projection;
+using Synqra.AppendStorage.JsonLines;
 
 namespace Synqra.Tests;
 
@@ -65,6 +66,38 @@ public class FileStateManageementTests : StateManagementTests
 		});
 
 		hostApplicationBuilder.Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
+	}
+}
+
+[InheritsTests]
+public class JsonLinesStateManageementTests : StateManagementTests
+{
+	string _fileName;
+
+	[Before(Test)]
+	public void Setup()
+	{
+		_fileName = CreateTestFileName("[Type].jsonl");
+	}
+
+	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
+	{
+		base.Register(hostApplicationBuilder);
+
+
+		hostApplicationBuilder.AddFileSynqraStore();
+		hostApplicationBuilder.AddAppendStorageJsonLines<Event>("", e => e.EventId);
+		hostApplicationBuilder.AddAppendStorageJsonLines<Command>("", e => e.CommandId);
+		hostApplicationBuilder.AddAppendStorageJsonLines<Item>("", e =>
+		{
+			if (e.CollectionId == default)
+			{
+				throw new Exception("Unknown collection id");
+			}
+			return (e.CollectionId, e.ObjectId);
+		});
+
+		hostApplicationBuilder.Configuration["Storage:JsonLinesStorage:FileName"] = _fileName;
 	}
 }
 
