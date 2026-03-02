@@ -8,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -24,15 +26,41 @@ public static class AppendStorageJsonLinesExtensions
 {
 	static object _synqraJsonLinesStorageConfiguredKey = new object();
 
+	public static void AddAppendStorageJsonLines<T>(this IHostApplicationBuilder hostBuilder, string keyFieldName, Func<T, (Guid, Guid)> getKey)
+	where T : class
+	{
+		AddAppendStorageJsonLines(hostBuilder, keyFieldName, getKey, x => x.Item1.ToString("N") + x.Item2.ToString("N"), path => (Guid.Parse(path.Replace(Path.DirectorySeparatorChar + "", "")[..32]), Guid.Parse(path.Replace(Path.DirectorySeparatorChar + "", "")[32..])));
+	}
+
+	public static void AddAppendStorageJsonLines<T>(this IHostApplicationBuilder hostBuilder, string keyFieldName, Func<T, Guid> getKey)
+		where T : class
+	{
+		AddAppendStorageJsonLines(hostBuilder, keyFieldName, getKey, x => x.ToString("N"), Guid.Parse);
+	}
+
 	// For nativeAOT
-	public static void AddAppendStorageJsonLines<T, TKey>(this IHostApplicationBuilder hostBuilder)
+	public static void AddAppendStorageJsonLines<T, TKey>(this IHostApplicationBuilder hostBuilder
+		, string keyFieldName
+		, Func<T, TKey> getKey
+		, Func<TKey, string> getKeyHex
+		, Func<string, TKey> getHexKey
+		)
 		where T : class
 		// where T : IIdentifiable<TKey>
 	{
 		// _ = typeof(IStorage<T, TKey>);
 		// _ = typeof(JsonLinesStorage<T, TKey>);
 		hostBuilder.AddAppendStorageJsonLinesCore();
+		/*
+		hostBuilder.Services.Configure<JsonLinesStorageConfigInstance>(typeof(T).Name, x =>
+		{
+			x.ObjectIdFieldName = keyFieldName;
+		});
+		*/
 		hostBuilder.Services.TryAddSingleton<IAppendStorage<T, TKey>, JsonLinesStorage<T, TKey>>();
+		hostBuilder.Services.AddSingleton(getKey);
+		hostBuilder.Services.AddSingleton(getKeyHex);
+		hostBuilder.Services.AddSingleton(getHexKey);
 	}
 
 	public static void AddAppendStorageJsonLines(this IHostApplicationBuilder hostBuilder)
@@ -54,12 +82,18 @@ public static class AppendStorageJsonLinesExtensions
 		public string FileName { get; set; } = "[TypeName].jsonl";
 	}
 
+	internal class JsonLinesStorageConfigInstance
+	{
+		public string ObjectIdFieldName { get; set; }
+	}
+
 	private class JsonLinesStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, IAsyncDisposable
 		where T : class
 		//where T : IIdentifiable<TKey>
 	{
 		private readonly ILogger _logger;
 		private readonly IOptions<JsonLinesStorageConfig> _options;
+		private readonly string _keyFieldName;
 #if LOCK
 		private readonly object _lock = new object();
 #elif SEMAPHORE
@@ -68,16 +102,28 @@ public static class AppendStorageJsonLinesExtensions
 		private FileStream? _stream;
 		private StreamWriter? _streamWriter;
 		private JsonSerializerOptions _serializerOptions;
+		private readonly ConcurrentDictionary<TKey, WeakReference> _attachedObjectsById = new();
+		private readonly Func<T, TKey> _getKeyFromItem;
+		private readonly Func<TKey, string> _getPathFromKey;
+		private readonly Func<string, TKey> _getKeyFromPath;
 
 		public JsonLinesStorage(
 			  ILogger<JsonLinesStorage<T, TKey>> logger
 			, IOptions<JsonLinesStorageConfig> options
+			, IOptionsFactory<JsonLinesStorageConfigInstance> instanceOptions
+			, Func<T, TKey> getKeyFromItem
+			, Func<TKey, string> getPathFromKey
+			, Func<string, TKey> getKeyFromPath
 			, JsonSerializerOptions? jsonSerializerOptions = null
 			)
 		{
 			_logger = logger;
 
 			_options = options;
+			_keyFieldName = instanceOptions.Create(typeof(T).Name).ObjectIdFieldName;
+			_getKeyFromItem = getKeyFromItem;
+			_getPathFromKey = getPathFromKey;
+			_getKeyFromPath = getKeyFromPath;
 
 			/*
 			if (!JsonSerializer.IsReflectionEnabledByDefault && jsonSerializerOptions is null)
@@ -100,25 +146,117 @@ public static class AppendStorageJsonLinesExtensions
 			{
 				if (_fileName == null)
 				{
-					_fileName = _options.Value.FileName.Replace("[TypeName]", typeof(T).Name);
+					_fileName = _options.Value.FileName.Replace("[Type]", typeof(T).Name).Replace("[TypeName]", typeof(T).Name);
 				}
 				return _fileName;
 			}
 		}
 
-		public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
+		private static Encoding _utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+
+		private void EventuallyMaintain()
 		{
-			return new JsonLinesAsyncEnumerable(this, cancellationToken);
+			if (Random.Shared.Next(1024) == 0)
+			{
+				foreach (var deadKey in _attachedObjectsById.Where(x => !x.Value.IsAlive).Select(x => x.Key))
+				{
+					_attachedObjectsById.TryRemove(deadKey, out _);
+				}
+			}
+		}
+
+		public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
+		{
+			string? _currentLine;
+			StreamReader? _streamReader;
+
+			if (File.Exists(FileName))
+			{
+				var stream = new FileStream(
+					  FileName
+					, FileMode.Open
+					, FileAccess.Read
+					, FileShare.ReadWrite
+					, bufferSize: 1024 * 64
+					, FileOptions.SequentialScan | FileOptions.Asynchronous
+					);
+				_streamReader = new StreamReader(stream, encoding: _utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
+			}
+			else
+			{
+				yield break;
+			}
+
+			var lineHeader = await _streamReader.ReadLineAsync();
+			if (lineHeader == null)
+			{
+				throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
+			}
+			var header = JsonSerializer.Deserialize(lineHeader, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
+			if (header == null || header.Version == null)
+			{
+				throw new Exception("Header line of Syncra.Storage.Jsonl is not valid");
+			}
+			if (header.Version != new Version("0.1"))
+			{
+				throw new Exception("File version is newer than expected");
+			}
+
+			var _fromStr = _getPathFromKey(from);
+			if (_fromStr.Length == 64 && _fromStr.TrimEnd('0').Length <= 32)
+			{
+				_fromStr = _fromStr[..32];
+			}
+
+			while (!_streamReader.EndOfStream)
+			{
+				_currentLine = await _streamReader.ReadLineAsync();
+
+				var parts = _currentLine.Split(new[] { '§' }, 2);
+				var (keyStr, json) = (parts[0], parts[1]);
+				TKey key = _getKeyFromPath(keyStr);
+
+				if (!Equals(from, default(TKey)))
+				{
+					if (!keyStr.StartsWith(_fromStr))
+					{
+						continue;
+					}
+				}
+
+				bool hit = false;
+				EventuallyMaintain();
+				if (_attachedObjectsById.TryGetValue(key, out var weakRef))
+				{
+					var target = weakRef.Target;
+					if (target != null)
+					{
+						yield return (T)target;
+						hit = true;
+					}
+				}
+				if (!hit)
+				{
+					var obj = JsonSerializer.Deserialize<T>(json, _serializerOptions)!;
+					_attachedObjectsById[key] = new WeakReference(obj);
+					yield return obj;
+				}
+
+			}
+
+			// return new JsonLinesAsyncEnumerable(this, from, cancellationToken);
 		}
 
 		private class JsonLinesAsyncEnumerable : IAsyncEnumerable<T>
 		{
 			private readonly JsonLinesStorage<T, TKey> _storage;
+			private readonly TKey? _from;
 			private readonly CancellationToken _cancellationToken;
 
-			public JsonLinesAsyncEnumerable(JsonLinesStorage<T, TKey> storage, CancellationToken cancellationToken)
+			public JsonLinesAsyncEnumerable(JsonLinesStorage<T, TKey> storage, TKey? from = default, CancellationToken cancellationToken = default)
 			{
 				_storage = storage;
+				_from = from;
 				_cancellationToken = cancellationToken;
 			}
 
@@ -128,14 +266,16 @@ public static class AppendStorageJsonLinesExtensions
 				{
 					cancellationToken = _cancellationToken;
 				}
-				return new JsonLinesAsyncEnumerator(_storage.FileName, _storage._serializerOptions, cancellationToken);
+				return new JsonLinesAsyncEnumerator(_storage, _from, _storage.FileName, _storage._serializerOptions, cancellationToken);
 			}
 		}
 
 		private class JsonLinesAsyncEnumerator : IAsyncEnumerator<T>
 		{
 			private static Encoding _utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
-
+			private readonly JsonLinesStorage<T, TKey> _storage;
+			private readonly TKey? _from;
+			private readonly string _fromStr;
 			private readonly string _fileName;
 			private readonly JsonSerializerOptions _jsonSerializerOptions;
 			private readonly CancellationToken? _cancellationToken;
@@ -144,8 +284,11 @@ public static class AppendStorageJsonLinesExtensions
 			private string? _currentLine;
 			private StreamReader? _streamReader;
 
-			public JsonLinesAsyncEnumerator(string fileName, JsonSerializerOptions jsonSerializerOptions, CancellationToken? cancellationToken = default)
+			public JsonLinesAsyncEnumerator(JsonLinesStorage<T, TKey> storage, TKey? from, string fileName, JsonSerializerOptions jsonSerializerOptions, CancellationToken? cancellationToken = default)
 			{
+				_storage = storage;
+				_from = from;
+				_fromStr = _storage._getPathFromKey(from);
 				_fileName = fileName;
 				_jsonSerializerOptions = jsonSerializerOptions;
 				_cancellationToken = cancellationToken;
@@ -159,7 +302,31 @@ public static class AppendStorageJsonLinesExtensions
 					{
 						throw new InvalidOperationException("No current line, did you call MoveNextAsync?");
 					}
-					return JsonSerializer.Deserialize<T>(_currentLine, _jsonSerializerOptions)!;
+					var parts = _currentLine.Split(new[] { '§' }, 2);
+					var (keyStr, json) = (parts[0], parts[1]);
+					TKey key = _storage._getKeyFromPath(keyStr);
+
+					/*
+					if (!Equals(_from, default))
+					{
+						if (keyStr.StartsWith(_fromStr))
+						{
+							ContextBoundObject
+						}
+					}
+					*/
+					_storage.EventuallyMaintain();
+					if (_storage._attachedObjectsById.TryGetValue(key, out var weakRef))
+					{
+						var target = weakRef.Target;
+						if (target != null)
+						{
+							return (T)target;
+						}
+					}
+					var obj = JsonSerializer.Deserialize<T>(json, _jsonSerializerOptions)!;
+					_storage._attachedObjectsById[key] = new WeakReference(obj);
+					return obj;
 				}
 			}
 
@@ -237,11 +404,20 @@ public static class AppendStorageJsonLinesExtensions
 				throw new ArgumentNullException(nameof(item), "Item to append can not be null");
 			}
 
+			var key = _getKeyFromItem(item);
+			bool potentialReplace = false;
+			EventuallyMaintain();
+			if (!_attachedObjectsById.TryAdd(key, new WeakReference(item)))
+			{
+				// This mean - just write same object over again
+				potentialReplace = true;
+				// throw new Exception("Object already tracked by AppendStorage, it is not new!");
+			}
+
 			// first searialize then open
 			// 1. because it might fail to searialize but you created empty file
 			// 2. because we can write first data line under same lock
 			var json = JsonSerializer.Serialize(item, _serializerOptions);
-
 #if LOCK
 			lock (_lock)
 			{
@@ -264,17 +440,65 @@ public static class AppendStorageJsonLinesExtensions
 #if DEBUG
 #endif
 					};// , new UTF8Encoding(false, false), bufferSize: 1024 * 64);
-					// Header
-					var header = JsonSerializer.Serialize(new JsonLinesStorageHeader
+					 
+					if (_stream.Length == 0) // Header
 					{
-						Version = new Version(0, 1),
-						RootItemType = typeof(T).FullName,
-					}, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
-					_streamWriter.WriteLine(header);
-					_streamWriter.Flush();
+						var header = JsonSerializer.Serialize(new JsonLinesStorageHeader
+						{
+							Version = new Version(0, 1),
+							RootItemType = typeof(T).FullName,
+						}, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
+						_streamWriter.WriteLine(header);
+						_streamWriter.Flush();
+					}
 				}
 #if LOCK
-				_streamWriter.WriteLine(json);
+				var keyStr = _getPathFromKey(key);
+
+				#region Delete old record
+
+				using var streamR = new FileStream(FileName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write, bufferSize: 1024 * 64, options: FileOptions.SequentialScan);
+
+				long lineStart = 0;
+				var lineBytes = new MemoryStream();
+				int b;
+				while ((b = streamR.ReadByte()) != -1)
+				{
+					if (b == '\n')
+					{
+						var lineData = lineBytes.ToArray();
+						int len = lineData.Length;
+						if (len > 0 && lineData[len - 1] == (byte)'\r') len--;
+
+						var line = _utf8NoBom.GetString(lineData, 0, len);
+						var parts = line.Split(new[] { '§' }, 2);
+						if (parts.Length >= 2)
+						{
+							var keyStrR = parts[0];
+							if (keyStrR == keyStr)
+							{
+								var orig = _stream.Position;
+								_stream.Seek(lineStart, SeekOrigin.Begin);
+								var zeroBytes = _utf8NoBom.GetBytes(new string('0', keyStrR.Length));
+								_stream.Write(zeroBytes, 0, zeroBytes.Length);
+								_stream.Flush();
+								_stream.Seek(orig, SeekOrigin.Begin);
+								break;
+							}
+						}
+						lineBytes.SetLength(0);
+						lineStart = streamR.Position;
+					}
+					else
+					{
+						lineBytes.WriteByte((byte)b);
+					}
+				}
+
+				#endregion
+
+				_streamWriter.WriteLine($"{keyStr}§{json}");
+
 #elif SEMAPHORE
 				await _streamWriter.WriteLineAsync(json);
 #endif
@@ -389,9 +613,56 @@ public static class AppendStorageJsonLinesExtensions
 			throw new NotImplementedException();
 		}
 
-		public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
-			throw new NotImplementedException();
+			// in this storage we can only get all items, so we will read all and find the one with matching key
+			var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+			using var stream = new FileStream(
+				  FileName
+				, FileMode.Open
+				, FileAccess.Read
+				, FileShare.ReadWrite
+				, bufferSize: 1024 * 64
+				, FileOptions.SequentialScan | FileOptions.Asynchronous
+				);
+			using var reader = new StreamReader(stream, encoding: utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
+
+			// Skip header
+			var headerLine = await reader.ReadLineAsync(cancellationToken);
+			if (headerLine == null)
+			{
+				throw new InvalidOperationException("Header line of Syncra.Storage.Jsonl is not found");
+			}
+
+			var keyJson = JsonSerializer.Serialize(key, _serializerOptions);
+
+			EventuallyMaintain();
+
+			string? line;
+			while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var parts = line.Split(new[] { '§' }, 2);
+				var (keyStr, json) = (parts[0], parts[1]);
+				var thisKey = _getKeyFromPath(keyStr);
+
+				if (Equals(thisKey, key))
+				{
+					if (_attachedObjectsById.TryGetValue(key, out var weakRef))
+					{
+						var target = weakRef.Target;
+						if (target != null)
+						{
+							return (T)target;
+						}
+					}
+					var obj = JsonSerializer.Deserialize<T>(json, _serializerOptions)!;
+					_attachedObjectsById[key] = new WeakReference(obj);
+					return obj;
+				}
+			}
+
+			throw new KeyNotFoundException($"Item with key '{key}' was not found");
 		}
 
 		~JsonLinesStorage()

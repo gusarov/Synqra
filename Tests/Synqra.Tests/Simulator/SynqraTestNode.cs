@@ -169,7 +169,7 @@ internal class SynqraTestNode
 		});
 
 		builder.AddInMemorySynqraStore();
-		builder.AddAppendStorageJsonLines<Event, Guid>();
+		builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
 		builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();

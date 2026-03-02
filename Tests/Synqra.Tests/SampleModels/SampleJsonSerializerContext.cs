@@ -95,13 +95,19 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(SamplePublicModel),
 		typeof(SampleTaskModel),
 		typeof(SampleTodoTaskPoco),
+		typeof(StorableModel),
 		typeof(Item),
+		typeof(MyPocoTask),
 	];
 
 	public static JsonSerializerOptions DefaultOptions { get; }
 
 	static SampleJsonSerializerContext()
 	{
+		foreach (var type in _extra)
+		{
+			Activator.CreateInstance(type);
+		}
 		DefaultOptions = new JsonSerializerOptions(Default.Options)
 		{
 			TypeInfoResolver = JsonTypeInfoResolver.Combine(Default, new SynqraJsonTypeInfoResolver(_extra)),
