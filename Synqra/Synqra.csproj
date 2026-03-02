@@ -6,7 +6,7 @@
     ;netstandard2.0
     -->
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,7 +28,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Synqra.Abstractions\Synqra.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
