@@ -33,7 +33,7 @@ public class JsonSerializationTests
 			"Subject": "{{subject}}"
 		}
 		""".NormalizeNewLines());
-		var deserializedObj = JsonSerializer.Deserialize(json, SampleJsonSerializerContext.Default.SampleTodoTaskPoco);
+		var deserializedObj = JsonSerializer.Deserialize<SampleTodoTaskPoco>(json, SampleJsonSerializerContext.DefaultOptions);
 		await Assert.That(deserializedObj).IsNotNull();
 		await Assert.That(deserializedObj.Subject).IsEqualTo(subject);
 	}

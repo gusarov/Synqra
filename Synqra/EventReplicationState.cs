@@ -16,7 +16,7 @@ public class EventReplicationState
 
 		if (File.Exists(_fileName))
 		{
-			this.RSetSTJ(File.ReadAllText(_fileName), EventReplicationStateJsonSerializerContext.Default);
+			this.RSetSTJ(File.ReadAllText(_fileName), EventReplicationStateJsonSerializerContext.Default.Options);
 		}
 		else
 		{

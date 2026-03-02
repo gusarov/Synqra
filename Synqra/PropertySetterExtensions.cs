@@ -17,13 +17,13 @@ static class PropertySetterExtensions
 	}
 	*/
 
-	public static void RSetSTJ<T>(this T obj, string json, JsonSerializerContext jsonSerializerContext)
+	public static void RSetSTJ<T>(this T obj, string json, JsonSerializerOptions jsonSerializerOptions)
 	{
-		var so = new JsonSerializerOptions(jsonSerializerContext.Options);
+		var so = new JsonSerializerOptions(jsonSerializerOptions);
 		var ti = so.GetTypeInfo(obj.GetType());
 
 #if DEBUG
-		var so2 = new JsonSerializerOptions(jsonSerializerContext.Options);
+		var so2 = new JsonSerializerOptions(jsonSerializerOptions);
 		var ti2 = so.GetTypeInfo(obj.GetType());
 		if (ReferenceEquals(ti2, ti))
 		{
@@ -42,14 +42,14 @@ static class PropertySetterExtensions
 		}
 	}
 
-	public static void RSetSTJ<T>(this T obj, string property, object value, JsonSerializerContext jsonSerializerContext)
+	public static void RSetSTJ<T>(this T obj, string property, object value, JsonSerializerOptions jsonSerializerOptions)
 	{
 		IDictionary<string, object> dic = new Dictionary<string, object>
 		{
 			[property] = value,
 		};
-		var json = JsonSerializer.Serialize(dic, jsonSerializerContext.Options);
-		obj.RSetSTJ(json, jsonSerializerContext);
+		var json = JsonSerializer.Serialize(dic, jsonSerializerOptions);
+		obj.RSetSTJ(json, jsonSerializerOptions);
 	}
 
 }
