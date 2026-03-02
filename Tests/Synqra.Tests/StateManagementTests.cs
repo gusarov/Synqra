@@ -181,6 +181,8 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			typeof(ChangeObjectPropertyCommand),
 			typeof(Item),
 		]);
+
+		var q0 = new DemoModel(); // must register polimorfic before serializaiton
 		var q1 = new Item(); // must register polimorfic before serializaiton
 		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
 		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton

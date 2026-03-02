@@ -100,6 +100,7 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(StorableModel),
 		typeof(Item),
 		typeof(MyPocoTask),
+		typeof(DemoModel),
 	];
 
 	static readonly object __sync = new object();
