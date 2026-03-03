@@ -9,7 +9,7 @@
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <OutputItemType>Analyzer</OutputItemType>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <Version>0.2.2</Version>
+    <Version>$(CommonVersion)</Version>
   </PropertyGroup>
 
   <ItemGroup>

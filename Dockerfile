@@ -1,4 +1,5 @@
 ﻿#syntax=docker/dockerfile:1-labs
+ARG BUILD_BUILDNUMBER="0"
 
 #FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
 #USER $APP_UID
@@ -33,7 +34,11 @@ FROM build AS test
 RUN dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM build AS pack
+ARG BUILD_BUILDNUMBER
+ENV BUILD_BUILDNUMBER=$BUILD_BUILDNUMBER
+ARG BUILD_BUILDNUMBER
 RUN dotnet pack -o /out                -c $BUILD_CONFIGURATION --no-restore --no-build -clp:ErrorsOnly -nologo -tl:off
+RUN printenv > /out/env.txt
 
 FROM build AS buildaot
 RUN dotnet nuget enable source nuget.org

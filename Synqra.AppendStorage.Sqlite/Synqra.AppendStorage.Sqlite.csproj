@@ -4,7 +4,7 @@
     <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.2.2</Version>
+    <Version>$(CommonVersion)</Version>
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
