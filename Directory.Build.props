@@ -24,6 +24,8 @@
 		<TestingPlatformCommandLineArguments_>--treenode-filter "/**[CI!=false]"</TestingPlatformCommandLineArguments_>
 		<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>
 		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+		<BUILD_BUILDNUMBER Condition="'$(BUILD_BUILDNUMBER)'==''">0</BUILD_BUILDNUMBER>
+		<CommonVersion>0.2.3-Preview.$(BUILD_BUILDNUMBER)</CommonVersion>
 	</PropertyGroup>
 
 	<Target Name="_Synqra_BlockPackOnV1_0_0" BeforeTargets="Pack">

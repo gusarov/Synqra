@@ -6,7 +6,7 @@
     ;netstandard2.0
     -->
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.2.2</Version>
+    <Version>$(CommonVersion)</Version>
   </PropertyGroup>
 
   <ItemGroup>

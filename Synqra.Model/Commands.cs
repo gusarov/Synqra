@@ -53,6 +53,10 @@ public abstract partial class Command : ISynqraCommand
 [Schema(2025.797, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
 [Schema(2026.156, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Target object?")]
 [Schema(2026.157, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2026.167, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid TargetObject object?")]
+[Schema(2026.168, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2026.169, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid TargetObject object?")]
+[Schema(2026.170, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
 public abstract partial class SingleObjectCommand : Command
 {
 	public partial Guid TargetTypeId { get; set; }
