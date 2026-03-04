@@ -19,7 +19,7 @@ internal class SqliteStoreCollection<[DynamicallyAccessedMembers(DynamicallyAcce
 		, IObjectStore store
 		, Guid containerId
 		, Guid collectionId
-		, ISBXSerializerFactory serializerFactory
+		, ISbxSerializerFactory serializerFactory
 		) : base(
 		  store ?? throw new ArgumentNullException(nameof(store))
 		, containerId

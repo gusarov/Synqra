@@ -26,7 +26,7 @@ public static class SynqraPocoTrackingExtensions
 		ConcurrentDictionary<object, byte[]> _originalsSerialized = new();
 		ConcurrentDictionary<Type, bool> _typeIds = new();
 
-		private readonly ISBXSerializer _serializer;
+		private readonly ISbxSerializer _serializer;
 
 		public TrackingSessionImplementation(StoreCollection storeCollection, IEnumerable<object> items)
 		{

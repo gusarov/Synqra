@@ -14,7 +14,7 @@ internal abstract class InMemoryStoreCollection : StoreCollection, ISynqraCollec
 		  IObjectStore store
 		, Guid containerId
 		, Guid collectionId
-		, ISBXSerializerFactory serializerFactory
+		, ISbxSerializerFactory serializerFactory
 		) : base(
 		  store
 		, containerId
@@ -46,7 +46,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		  IObjectStore store
 		, Guid containerId
 		, Guid collectionId
-		, ISBXSerializerFactory serializerFactory
+		, ISbxSerializerFactory serializerFactory
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
 		: base(

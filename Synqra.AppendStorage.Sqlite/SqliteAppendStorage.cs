@@ -14,12 +14,12 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
 		where T : class
 {
 	private readonly SqliteConnection _connection;
-    private readonly ISBXSerializer _serializer;
+    private readonly ISbxSerializer _serializer;
     private readonly Func<T, Guid> _getKey;
 
     public SqliteAppendStorage(
         IOptions<SqliteAppendStorageOptions> options,
-        ISBXSerializerFactory serializerFactory,
+        ISbxSerializerFactory serializerFactory,
         Func<T, Guid> getKey)
     {
         _serializer = serializerFactory.CreateSerializer();

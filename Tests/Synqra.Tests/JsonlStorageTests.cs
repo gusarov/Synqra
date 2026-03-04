@@ -103,16 +103,14 @@ public abstract class AppendStorageTests : BaseTest
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		HostBuilder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+		hostApplicationBuilder.Services.AddSbxSerializer(ser =>
 		{
-			var ser = new SBXSerializer();
 			ser.Map(100, typeof(Event));
 			ser.Map(101, typeof(ObjectCreatedEvent));
 			ser.Map(102, typeof(StorableModel));
 			ser.Map(99, 3000.0, typeof(Item));
 			ser.Snapshot();
-			return ser;
-		}));
+		});
 
 		// hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		hostApplicationBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options

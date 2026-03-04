@@ -21,12 +21,12 @@ public interface IBindableModel
 	/// <summary>
 	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow in a buffer, this is only for schema-driven fields.
 	/// </summary>
-	void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
+	void Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
 
 	/// <summary>
 	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow in a buffer, this is only for schema-driven fields.
 	/// </summary>
-	void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+	void Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
 }
 
 public interface IModelBinder
@@ -34,12 +34,12 @@ public interface IModelBinder
 	/// <summary>
 	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
-	void Set(ref object model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
+	void Set(ref object model, ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
 
 	/// <summary>
 	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
-	void Get(object model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+	void Get(object model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
 }
 
 public interface IModelBinder<T> : IModelBinder
@@ -47,12 +47,12 @@ public interface IModelBinder<T> : IModelBinder
 	/// <summary>
 	/// Model<-Set<-Deserialize from a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
-	void Set(ref T model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
+	void Set(ref T model, ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos);
 
 	/// <summary>
 	/// Model->Get->Serialize to a particular binary schema version. This allows to minimize the size by pre-sharing well-known schemas. Note that other named fields might follow, this is only for schema-driven fields.
 	/// </summary>
-	void Get(T model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
+	void Get(T model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos);
 }
 
 public static class BinderModes

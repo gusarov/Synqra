@@ -208,7 +208,7 @@ public class SqliteStore : IObjectStore
 	}
 
 	private readonly SqliteDatabaseContext _databaseContext;
-	private readonly ISBXSerializerFactory _serializerFactory;
+	private readonly ISbxSerializerFactory _serializerFactory;
 	public ITypeMetadataProvider TypeMetadataProvider { get; }
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
@@ -218,7 +218,7 @@ public class SqliteStore : IObjectStore
 
 	public SqliteStore(
 	  SqliteDatabaseContext databaseContext
-	, ISBXSerializerFactory serializerFactory
+	, ISbxSerializerFactory serializerFactory
 	, ITypeMetadataProvider typeMetadataProvider
 	, IAppendStorage? eventStorage = null
 	, IEventReplicationService? eventReplicationService = null

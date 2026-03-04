@@ -3,7 +3,7 @@
 /// <summary>
 /// Synqra Binary eXchange serializer // or // Syncron
 /// </summary>
-public interface ISBXSerializer
+public interface ISbxSerializer
 {
 	void Snapshot();
 	void Reset();

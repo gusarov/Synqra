@@ -182,24 +182,22 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			typeof(Item),
 		]);
 
-		_ = new DemoModel(); // must register polimorfic before serializaiton
-		_ = new Item(); // must register polimorfic before serializaiton
-		_ = new CreateObjectCommand(); // must register polimorfic before serializaiton
-		_ = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
+		var q0 = new DemoModel(); // must register polimorfic before serializaiton
+		var q1 = new Item(); // must register polimorfic before serializaiton
+		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
+		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();
 		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
 		HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
 
-		HostBuilder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+		HostBuilder.Services.AddSbxSerializer(ser =>
 		{
-			var ser = new SBXSerializer();
 			ser.Map(100, -1, typeof(MyPocoTask));
 			ser.Map(101, 3000.0, typeof(Item));
 			ser.Map(102, 3000.0, typeof(DemoModel));
 			ser.Snapshot();
-			return ser;
-		}));
+		});
 
 		// HostBuilder.AddJsonLinesStorage();
 

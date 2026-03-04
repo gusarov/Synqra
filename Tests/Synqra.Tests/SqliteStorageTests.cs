@@ -13,7 +13,7 @@ namespace Synqra.Tests;
 /// Minimal serializer for testing SQLite storage in isolation.
 /// Hand-rolls Guid+string so we avoid any reflection / source-gen dependency.
 /// </summary>
-file class TestBinarySerializer : ISBXSerializer
+file class TestBinarySerializer : ISbxSerializer
 {
 	public void Serialize<T>(in Span<byte> buffer, T value, ref int pos)
 	{
@@ -58,9 +58,9 @@ file class TestBinarySerializer : ISBXSerializer
 	public IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 }
 
-file class TestSerializerFactory : ISBXSerializerFactory
+file class TestSerializerFactory : ISbxSerializerFactory
 {
-	public ISBXSerializer CreateSerializer() => new TestBinarySerializer();
+	public ISbxSerializer CreateSerializer() => new TestBinarySerializer();
 }
 
 class SqliteTestItem

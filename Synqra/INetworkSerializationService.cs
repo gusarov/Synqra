@@ -55,16 +55,16 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 {
 	const ulong _magic = 0xBC8ED5144A534258ul; // "SBX"
 
-	private readonly ISBXSerializerFactory _sbxSerializerFactory;
-	private ISBXSerializer _sbxSerializerSenderVerify;
-	private ISBXSerializer _sbxSerializerSender;
-	private ISBXSerializer _sbxSerializerReceiver;
+	private readonly ISbxSerializerFactory _sbxSerializerFactory;
+	private ISbxSerializer _sbxSerializerSenderVerify;
+	private ISbxSerializer _sbxSerializerSender;
+	private ISbxSerializer _sbxSerializerReceiver;
 
 	public bool IsTextOrBinary => false;
 
 	public ulong Magic => _magic;
 
-	public SbxNetworkSerializationService(ISBXSerializerFactory sbxSerializerFactory)
+	public SbxNetworkSerializationService(ISbxSerializerFactory sbxSerializerFactory)
 	{
 		_sbxSerializerFactory = sbxSerializerFactory;
 		Reinitialize();

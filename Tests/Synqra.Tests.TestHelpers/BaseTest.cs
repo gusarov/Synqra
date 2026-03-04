@@ -102,7 +102,7 @@ public class TestUtils : PerformanceTestUtils
 		return lines;
 	}
 
-	public void HexDump(ReadOnlySpan<byte> data, SBXSerializer? serializer = null)
+	public void HexDump(ReadOnlySpan<byte> data, SbxSerializer? serializer = null)
 	{
 		Console.WriteLine();
 		HexDumpWriter.HexDump(data, Console.Write, Console.Write);

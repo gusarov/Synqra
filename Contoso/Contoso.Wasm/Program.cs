@@ -12,15 +12,13 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 // Event Storage
 builder.Services.AddIndexedDbAppendStorage<Event, Guid>();
 builder.Services.AddSingleton<Func<Event, Guid>>(x => x.EventId);
-builder.Services.AddSingleton<ISBXSerializerFactory>(new SBXSerializerFactory(() =>
+builder.Services.AddSbxSerializer(ser =>
 {
-	var ser = new SBXSerializer();
 	ser.Map(100, typeof(ContosoItem));
 	ser.Map(101, typeof(FooContosoCommand));
 	ser.Map(102, typeof(FooContosoEvent));
 	ser.Snapshot();
-	return ser;
-}));
+});
 
 // Projection
 builder.Services.AddSingleton<JsonSerializerContext>(ContosoJsonSerializerContext.Default);

@@ -677,12 +677,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	void IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	void IBindableModel.Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 		GetCore(serializer, version, in buffer, ref pos);
 	}
 
-	void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	void IBindableModel.Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		SetCore(serializer, version, in buffer, ref pos);
 	}
@@ -722,7 +722,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	protected{{virtualKeyword}} void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	protected{{virtualKeyword}} void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 """);
 				string? els = null;
@@ -775,7 +775,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	}
 
 
-	protected{{virtualKeyword}} void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	protected{{virtualKeyword}} void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 """);
 					els = null;
@@ -840,7 +840,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	protected override void GetCore(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	protected override void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 """);
 				string? els = null;
@@ -892,7 +892,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				body.AppendLine("""
 	}
 
-	protected override void SetCore(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	protected override void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 """);
 				els = null;

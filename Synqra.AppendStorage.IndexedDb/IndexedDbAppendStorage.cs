@@ -40,12 +40,12 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 {
 	private readonly Func<T, TKey> _keyAccessor;
 	private readonly IndexedDbJsInterop _indexedDbInterop;
-	private readonly ISBXSerializerFactory _sbxSerializerFactory;
-	private readonly ISBXSerializer _sbxSerializer;
+	private readonly ISbxSerializerFactory _sbxSerializerFactory;
+	private readonly ISbxSerializer _sbxSerializer;
 
 	// private readonly IndexedDBManager _tgnDbManager;
 
-	public IndexedDbAppendStorage(Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISBXSerializerFactory sbxSerializerFactory)
+	public IndexedDbAppendStorage(Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISbxSerializerFactory sbxSerializerFactory)
 	{
 		_keyAccessor = keyAccessor;
 		_indexedDbInterop = jsInterop;

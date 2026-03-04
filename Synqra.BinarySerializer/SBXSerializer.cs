@@ -1,4 +1,6 @@
-﻿using System.Buffers;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -11,26 +13,42 @@ using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
-using static Synqra.BinarySerializer.SBXSerializer;
+using static Synqra.BinarySerializer.SbxSerializer;
 
 namespace Synqra.BinarySerializer;
 
-public class SBXSerializerFactory : ISBXSerializerFactory
+public static class SBXSerializerExtensions
 {
-	private readonly Func<ISBXSerializer>? _func;
-
-	public SBXSerializerFactory(Func<ISBXSerializer>? func = null)
+	public static void AddSbxSerializer(this IServiceCollection services, Action<SbxSerializer>? func = null)
 	{
-		_func = func;
+		services.AddSingleton<ISbxSerializerFactory, SbxSerializerFactory>();
+		if (func != null)
+		{
+			services.AddKeyedSingleton<Action<SbxSerializer>>("configure", func);
+		}
+	}
+	private class SbxSerializerFactory : ISbxSerializerFactory
+	{
+		private readonly ILogger<SbxSerializer> _SbxSerializerLogger;
+		private readonly Action<SbxSerializer>? _configure;
+
+		public SbxSerializerFactory(ILogger<SbxSerializer> logger, [FromKeyedServices("configure")] Action<SbxSerializer>? configure = null)
+		{
+			_SbxSerializerLogger = logger;
+			_configure = configure;
+		}
+
+		public ISbxSerializer CreateSerializer()
+		{
+			var ser = new SbxSerializer(_SbxSerializerLogger);
+			_configure?.Invoke(ser);
+			return ser;
+		}
 	}
 
-	public ISBXSerializer CreateSerializer()
-	{
-		return _func?.Invoke() ?? new SBXSerializer();
-	}
 }
 
-public class SBXSerializer : ISBXSerializer
+public class SbxSerializer : ISbxSerializer
 {
 	// A schema can carry not only the mappings but also - a day when it was created. This can let automatically expire old schemas. E.g. just a simple rule that no stream can live for more than a year and have to be re-built, leads to a fact that we know, a year old format can be easily dropped if it is not latest.
 
@@ -152,6 +170,7 @@ public class SBXSerializer : ISBXSerializer
 
 	// Let's use UTF8 continuation ranges (0x80...0xBF) for string interning. This way, we can always distinguish between real first character and a pointer to dictionary.
 	const byte _startNextStringInternId = 0x80;
+	private readonly ILogger<SbxSerializer>? _logger;
 	byte _nextStringId = _startNextStringInternId;
 	Dictionary<byte, string> _stringById = new();
 	Dictionary<string, (byte Id, LinkedListNode<string> Node)> _stringByValue = new();
@@ -161,8 +180,10 @@ public class SBXSerializer : ISBXSerializer
 	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
 	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
 
-	public SBXSerializer()
+	public SbxSerializer(ILogger<SbxSerializer>? logger = null)
 	{
+		_logger = logger;
+
 		//     ..-129 | Same, but multibyte
 		// -128..-1   | Reserved for system types
 		// 0          | Custom type specified by full name
@@ -181,7 +202,7 @@ public class SBXSerializer : ISBXSerializer
 		Map(-91, typeof(CommandCreatedEvent));
 	}
 
-	SBXSerializer? _spanshotPrimitives;
+	SbxSerializer? _spanshotPrimitives;
 
 	public void Snapshot()
 	{
@@ -191,7 +212,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			throw new Exception("Snapshot already exists");
 		}
-		_spanshotPrimitives = (SBXSerializer)MemberwiseClone();
+		_spanshotPrimitives = (SbxSerializer)MemberwiseClone();
 		if (_stringById.Count > 0) throw new Exception("Strings must be empty");
 		if (_stringByValue.Count > 0) throw new Exception("Strings must be empty");
 		if (_strings.Count > 0) throw new Exception("Strings must be empty");
@@ -215,23 +236,23 @@ public class SBXSerializer : ISBXSerializer
 
 	class KeyValuePairModelBinder<TK, TV> : IModelBinder<KeyValuePair<TK, TV>>
 	{
-		public void Get(KeyValuePair<TK, TV> model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		public void Get(KeyValuePair<TK, TV> model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 		{
 			serializer.Serialize(buffer, model.Key, ref pos);
 			serializer.Serialize(buffer, model.Value, ref pos);
 		}
 
-		public void Get(object model, ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		public void Get(object model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 		{
 			Get((KeyValuePair<TK, TV>)model, serializer, schemaVersion, buffer, ref pos);
 		}
 
-		public void Set(ref KeyValuePair<TK, TV> model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		public void Set(ref KeyValuePair<TK, TV> model, ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
 		{
 			model = new KeyValuePair<TK, TV>(serializer.Deserialize<TK>(buffer, ref pos), serializer.Deserialize<TV>(buffer, ref pos));
 		}
 
-		public void Set(ref object model, ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		public void Set(ref object model, ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
 		{
 			model = new KeyValuePair<TK, TV>(serializer.Deserialize<TK>(buffer, ref pos), serializer.Deserialize<TV>(buffer, ref pos));
 		}
@@ -244,10 +265,14 @@ public class SBXSerializer : ISBXSerializer
 			throw new ArgumentException("Stream base time must be in UTC.");
 		}
 		_streamBaseTime = new DateTime(streamBaseTime.Ticks / 10_000_000 * 10_000_000, DateTimeKind.Utc); // clip to full second - by requirement, to have predictable floating points and simplified math and improved precision
+		if (_streamBaseTime != streamBaseTime)
+		{
+			_logger?.LogWarning($"SetTimeBase - value clipped to full second. Consider to avoid fractions of second.");
+		}
 	}
 
-	// void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
-	// void IBindableModel.Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	// void IBindableModel.Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	// void IBindableModel.Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 
 	public void Map(int typeId, Type type, IModelBinder? binder = null)
 	{
@@ -2013,13 +2038,13 @@ public class SBXSerializer : ISBXSerializer
 
 internal static class TypeIdConverter
 {
-	public static SBXSerializer.ListTypeId ListTypeId(this SBXSerializer.TypeId typeId)
+	public static SbxSerializer.ListTypeId ListTypeId(this SbxSerializer.TypeId typeId)
 	{
-		return (SBXSerializer.ListTypeId)(-((int)typeId + 8));
+		return (SbxSerializer.ListTypeId)(-((int)typeId + 8));
 	}
 
-	public static SBXSerializer.TypeId TypeId(this SBXSerializer.ListTypeId listTypeId)
+	public static SbxSerializer.TypeId TypeId(this SbxSerializer.ListTypeId listTypeId)
 	{
-		return (SBXSerializer.TypeId)(SBXSerializer.TypeId.ListTypeFrom - (byte)listTypeId);
+		return (SbxSerializer.TypeId)(SbxSerializer.TypeId.ListTypeFrom - (byte)listTypeId);
 	}
 }

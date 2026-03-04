@@ -1,6 +1,6 @@
 ﻿namespace Synqra.BinarySerializer;
 
-public interface ISBXSerializerFactory
+public interface ISbxSerializerFactory
 {
-	ISBXSerializer CreateSerializer();
+	ISbxSerializer CreateSerializer();
 }
