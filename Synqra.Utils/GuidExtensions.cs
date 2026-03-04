@@ -155,9 +155,13 @@ public static class GuidExtensions
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private unsafe Guid CreateVersion7(DateTime timestamp)
+		internal unsafe Guid CreateVersion7(DateTime timestamp)
 		{
-			return CreateVersion7(timestamp.ToUniversalTime().Ticks);
+			if (timestamp.Kind != DateTimeKind.Utc)
+			{
+				throw new Exception("Only UTC time supported");
+			}
+			return CreateVersion7(timestamp.Ticks);
 		}
 
 		/// <summary>
@@ -381,7 +385,7 @@ public static class GuidExtensions
 				var tsLow = shorts[0];
 				long unix_64_bit_ms = (tsHigh << 16) | tsLow;
 
-				return new DateTime(UnixEpochTicks).AddMilliseconds(unix_64_bit_ms);
+				return new DateTime(UnixEpochTicks, DateTimeKind.Utc).AddMilliseconds(unix_64_bit_ms);
 			}
 			default:
 				throw new NotSupportedException($"Cannot get timestamp of UUID v{ver}");

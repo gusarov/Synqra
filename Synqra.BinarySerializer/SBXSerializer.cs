@@ -243,7 +243,7 @@ public class SBXSerializer : ISBXSerializer
 		{
 			throw new ArgumentException("Stream base time must be in UTC.");
 		}
-		_streamBaseTime = streamBaseTime;
+		_streamBaseTime = new DateTime(streamBaseTime.Ticks / 10_000_000 * 10_000_000, DateTimeKind.Utc); // clip to full second - by requirement, to have predictable floating points and simplified math and improved precision
 	}
 
 	// void IBindableModel.Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
@@ -1711,10 +1711,23 @@ public class SBXSerializer : ISBXSerializer
 
 	#endregion
 
+	public void SerializeNullable(in Span<byte> buffer, Guid? data, ref int pos)
+	{
+		if (data == null)
+		{
+			buffer[pos++] = 0x03; // glyph 0x03 - NULL object guid
+		}
+		else
+		{
+			Serialize(buffer, data, ref pos);
+		}
+	}
+
 	public unsafe void Serialize(in Span<byte> buffer, Guid data, ref int pos)
 	{
-		// In scope of Synqra and SBX we only use Guid v4, v7, v8
+		// In scope of Synqra and SBX we only use Guid v4, v5, v7, v8
 		// In guid v4 there is nothing to compress
+		// In guid v5 there is nothing to compress
 		// In guid v7 we can only compress time
 		// In guid v8 we can only compress sequences of zero bytes if any (otherwise drop compression and store as is, e.g. SHA256 guids)
 
@@ -1729,9 +1742,13 @@ public class SBXSerializer : ISBXSerializer
 		// 00000000 00 nil (that's it, the guid is nil, no other bytes)
 		// 00000001 01 max
 		// 00000010 02 fallback 17 bytes mode (any Legacy or non standard guid)
-		// 00000011 03 RESERVED (NULL?)
-		// 000001xx 04-07 v7 time based compressed +2 bits from rand_a
-		// 001xxxxx v8 5 section compression
+		// 00000011 03 NULL object for nullable guid
+		// 000001xx 04-07 v7 time based compressed +2 bits from rand
+		// 000010xx 08-0B RESERVED FOR v1 time based compressed +2 bits from rand
+		// 000011xx 0C-0F RESERVED FOR v6 time based compressed +2 bits from rand
+		// 0001xxxx RESERVED
+		// 001xxxxx v8 5 section compression flags
+		// 01xxxxxx
 		// 1xxxxxxx Guid as in RFC (mixed endian for .Net performance on LE, except that this byte goes to 8 and the rest is picked from/to RAM sequentially) This ensures we can store any standard guid in 16 bytes max.
 
 		byte* bytes = (byte*)&data;
@@ -1746,7 +1763,7 @@ public class SBXSerializer : ISBXSerializer
 		else if (data.GetVariant() != 1)
 		{
 			// We took away high bit of byte 8, so we capture Apollo 1980 & MS Legacy Guids. This means such guid can only be written with 17 bytes instead of 16. Glyph 2 will mark that.
-			buffer[pos++] = 2; // glyph 2 - Fallback to 17 bytes guid (a payment for the luxury to have a glyph). Same technique can serialize any other missed guid, e.g. v0
+			buffer[pos++] = 0x02; // glyph 2 - Fallback to 17 bytes guid (a payment for the luxury to have a glyph). Same technique can serialize any other missed guid, e.g. v0
 			for (int i = 0; i < 16; i++)
 			{
 				buffer[pos++] = bytes[i];
@@ -1803,31 +1820,45 @@ public class SBXSerializer : ISBXSerializer
 							glyph |= 0b00000001;
 							MemoryMarshal.Write(buffer[pos..], in ushorts[5]); // this is likely wrong and will rearrange bytes! Because windows do only int-short-short
 							pos += 2;
-							MemoryMarshal.Write(buffer[pos..], in bytes[12]); // this is likely wrong and will rearrange bytes!
-							pos += 1;
-							MemoryMarshal.Write(buffer[pos..], in bytes[13]); // this is likely wrong and will rearrange bytes!
-							pos += 1;
-							MemoryMarshal.Write(buffer[pos..], in bytes[14]); // this is likely wrong and will rearrange bytes!
-							pos += 1;
-							MemoryMarshal.Write(buffer[pos..], in bytes[15]); // this is likely wrong and will rearrange bytes!
-							pos += 1;
+							buffer[pos++] = bytes[12];
+							buffer[pos++] = bytes[13];
+							buffer[pos++] = bytes[14];
+							buffer[pos++] = bytes[15];
 						}
 						buffer[glyphPos] = glyph;
+						if (pos - glyphPos >= 16)
+						{
+							pos = glyphPos;
+							bytes[7] &= 0b_0000_1111;
+							bytes[7] |= 8 << 4;
+							bytes[8] &= 0b_0011_1111;
+							bytes[8] |= 0x80;
+							break; // fallback - regular encoding
+						}
 						return;
 					}
 					case 7:
 					{
-						buffer[pos++] = (byte)(1<<2 | bytes[7] & 0x03); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
-						var ms = data.GetTimestamp();
-						var tsdiff = checked((long)(ms - _streamBaseTime).TotalMilliseconds);
-						Serialize(buffer, tsdiff, ref pos);
-						buffer[pos++] = bytes[6]; // rand_a_low
-						buffer[pos++] = (byte)((bytes[7] & 0x0C)<<4 | bytes[8] & 0x3F); // packed8 rand_a_high 2 other bit + byte8
-						for (int i = 9; i < 16; i++)
+						var time = data.GetTimestamp();
+						if (time > _streamBaseTime && (time - _streamBaseTime).TotalDays <= 398) // after 398 days it will start encoding same 16 bytes total, so useless. After 139 years it will start encoding 17 bytes.
 						{
-							buffer[pos++] = bytes[i];
+							buffer[pos++] = (byte)(1 << 2 | bytes[7] & 0x03); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
+							// Console.WriteLine($">> time_ {time:HH:mm:ss.fffff} ({_streamBaseTime:HH:mm:ss.fffff})");
+							var dms = checked((ulong)(time.Ticks - _streamBaseTime.Ticks) / 10000);
+							time = _streamBaseTime.AddMilliseconds(dms);
+							// Console.WriteLine($">> time2_ {time:HH:mm:ss.fffff}");
+							// Console.WriteLine(">> dms_ " + (ulong)dms);
+							Serialize(buffer, dms, ref pos);
+							buffer[pos++] = bytes[6]; // rand_a_low
+							buffer[pos++] = (byte)((bytes[7] & 0x0C) << 4 | bytes[8] & 0x3F); // packed8 rand_a_high 2 other bit + byte8
+							// buffer[pos++] = 0;
+							for (int i = 9; i < 16; i++)
+							{
+								buffer[pos++] = bytes[i];
+							}
+							return;
 						}
-						return;
+						break;
 					}
 				}
 			}
@@ -1842,6 +1873,16 @@ public class SBXSerializer : ISBXSerializer
 				buffer[pos++] = bytes[i];
 			}
 		}
+	}
+
+	public Guid? DeserializeNullableGuid(in Span<byte> buffer, Guid? data, ref int pos)
+	{
+		var glyph = buffer[pos++];
+		if (glyph == 0x03) // glyph for null object
+		{
+			return null;
+		}
+		return DeserializeGuid(buffer, ref pos);
 	}
 
 	public unsafe Guid DeserializeGuid(in ReadOnlySpan<byte> buffer, ref int pos)
@@ -1865,12 +1906,20 @@ public class SBXSerializer : ISBXSerializer
 			}
 			return r;
 		}
+		else if (glyph == 3)
+		{
+			throw new Exception("Incorrect reading Nullable<Guid> from regular Guid");
+		}
 		else if (glyph >= 4 && glyph <= 7) // v7 compressed [Glyph contains 2 more bits, the high bits of rand_a, 6 more bits are known (ver+var), that is 8, entire byte is off. 6 bytes is diff varint encoded, 9 bytes left]
 		{
 			// 2 bits are already there in glyph
 
-			var diff = DeserializeSigned(buffer, ref pos);
-			var ms = (_streamBaseTime.AddMilliseconds(diff).Ticks - GuidExtensions.UnixEpochTicks) / 10000;
+			var msDiff = DeserializeUnsigned(buffer, ref pos);
+			// Console.WriteLine("<< dms_ " + (ulong)msDiff);
+
+			var ms = (_streamBaseTime.AddMilliseconds(msDiff).Ticks - GuidExtensions.UnixEpochTicks) / 10000;
+			// Console.WriteLine($"<< time_ {_streamBaseTime.AddMilliseconds(msDiff):HH:mm:ss.fffff}");
+			// Console.WriteLine("<< ums_ " + (long)ms);
 
 			var r = default(Guid);
 			byte* bytes = (byte*)&r;
@@ -1879,7 +1928,7 @@ public class SBXSerializer : ISBXSerializer
 
 			// Apply Time
 			shorts[2] = unchecked((ushort)ms);
-			ints[0] = (uint)(ms >> 16);
+			ints[0] = checked((uint)(ms >> 16));
 
 			// Apply Random_a_low
 			bytes[6] = buffer[pos++];
