@@ -70,7 +70,7 @@ public static partial class StringExtensions
 	}
 	*/
 
-	public static string Hex(this byte[] bytes, int index, int count)
+	public static string Hex(this ReadOnlySpan<byte> bytes, int index, int count)
 	{
 		char[] c = new char[count * 2];
 		int b;
@@ -82,12 +82,15 @@ public static partial class StringExtensions
 			c[i * 2 + 1] = (char)(55 + b + (((b - 10) >> 31) & -7));
 		}
 		return new string(c);
-		// return BitConverter.ToString(bytes, index, count);
 	}
 
 	public static string Hex(this byte[] bytes)
 	{
-		return Hex(bytes, 0, bytes.Length);
+		return Hex(bytes.AsSpan(), 0, bytes.Length);
+	}
+	public static string Hex(this byte[] bytes, int index, int count)
+	{
+		return Hex(bytes.AsSpan(), index, count);
 	}
 
 	public static byte[] Hex(this string hexString)

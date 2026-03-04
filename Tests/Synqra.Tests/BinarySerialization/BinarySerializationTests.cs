@@ -1,4 +1,5 @@
-﻿using Synqra.BinarySerializer;
+﻿using MongoDB.Bson;
+using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
@@ -22,15 +23,17 @@ namespace Synqra.Tests.BinarySerialization;
 internal class BinarySerializationGuidTests : BaseTest
 {
 	[Test]
-	[Arguments(1, "00000000-0000-0000-0000-000000000000", "00")] // glyph zero
-	[Arguments(2, "ffffffff-ffff-ffff-ffff-ffffffffffff", "01")] // glyph one
-	[Arguments(3, "DB7196E3-FD0C-4C15-8D5A-94ABC2D5DFDC", "8D E39671DB 0CFD 154C 5A 94ABC2D5DFDC")] // regular Guid v4
-	[Arguments(4, "DB7196E3-FD0C-4C15-8D5A-94ABC2D50000", "8D E39671DB 0CFD 154C 5A 94ABC2D50000")] // TODO compress it!
-	[Arguments(5, "0199bf3f-deae-77bb-8631-335347819f65", "07 BC01 BB 46 31335347819F65")] // v7 compressed related to known time base
-	[Arguments(6, "00000000-0000-8000-8001-000000000000", "22 0001")] // compress with presence mask
-	[Arguments(7, "00000000-0037-8000-8000-000000000000", "28 3700")] // compress with presence mask
-	[Arguments(8, "DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")] // Apollo 1980 Guid
-	[Arguments(9, "DB7196E3-FD0C-AC15-C0DA-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC C0DA 94ABC2D5DFDC")] // Microsoft 1990 Guid
+	[Arguments( 1, "00000000-0000-0000-0000-000000000000", "00")] // glyph zero
+	[Arguments( 2, "ffffffff-ffff-ffff-ffff-ffffffffffff", "01")] // glyph one
+	[Arguments( 3, "DB7196E3-FD0C-4C15-8D5A-94ABC2D5DFDC", "8D E39671DB 0CFD 154C 5A 94ABC2D5DFDC")] // regular Guid v4
+	[Arguments( 4, "DB7196E3-FD0C-4C15-8D5A-94ABC2D50000", "8D E39671DB 0CFD 154C 5A 94ABC2D50000")] // TODO compress it!
+	[Arguments( 5, "0199bf3f-deae-77bb-8631-335347819f65", "07 5EBB46 31335347819F65")] // v7 compressed related to known time base
+	[Arguments( 6, "00000000-0000-8000-8001-000000000000", "22 0001")] // compress with presence mask
+	[Arguments( 7, "00000000-0037-8000-8000-000000000000", "28 3700")] // compress with presence mask
+	[Arguments( 8, "DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")] // Apollo 1980 Guid
+	[Arguments( 9, "DB7196E3-FD0C-AC15-C0DA-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC C0DA 94ABC2D5DFDC")] // Microsoft 1990 Guid
+	[Arguments(10, "019cb4de-31fd-742f-9f9a-7010f530c498", "04 ADA7F9AC2F2F 5F9A 7010F530C498")] // found during random testing
+	[Arguments(11, "019cb558-8195-7376-b23d-d9706532a2c9", "07 C5C6E2B02F76 323D D9706532A2C9")] // found during random testing
 	public void Should_serialize_guid_with_test_vectors(int id, string guidString, string hex)
 	{
 #if NET9_0_OR_GREATER
@@ -52,6 +55,167 @@ internal class BinarySerializationGuidTests : BaseTest
 		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex.Replace(" ", "")).GetAwaiter().GetResult();
 	}
 
+	[Test]
+	public void Should_compress_time()
+	{
+		var ser = new SBXSerializer();
+		var baseTime = new DateTime(2000, 01, 01, 00, 00, 00, DateTimeKind.Utc);
+		ser.SetTimeBase(baseTime);
+		Span<byte> buffer = stackalloc byte[20];
+		int lastLen = 0;
+
+		var inc = TimeSpan.FromMilliseconds(1);
+		for (DateTime i = baseTime; i < DateTime.UtcNow.AddYears(2000); i+=inc)
+		{
+			int pos = 0;
+			
+			var original = new GuidExtensions.Generator().CreateVersion7(i);
+			ser.Serialize(buffer, original, ref pos);
+
+			if (pos > lastLen)
+			{
+				lastLen = pos;
+				Console.WriteLine($"{original.GetTimestamp()} Day {(original.GetTimestamp() - baseTime).TotalDays:000} Len {pos}");
+				var originalHex = original.ToByteArray(false).Hex(); // LE HEX in synqra!
+				var compressedHex = buffer[..pos].ToArray().Hex();
+				Console.WriteLine("   " + originalHex);
+				Console.WriteLine("   " + compressedHex);
+
+				pos = 0;
+				var g = ser.DeserializeGuid(buffer, ref pos);
+				Assert.That(g).IsEqualTo(original).GetAwaiter().GetResult();
+
+				switch (pos)
+				{
+					case 13:
+						inc = TimeSpan.FromMinutes(1);
+						break;
+					case 16:
+						inc = TimeSpan.FromDays(1);
+						break;
+				}
+			}
+		}
+	}
+
+	[Test]
+	public void Should_reconstruct_guid_v7()
+	{
+		var id = new Guid("019cb558-8195-7376-b23d-d9706532a2c9");
+		var ms =  (id.GetTimestamp() - DateTimeOffset.UnixEpoch).TotalMilliseconds;
+		Console.WriteLine(ms);
+
+		var backStamp = new GuidExtensions.Generator().CreateVersion7(id.GetTimestamp());
+		Console.WriteLine(id);
+		Console.WriteLine(backStamp);
+		Assert.That(id.ToString("N")[..12]).IsEqualTo(backStamp.ToString("N")[..12]).GetAwaiter().GetResult();
+
+		var ser = new SBXSerializer();
+		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
+		Span<byte> buffer = stackalloc byte[20];
+		int pos = 0;
+		ser.Serialize(buffer, id, ref pos);
+		int rpos = 0;
+		var back = ser.DeserializeGuid(buffer[..pos], ref rpos);
+		Assert.That(back).IsEqualTo(id).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	[Arguments(null)]
+	[Arguments(false)]
+	[Arguments(true)]
+	public void Should_serialize_v7_guids(bool? sign)
+	{
+		var ser = new SBXSerializer();
+		ser.SetTimeBase(DateTime.UtcNow.AddHours(sign != null ? (sign.Value ? 1 : -1) : 0)); // need to guarantee one of 2 paths: compressed unsigned vs signed to avoid flakiness
+		Span<byte> buffer = stackalloc byte[20];
+		Console.WriteLine("V7 compression");
+		for (int i = 0; i < 1000; i++)
+		{
+#if NET9_0_OR_GREATER
+			var guid = Guid.CreateVersion7(); // GuidExtensions.CreateVersion7();
+#else
+			var guid = GuidExtensions.CreateVersion7();
+#endif
+			int pos = 0;
+			ser.Serialize(buffer, guid, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeGuid(buffer[..pos], ref pos2);
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+			try
+			{
+				// 019cb558-8196-7376-b23d-d9706532a2c9
+				// 019cb558-8195-7376-b23d-d9706532a2c9
+				Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+			}
+			catch
+			{
+				Console.WriteLine(i);
+				Console.WriteLine(guid);
+				Console.WriteLine(buffer[..pos].ToArray().Hex());
+				Console.WriteLine(deserialized);
+				throw;
+			}
+			if (sign == false)
+			{
+				Assert.That(pos).IsLessThan(16).GetAwaiter().GetResult();
+			}
+		}
+	}
+
+	[Test]
+	public void Should_serialize_random_guids_v8()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[20];
+		Console.WriteLine("V8 high entropy");
+		for (int i = 0; i < 1000; i++)
+		{
+			var guid = GuidExtensions.CreateVersion8_Sha256_Dns(Guid.NewGuid().ToString());
+			int pos = 0;
+			ser.Serialize(buffer, guid, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
+			try
+			{
+				using (Assert.Multiple())
+				{
+					Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+					Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+					Assert.That(pos).IsLessThanOrEqualTo(16).GetAwaiter().GetResult();
+				}
+			}
+			catch
+			{
+				Console.WriteLine(i);
+				Console.WriteLine(guid);
+				Console.WriteLine(buffer[..pos].ToArray().Hex());
+				Console.WriteLine(deserialized);
+				throw;
+			}
+		}
+	}
+	[Test]
+	public void Should_serialize_random_guids_v4()
+	{
+		var ser = new SBXSerializer();
+		Span<byte> buffer = stackalloc byte[20];
+		Console.WriteLine("V4");
+		for (int i = 0; i < 1000; i++)
+		{
+			var guid = Guid.NewGuid();
+			int pos = 0;
+			ser.Serialize(buffer, guid, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
+			using (Assert.Multiple())
+			{
+				Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+				Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+				Assert.That(pos).IsEqualTo(16).GetAwaiter().GetResult();
+			}
+		}
+	}
 }
 
 internal class BinarySerializationSignedTests : BaseTest
@@ -472,7 +636,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					},
 				},
 			},
-		}, "C301B50104BEDFD5F8B90130602AD9FD1BF8000104B8DFD5F8B901B2B1C5AB90B83B0002BF0104B8DFD5F8B901B2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304B6DFD5F8B901DB216DF966E2C9F33D1E5461736B310002"));
+		}, "C301B50104DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B0002BF0104DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D1E5461736B310002"));
 
 		yield return () => SP(() => (72, new NewEvent1
 		{
@@ -486,7 +650,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				ContainerId  = default,
 				EventId      = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
 			},
-		}, "C301BB0104BEDFD5F8B90130602AD9FD1BF847F804B8DFD5F8B901B2B1C5AB90B83BE68304B6DFD5F8B901DB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
+		}, "C301BB0104DFEFAAFC5C30602AD9FD1BF847F804DCEFAAFC5CB2B1C5AB90B83BE68304DBEFAAFC5CDB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
 	}
 
 	[Test]
@@ -717,11 +881,49 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	}
 
 	[Test]
+	[Arguments(0x00u, "00")]
+	[Arguments(0x7Fu, "7F")]
+	[Arguments(0x80u, "8001")]
+	[Arguments(0x81u, "8101")]
+	[Arguments(0xFFu, "FF01")]
+	public void Should_serialize_unsigned_integers_with_test_vectors_long(ulong i, string hex)
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		var ser = new SBXSerializer();
+		int pos = 0;
+		ser.Serialize(buffer, i, ref pos);
+		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
+		Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
+	}
+
+	[Test]
 	public void Should_serialize_unsigned_integers()
 	{
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SBXSerializer();
 		for (uint i = 0; i < ushort.MaxValue; i++)
+		{
+			int pos = 0;
+			ser.Serialize(buffer, i, ref pos);
+			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+			var pos2 = 0;
+			var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
+			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+		}
+	}
+
+	[Test]
+	public void Should_serialize_unsigned_integers_long()
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		var ser = new SBXSerializer();
+		for (ulong i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
 			ser.Serialize(buffer, i, ref pos);
@@ -857,8 +1059,8 @@ public class BinarySerializationTests : BaseTest
 		pos = 0;
 		ReadOnlySpan<byte> rbuffer = buffer;
 		var de = ser.Deserialize<SampleTestDataPoco>(in rbuffer, ref pos);
-		await Assert.That(de.Id).IsEqualTo(testData.Id);
-		await Assert.That(de.Name).IsEqualTo(testData.Name);
+		Assert.That(de.Id).IsEqualTo(testData.Id).GetAwaiter().GetResult();
+		Assert.That(de.Name).IsEqualTo(testData.Name).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -892,8 +1094,8 @@ public class BinarySerializationTests : BaseTest
 
 		pos = 0;
 		var de = ser.Deserialize<SampleTestDataPoco>(in rbuffer, ref pos);
-		await Assert.That(de.Id).IsEqualTo(testData.Id);
-		await Assert.That(de.Name).IsEqualTo(testData.Name);
+		Assert.That(de.Id).IsEqualTo(testData.Id).GetAwaiter().GetResult();
+		Assert.That(de.Name).IsEqualTo(testData.Name).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -922,9 +1124,9 @@ public class BinarySerializationTests : BaseTest
 
 		pos = 0;
 		var de = ser.Deserialize<SampleTestSynqraModel>(in rbuffer, ref pos);
-		await Assert.That(de.Id).IsEqualTo(data.Id);
-		await Assert.That(de.Name).IsEqualTo(data.Name);
-		await Assert.That(pos).IsEqualTo(6);
+		Assert.That(de.Id).IsEqualTo(data.Id).GetAwaiter().GetResult();
+		Assert.That(de.Name).IsEqualTo(data.Name).GetAwaiter().GetResult();
+		Assert.That(pos).IsEqualTo(6).GetAwaiter().GetResult();
 	}
 
 	[Test]
@@ -960,11 +1162,11 @@ public class BinarySerializationTests : BaseTest
 		var de = (NewEvent1)ser.Deserialize<TransportOperation>(in rbuffer, ref pos);
 		var te = (ObjectCreatedEvent)de.Event;
 		var te2 = (ObjectCreatedEvent)data.Event;
-		await Assert.That(te.EventId).IsEqualTo(te2.EventId);
-		await Assert.That(te.CommandId).IsEqualTo(te2.CommandId);
-		await Assert.That(te.TargetId).IsEqualTo(te2.TargetId);
-		await Assert.That(te.TargetTypeId).IsEqualTo(te2.TargetTypeId);
-		await Assert.That(te.CollectionId).IsEqualTo(te2.CollectionId);
+		Assert.That(te.EventId).IsEqualTo(te2.EventId).GetAwaiter().GetResult();
+		Assert.That(te.CommandId).IsEqualTo(te2.CommandId).GetAwaiter().GetResult();
+		Assert.That(te.TargetId).IsEqualTo(te2.TargetId).GetAwaiter().GetResult();
+		Assert.That(te.TargetTypeId).IsEqualTo(te2.TargetTypeId).GetAwaiter().GetResult();
+		Assert.That(te.CollectionId).IsEqualTo(te2.CollectionId).GetAwaiter().GetResult();
 	}
 }
 
@@ -1006,7 +1208,7 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 		var hex = _buffer.Hex(0, pos);
 
 		await Assert.That(item).IsNotNull();
-		await Assert.That(item.NewName).IsEqualTo("Test");
+		Assert.That(item.NewName).IsEqualTo("Test").GetAwaiter().GetResult();
 		// nothing needs to be done here, because there is no field names in perfect positional binary form. So field rename survives automatically
 	}
 
@@ -1020,8 +1222,8 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 		var hex = _buffer.Hex(0, pos);
 
 		await Assert.That(item).IsNotNull();
-		await Assert.That(item.NewName).IsEqualTo("Test");
-		await Assert.That(item.NewProperty2).IsEqualTo(null);
+		Assert.That(item.NewName).IsEqualTo("Test").GetAwaiter().GetResult();
+		Assert.That(item.NewProperty2).IsEqualTo(null).GetAwaiter().GetResult();
 	}
 
 
@@ -1034,8 +1236,8 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 		var hex = _buffer.Hex(0, pos);
 
 		await Assert.That(item).IsNotNull();
-		await Assert.That(item.NewName).IsEqualTo("Test");
-		await Assert.That(item.NewProperty2).IsEqualTo(null);
+		Assert.That(item.NewName).IsEqualTo("Test").GetAwaiter().GetResult();
+		Assert.That(item.NewProperty2).IsEqualTo(null).GetAwaiter().GetResult();
 	}
 
 }
