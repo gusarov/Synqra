@@ -14,7 +14,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using TUnit.Assertions.Exceptions;
 using TUnit.Assertions.Extensions;
-using static Synqra.BinarySerializer.SBXSerializer;
+using static Synqra.BinarySerializer.SbxSerializer;
 
 namespace Synqra.Tests.BinarySerialization;
 
@@ -42,7 +42,7 @@ internal class BinarySerializationGuidTests : BaseTest
 
 		var guid = new Guid(guidString);
 		Span<byte> buffer = stackalloc byte[20];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
 		int pos = 0;
 		ser.Serialize(buffer, guid, ref pos);
@@ -58,7 +58,7 @@ internal class BinarySerializationGuidTests : BaseTest
 	[Test]
 	public void Should_compress_time()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		var baseTime = new DateTime(2000, 01, 01, 00, 00, 00, DateTimeKind.Utc);
 		ser.SetTimeBase(baseTime);
 		Span<byte> buffer = stackalloc byte[20];
@@ -110,7 +110,7 @@ internal class BinarySerializationGuidTests : BaseTest
 		Console.WriteLine(backStamp);
 		Assert.That(id.ToString("N")[..12]).IsEqualTo(backStamp.ToString("N")[..12]).GetAwaiter().GetResult();
 
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
 		Span<byte> buffer = stackalloc byte[20];
 		int pos = 0;
@@ -126,7 +126,7 @@ internal class BinarySerializationGuidTests : BaseTest
 	[Arguments(true)]
 	public void Should_serialize_v7_guids(bool? sign)
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.SetTimeBase(DateTime.UtcNow.AddHours(sign != null ? (sign.Value ? 1 : -1) : 0)); // need to guarantee one of 2 paths: compressed unsigned vs signed to avoid flakiness
 		Span<byte> buffer = stackalloc byte[20];
 		Console.WriteLine("V7 compression");
@@ -166,7 +166,7 @@ internal class BinarySerializationGuidTests : BaseTest
 	[Test]
 	public void Should_serialize_random_guids_v8()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[20];
 		Console.WriteLine("V8 high entropy");
 		for (int i = 0; i < 1000; i++)
@@ -198,7 +198,7 @@ internal class BinarySerializationGuidTests : BaseTest
 	[Test]
 	public void Should_serialize_random_guids_v4()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[20];
 		Console.WriteLine("V4");
 		for (int i = 0; i < 1000; i++)
@@ -244,7 +244,7 @@ internal class BinarySerializationSignedTests : BaseTest
 	public void Should_serialize_signed_integers_with_test_vectors(int id, int i, string hex)
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		int pos = 0;
 		ser.Serialize(buffer, i, ref pos);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
@@ -267,7 +267,7 @@ internal class BinarySerializationSignedTests : BaseTest
 	{
 		Span<byte> buffer = stackalloc byte[10];
 		int pos = 0;
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.Serialize(buffer, i, ref pos);
 		ReadOnlySpan<byte> buffer2 = buffer;
 		int pos2 = 0;
@@ -289,7 +289,7 @@ internal class BinarySerializationSignedTests : BaseTest
 	{
 		Span<byte> buffer = stackalloc byte[10];
 		int pos = 0;
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.SerializeNullableSigned(buffer, i, ref pos);
 		ReadOnlySpan<byte> buffer2 = buffer;
 		int pos2 = 0;
@@ -302,7 +302,7 @@ internal class BinarySerializationSignedTests : BaseTest
 	[Test]
 	public void Should_serialize_signed_integers()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[10];
 		for (int i = short.MinValue; i <= short.MaxValue; i++)
 		{
@@ -329,7 +329,7 @@ internal class BinarySerializationStringTests : BaseTest
 	[Arguments(null, "FF")]
 	public void Should_serialize_strings_with_test_vectors(string? data, string hex)
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[20];
 		int pos = 0;
 		ser.Serialize(buffer, data, ref pos);
@@ -341,7 +341,7 @@ internal class BinarySerializationStringTests : BaseTest
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
 
-		var deser = new SBXSerializer();
+		var deser = new SbxSerializer();
 		var deserPos = 0;
 		var deserialized2 = deser.DeserializeString(buffer, ref deserPos);
 		Assert.That(deserialized2).IsEqualTo(data).GetAwaiter().GetResult();
@@ -366,7 +366,7 @@ internal class BinarySerializationStringTests : BaseTest
 	[Test]
 	public void Should_17_make_string_interning()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 		var data = new List<string> { "Three", "", "Three" };
@@ -374,7 +374,7 @@ internal class BinarySerializationStringTests : BaseTest
 		buffer = buffer[0..pos];
 		HexDump(buffer);
 
-		var deser = new SBXSerializer();
+		var deser = new SbxSerializer();
 		var pos2 = 0;
 		var deserialized = deser.Deserialize<List<string>>(buffer, ref pos2);
 		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
@@ -384,7 +384,7 @@ internal class BinarySerializationStringTests : BaseTest
 	[Test]
 	public void Should_18_make_string_interning()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 		var data = new List<string> { "Three", "", "Three" };
@@ -401,8 +401,8 @@ internal class BinarySerializationStringTests : BaseTest
 	[Test]
 	public async Task Should_serialize_strings_with_heavy_interning()
 	{
-		var ser = new SBXSerializer();
-		var deser = new SBXSerializer();
+		var ser = new SbxSerializer();
+		var deser = new SbxSerializer();
 
 		var iterations = 3000;
 
@@ -452,7 +452,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[Test]
 	public void Should_10_serialize_generic_int_without_type()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -475,7 +475,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[Test]
 	public void Should_10_serialize_generic_int_with_type()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -498,7 +498,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[Test]
 	public void Should_10_serialize_boxed_int()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -663,7 +663,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		var modelJson = doubleCheckJson ? JsonSerializer.Serialize(model, options) : null;
 		Console.WriteLine(modelJson);
 
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		ser.Map( 1 /* 02 */, typeof(SampleFieldSealedModel));
 		ser.Map( 2 /* 04 */, typeof(SampleSealedModel));
 		ser.Map( 3 /* 06 */, typeof(SampleFieldBaseModel));
@@ -711,7 +711,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		Console.WriteLine(".");
 		var count = (int)ListTypeId.MAX;
 		Assert.That(count).IsEqualTo(16).GetAwaiter().GetResult();
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		for (int i = 0; i < count; i++)
 		{
 			var listTypeId = (ListTypeId)(i);
@@ -735,7 +735,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	[Test]
 	public void Should_15_serialize_list_of_int()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -759,7 +759,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	[Test]
 	public void Should_15_serialize_list_of_string()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -783,7 +783,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	[Test]
 	public void Should_17_make_string_interning()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -807,7 +807,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	[Test]
 	public void Should_20_serialize_dictionary_of_string()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -836,7 +836,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 	[Test]
 	public void Should_print_cyrillic_utf8_codes()
 	{
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
@@ -868,7 +868,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	public void Should_serialize_unsigned_integers_with_test_vectors(uint i, string hex)
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		int pos = 0;
 		ser.Serialize(buffer, i, ref pos);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
@@ -889,7 +889,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	public void Should_serialize_unsigned_integers_with_test_vectors_long(ulong i, string hex)
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		int pos = 0;
 		ser.Serialize(buffer, i, ref pos);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
@@ -905,7 +905,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	public void Should_serialize_unsigned_integers()
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		for (uint i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
@@ -922,7 +922,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	public void Should_serialize_unsigned_integers_long()
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		for (ulong i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
@@ -939,7 +939,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	public void Should_serialize_nullable_unsigned_integers()
 	{
 		Span<byte> buffer = stackalloc byte[10];
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		for (uint? i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
@@ -1044,7 +1044,7 @@ public class BinarySerializationTests : BaseTest
 			// Tags = new List<string> { "Tag1", "Tag2" }
 		};
 
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
 		int pos = 0;
@@ -1075,7 +1075,7 @@ public class BinarySerializationTests : BaseTest
 			// Tags = new List<string> { "Tag1", "Tag2" }
 		};
 
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
 		ReadOnlySpan<byte> rbuffer = buffer;
@@ -1102,7 +1102,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_generated_class_by_field_names_as_known()
 	{
 		// Arrange
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		var data = new SampleTestSynqraModel
 		{
 			Id = 7,
@@ -1133,7 +1133,7 @@ public class BinarySerializationTests : BaseTest
 	public async Task Should_serialize_well_known_class_by_field_names_as_known2()
 	{
 		// Arrange
-		var ser = new SBXSerializer();
+		var ser = new SbxSerializer();
 		var data = new NewEvent1
 		{
 			Event = new ObjectCreatedEvent
@@ -1175,8 +1175,8 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 	byte[] _buffer = new byte[10240];
 	int pos = 0;
 	int depos = 0;
-	SBXSerializer _ser = new SBXSerializer();
-	SBXSerializer _deser = new SBXSerializer();
+	SbxSerializer _ser = new SbxSerializer();
+	SbxSerializer _deser = new SbxSerializer();
 	byte[] _v1Test = "5465737400".Hex(); // see Should_10_serialize_simple_field
 
 	[Test]

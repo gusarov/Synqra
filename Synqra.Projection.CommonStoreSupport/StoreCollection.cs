@@ -14,7 +14,7 @@ public abstract class StoreCollection : ISynqraCollection
 	public IObjectStore Store { get; }
 	public Guid ContainerId { get; }
 	public Guid CollectionId { get; }
-	public ISBXSerializerFactory SerializerFactory { get; }
+	public ISbxSerializerFactory SerializerFactory { get; }
 
 	public abstract Type Type { get; }
 
@@ -31,7 +31,7 @@ public abstract class StoreCollection : ISynqraCollection
 		  IObjectStore store
 		, Guid containerId
 		, Guid collectionId
-		, ISBXSerializerFactory serializerFactory
+		, ISbxSerializerFactory serializerFactory
 		)
 	{
 		Store = store ?? throw new ArgumentNullException(nameof(store));

@@ -335,7 +335,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 			throw new NotImplementedException();
 		}
 
-		void IBindableModel.Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+		void IBindableModel.Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 		{
 			throw new NotImplementedException();
 		}
@@ -345,7 +345,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 			throw new NotImplementedException();
 		}
 
-		void IBindableModel.Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+		void IBindableModel.Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
 		{
 			throw new NotImplementedException();
 		}

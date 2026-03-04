@@ -52,7 +52,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	internal readonly JsonSerializerOptions? _jsonSerializerOptions;
 
 	private readonly IAppendStorage? _eventStorage;
-	private readonly ISBXSerializerFactory _serializerFactory;
+	private readonly ISbxSerializerFactory _serializerFactory;
 	public ITypeMetadataProvider TypeMetadataProvider { get; }
 
 	private readonly IEventReplicationService? _eventReplicationService;
@@ -65,7 +65,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 
 	public InMemoryProjection(
-		  ISBXSerializerFactory serializerFactory
+		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
 		, IAppendStorage? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null

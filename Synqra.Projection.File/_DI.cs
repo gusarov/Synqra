@@ -96,7 +96,7 @@ public static class FileSynqraExtensions
 		private readonly ConcurrentDictionary<Guid, WeakReference> _attachedObjectsById = new();
 
 		private byte _attachedMaintain;
-		public ISBXSerializerFactory SerializerFactory { get; }
+		public ISbxSerializerFactory SerializerFactory { get; }
 		private readonly Lazy<IProjection> _lazyFileProjection;
 		private readonly IOptions<FileObjectStoreConfig> _options;
 
@@ -112,7 +112,7 @@ public static class FileSynqraExtensions
 
 		public FileObjectStore(
 			  ITypeMetadataProvider typeMetadataProvider
-			, ISBXSerializerFactory serializerFactory
+			, ISbxSerializerFactory serializerFactory
 			, Lazy<IProjection> fileProjection
 			, IOptions<FileObjectStoreConfig> options
 			, AppendStores appendStores
@@ -373,7 +373,7 @@ public static class FileSynqraExtensions
 			  FileObjectStore store
 			, Guid containerId
 			, Guid collectionId
-			, ISBXSerializerFactory serializerFactory
+			, ISbxSerializerFactory serializerFactory
 			) : base(
 			  store
 			, containerId
@@ -426,7 +426,7 @@ public static class FileSynqraExtensions
 			  FileObjectStore store
 			, Guid containerId
 			, Guid collectionId
-			, ISBXSerializerFactory serializerFactory
+			, ISbxSerializerFactory serializerFactory
 			) : base(
 			  store
 			, containerId

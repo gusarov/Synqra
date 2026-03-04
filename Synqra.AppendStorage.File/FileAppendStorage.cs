@@ -14,8 +14,8 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 	const int BufferSizeForObject = 10240;
 
 	// if concurrent, then most conflicting reader vs writer, so we can have separate serializer and deserializer to avoid lock contention. But for single writer scenario, we can use the same instance.
-	private readonly ISBXSerializer _serializer;
-	private readonly ISBXSerializer _deserializer;
+	private readonly ISbxSerializer _serializer;
+	private readonly ISbxSerializer _deserializer;
 	private readonly Func<T, TKey> _getKeyFromItem;
 	private readonly Func<TKey, string> _getPathFromKey;
 	private readonly Func<string, TKey> _getKeyFromPath;
@@ -26,7 +26,7 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 
 	public FileAppendStorage(
 		  IOptions<FileAppendStorageOptions> options
-		, ISBXSerializerFactory serializerFactory
+		, ISbxSerializerFactory serializerFactory
 		, JsonSerializerOptions jsonSerializerOptions
 		, Func<T, TKey> getKeyFromItem
 		, Func<TKey, string> getPathFromKey

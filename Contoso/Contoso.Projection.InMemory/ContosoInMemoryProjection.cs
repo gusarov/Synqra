@@ -9,7 +9,7 @@ namespace Contoso.Projection.InMemory;
 
 public class LocalOnlyContosoInMemoryProjection : ContosoInMemoryProjection
 {
-	public LocalOnlyContosoInMemoryProjection(ISBXSerializerFactory serializerFactory, ITypeMetadataProvider typeMetadataProvider) : base(
+	public LocalOnlyContosoInMemoryProjection(ISbxSerializerFactory serializerFactory, ITypeMetadataProvider typeMetadataProvider) : base(
 		  serializerFactory: serializerFactory
 		, typeMetadataProvider: typeMetadataProvider
 		, eventStorage: null
@@ -24,7 +24,7 @@ public class LocalOnlyContosoInMemoryProjection : ContosoInMemoryProjection
 public class ContosoInMemoryProjection : InMemoryProjection, IContosoCommandVisitor<CommandHandlerContext>, IContosoEventVisitor<EventVisitorContext>
 {
 	public ContosoInMemoryProjection(
-		  ISBXSerializerFactory serializerFactory
+		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
 		, IAppendStorage<Event, Guid>? eventStorage = null
 		, IAppendStorage<ProjectionSnapshot, Guid>? snapshotStorage = null

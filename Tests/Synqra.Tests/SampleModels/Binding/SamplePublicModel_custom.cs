@@ -32,12 +32,12 @@ public class SampleFieldListBaseModel_ : IBindableModel
 		throw new NotImplementedException();
 	}
 
-	public void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+	public void Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 	{
 		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass weather this list requires typeId or not
 	}
 
-	public void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+	public void Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		// DeserializeList - only executed when it is known from static data (field or request type) all information about the list.
 		// Deserialize<IList<SampleBaseModel>> - executed when there is not way to guarantee the list type or element types
@@ -63,12 +63,12 @@ public class SampleFieldEnumerableBaseModel_ : IBindableModel
 		throw new NotImplementedException();
 	}
 
-	public void Get(ISBXSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
+	public void Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 	{
 		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass weather this list requires typeId or not
 	}
 
-	public void Set(ISBXSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
+	public void Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		// DeserializeList - only executed when it is known from static data (field or request type) all information about the list.
 		// Deserialize<IList<SampleBaseModel>> - executed when there is not way to guarantee the list type or element types
@@ -206,13 +206,13 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 		Name = "Value 0";
 	}
 
-	public void Set(ISBXSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
+	public void Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		// Positional Fields: Name
 		__name = serializer.DeserializeString(in buffer, ref pos);
 	}
 
-	public void Get(ISBXSerializer serializer, float version, in Span<byte> buffer, ref int pos)
+	public void Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 		// Positional Fields: Name
 		serializer.Serialize(in buffer, __name, ref pos);
