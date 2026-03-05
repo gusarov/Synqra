@@ -577,4 +577,35 @@ public class GuidExtensionsTests3 : BaseTest
 		await Assert.That(guid.ToString("N")).EndsWith("00000000");
 		Console.WriteLine(guid);
 	}
+
+	[Test]
+	public async Task Should_get_time_from_any_guid_v7_with_no_crash()
+	{
+		for (var date = new DateTime(2000, 1, 1, 0, 0, 0, kind: DateTimeKind.Utc); date < new DateTime(3000, 1, 1, 0, 0, 0, kind: DateTimeKind.Utc); date = date.AddDays(1))
+		{
+			var guid = new GuidExtensions.Generator().CreateVersion7(date);
+			_ = guid.GetVariant();
+			_ = guid.GetTimestamp();
+		}
+	}
+
+	[Test]
+	[Explicit] // not sure about it
+	public async Task Should_get_time_from_any_guid_with_no_crash()
+	{
+		unsafe Guid CreateGuid()
+		{
+			var guid = Guid.NewGuid();
+			byte* bytes = (byte*)&guid;
+			bytes[7] = (byte)(bytes[7] & 0x0F | (Random.Shared.Next(0, 16) << 4));
+			return guid;
+		}
+
+		for (int i = 0; i < 1000; i++)
+		{
+			var guid = CreateGuid();
+			_ = guid.GetVariant();
+			_ = guid.GetTimestamp();
+		}
+	}
 }

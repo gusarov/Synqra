@@ -8,6 +8,7 @@ using Synqra.Tests.TestHelpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,7 @@ using System.Threading.Tasks;
 using TUnit.Assertions.Exceptions;
 using TUnit.Assertions.Extensions;
 using static Synqra.BinarySerializer.SbxSerializer;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Synqra.Tests.BinarySerialization;
 
@@ -164,6 +166,39 @@ internal class BinarySerializationGuidTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_serialize_v7_at_all_times()
+	{
+		Span<byte> buffer = stackalloc byte[20];
+		var ser = new SbxSerializer();
+		ser.SetTimeBase(new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+
+		for (var date = new DateTime(2000, 1, 1, 0, 0, 0, kind: DateTimeKind.Utc); date < new DateTime(3000, 1, 1, 0, 0, 0, kind: DateTimeKind.Utc); date = date.AddDays(1))
+		{
+			var guid = new GuidExtensions.Generator().CreateVersion7(date);
+			int pos = 0;
+			ser.Serialize(buffer, guid, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeGuid(buffer[..pos], ref pos2);
+			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+			try
+			{
+				// 019cb558-8196-7376-b23d-d9706532a2c9
+				// 019cb558-8195-7376-b23d-d9706532a2c9
+				Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+			}
+			catch
+			{
+				Console.WriteLine(date);
+				Console.WriteLine(guid);
+				Console.WriteLine(buffer[..pos].ToArray().Hex());
+				Console.WriteLine(deserialized);
+				throw;
+			}
+		}
+	}
+
+	[Test]
 	public void Should_serialize_random_guids_v8()
 	{
 		var ser = new SbxSerializer();
@@ -195,6 +230,58 @@ internal class BinarySerializationGuidTests : BaseTest
 			}
 		}
 	}
+
+	[Test]
+	public unsafe void Should_serialize_any_guid()
+	{
+#if NET10_0_OR_GREATER
+		var g1 = new Guid("e8f9566b-430e-7b3f-3f92-d7628209888e");
+		Assert.That(g1.Version).IsEqualTo(7); // this is not V7 !!! this is .Net BUG!! Variant is wrong!!
+#endif
+
+		var ser = new SbxSerializer();
+		Span<byte> buffer = stackalloc byte[20];
+		Console.WriteLine("V8 high entropy");
+		Span<byte> buf = stackalloc byte[2];
+		for (int i = 0; i < 10000; i++)
+		{
+			var guid = Guid.NewGuid();
+			byte* bytes = (byte*)&guid;
+
+			// make it absolutely any guid, including apollo, reserved spaces, COM, etc...
+			Random.Shared.NextBytes(buf);
+			bytes[8] = buf[0]; // variant byte 8
+			bytes[7] = buf[1]; // version, byte6 is located at byte 7 on .Net
+
+#if DEBUG
+			// guid = new Guid("4e2a048e-bcf6-8e96-291c-44e1b6cb36ba"); // test
+#endif
+
+			int pos = 0;
+			ser.Serialize(buffer, guid, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
+			try
+			{
+				using (Assert.Multiple())
+				{
+					Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+					Assert.That(deserialized).IsEqualTo(guid).GetAwaiter().GetResult();
+					var allowedLimit = guid.GetVariant() == 1 ? 16 : 17;
+					Assert.That(pos).IsLessThanOrEqualTo(allowedLimit).GetAwaiter().GetResult();
+				}
+			}
+			catch
+			{
+				Console.WriteLine(i);
+				Console.WriteLine(guid);
+				Console.WriteLine(buffer[..pos].ToArray().Hex());
+				Console.WriteLine(deserialized);
+				throw;
+			}
+		}
+	}
+
 	[Test]
 	public void Should_serialize_random_guids_v4()
 	{
@@ -216,6 +303,7 @@ internal class BinarySerializationGuidTests : BaseTest
 			}
 		}
 	}
+
 }
 
 internal class BinarySerializationSignedTests : BaseTest
