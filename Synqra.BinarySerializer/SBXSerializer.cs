@@ -1864,7 +1864,16 @@ public class SbxSerializer : ISbxSerializer
 					}
 					case 7:
 					{
-						var time = data.GetTimestamp();
+						DateTime time;
+						try
+						{
+							time = data.GetTimestamp();
+						}
+						catch (Exception ex)
+						{
+							// can't get time! Just ignore compression and pack as is!
+							break;
+						}
 						if (time > _streamBaseTime && (time - _streamBaseTime).TotalDays <= 398) // after 398 days it will start encoding same 16 bytes total, so useless. After 139 years it will start encoding 17 bytes.
 						{
 							buffer[pos++] = (byte)(1 << 2 | bytes[7] & 0x03); // 4-7: UUIDv7 - time based + 2 bits from rand_a_high
