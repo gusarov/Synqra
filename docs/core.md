@@ -126,7 +126,7 @@ Materialization is the process of turning a stream of Events into a usable model
 Synqra supports multiple materialization strategies:
 - In-memory (hot, fast, ephemeral): universal dictionaries / JsonObjects / Real POCO Models
 - ReDis-style external in-memory with optional persistance
-- Persistent projections (durable, rebuildable): SQL Database, Non-SQL, Browser Local Storage or IndexedDB
+- Persistent projections (durable, rebuildable): SQL Database, Non-SQL, In-Browser IndexedDB
 - API to build your own materializers
 
 All materializations are:
