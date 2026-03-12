@@ -29,9 +29,9 @@ namespace Synqra;
 [Schema(2026.168, "1 EventId Guid CommandId Guid")]
 [Schema(2026.169, "1 EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2026.170, "1 EventId Guid CommandId Guid")]
-public abstract partial class Event : IEvent
+public abstract partial class Event : IEvent, IGuidentifiable
 {
-	// Guid IIdentifiable<Guid>.Id => EventId;
+	Guid IIdentifiable<Guid>.Id => EventId;
 
 	public required partial Guid EventId { get; set; }
 	public required partial Guid CommandId { get; set; }
