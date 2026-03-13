@@ -14,7 +14,7 @@
 		<WarningsAsErrors>$(WarningsAsErrors);8785</WarningsAsErrors> <!-- generator failed -->
 
 		<ImplicitUsings>enable</ImplicitUsings>
-		<LangVersion>preview</LangVersion>
+		<LangVersion>latest</LangVersion>
 		<EnableMicrosoftExtensionsConfigurationBinderSourceGenerator>true</EnableMicrosoftExtensionsConfigurationBinderSourceGenerator> <!-- Preview 3 -->
 		<EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator> <!-- Preview 4 -->
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
