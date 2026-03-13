@@ -45,9 +45,6 @@
   <Target Name="_Synqra_GetDependencyTargetPaths">
     <ItemGroup>
       <!--
-      <TargetPathWithTargetPlatformMoniker
-         Include="C:\Users\xkip\source\repos\Quotaly\external\Synqra\Synqra.Model\bin\Debug\netstandard2.0\Synqra.Model.dll"
-         IncludeRuntimeDependency="false" />
       <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Model.dll" IncludeRuntimeDependency="false" />
       -->
       <TargetPathWithTargetPlatformMoniker Include="$(TargetDir)\Synqra.Utils.dll" IncludeRuntimeDependency="true" />

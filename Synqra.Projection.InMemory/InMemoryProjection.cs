@@ -67,7 +67,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public InMemoryProjection(
 		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
-		, IAppendStorage? eventStorage = null
+		, IAppendStorage<Event, Guid>? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
@@ -103,7 +103,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		_ = LoadStateAsync();
 	}
 
-	public string ProjectionStatus { get; set; }
+	public string? ProjectionStatus { get; set; }
 
 	Task? _loading;
 

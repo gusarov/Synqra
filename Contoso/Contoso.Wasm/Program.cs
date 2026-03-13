@@ -10,8 +10,8 @@ using System.Text.Json.Serialization;
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
 // Event Storage
-builder.Services.AddIndexedDbAppendStorage<Event, Guid>();
-builder.Services.AddSingleton<Func<Event, Guid>>(x => x.EventId);
+builder.Services.AddIndexedDbAppendStorage<Event, Guid>(x => x.EventId);
+// builder.Services.AddSingleton<Func<Event, Guid>>(x => x.EventId);
 builder.Services.AddSbxSerializer(ser =>
 {
 	ser.Map(100, typeof(ContosoItem));

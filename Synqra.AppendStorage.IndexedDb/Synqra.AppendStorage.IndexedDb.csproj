@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\Quotaly\external\Synqra\Synqra.Utils\_SharedUtils.cs" Link="_SharedUtils.cs" />
+    <Compile Include="..\Synqra.Utils\_SharedUtils.cs" Link="_SharedUtils.cs" />
     <Compile Include="..\Synqra.Utils\_Polyfill.cs" Link="_Polyfill.cs" />
   </ItemGroup>
 
@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Quotaly\external\Synqra\Synqra.Utils\Synqra.Utils.csproj" />
+    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
   </ItemGroup>

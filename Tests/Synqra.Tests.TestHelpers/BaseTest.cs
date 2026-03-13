@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
+using Microsoft.Extensions.Logging;
 using Synqra.BinarySerializer;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -145,12 +146,16 @@ public class BaseTest : TestUtils
 				_hostBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 				{
 					ContentRootPath = AppContext.BaseDirectory,
-					EnvironmentName = "Test",
-					// EnvironmentName = "Development",
+					// EnvironmentName = "Test",
+					EnvironmentName = Environments.Development,
 				});
 				_hostBuilder.Services.AddLazier();
 				_origServiceCount = _hostBuilder.Services.Count;
 				Register(_hostBuilder);
+				foreach (var service in _hostBuilder.Services)
+				{
+					EmergencyLog.Default.LogInformation("Registered service: " + service.ServiceType.FullName + " as " + service.Lifetime);
+				}
 				_configuration = _hostBuilder.Configuration;
 			}
 			return _hostBuilder;

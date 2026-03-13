@@ -36,7 +36,7 @@ public class InMemoryStateManageementTests : StateManagementTests
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		hostApplicationBuilder.AddInMemorySynqraStore();
+		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 }
 
@@ -169,10 +169,10 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		// HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
+		HostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		HostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 
-		HostBuilder.AddTypeMetadataProvider([
+		HostBuilder.Services.AddTypeMetadataProvider([
 			typeof(DemoModel),
 			typeof(SampleTaskModel),
 			typeof(MyPocoTask),
@@ -189,7 +189,7 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();
 		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
-		HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
+		// HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
 
 		HostBuilder.Services.AddSbxSerializer(ser =>
 		{
@@ -213,9 +213,23 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		ServiceCollection.AddSingleton(fakeAppendStorage);
 	}
 
+	static object _lock = new object();
+
 	[Test]
 	public async Task Should_00_have_proper_container()
 	{
+		lock (_lock)
+		{
+			Console.WriteLine("========================= " + GetType().Name);
+			foreach (var item in typeof(InMemoryProjection).GetConstructors().Last().GetParameters())
+			{
+				Console.WriteLine(item.ParameterType.FullName);
+				Console.Write("   ");
+				Console.WriteLine(ServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType)?.ToString() ?? "NONE!!");
+			}
+			Console.WriteLine("----");
+		}
+
 		Console.WriteLine(_sut);
 	}
 

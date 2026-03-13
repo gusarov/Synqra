@@ -168,7 +168,7 @@ internal class SynqraTestNode
 			["URLS"] = "http://*:" + port,
 		});
 
-		builder.AddInMemorySynqraStore();
+		builder.Services.AddInMemorySynqraStore();
 		builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
@@ -207,7 +207,7 @@ internal class SynqraTestNode
 		*/
 		builder.Services.AddSingleton(options);
 
-		builder.AddTypeMetadataProvider([
+		builder.Services.AddTypeMetadataProvider([
 			typeof(DemoModel),
 			typeof(MyPocoTask),
 			typeof(SampleTaskModel),
