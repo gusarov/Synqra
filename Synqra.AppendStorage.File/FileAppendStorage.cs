@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.BinarySerializer;
@@ -28,9 +29,9 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 		  IOptions<FileAppendStorageOptions> options
 		, ISbxSerializerFactory serializerFactory
 		, JsonSerializerOptions jsonSerializerOptions
-		, Func<T, TKey> getKeyFromItem
-		, Func<TKey, string> getPathFromKey
-		, Func<string, TKey> getKeyFromPath
+		, [FromKeyedServices("FileAppendStorage")] Func<T, TKey> getKeyFromItem
+		, [FromKeyedServices("FileAppendStorage")] Func<TKey, string> getPathFromKey
+		, [FromKeyedServices("FileAppendStorage")] Func<string, TKey> getKeyFromPath
 		)
 	{
 		_serializer = serializerFactory.CreateSerializer();

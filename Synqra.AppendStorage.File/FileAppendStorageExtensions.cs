@@ -33,12 +33,13 @@ public static class FileAppendStorageExtensions
 		, Func<string, TKey> getHexKey
 		)
 		where T : class
+		where TKey : notnull
 	{
 		hostBuilder.AddAppendStorageFileCore();
 		hostBuilder.Services.TryAddSingleton<IAppendStorage<T, TKey>, FileAppendStorage<T, TKey>>();
-		hostBuilder.Services.AddSingleton(getKey);
-		hostBuilder.Services.AddSingleton(getKeyHex);
-		hostBuilder.Services.AddSingleton(getHexKey);
+		hostBuilder.Services.AddKeyedSingleton("FileAppendStorage", getKey);
+		hostBuilder.Services.AddKeyedSingleton("FileAppendStorage", getKeyHex);
+		hostBuilder.Services.AddKeyedSingleton("FileAppendStorage", getHexKey);
 	}
 
 	internal static void AddAppendStorageFileCore(this IHostApplicationBuilder hostBuilder)

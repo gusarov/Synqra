@@ -8,10 +8,10 @@ namespace Synqra;
 
 public static class TypeMetadataProviderExtensions
 {
-	public static void AddTypeMetadataProvider(this IHostApplicationBuilder hostApplicationBuilder, params Type[] types)
+	public static void AddTypeMetadataProvider(this IServiceCollection services, params Type[] types)
 	{
-		hostApplicationBuilder.Services.AddSingleton<ITypeMetadataProvider, TypeMetadataProvider>();
-		hostApplicationBuilder.Services.PostConfigure<TypeMetadataProviderConfig>(x =>
+		services.AddSingleton<ITypeMetadataProvider, TypeMetadataProvider>();
+		services.PostConfigure<TypeMetadataProviderConfig>(x =>
 		{
 			x.Types ??= new List<Type>();
 			foreach (var type in types)

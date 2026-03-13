@@ -2,6 +2,7 @@
 using Microsoft.JSInterop;
 using Synqra.BinarySerializer;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -45,13 +46,13 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 
 	// private readonly IndexedDBManager _tgnDbManager;
 
-	public IndexedDbAppendStorage(Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISbxSerializerFactory sbxSerializerFactory)
+	public IndexedDbAppendStorage([FromKeyedServices(nameof(IndexedDbAppendStorage<,>))] Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISbxSerializerFactory sbxSerializerFactory)
 	{
 		_keyAccessor = keyAccessor;
 		_indexedDbInterop = jsInterop;
 		_sbxSerializerFactory = sbxSerializerFactory;
 		_sbxSerializer = _sbxSerializerFactory.CreateSerializer();
-		_ = _indexedDbInterop.InitializeAsync();
+		AsyncInvoker.InvokeAsync(_indexedDbInterop.InitializeAsync());
 		// _tgnDbManager = tgnDbManager;
 	}
 
@@ -76,10 +77,17 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	}
 	public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
 	{
-		var list = new List<EventItem<TKey>>();
 		foreach (var item in items)
 		{
-			Span<byte> buf = stackalloc byte[16 * 1024];
+			await AppendAsync(item, cancellationToken);
+		}
+	}
+	public async Task AppendBatchAsyncTrue(IEnumerable<T> items, CancellationToken cancellationToken = default)
+	{
+		var list = new List<EventItem<TKey>>();
+		Span<byte> buf = stackalloc byte[16 * 1024];
+		foreach (var item in items)
+		{
 			int pos = 0;
 			_sbxSerializer.Reset();
 			_sbxSerializer.Serialize(buf, item, ref pos); // to isolate sideeffects for now, every item is with fresh serializer state. This needs to be changed, but this likely requires special event to be logged that resets serializer state.

@@ -7,13 +7,23 @@ namespace Synqra.AppendStorage.IndexedDb;
 
 public static class IndexedDbAppendStorageExtensions
 {
-	public static void AddIndexedDbAppendStorage<T, TKey>(this IServiceCollection services)
+	/*
+	public static void AddIndexedDbAppendStorage<T>(this IServiceCollection services)
+		where T : class, IIdentifiable<Guid>
+	{
+		services.AddIndexedDbAppendStorage<T, Guid>();
+	}
+	*/
+
+	public static void AddIndexedDbAppendStorage<T, TKey>(this IServiceCollection services, Func<T, TKey> keyAccessor)
 		where T : class
+		where TKey : notnull
 	{
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER")))
 		{
 			services.TryAddSingleton<IndexedDbJsInterop>();
 			services.TryAddSingleton<IAppendStorage<T, TKey>, IndexedDbAppendStorage<T, TKey>>();
+			services.TryAddKeyedSingleton(nameof(IndexedDbAppendStorage<,>), keyAccessor);
 			/*
 			services.AddIndexedDB(dbStore => {
 				dbStore.DbName = "TgNugetStore";

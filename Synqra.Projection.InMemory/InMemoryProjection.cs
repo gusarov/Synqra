@@ -134,6 +134,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		catch (Exception ex)
 		{
 			ProjectionStatus = $"Error: {ex.Message}";
+			CommandProcessed?.Invoke(this, EventArgs.Empty);
 			Console.Error.WriteLine($"{ex}");
 			throw;
 		}
@@ -573,7 +574,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		};
 		ctx.Events.Add(created);
 
-		if (false && cmd.Data is IBindableModel bm)
+		if (false && cmd.TargetObject is IBindableModel bm)
 		{
 			
 		}

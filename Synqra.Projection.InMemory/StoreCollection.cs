@@ -142,7 +142,11 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 						 // DataJson = dataJson,
 			TargetObject = item,
 		});
-		if (!OperatingSystem.IsBrowser())
+		if (OperatingSystem.IsBrowser())
+		{
+			AsyncInvoker.InvokeAsync(task);
+		}
+		else
 		{
 			task.GetAwaiter().GetResult();
 		}
