@@ -17,6 +17,7 @@ public partial class ContosoItem
 
 [SynqraModel]
 [Schema(2026.134, "1 CommandId Guid ContainerId Guid")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid")]
 public partial class FooContosoCommand : Command
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx)

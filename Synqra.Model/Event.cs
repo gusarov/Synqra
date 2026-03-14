@@ -37,7 +37,7 @@ public abstract partial class Event : IEvent, IGuidentifiable
 	public required partial Guid CommandId { get; set; }
 	// public required Guid UserId { get; set; }
 	[JsonIgnore] // too verbose, containerId (streamId) should be handled outside of event stream
-	public partial Guid ContainerId { get; set; } // like layer id
+	public partial Guid StreamId { get; set; } // like layer id
 
 	/*
 	public async Task AcceptAsync<T>(IEventVisitor<object?> visitor)

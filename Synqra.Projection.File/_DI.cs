@@ -86,7 +86,7 @@ public static class FileSynqraExtensions
 		//   - collection type: "node" collectionName: "" // main collection
 		//   - collection type: "node" collectionName: "archive" // additional named collection
 		//   - collection "userSettings"
-		public Guid ContainerId { get; set; } = SynqraGuids.SynqraRootContainerId; // for current phase this is global root container, no distinction yet, just to pass validations
+		public Guid StreamId { get; set; } = SynqraGuids.SynqraRootStreamId; // for current phase this is global root container, no distinction yet, just to pass validations
 	}
 
 	private class FileObjectStore : IObjectStore
@@ -102,7 +102,7 @@ public static class FileSynqraExtensions
 
 		private FileProjection _fileProjection => (FileProjection)_lazyFileProjection.Value;
 
-		public Guid ContainerId { get; } = SynqraGuids.SynqraRootContainerId; // for current phase this is global root container, no distinction yet, just to pass validations
+		public Guid StreamId { get; } = SynqraGuids.SynqraRootStreamId; // for current phase this is global root container, no distinction yet, just to pass validations
 
 		public ITypeMetadataProvider TypeMetadataProvider { get; }
 
@@ -124,7 +124,7 @@ public static class FileSynqraExtensions
 			_lazyFileProjection = fileProjection;
 			_options = options;
 			AppendStores = appendStores;
-			ContainerId = options.Value.ContainerId;
+			StreamId = options.Value.StreamId;
 			GuidGenerator = generator ?? new GuidExtensions.Generator();
 		}
 
@@ -173,7 +173,7 @@ public static class FileSynqraExtensions
 				var gtype = typeof(FileObjectCollection<>).MakeGenericType(type);
 				slot = (FileObjectCollection)Activator.CreateInstance(gtype, [
 				  /* store */ this
-				, /* containerId */ ContainerId
+				, /* streamId */ StreamId
 				, /* collectionId */ collectionId
 				, /* serializerFactory */ SerializerFactory
 				])!;
@@ -192,7 +192,7 @@ public static class FileSynqraExtensions
 			{
 				var col = new FileObjectCollection<T>(
 				  /* store */ this
-				, /* containerId */ ContainerId
+				, /* streamId */ StreamId
 				, /* collectionId */ collectionId
 				, /* serializerFactory */ SerializerFactory
 				);
@@ -424,12 +424,12 @@ public static class FileSynqraExtensions
 
 		public FileObjectCollection(
 			  FileObjectStore store
-			, Guid containerId
+			, Guid streamId
 			, Guid collectionId
 			, ISbxSerializerFactory serializerFactory
 			) : base(
 			  store
-			, containerId
+			, streamId
 			, collectionId
 			, serializerFactory
 			)
@@ -474,7 +474,7 @@ public static class FileSynqraExtensions
 			var attachedData = _store.Attach(item, this);
 			var task = _store.SubmitCommandAsync(new CreateObjectCommand
 			{
-				ContainerId = _store.ContainerId,
+				StreamId = _store.StreamId,
 				CollectionId = CollectionId,
 				TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 				CommandId = _store.GuidGenerator.CreateVersion7(), // This is a new object, so we generate a new command Id
@@ -617,7 +617,7 @@ public static class FileSynqraExtensions
 				EventId = GuidExtensions.CreateVersion7(),
 				Data = cmd,
 				CommandId = cmd.CommandId,
-				ContainerId = cmd.ContainerId,
+				StreamId = cmd.StreamId,
 			};
 			ctx.Events.Add(created);
 		}
@@ -666,9 +666,9 @@ public static class FileSynqraExtensions
 			{
 				throw new ArgumentException("CommandId is not specified", nameof(cmd));
 			}
-			if (cmd.ContainerId == default)
+			if (cmd.StreamId == default)
 			{
-				throw new ArgumentException("ContainerId is not specified", nameof(cmd));
+				throw new ArgumentException("StreamId is not specified", nameof(cmd));
 			}
 			if (cmd.TargetId == default)
 			{
@@ -704,7 +704,7 @@ public static class FileSynqraExtensions
 
 			var created = new ObjectCreatedEvent
 			{
-				ContainerId = cmd.ContainerId,
+				StreamId = cmd.StreamId,
 				EventId = GuidExtensions.CreateVersion7(),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
@@ -734,7 +734,7 @@ public static class FileSynqraExtensions
 					{
 						ctx.Events.Add(new ObjectPropertyChangedEvent
 						{
-							ContainerId = cmd.ContainerId,
+							StreamId = cmd.StreamId,
 							CommandId = cmd.CommandId,
 							CollectionId = cmd.CollectionId,
 							EventId = GuidExtensions.CreateVersion7(),
@@ -781,7 +781,7 @@ public static class FileSynqraExtensions
 		{
 			var ev = new ObjectPropertyChangedEvent
 			{
-				ContainerId = cmd.ContainerId,
+				StreamId = cmd.StreamId,
 				EventId = GuidExtensions.CreateVersion7(),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
@@ -804,7 +804,7 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
-				CollectionId = ev.CollectionId,
+				StreamId = ev.CollectionId,
 				Blob = ev.DataObject,
 			});
 		}
@@ -837,7 +837,7 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
-				CollectionId = ev.CollectionId,
+				StreamId = ev.CollectionId,
 				Blob = model,
 			});
 		}
@@ -851,7 +851,7 @@ public static class FileSynqraExtensions
 		{
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
-				CollectionId = _objectStore.TypeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
+				StreamId = _objectStore.TypeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
 				ObjectId = ev.CommandId,
 				Blob = ev.Data,
 			});
@@ -882,6 +882,6 @@ public sealed partial class Item
 	public partial Guid ObjectId { get; set; }
 
 	[JsonIgnore]
-	public Guid CollectionId { get; set; }
+	public Guid StreamId { get; set; }
 	public partial object Blob { get; set; }
 }

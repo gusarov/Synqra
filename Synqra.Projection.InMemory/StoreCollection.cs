@@ -12,12 +12,12 @@ internal abstract class InMemoryStoreCollection : StoreCollection, ISynqraCollec
 {
 	public InMemoryStoreCollection(
 		  IObjectStore store
-		, Guid containerId
+		, Guid streamId
 		, Guid collectionId
 		, ISbxSerializerFactory serializerFactory
 		) : base(
 		  store
-		, containerId
+		, streamId
 		, collectionId
 		, serializerFactory
 		)
@@ -44,14 +44,14 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 
 	public InMemoryStoreCollection(
 		  IObjectStore store
-		, Guid containerId
+		, Guid streamId
 		, Guid collectionId
 		, ISbxSerializerFactory serializerFactory
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		)
 		: base(
 			  store
-			, containerId
+			, streamId
 			, collectionId
 			, serializerFactory
 			)
@@ -133,7 +133,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		var attachedData = Store.Attach(item, this);
 		var task = Store.SubmitCommandAsync(new CreateObjectCommand
 		{
-			ContainerId = ContainerId,
+			StreamId = StreamId,
 			CollectionId = CollectionId,
 			TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id

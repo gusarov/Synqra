@@ -20,12 +20,13 @@ public static class SynqraGuids
 	 * - The sub-version 0 - is for constant guids. It should be guaranteed that there will be no guids of that version with dynamic parts.
 	 * - The other sub-versions are reserved.
 	 * - The remaining bits are available for customization or conters.
+	 * - 00000000-0000-8000-8000-C0DE00000000 is a reserved UUID to identify principles behind custom UUIDs
 	 * - 00000000-0000-8000-8000-C0DE2A21B27D is a reserved synqra-zero UUID to identify this "the Synqra UUID reservations table and principles document"
-	 * - 00000001-0000-8000-8000-C0DE2A21B27D is
+	 * - 00000001-0000-8000-8000-C0DE2A21B27D is ...
 	 */
 
-	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // This id is never visible and already in use
-	public static Guid SynqraRootContainerId = new("00000000-000C-8000-8000-C0DE2A21B27D"); // This id is never visible and already in use
+	public static Guid SynqraTypeNamespaceId = new("BAD8F923-0000-8000-8000-C0DE2A21B27D"); // type id 0 means - an objects, type is object. So the results are always unique and there is no type-specific knowledge can be retrieved from the id itself.
+	public static Guid SynqraRootStreamId = new("00000000-000C-8000-8000-C0DE2A21B27D"); // StreamId used to be ContainerId, and C stands for Container. Just a historical note. C was actually the first occupied type id in Synqra Guids
 	// public static Guid SynqraTypeNamespaceId = new("00000001-0000-8000-8000-C0DE2A21B27D"); //
 
 	/*

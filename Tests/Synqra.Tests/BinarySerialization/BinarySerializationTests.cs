@@ -666,7 +666,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				Data = new CreateObjectCommand
 				{
 					CommandId = default,
-					ContainerId = default,
+					StreamId = default,
 					CollectionId = default,
 					TargetObject = null,
 					TargetId = default,
@@ -697,7 +697,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				EventId = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf80001"),
 				CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83b0002"),
 				//  CommandId Guid
-				//  ContainerId Guid
+				//  StreamId Guid
 				//  TargetTypeId Guid
 				//  CollectionId Guid
 				//  TargetId Guid
@@ -705,7 +705,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				Data = new CreateObjectCommand
 				{
 					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83b0002"),
-					ContainerId = default,
+					StreamId = default,
 					TargetTypeId = new Guid("bdb0fa49-b78b-56a4-98de-154556290012"),
 					CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc2060013"),
 					TargetId = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
@@ -735,7 +735,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				CollectionId = new Guid("7a8aa4c5-8dbe-58f9-bd0c-63fbc206d770"),
 				TargetId     = new Guid("0199eeb4-33db-70db-a16d-f966e2c9f33d"),
 				CommandId    = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83be683"),
-				ContainerId  = default,
+				StreamId = default,
 				EventId      = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
 			},
 		}, "C301BB0104DFEFAAFC5C30602AD9FD1BF847F804DCEFAAFC5CB2B1C5AB90B83BE68304DBEFAAFC5CDB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
