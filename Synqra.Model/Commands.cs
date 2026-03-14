@@ -17,6 +17,7 @@ namespace Synqra;
 [Schema(2025.792, "1 CommandId Guid ContainerId Guid")]
 [Schema(2025.793, "1")]
 [Schema(2025.794, "1 CommandId Guid ContainerId Guid")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid")]
 public abstract partial class Command : ISynqraCommand
 {
 	protected Command()
@@ -25,7 +26,7 @@ public abstract partial class Command : ISynqraCommand
 	}
 
 	public partial Guid CommandId { get; set; }
-	public partial Guid ContainerId { get; set; }
+	public partial Guid StreamId { get; set; }
 
 	protected abstract Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx);
 
@@ -57,6 +58,7 @@ public abstract partial class Command : ISynqraCommand
 [Schema(2026.168, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
 [Schema(2026.169, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid TargetObject object?")]
 [Schema(2026.170, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
 public abstract partial class SingleObjectCommand : Command
 {
 	public partial Guid TargetTypeId { get; set; }
@@ -80,6 +82,7 @@ public abstract partial class SingleObjectCommand : Command
 [Schema(2025.798, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
 [Schema(2025.799, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IBindableModel")]
 [Schema(2025.800, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
 public partial class CreateObjectCommand : SingleObjectCommand
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
@@ -100,6 +103,7 @@ public class DeleteObjectCommand : Command
 [Schema(2025.792, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2025.793, "1 PropertyName string OldValue object? NewValue object? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
 [Schema(2025.794, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
 public partial class ChangeObjectPropertyCommand : SingleObjectCommand
 {
 	public required partial string PropertyName { get; set; }

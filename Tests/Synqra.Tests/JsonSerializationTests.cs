@@ -74,7 +74,7 @@ public class JsonSerializationTests
 		var obj = new CommandCreatedEvent
 		{
 			CommandId = Guid.NewGuid(),
-			ContainerId = Guid.NewGuid(),
+			StreamId = Guid.NewGuid(),
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
@@ -109,7 +109,7 @@ public class JsonSerializationTests
 					"CollectionId": "00000000-0000-0000-0000-000000000000",
 					"TargetId": "00000000-0000-0000-0000-000000000000",
 					"CommandId": "{{obj.Data.CommandId}}",
-					"ContainerId": "00000000-0000-0000-0000-000000000000"
+					"StreamId": "00000000-0000-0000-0000-000000000000"
 				},
 				"EventId": "{{obj.EventId}}",
 				"CommandId": "{{obj.CommandId}}"
@@ -150,7 +150,7 @@ public class JsonSerializationTests
 		var @event = new CommandCreatedEvent
 		{
 			CommandId = Guid.NewGuid(),
-			ContainerId = Guid.NewGuid(),
+			StreamId = Guid.NewGuid(),
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
@@ -199,7 +199,7 @@ public class JsonSerializationTests
 				"CollectionId": "00000000-0000-0000-0000-000000000000",
 				"TargetId": "00000000-0000-0000-0000-000000000000",
 				"CommandId": "{{@event.Data.CommandId}}",
-				"ContainerId": "00000000-0000-0000-0000-000000000000"
+				"StreamId": "00000000-0000-0000-0000-000000000000"
 			},
 			"EventId": "{{@event.EventId}}",
 			"CommandId": "{{@event.CommandId}}"

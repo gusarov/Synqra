@@ -41,7 +41,7 @@ public class JsonAppendStorageTests : AppendStorageTests
 		HostBuilder.AddAppendStorageJsonLines<TestItem, int>("Id", x => x.Id, x => x.ToString(), x => int.Parse(x));
 		HostBuilder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
 		HostBuilder.AddAppendStorageJsonLines<StorableModel, string>("Key", x => x.Key, x => x, x => x);
-		HostBuilder.AddAppendStorageJsonLines<Item>("", x => (x.CollectionId, x.ObjectId));
+		HostBuilder.AddAppendStorageJsonLines<Item>("", x => (x.StreamId, x.ObjectId));
 
 		// ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
@@ -68,7 +68,7 @@ public class FileAppendStorageTests : AppendStorageTests
 		// HostBuilder.AddAppendStorageFile<TestItem, int>(x => x.Id);
 		HostBuilder.AddAppendStorageFile<Event>(x => x.EventId);
 		HostBuilder.AddAppendStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
-		HostBuilder.AddAppendStorageFile<Item>(x => (x.CollectionId, x.ObjectId));
+		HostBuilder.AddAppendStorageFile<Item>(x => (x.StreamId, x.ObjectId));
 		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
 		Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
 	}
@@ -251,7 +251,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
-			ContainerId = GuidExtensions.CreateVersion7(),
+			StreamId = GuidExtensions.CreateVersion7(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -261,14 +261,14 @@ public abstract class AppendStorageTests : BaseTest
 
 		var back = await storage.GetAsync(ev.EventId);
 		await Assert.That(back.EventId).IsEqualTo(back.EventId);
-		await Assert.That(back.ContainerId).IsEqualTo(back.ContainerId);
+		await Assert.That(back.StreamId).IsEqualTo(back.StreamId);
 		await Assert.That(back.CommandId).IsEqualTo(back.CommandId);
 
 		Reopen();
 		storage = Get<Event, Guid>();
 		back = await storage.GetAsync(ev.EventId);
 		await Assert.That(back.EventId).IsEqualTo(back.EventId);
-		await Assert.That(back.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(back.StreamId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
 		await Assert.That(back.CommandId).IsEqualTo(back.CommandId);
 	}
 
@@ -284,7 +284,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
-			ContainerId = GuidExtensions.CreateVersion7(),
+			StreamId = GuidExtensions.CreateVersion7(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -299,7 +299,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = Guid.Parse("00000002-0001-8000-8000-000000000000"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
-			ContainerId = GuidExtensions.CreateVersion7(),
+			StreamId = GuidExtensions.CreateVersion7(),
 			Data = new StorableModel
 			{
 				Title = "Bob",
@@ -309,12 +309,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var back = await storage.GetAsync(ev.EventId);
 		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
-		await Assert.That(back.ContainerId).IsEqualTo(ev.ContainerId);
+		await Assert.That(back.StreamId).IsEqualTo(ev.StreamId);
 		await Assert.That(back.CommandId).IsEqualTo(ev.CommandId);
 
 		var back2 = await storage.GetAsync(ev2.EventId);
 		await Assert.That(back2.EventId).IsEqualTo(ev2.EventId);
-		await Assert.That(back2.ContainerId).IsEqualTo(ev2.ContainerId);
+		await Assert.That(back2.StreamId).IsEqualTo(ev2.StreamId);
 		await Assert.That(back2.CommandId).IsEqualTo(ev2.CommandId);
 
 		Reopen();
@@ -323,13 +323,13 @@ public abstract class AppendStorageTests : BaseTest
 		var Rback = await storage.GetAsync(ev.EventId);
 		await Assert.That(Rback).IsNotSameReferenceAs(back);
 		await Assert.That(Rback.EventId).IsEqualTo(ev.EventId);
-		await Assert.That(Rback.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(Rback.StreamId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
 		await Assert.That(Rback.CommandId).IsEqualTo(ev.CommandId);
 
 		var Rback2 = await storage.GetAsync(ev2.EventId);
 		await Assert.That(Rback2).IsNotSameReferenceAs(back2);
 		await Assert.That(Rback2.EventId).IsEqualTo(ev2.EventId);
-		await Assert.That(Rback2.ContainerId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
+		await Assert.That(Rback2.StreamId).IsEqualTo(default); // container id can not be persisted, it is ingnored on serialization
 		await Assert.That(Rback2.CommandId).IsEqualTo(ev2.CommandId);
 	}
 
@@ -340,7 +340,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item0 = new Item
 		{
-			CollectionId = GuidExtensions.CreateVersion7(), // different collection
+			StreamId = GuidExtensions.CreateVersion7(), // different collection
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -352,7 +352,7 @@ public abstract class AppendStorageTests : BaseTest
 		var collectionId1 = GuidExtensions.CreateVersion7();
 		var item1 = new Item
 		{
-			CollectionId = collectionId1,
+			StreamId = collectionId1,
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -363,7 +363,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item2 = new Item
 		{
-			CollectionId = collectionId1,
+			StreamId = collectionId1,
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -374,7 +374,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item3 = new Item
 		{
-			CollectionId = GuidExtensions.CreateVersion7(), // different collection
+			StreamId = GuidExtensions.CreateVersion7(), // different collection
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -400,7 +400,7 @@ public abstract class AppendStorageTests : BaseTest
 		var hitRange = storage.GetAllAsync((collectionId1, item2.ObjectId)).ToBlockingEnumerable().ToArray();
 		foreach (var item in hitRange)
 		{
-			EmergencyLog.Default.LogDebug($"ByExactRange: {item.CollectionId} {item.ObjectId} {item.Blob}");
+			EmergencyLog.Default.LogDebug($"ByExactRange: {item.StreamId} {item.ObjectId} {item.Blob}");
 		}
 		await Assert.That(hitRange).HasCount(1);
 		await Assert.That(((MyPocoTask)hitRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
@@ -585,7 +585,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		{
 			CollectionId = default,
 			CommandId = default,
-			EventId = SynqraGuids.SynqraRootContainerId,
+			EventId = SynqraGuids.SynqraRootStreamId,
 			TargetId = default,
 			TargetTypeId = default,
 		});
@@ -593,7 +593,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		(_storage as IDisposable)?.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo($$"""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{{SynqraGuids.SynqraRootContainerId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"00000000-000c-8000-8000-c0de2a21b27d","CommandId":"00000000-0000-0000-0000-000000000000"}
+{{SynqraGuids.SynqraRootStreamId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"00000000-000c-8000-8000-c0de2a21b27d","CommandId":"00000000-0000-0000-0000-000000000000"}
 
 """.NormalizeNewLines());
 	}

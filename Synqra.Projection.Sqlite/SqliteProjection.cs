@@ -258,7 +258,7 @@ public class SqliteStore : IObjectStore
 				// , /* store */ _databaseContext.Set<Command>() // TODO this is a problem
 				, /* set */ null
 				, /* store */ this
-				, /* containerId */ ContainerId
+				, /* streamId */ StreamId
 				, /* collectionId */ collectionId
 				, /* serializerFactory */ _serializerFactory
 				])!;
@@ -282,7 +282,7 @@ public class SqliteStore : IObjectStore
 				// , /* store */ _databaseContext.Set<T>()
 				, null
 				, /* store */ this
-				, /* containerId */ ContainerId
+				, /* streamId */ StreamId
 				, /* collectionId */ collectionId
 				, /* serializerFactory */ _serializerFactory
 				);
@@ -311,7 +311,7 @@ public class SqliteStore : IObjectStore
 	{
 	}
 
-	public Guid ContainerId { get; }
+	public Guid StreamId { get; }
 }
 
 public class SqliteProjection : IProjection

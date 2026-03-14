@@ -990,7 +990,7 @@ $$"""
 				var task = __store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
-					ContainerId = SynqraGuids.SynqraRootContainerId,
+					StreamId = SynqraGuids.SynqraRootStreamId,
 					CollectionId = __collectionId ?? Guid.Empty,
 
 					TargetObject = this,

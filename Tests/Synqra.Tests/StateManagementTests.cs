@@ -59,11 +59,11 @@ public class FileStateManageementTests : StateManagementTests
 		hostApplicationBuilder.AddAppendStorageFile<Command>(e => e.CommandId);
 		hostApplicationBuilder.AddAppendStorageFile<Item>(e =>
 		{
-			if (e.CollectionId == default)
+			if (e.StreamId == default)
 			{
 				throw new Exception("Unknown collection id");
 			}
-			return (e.CollectionId, e.ObjectId);
+			return (e.StreamId, e.ObjectId);
 		});
 
 		hostApplicationBuilder.Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
@@ -91,11 +91,11 @@ public class JsonLinesStateManageementTests : StateManagementTests
 		hostApplicationBuilder.AddAppendStorageJsonLines<Command>("", e => e.CommandId);
 		hostApplicationBuilder.AddAppendStorageJsonLines<Item>("", e =>
 		{
-			if (e.CollectionId == default)
+			if (e.StreamId == default)
 			{
 				throw new Exception("Unknown collection id");
 			}
-			return (e.CollectionId, e.ObjectId);
+			return (e.StreamId, e.ObjectId);
 		});
 
 		hostApplicationBuilder.Configuration["Storage:JsonLinesStorage:FileName"] = _fileName;

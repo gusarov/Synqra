@@ -355,7 +355,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(name);
 	}
 
-	public Guid ContainerId { get; } = SynqraGuids.SynqraRootContainerId;
+	public Guid StreamId { get; } = SynqraGuids.SynqraRootStreamId;
 
 	ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)
 	{
@@ -371,7 +371,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			var gtype = typeof(InMemoryStoreCollection<>).MakeGenericType(type);
 			slot = (InMemoryStoreCollection)Activator.CreateInstance(gtype, [this
-				, /*containerId*/ ContainerId
+				, /*streamId*/ StreamId
 				, collectionId/*collectionId*/
 				, _serializerFactory
 #if NET8_0_OR_GREATER
@@ -400,7 +400,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			var col = new InMemoryStoreCollection<T>(
 				  /* store */ this
-				, /*containerId*/ ContainerId
+				, /*streamId*/ StreamId
 				, collectionId/*collectionId*/
 				, _serializerFactory
 #if NET8_0_OR_GREATER
@@ -424,9 +424,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			{
 				cmd.CommandId = GuidExtensions.CreateVersion7();
 			}
-			if (cmd.ContainerId == default)
+			if (cmd.StreamId == default)
 			{
-				cmd.ContainerId = ContainerId;
+				cmd.StreamId = StreamId;
 			}
 		}
 		if (newCommand is SingleObjectCommand soc)
@@ -516,7 +516,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			EventId = GuidExtensions.CreateVersion7(),
 			Data = cmd,
 			CommandId = cmd.CommandId,
-			ContainerId = cmd.ContainerId,
+			StreamId = cmd.StreamId,
 		};
 		ctx.Events.Add(created);
 		/*
@@ -562,7 +562,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 		var created = new ObjectCreatedEvent
 		{
-			ContainerId = cmd.ContainerId,
+			StreamId = cmd.StreamId,
 			EventId = GuidExtensions.CreateVersion7(),
 			CollectionId = cmd.CollectionId,
 			CommandId = cmd.CommandId,
@@ -593,7 +593,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				{
 					ctx.Events.Add(new ObjectPropertyChangedEvent
 					{
-						ContainerId = cmd.ContainerId,
+						StreamId = cmd.StreamId,
 						CommandId = cmd.CommandId,
 						CollectionId = cmd.CollectionId,
 						EventId = GuidExtensions.CreateVersion7(),
@@ -641,7 +641,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var created = new ObjectPropertyChangedEvent
 		{
-			ContainerId = cmd.ContainerId,
+			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
 

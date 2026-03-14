@@ -175,7 +175,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 				__store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
-					ContainerId = default,
+					StreamId = default,
 					CollectionId = default,
 
 					TargetObject = this,

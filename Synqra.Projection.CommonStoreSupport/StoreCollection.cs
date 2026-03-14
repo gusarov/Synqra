@@ -12,7 +12,7 @@ namespace Synqra;
 public abstract class StoreCollection : ISynqraCollection
 {
 	public IObjectStore Store { get; }
-	public Guid ContainerId { get; }
+	public Guid StreamId { get; }
 	public Guid CollectionId { get; }
 	public ISbxSerializerFactory SerializerFactory { get; }
 
@@ -29,17 +29,17 @@ public abstract class StoreCollection : ISynqraCollection
 
 	public StoreCollection(
 		  IObjectStore store
-		, Guid containerId
+		, Guid streamId
 		, Guid collectionId
 		, ISbxSerializerFactory serializerFactory
 		)
 	{
 		Store = store ?? throw new ArgumentNullException(nameof(store));
-		ContainerId = containerId;
+		StreamId = streamId;
 		CollectionId = collectionId;
-		if (containerId == default)
+		if (streamId == default)
 		{
-			throw new ArgumentException("", nameof(containerId));
+			throw new ArgumentException("", nameof(streamId));
 		}
 		if (collectionId == default)
 		{
