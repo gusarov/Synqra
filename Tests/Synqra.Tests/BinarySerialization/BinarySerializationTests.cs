@@ -800,11 +800,11 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		var count = (int)ListTypeId.MAX;
 		Assert.That(count).IsEqualTo(16).GetAwaiter().GetResult();
 		var ser = new SbxSerializer();
+		Span<Byte> buffer = stackalloc byte[1];
 		for (int i = 0; i < count; i++)
 		{
 			var listTypeId = (ListTypeId)(i);
 			var typeId = (TypeId)(TypeId.ListTypeFrom - i);
-			Span<Byte> buffer = stackalloc byte[1];
 			int pos = 0;
 			ser.Serialize(buffer, (long)typeId, ref pos);
 			Console.WriteLine($"{i,2} {listTypeId,12} <--> {(int)typeId,3} 0z{buffer[0],2:X2} {typeId,12}"); // z - for ZigZag

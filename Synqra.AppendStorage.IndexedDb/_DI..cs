@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Runtime.InteropServices;
 // using TG.Blazor.IndexedDB;
@@ -15,7 +16,7 @@ public static class IndexedDbAppendStorageExtensions
 	}
 	*/
 
-	public static void AddIndexedDbAppendStorage<T, TKey>(this IServiceCollection services, Func<T, TKey> keyAccessor)
+	public static void AddIndexedDbAppendStorage<T, TKey>(this IServiceCollection services, Func<T, TKey> keyAccessor, IConfiguration configuration)
 		where T : class
 		where TKey : notnull
 	{
@@ -24,6 +25,7 @@ public static class IndexedDbAppendStorageExtensions
 			services.TryAddSingleton<IndexedDbJsInterop>();
 			services.TryAddSingleton<IAppendStorage<T, TKey>, IndexedDbAppendStorage<T, TKey>>();
 			services.TryAddKeyedSingleton(nameof(IndexedDbAppendStorage<,>), keyAccessor);
+			services.Configure<IndexedDbOptions>(configuration.GetSection(nameof(IndexedDbOptions)));
 			/*
 			services.AddIndexedDB(dbStore => {
 				dbStore.DbName = "TgNugetStore";

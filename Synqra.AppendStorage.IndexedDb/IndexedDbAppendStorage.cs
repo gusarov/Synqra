@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 using Synqra.BinarySerializer;
 using System;
@@ -23,16 +24,20 @@ internal record struct EventItem<TKey>
 {
 	public TKey Key { get; init; }
 	public byte[] Bin { get; init; }
-#if DEBUG
-	public object Debug { get; init; }
-#endif
+	public object? Debug { get; init; }
 }
 
 internal record struct EventItem
 {
 	public byte[] Bin { get; init; }
+	public object? Debug { get; init; }
+}
+
+class IndexedDbOptions
+{
+	public bool PopulateDebugJson { get; set; }
 #if DEBUG
-	public object Debug { get; init; }
+	= true;
 #endif
 }
 
@@ -42,15 +47,17 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	private readonly Func<T, TKey> _keyAccessor;
 	private readonly IndexedDbJsInterop _indexedDbInterop;
 	private readonly ISbxSerializerFactory _sbxSerializerFactory;
+	private readonly IOptions<IndexedDbOptions> _options;
 	private readonly ISbxSerializer _sbxSerializer;
 
 	// private readonly IndexedDBManager _tgnDbManager;
 
-	public IndexedDbAppendStorage([FromKeyedServices(nameof(IndexedDbAppendStorage<,>))] Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISbxSerializerFactory sbxSerializerFactory)
+	public IndexedDbAppendStorage([FromKeyedServices(nameof(IndexedDbAppendStorage<,>))] Func<T, TKey> keyAccessor, IndexedDbJsInterop jsInterop, ISbxSerializerFactory sbxSerializerFactory, IOptions<IndexedDbOptions> options)
 	{
 		_keyAccessor = keyAccessor;
 		_indexedDbInterop = jsInterop;
 		_sbxSerializerFactory = sbxSerializerFactory;
+		_options = options;
 		_sbxSerializer = _sbxSerializerFactory.CreateSerializer();
 		AsyncInvoker.InvokeAsync(_indexedDbInterop.InitializeAsync());
 		// _tgnDbManager = tgnDbManager;
@@ -68,9 +75,7 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 			await _indexedDbInterop.AddAsync(new EventItem
 			{
 				Bin = buf[..pos].ToArray(),
-#if DEBUG
-				Debug = item,
-#endif
+				Debug = _options.Value.PopulateDebugJson ? item : null,
 			}, _keyAccessor(item));
 			// Console.WriteLine(await _indexedDbInterop.TestAsync($"AppendAsync: {item}"));
 		}
@@ -96,9 +101,7 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 			{
 				Key = _keyAccessor(item),
 				Bin = buf[..pos].ToArray(),
-#if DEBUG
-				// Debug = item,
-#endif
+				Debug = _options.Value.PopulateDebugJson ? item : null,
 			};
 			list.Add(itemDto);
 		}
