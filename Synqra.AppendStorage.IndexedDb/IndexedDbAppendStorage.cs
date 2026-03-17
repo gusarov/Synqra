@@ -109,11 +109,6 @@ internal class IndexedDbAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		await _indexedDbInterop.AddBatchAsync(list, "key");
 	}
 
-	public Task<string> TestAsync(string input)
-	{
-		return _indexedDbInterop.TestAsync(input);
-	}
-
 	public void Dispose()
 	{
 	}
