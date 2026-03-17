@@ -13,8 +13,6 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 	where TKey : notnull
 	// where T : IIdentifiable<TKey>
 {
-	Task<string> TestAsync(string input);
-
 	Task AppendAsync(T item, CancellationToken cancellationToken = default);
 	Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default);
 
