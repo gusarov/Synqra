@@ -17,7 +17,6 @@
 <h2>Test 001 - Add element to collection</h2>
 <InputText @bind-Value="itemName" data-testid="itemName" />
 <button @onclick="AddElement" data-testid="btnAdd">Add element to collection</button>
-<button @onclick="TestInterop" data-testid="btnTest">Test Interop</button>
 <button @onclick="TestBatch" data-testid="btnTest">Test Batch</button>
 <button @onclick="StressTest" data-testid="btnStress">Stress Test</button>
 <table>
@@ -61,12 +60,6 @@
         {
             ItemName = itemName,
         });
-    }
-
-    private async void TestInterop(MouseEventArgs args)
-    {
-        var res = await appendStorage.TestAsync("asd");
-        Console.WriteLine(res);
     }
 
     private async void TestBatch(MouseEventArgs args)
