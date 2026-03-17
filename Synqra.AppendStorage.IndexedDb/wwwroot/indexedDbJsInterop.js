@@ -7,10 +7,6 @@ let synqraDb;
 let synqraDbResult;
 let synqraDbPromise;
 
-export function test(message) {
-    return message + " pass";
-}
-
 export function initialize() {
     if (!synqraDbPromise) {
         synqraDbPromise = new Promise((resolve, reject) => {

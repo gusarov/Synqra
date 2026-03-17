@@ -45,8 +45,6 @@ public class SqliteAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable
         pragma.ExecuteNonQuery();
     }
 
-    public Task<string> TestAsync(string input) => Task.FromResult(input);
-
     public Task AppendAsync(T item, CancellationToken cancellationToken = default)
     {
         AppendCore(item);

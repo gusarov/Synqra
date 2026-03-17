@@ -84,8 +84,6 @@ public class FileAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IDisposable, 
 		}
 	}
 
-	public Task<string> TestAsync(string input) => Task.FromResult(input);
-
 	public Task AppendAsync(T item, CancellationToken cancellationToken = default)
 	{
 		AppendCore(item);

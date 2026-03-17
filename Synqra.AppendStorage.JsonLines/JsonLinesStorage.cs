@@ -608,11 +608,6 @@ public static class AppendStorageJsonLinesExtensions
 #endif
 		}
 
-		public Task<string> TestAsync(string input)
-		{
-			throw new NotImplementedException();
-		}
-
 		public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			// in this storage we can only get all items, so we will read all and find the one with matching key

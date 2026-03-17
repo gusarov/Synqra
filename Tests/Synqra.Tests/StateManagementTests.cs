@@ -448,11 +448,6 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	{
 		throw new NotImplementedException();
 	}
-
-	public Task<string> TestAsync(string input)
-	{
-		throw new NotImplementedException();
-	}
 }
 
 [SynqraModel]

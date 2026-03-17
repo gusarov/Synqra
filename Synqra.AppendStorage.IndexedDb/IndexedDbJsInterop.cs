@@ -7,12 +7,6 @@ public class IndexedDbJsInterop(IJSRuntime jsRuntime) : IAsyncDisposable
 	private readonly Lazy<Task<IJSObjectReference>> _moduleTask = new(() => jsRuntime.InvokeAsync<IJSObjectReference>(
 			"import", "./_content/Synqra.AppendStorage.IndexedDb/indexedDbJsInterop.js").AsTask());
 
-	public async Task<string> TestAsync(string message)
-	{
-		var module = await _moduleTask.Value;
-		return await module.InvokeAsync<string>("test", message);
-	}
-
 	public async Task InitializeAsync()
 	{
 		var module = await _moduleTask.Value;
