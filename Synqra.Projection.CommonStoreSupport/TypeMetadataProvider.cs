@@ -56,6 +56,10 @@ public static class TypeMetadataProviderExtensions
 			if (!exists)
 			{
 				var sma = type.GetCustomAttribute<SynqraModelAttribute>();
+				var legacyTypeIds = type.GetCustomAttributes<SynqraLegacyTypeIdAttribute>()
+					.Select(x => x.SynqraTypeId)
+					.Distinct()
+					.ToArray();
 				Guid typeId = sma?.SynqraTypeId ?? GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName); // it is not a secret, so for type identification SHA1 is totally fine
 				slot = new TypeMetadata
 				{
@@ -64,6 +68,10 @@ public static class TypeMetadataProviderExtensions
 				};
 				_typeMetadataByType[type] = slot;
 				_typeMetadataByTypeId[slot.TypeId] = slot;
+				foreach (var legacyTypeId in legacyTypeIds)
+				{
+					_typeMetadataByTypeId[legacyTypeId] = slot;
+				}
 			}
 		}
 

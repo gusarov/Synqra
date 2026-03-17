@@ -20,10 +20,21 @@ public sealed class SynqraModelAttribute : Attribute
 		
 	}
 
-	public SynqraModelAttribute(Guid synqraTypeId)
+	public SynqraModelAttribute(string synqraTypeId)
 	{
-		SynqraTypeId = synqraTypeId;
+		SynqraTypeId = Guid.Parse(synqraTypeId ?? throw new ArgumentNullException(nameof(synqraTypeId)));
 	}
 
-	public Guid? SynqraTypeId { get; init; }
+	public Guid? SynqraTypeId { get; }
+}
+
+[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
+public sealed class SynqraLegacyTypeIdAttribute : Attribute
+{
+	public SynqraLegacyTypeIdAttribute(string synqraTypeId)
+	{
+		SynqraTypeId = Guid.Parse(synqraTypeId ?? throw new ArgumentNullException(nameof(synqraTypeId)));
+	}
+
+	public Guid SynqraTypeId { get; }
 }

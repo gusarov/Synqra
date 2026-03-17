@@ -252,3 +252,12 @@ public sealed partial class SampleNewSchemaEvolutionModel // after refactoring
 	public partial string NewProperty2 { get; set; }
 	public partial string NewName { get; set; }
 }
+
+[SynqraModel]
+[Schema(1.0, "1 Name string")]
+[Schema(2.0, "1 Name string Extra string")]
+public sealed partial class SampleAppendOnlySchemaEvolutionModel
+{
+	public partial string Name { get; set; }
+	public partial string Extra { get; set; }
+}

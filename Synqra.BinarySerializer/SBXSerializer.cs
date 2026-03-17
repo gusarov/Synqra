@@ -354,6 +354,13 @@ public class SbxSerializer : ISbxSerializer
 		, bool? emitTypeId = null
 		)
 	{
+		// TODO: Actually utf8 is not efficient encoding, it is very verbose. Consider to reencode this as varints sequence. On top of that - delata encoding and offset pointer(s) might give huge benefit for different countries, e.g. imagine to use 2 bytes to refer to 32K of most typical hyeroglyphs!
+		//  0x0000 –   0x007F: utf8: 1 bytes, varint_array: 1 bytes
+		//  0x0080 –   0x07FF: utf8: 2 bytes, varint_array: 2 bytes
+		//  0x0800 –   0x3FFF: utf8: 3 bytes, varint_array: 2 bytes
+		//  0x4000 –   0xFFFF: utf8: 3 bytes, varint_array: 3 bytes
+		// 0x10000 - 0x10FFFF: utf8: 4 bytes, varint_array: 3 bytes
+
 		// obj - null? Then if we emit type, it is TypeId.Null, otherwise try known types or if type formatter supports built-in null serialization.
 		// string, bool?, int? - the all potentially can support built-in NULL serialization.
 

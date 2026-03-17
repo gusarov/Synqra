@@ -574,7 +574,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		};
 		ctx.Events.Add(created);
 
-		if (false && cmd.TargetObject is IBindableModel bm)
+		if (false && cmd.TargetObject is IBindableModel bm) // I just found it out while debugging, do not remember why originally, but it is likely because it is not implemented yet (and still not)
 		{
 			
 		}

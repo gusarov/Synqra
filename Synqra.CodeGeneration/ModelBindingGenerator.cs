@@ -699,13 +699,17 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						body.AppendLine($$"""
 			case "{{pro.Name}}":
+			{
 				if (value is long l)
 				{
 					this.{{pro.Name}} = ({{FQN(pro.Type)}})l;
-				} else {
+				}
+				else
+				{
 					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
 				}
 				break;
+			}
 """);
 					}
 					else
@@ -797,6 +801,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro)
 							: "this." + pro.Name;
+						// body.AppendLine($"\t\t\tif (pos >= buffer.Length)");
+						// body.AppendLine($"\t\t\t{{");
+						// body.AppendLine($"\t\t\t\treturn;");
+						// body.AppendLine($"\t\t\t}}");
 						body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
 					}
 						body.AppendLine($"\t\t}}");
@@ -826,11 +834,31 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				// Include properties from this class and all base classes that have a setter
 				foreach (var pro in GetAllInstancePropertiesOfType(classData.Data))
 				{
-					body.AppendLine($$"""
+					if (pro.Type.ToString() == "int")
+					{
+						body.AppendLine($$"""
+			case "{{pro.Name}}":
+			{
+				if (value is long l)
+				{
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})l;
+				}
+				else
+				{
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				}
+				break;
+			}
+""");
+					}
+					else
+					{
+						body.AppendLine($$"""
 			case "{{pro.Name}}":
 				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
 				break;
 """);
+					}
 				}
 				body.AppendLine(
 """

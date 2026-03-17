@@ -1328,4 +1328,15 @@ public class BinarySerializationSchemaEvolutionTests : BaseTest
 		Assert.That(item.NewProperty2).IsEqualTo(null).GetAwaiter().GetResult();
 	}
 
+	[Test]
+	public async Task Should_14_deserialize_append_only_payload_with_latest_registered_schema()
+	{
+		_ser.Map(1, 1.0, typeof(SampleAppendOnlySchemaEvolutionModel));
+		var item = _ser.Deserialize<SampleAppendOnlySchemaEvolutionModel>(_v1Test, ref pos);
+
+		await Assert.That(item).IsNotNull();
+		Assert.That(item.Name).IsEqualTo("Test").GetAwaiter().GetResult();
+		Assert.That(item.Extra).IsEqualTo(null).GetAwaiter().GetResult();
+	}
+
 }
