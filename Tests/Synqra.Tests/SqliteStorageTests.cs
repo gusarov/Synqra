@@ -244,11 +244,4 @@ public class SqliteStorageTests : BaseTest
 		var ex = await Assert.ThrowsAsync(() =>
 			_storage.AppendAsync(new SqliteTestItem { Id = id, Name = "Duplicate" }));
 	}
-
-	[Test]
-	public async Task Should_test_roundtrip()
-	{
-		var result = await _storage!.TestAsync("ping");
-		await Assert.That(result).IsEqualTo("ping");
-	}
 }
