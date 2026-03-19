@@ -20,7 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
-    <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.AppendStorage.BlobStorage\Synqra.AppendStorage.BlobStorage.csproj" />
+    <ProjectReference Include="..\Synqra.BlobStorage.Abstractions\Synqra.BlobStorage.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

@@ -581,7 +581,7 @@ public class GuidExtensionsTests3 : BaseTest
 	[Explicit]
 	public void GetUnixSeconds_2038Problem_DateTime2()
 	{
-		Console.WriteLine((int)(DateTime.UtcNow.Ticks - Gre) / TimeSpan.TicksPerSecond);
+		Console.WriteLine((int)(DateTime.UtcNow.Ticks - GregEpochTicks) / TimeSpan.TicksPerSecond);
 		MeasureOps(static () => _ = (int)(DateTime.UtcNow.Ticks - UnixEpochTicks) / TimeSpan.TicksPerSecond);
 	}
 

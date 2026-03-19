@@ -877,6 +877,8 @@ public static class FileSynqraExtensions
 [SynqraModel]
 [Schema(1, "0")]
 [Schema(3000.0, "1 ObjectId Guid Blob object")]
+[Schema(2026.213, "1 ObjectId Guid Blob object")]
+[Schema(2026.213, "1 ObjectId Guid Blob object")]
 public sealed partial class Item
 {
 	public partial Guid ObjectId { get; set; }
