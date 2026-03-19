@@ -21,7 +21,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Synqra.BinarySerializer;
 using Synqra.Projection.File;
-using Synqra.AppendStorage.File;
+using Synqra.BlobStorage.File;
 using Synqra.Projection;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.Tests.SampleModels.Syncronization;
@@ -55,9 +55,9 @@ public class FileStateManageementTests : StateManagementTests
 	{
 		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.AddFileSynqraStore();
-		hostApplicationBuilder.AddAppendStorageFile<Event>(e => e.EventId);
-		hostApplicationBuilder.AddAppendStorageFile<Command>(e => e.CommandId);
-		hostApplicationBuilder.AddAppendStorageFile<Item>(e =>
+		hostApplicationBuilder.AddBlobStorageFile<Event>(e => e.EventId);
+		hostApplicationBuilder.AddBlobStorageFile<Command>(e => e.CommandId);
+		hostApplicationBuilder.AddBlobStorageFile<Item>(e =>
 		{
 			if (e.StreamId == default)
 			{
@@ -66,7 +66,7 @@ public class FileStateManageementTests : StateManagementTests
 			return (e.StreamId, e.ObjectId);
 		});
 
-		hostApplicationBuilder.Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
+		hostApplicationBuilder.Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
 	}
 }
 

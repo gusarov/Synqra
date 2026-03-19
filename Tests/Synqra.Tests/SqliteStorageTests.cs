@@ -1,7 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
-using Synqra.AppendStorage.Sqlite;
+using Synqra.AppendStorage.BlobStorage;
+using Synqra.BlobStorage.Sqlite;
 using Synqra.BinarySerializer;
 using Synqra.Tests.TestHelpers;
 using System.Runtime.CompilerServices;
@@ -89,14 +90,15 @@ public class SqliteStorageTests : BaseTest
 		_storage?.Dispose();
 	}
 
-	private static SqliteAppendStorage<SqliteTestItem, Guid> CreateStorage(string dbPath)
+	private static BlobAppendStorage<SqliteTestItem, Guid> CreateStorage(string dbPath)
 	{
-		var options = Options.Create(new SqliteAppendStorageOptions
+		var options = new SqliteBlobStorageOptions
 		{
 			ConnectionString = $"Data Source={dbPath}",
-		});
-		return new SqliteAppendStorage<SqliteTestItem, Guid>(
-			options,
+		};
+		var blobStorage = new SqliteBlobStorage<Guid>(options, nameof(SqliteTestItem));
+		return new BlobAppendStorage<SqliteTestItem, Guid>(
+			blobStorage,
 			new TestSerializerFactory(),
 			item => item.Id);
 	}

@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
-using Synqra.AppendStorage.File;
 using Synqra.AppendStorage.JsonLines;
+using Synqra.BlobStorage.File;
 using Synqra.BinarySerializer;
 using Synqra.Projection.File;
 using Synqra.Tests.SampleModels;
@@ -66,11 +66,11 @@ public class FileAppendStorageTests : AppendStorageTests
 	{
 		base.Register(hostApplicationBuilder);
 		// HostBuilder.AddAppendStorageFile<TestItem, int>(x => x.Id);
-		HostBuilder.AddAppendStorageFile<Event>(x => x.EventId);
-		HostBuilder.AddAppendStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
-		HostBuilder.AddAppendStorageFile<Item>(x => (x.StreamId, x.ObjectId));
+		HostBuilder.AddBlobStorageFile<Event>(x => x.EventId);
+		HostBuilder.AddBlobStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
+		HostBuilder.AddBlobStorageFile<Item>(x => (x.StreamId, x.ObjectId));
 		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
-		Configuration["Storage:FileStorage:Folder"] = Path.Combine(_folder, "[Type]") + Path.DirectorySeparatorChar;
+		Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
 	}
 
 	[Test]
@@ -90,8 +90,8 @@ public class FileAppendStorageTests : AppendStorageTests
 	public async Task Should_F10_prepare_file_name(int num, string key, string expectedPath)
 	{
 		expectedPath = expectedPath.Replace('/', Path.DirectorySeparatorChar);
-		var storage = Get<StorableModel, string>();
-		await Assert.That(((FileAppendStorage<StorableModel, string>)storage).GetFileNameFor(key, false)).EndsWith(expectedPath);
+		var blobStorage = ServiceProvider.GetRequiredKeyedService<FileBlobStorage<string>>(nameof(StorableModel));
+		await Assert.That(blobStorage.GetFileNameFor(key, false)).EndsWith(expectedPath);
 	}
 }
 
@@ -112,7 +112,7 @@ public abstract class AppendStorageTests : BaseTest
 			ser.Snapshot();
 		});
 
-		// hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
+		hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options
 		hostApplicationBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions); // im not sure yet, context or options
 	}
 
@@ -309,13 +309,15 @@ public abstract class AppendStorageTests : BaseTest
 
 		var back = await storage.GetAsync(ev.EventId);
 		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
-		await Assert.That(back.StreamId).IsEqualTo(ev.StreamId);
+		await Assert.That(back.StreamId).IsEqualTo(ev.StreamId); // it should return same object reference, so streamId should be the same
 		await Assert.That(back.CommandId).IsEqualTo(ev.CommandId);
+		await Assert.That(back).IsSameReferenceAs(ev);
 
 		var back2 = await storage.GetAsync(ev2.EventId);
 		await Assert.That(back2.EventId).IsEqualTo(ev2.EventId);
 		await Assert.That(back2.StreamId).IsEqualTo(ev2.StreamId);
-		await Assert.That(back2.CommandId).IsEqualTo(ev2.CommandId);
+		await Assert.That(back2.CommandId).IsEqualTo(ev2.CommandId); // it should return same object reference, so streamId should be the same
+		await Assert.That(back2).IsSameReferenceAs(ev2);
 
 		Reopen();
 		storage = Get<Event>();
