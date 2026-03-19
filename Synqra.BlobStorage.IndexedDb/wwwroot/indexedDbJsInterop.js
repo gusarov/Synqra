@@ -8,6 +8,12 @@ const separator = "§";
 function getCompoundKey(storeName, keyText) {
     return `${storeName}${separator}${keyText}`;
 }
+<<<<<<< HEAD
+=======
+export function test(message) {
+    return message + " pass";
+}
+>>>>>>> 7303277 (Introduce IBlobStorage layer between FileBlobStorage and BlobAppendStorage [CoPiloted])
 export function initialize(dbName, objectStoreName) {
     if (dbName) {
         databaseName = dbName;
