@@ -62,3 +62,21 @@ It all starts from IMyStoreContext : IStoreContext
 1. Before any successful exchange of commands or events, client should send a negotiation "HELLO" frame
 
 8 bytes magic: AD790DD0594578[01] - this represents Syncra [V1] protocol for Little Endian
+
+==================================================================
+Event and object need some mean of identification in order for event to refer to object, also for any other serialized reference to object.
+Every reference should be GUID. Event itself has an id. Every obejct/serializable carry the type. Notion is similar to polymorphic JSON serialization. There is a notion of "RequestedType", this is when you do Deserialize<Some> here Some is a type specifier. In this case, serializer knows we talk about Some, but the actual type of the object might be SomeDerived. So the type specifier is optional.
+
+Event:
+{
+	_t: string = 'ObjectCreatedEvent',
+	EventId: Guid = '00000000-0000-0000-0000-000000000000', // events needs to be able to generate concurrently, so they need to be guid
+	TargetId: Guid = '00000000-0000-0000-0000-000000000000', // reference to object
+}
+
+==================================================================
+
+00000000-0000-7000-0000-000000000000
+1             2                   4
+
+00000000-0000-0000-0000-000000000000

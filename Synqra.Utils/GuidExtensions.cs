@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
@@ -103,13 +104,11 @@ public static class GuidExtensions
 			return GuidExtensions.CreateVersion1(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _v1v6nodeId);
 		}
 
-		[Obsolete("Use CreateVersion7 instead")]
 		public unsafe Guid CreateVersion6()
 		{
 			return CreateVersion6(DateTime.UtcNow, (ushort)Interlocked.Increment(ref _clockSeq), _v1v6nodeId);
 		}
 
-		[Obsolete("Use CreateVersion7 instead")]
 		internal unsafe Guid CreateVersion6(DateTimeOffset dateTime, ushort clockSeq, ulong node)
 		{
 			var greg_100_ns = dateTime.ToUniversalTime().Ticks - GregEpochTicks;
@@ -285,6 +284,17 @@ public static class GuidExtensions
 
 			return g;
 		}
+
+		public Guid CreateVersion8sq()
+		{
+			// Synqra Guid is v8 custom guid with a following rules:
+			// first 4 bytes is unix seconds time
+
+
+
+			return default;
+		}
+
 	}
 
 	private static readonly Encoding _utf8 = new UTF8Encoding(false, false); // for name-based UUIDs
@@ -484,7 +494,6 @@ public static class GuidExtensions
 		return CreateHashBased(sha1, 5, namespaceId, input);
 	}
 
-	[Obsolete("Use CreateVersion7 instead")]
 	public static unsafe Guid CreateVersion6() => Default.CreateVersion6();
 
 	public static Guid CreateVersion7() => Default.CreateVersion7();

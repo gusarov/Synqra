@@ -26,7 +26,7 @@ public static class SynqraGuids
 	 */
 
 	public static Guid SynqraTypeNamespaceId = new("BAD8F923-0000-8000-8000-C0DE2A21B27D"); // type id 0 means - an objects, type is object. So the results are always unique and there is no type-specific knowledge can be retrieved from the id itself.
-	public static Guid SynqraRootStreamId = new("00000000-000C-8000-8000-C0DE2A21B27D"); // StreamId used to be ContainerId, and C stands for Container. Just a historical note. C was actually the first occupied type id in Synqra Guids
+	public static Guid SynqraRootStreamId    = new("00000000-000C-8000-8000-C0DE2A21B27D"); // StreamId used to be ContainerId, and C stands for Container. Just a historical note. C was actually the first occupied type id in Synqra Guids
 	// public static Guid SynqraTypeNamespaceId = new("00000001-0000-8000-8000-C0DE2A21B27D"); //
 
 	/*

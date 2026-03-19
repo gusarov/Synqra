@@ -1,11 +1,14 @@
 const DATABASE_NAME = "Synqra";
 const CURRENT_VERSION = 1;
+
 const collectionName = "events";
-let synqraDb;
-let synqraDbPromise;
-export function initialize() {
+
+let synqraDb: IDBDatabase;
+let synqraDbPromise: Promise<void> | undefined;
+
+export function initialize(): Promise<void> {
     if (!synqraDbPromise) {
-        synqraDbPromise = new Promise((resolve, reject) => {
+        synqraDbPromise = new Promise<void>((resolve, reject) => {
             try {
                 let synqraDbRequest = indexedDB.open(DATABASE_NAME, CURRENT_VERSION);
                 // console.log('Synqra Indexed DB Initialize...', synqraDb);
@@ -18,24 +21,25 @@ export function initialize() {
                     // console.error('Synqra Indexed DB Initialize error.', synqraDb.error);
                     reject(synqraDbRequest.error);
                 };
-                synqraDbRequest.onupgradeneeded = function (event) {
+                synqraDbRequest.onupgradeneeded = function (event: IDBVersionChangeEvent) {
                     const db = synqraDbRequest.result;
                     const oldVersion = event.oldVersion;
                     console.warn("Synqra Indexed DB Upgrade needed from v" + oldVersion);
+
                     if (oldVersion < 1) {
                         // const objStore = db.createObjectStore("events", { keyPath: "seq_id", autoIncrement: true });
                         // objStore.add({ _sys: 'ObjectStoreCreated' });
                         db.createObjectStore(collectionName);
                     }
                 };
-            }
-            catch (error) {
+            } catch (error) {
                 reject(error);
             }
         });
     }
     return synqraDbPromise;
 }
+
 /*
 export function set(collectionName: string, value: unknown): void {
     const synqraDb = indexedDB.open(DATABASE_NAME, CURRENT_VERSION);
@@ -66,7 +70,8 @@ export async function get(collectionName: string, id: IDBValidKey): Promise<unkn
     return result;
 }
 */
-export async function add(newItem, key) {
+
+export async function add(newItem: unknown, key: IDBValidKey): Promise<void> {
     console.log("Synqra Indexed DB add|");
     await initialize();
     console.log("Synqra Indexed DB add...");
@@ -80,7 +85,8 @@ export async function add(newItem, key) {
     console.log("L4...");
     console.log("Synqra Indexed DB add succeeded.");
 }
-export async function addBatch(newItems, keyField) {
+
+export async function addBatch(newItems: Record<string, unknown>[], keyField: string): Promise<void> {
     await initialize();
     console.log("Synqra Indexed DB addBatch...");
     const transaction = synqraDb.transaction(collectionName, "readwrite");
@@ -89,13 +95,14 @@ export async function addBatch(newItems, keyField) {
     console.log("L2...");
     newItems.forEach((newItem) => {
         console.log("L3...");
-        collection.add(newItem, newItem[keyField]);
+        collection.add(newItem, newItem[keyField] as IDBValidKey);
     });
     console.log("L4...");
     console.log("Synqra Indexed DB addBatch succeeded.");
 }
-export async function getAll(fromKey, pageSize) {
-    return await new Promise((resolve, reject) => {
+
+export async function getAll(fromKey: IDBValidKey, pageSize: number): Promise<unknown[]> {
+    return await new Promise<unknown[]>((resolve, reject) => {
         const synqraDb = indexedDB.open(DATABASE_NAME, CURRENT_VERSION);
         synqraDb.onerror = function () {
             reject(synqraDb.error);
@@ -104,11 +111,13 @@ export async function getAll(fromKey, pageSize) {
             const transaction = synqraDb.result.transaction(collectionName, "readonly");
             const collection = transaction.objectStore(collectionName);
             const result = collection.getAll(IDBKeyRange.lowerBound(fromKey, true), pageSize);
+
             result.onsuccess = function () {
                 console.log("indexedDbInterop getAll");
                 resolve(result.result);
                 console.log("indexedDbInterop getAll ok");
             };
+
             result.onerror = function () {
                 console.error(result.error);
                 reject(result.error);
@@ -116,4 +125,3 @@ export async function getAll(fromKey, pageSize) {
         };
     });
 }
-//# sourceMappingURL=indexedDbJsInterop.js.map

@@ -14,7 +14,18 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 	// where T : IIdentifiable<TKey>
 {
 	Task AppendAsync(T item, CancellationToken cancellationToken = default);
-	Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default);
+	async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+	{
+		foreach (var item in items)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (item is null)
+			{
+				throw new ArgumentException("Items cannot contain null values.", nameof(items));
+			}
+			await AppendAsync(item, cancellationToken);
+		}
+	}
 
 	Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default);
 	IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
