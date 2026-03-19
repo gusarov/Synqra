@@ -1,8 +1,10 @@
 ﻿using Synqra.Tests.TestHelpers;
 using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using TUnit.Assertions.Extensions;
+using static Synqra.GuidExtensions;
 
 namespace Synqra.Utils.Tests;
 
@@ -299,6 +301,20 @@ public class GuidExtensionsTests3 : BaseTest
 	}
 
 	[Test]
+	public async Task Should_create_v6()
+	{
+		var guid = GuidExtensions.CreateVersion6();
+		Console.WriteLine(guid);
+		Console.WriteLine(GuidExtensions.CreateVersion6());
+		await Assert.That(guid.GetVariant()).IsEqualTo(1);
+		await Assert.That(guid.GetVersion()).IsEqualTo(6);
+
+		var timestamp = guid.GetTimestamp();
+		Console.WriteLine(timestamp);
+		await Assert.That((DateTime.UtcNow - timestamp).TotalSeconds).IsLessThan(1);
+	}
+
+	[Test]
 	public async Task Should_handle_v8_example_vector()
 	{
 		var guid = GuidExtensions.CreateVersion8_Sha256_Dns("www.example.com");
@@ -513,6 +529,106 @@ public class GuidExtensionsTests3 : BaseTest
 	{
 		var perf = MeasureOps(static () => GuidExtensions.CreateVersion7());
 		await Assert.That(perf).IsGreaterThan(1_000_000);
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public async Task Should_create_v6_fast()
+	{
+		var perf = MeasureOps(static () => GuidExtensions.CreateVersion6());
+		await Assert.That(perf).IsGreaterThan(1_000_000);
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public async Task Should_create_v8sq_fast_DateTime()
+	{
+		var generator = new GuidExtensions.Generator();
+
+		var perf = MeasureOps(() => generator.CreateVersion8sq());
+		await Assert.That(perf).IsGreaterThan(1_000_000);
+	}
+
+	const long UnixEpochTicks = 0x089F7FF5F7B58000;
+	static DateTime _unixEpoch = new DateTime(UnixEpochTicks, DateTimeKind.Utc);
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_DateTimeOffset()
+	{
+		MeasureOps(static () => _ = (int)(DateTimeOffset.UtcNow - _unixEpoch).TotalSeconds);
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_DateTime()
+	{
+		Console.WriteLine((int)(DateTime.UtcNow - _unixEpoch).TotalSeconds);
+		MeasureOps(static () => _ = (int)(DateTime.UtcNow - _unixEpoch).TotalSeconds);
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_DateTime2()
+	{
+		Console.WriteLine((int)(DateTime.UtcNow.Ticks - Gre) / TimeSpan.TicksPerSecond);
+		MeasureOps(static () => _ = (int)(DateTime.UtcNow.Ticks - UnixEpochTicks) / TimeSpan.TicksPerSecond);
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_StopwatchGetTimestamp()
+	{
+		Console.WriteLine((int)((Stopwatch.GetTimestamp() - UnixEpochTicks) / TimeSpan.TicksPerSecond));
+		Console.WriteLine(Stopwatch.GetTimestamp());
+		MeasureOps(static () => _ = (int)((Stopwatch.GetTimestamp() - UnixEpochTicks) / TimeSpan.TicksPerSecond));
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_EnvironmentTickCount64()
+	{
+		MeasureOps(static () => _ = (int)((Environment.TickCount64 - UnixEpochTicks) / TimeSpan.TicksPerSecond));
+	}
+
+	[Test]
+	[Category("Performance")]
+	[Property("CI", "false")]
+	[Explicit]
+	public void GetUnixSeconds_2038Problem_GetSystemTimeAsFileTime()
+	{
+		MeasureOps(static () =>
+		{
+			GetSystemTimeAsFileTime(out var fileTime);
+			_ = (int)((((long)fileTime.DateTimeHigh << 32) | fileTime.DateTimeLow) - UnixEpochTicks) / TimeSpan.TicksPerSecond;
+		});
+		GetSystemTimeAsFileTime(out var fileTime);
+		Console.WriteLine((fileTime.DateTimeHigh << 32) | fileTime.DateTimeLow);
+		Console.WriteLine((int)((((long)fileTime.DateTimeHigh << 32) | fileTime.DateTimeLow) - UnixEpochTicks) / TimeSpan.TicksPerSecond);
+	}
+
+	[DllImport("kernel32.dll")]
+	static extern void GetSystemTimeAsFileTime(out FILETIME lpSystemTimeAsFileTime);
+
+	[StructLayout(LayoutKind.Sequential)]
+	struct FILETIME
+	{
+		public uint DateTimeLow;
+		public uint DateTimeHigh;
 	}
 
 #if NET9_0_OR_GREATER

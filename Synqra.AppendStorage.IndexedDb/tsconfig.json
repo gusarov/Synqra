@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2015",
+    "strict": true,
+    "outDir": "wwwroot",
+    "rootDir": "TypeScript",
+    "sourceMap": true,
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["TypeScript/**/*.ts"],
+  "exclude": ["node_modules"]
+}
