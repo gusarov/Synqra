@@ -35,6 +35,7 @@ public static class SynqraGuids
 	 * Reserved UUIDs:
 	 *   - C0DE0000-0000-8000-8000-000000000000 is a reserved UUID to identify principles behind custom UUIDs (vendor-neutral)
 	 *   - C0DEADD0-1032-8000-8000-000000000000 is a reserved synqra-zero UUID to identify "the Synqra UUID reservations table and principles document". Sha256('synqra')[..4] = ADD01032
+	 *   - C0DEADD0-1032-8000-800C-000000000000 is a reserved synqra GUID for root/default stream id (before stream id is fully supported in a system, it is a reserved field and requires reserved value to avoid zeros validation)
 	 *
 	 * For Synqra: SHA256("synqra") → first 4 bytes → ADD01032
 	 * To compute: pwsh -c "$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes('synqra'));($h[0..3]|%{$_.ToString('X2')})-join''"
