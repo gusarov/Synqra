@@ -1,11 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!--
-    <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
-    -->
     <IsPackable>false</IsPackable>
+    <TypeScriptCompileBlocked Condition="'$(Configuration)' == 'Release'">true</TypeScriptCompileBlocked>
+    <TypeScriptCompileOnSaveEnabled Condition="'$(Configuration)' == 'Release'">false</TypeScriptCompileOnSaveEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,23 +17,21 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
     <PackageReference Include="Microsoft.TypeScript.MSBuild" Version="5.7.3">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Condition="'$(TargetFramework)' == 'net10.0' " Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Condition="'$(TargetFramework)' == 'net9.0' " Version="9.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Condition="'$(TargetFramework)' == 'net8.0' " Version="8.0.0" />
-    <!--
-    <PackageReference Include="TG.Blazor.IndexedDB.sisn" Version="1.0.0" />
-    -->
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
-    <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.AppendStorage.BlobStorage\Synqra.AppendStorage.BlobStorage.csproj" />
+    <ProjectReference Include="..\Synqra.BlobStorage.Abstractions\Synqra.BlobStorage.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>
