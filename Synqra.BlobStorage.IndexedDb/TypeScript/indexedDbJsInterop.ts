@@ -10,13 +10,6 @@ function getCompoundKey(storeName: string, keyText: string): string {
     return `${storeName}${separator}${keyText}`;
 }
 
-<<<<<<< HEAD
-=======
-export function test(message: string): string {
-    return message + " pass";
-}
-
->>>>>>> 7303277 (Introduce IBlobStorage layer between FileBlobStorage and BlobAppendStorage [CoPiloted])
 export function initialize(dbName?: string, objectStoreName?: string): Promise<void> {
     if (dbName) {
         databaseName = dbName;
