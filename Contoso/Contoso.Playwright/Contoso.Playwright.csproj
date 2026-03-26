@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- Exclude from 'dotnet test' at solution level; run explicitly with: dotnet test Contoso/Contoso.Playwright -->
-    <IsTestProject>false</IsTestProject>
+    <!-- Browser tests stay local-first because the tests themselves are explicit and marked CI=false. -->
+    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,0 +1,122 @@
+@page "/opfs-poc"
+@using Contoso.Wasm.OpfsPoc
+@inject OpfsPocJsInterop OpfsPocInterop
+
+<PageTitle>Synqra Contoso OPFS PoC</PageTitle>
+
+<div data-testid="opfs-poc-page">
+    <h1>OPFS PoC</h1>
+    <p>This page runs browser-side OPFS checks on open for both async APIs and sync access handles in a dedicated worker.</p>
+
+    <div data-testid="opfs-poc-run-state">@GetRunState()</div>
+    <div data-testid="opfs-poc-summary">@(Result?.Summary ?? (_runError is null ? "Waiting to run." : _runError))</div>
+    @if (Result is not null)
+    {
+        <div data-testid="opfs-poc-completed-at">@Result.CompletedAtUtc</div>
+    }
+
+    @if (_runError is not null)
+    {
+        <pre data-testid="opfs-poc-error">@_runError</pre>
+    }
+    else if (_isRunning)
+    {
+        <p>Running OPFS validation...</p>
+    }
+
+    @if (Result is not null)
+    {
+        <section>
+            <h2>Suites</h2>
+            @foreach (var suite in Result.Suites)
+            {
+                <article data-testid="@($"opfs-suite-{suite.Key}")">
+                    <h3>@suite.Name</h3>
+                    <div data-testid="@($"opfs-suite-{suite.Key}-status")">@GetSuiteState(suite)</div>
+                    <div data-testid="@($"opfs-suite-{suite.Key}-message")">@suite.Message</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>Status</th>
+                                <th>Detail</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var step in suite.Steps)
+                            {
+                                <tr data-testid="@($"opfs-step-{suite.Key}-{step.Key}")">
+                                    <td>@step.Name</td>
+                                    <td data-testid="@($"opfs-step-{suite.Key}-{step.Key}-status")">@(step.Passed ? "Passed" : "Failed")</td>
+                                    <td data-testid="@($"opfs-step-{suite.Key}-{step.Key}-message")">@step.Message</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </article>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private bool _isRunning;
+    private string? _runError;
+
+    private OpfsPocResult? Result { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _isRunning = true;
+        StateHasChanged();
+
+        try
+        {
+            Result = await OpfsPocInterop.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            _runError = ex.ToString();
+        }
+        finally
+        {
+            _isRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetRunState()
+    {
+        if (_isRunning)
+        {
+            return "Running";
+        }
+
+        if (_runError is not null)
+        {
+            return "Failed";
+        }
+
+        if (Result is null)
+        {
+            return "Idle";
+        }
+
+        return Result.IsSuccess ? "Success" : "Failed";
+    }
+
+    private static string GetSuiteState(OpfsSuiteResult suite)
+    {
+        if (!suite.Supported)
+        {
+            return "Unsupported";
+        }
+
+        return suite.Passed ? "Passed" : "Failed";
+    }
+}

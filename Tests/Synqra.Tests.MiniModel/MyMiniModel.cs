@@ -9,6 +9,7 @@ namespace Synqra.Tests.MiniModel;
 [Schema(2025.793, "1 Id int Subject string? Number int")]
 [Schema(2025.794, "1 Id int")]
 [Schema(2025.795, "1 Id int Subject string? Number int")]
+[Schema(2026.231, "1 Id int Subject string? Number int")]
 public partial class MyMiniModel : MyBaseModel
 {
 	public partial string? Subject { get; set; }
