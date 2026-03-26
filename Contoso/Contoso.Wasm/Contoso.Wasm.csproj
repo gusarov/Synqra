@@ -8,10 +8,16 @@
     <StaticWebAssetProjectMode>Default</StaticWebAssetProjectMode>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <RunAOTCompilation>true</RunAOTCompilation>
+    <TypeScriptCompileBlocked Condition="'$(Configuration)' == 'Release'">true</TypeScriptCompileBlocked>
+    <TypeScriptCompileOnSaveEnabled Condition="'$(Configuration)' == 'Release'">false</TypeScriptCompileOnSaveEnabled>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.3" />
+    <PackageReference Include="Microsoft.TypeScript.MSBuild" Version="5.7.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

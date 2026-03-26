@@ -1,3 +1,4 @@
+using Contoso.Wasm.OpfsPoc;
 using Contoso.Model;
 using Contoso.Projection.InMemory;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
@@ -21,8 +22,13 @@ builder.Services.AddSbxSerializer(ser =>
 });
 
 // Projection
+builder.Services.AddTypeMetadataProvider(
+	typeof(ContosoItem),
+	typeof(FooContosoCommand),
+	typeof(FooContosoEvent));
 builder.Services.AddSingleton<JsonSerializerContext>(ContosoJsonSerializerContext.Default);
 builder.Services.AddSingleton(ContosoJsonSerializerContext.DefaultOptions);
 builder.Services.AddSingleton<ContosoInMemoryProjection>();
+builder.Services.AddScoped<OpfsPocJsInterop>();
 
 await builder.Build().RunAsync();
