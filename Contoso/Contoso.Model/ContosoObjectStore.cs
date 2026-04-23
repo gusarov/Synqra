@@ -15,22 +15,23 @@ public interface IContosoObjectStore : IObjectStore
 	ISynqraCollection<ContosoItem> Root { get; }
 }
 
+/*
 public class ContosoObjectStore : InMemoryProjection, IContosoObjectStore
 {
 	public ContosoObjectStore(
-		ISbxSerializerFactory serializerFactory
-		, ITypeMetadataProvider typeMetadataProvider
-		, IAppendStorage<Event, Guid>? eventStorage = null
-		, IEventReplicationService? eventReplicationService = null
-		, JsonSerializerOptions? jsonSerializerOptions = null
-		, JsonSerializerContext? jsonSerializerContext = null
+		// ISbxSerializerFactory serializerFactory
+		// , ITypeMetadataProvider typeMetadataProvider
+		// , IAppendStorage<Event, Guid>? eventStorage = null
+		// , IEventReplicationService? eventReplicationService = null
+		// , JsonSerializerOptions? jsonSerializerOptions = null
+		// , JsonSerializerContext? jsonSerializerContext = null
 		) : base(
-			serializerFactory
-			, typeMetadataProvider
-			, eventStorage
-			, eventReplicationService
-			, jsonSerializerOptions
-			, jsonSerializerContext
+			// serializerFactory
+			// , typeMetadataProvider
+			// , eventStorage
+			// , eventReplicationService
+			// , jsonSerializerOptions
+			// , jsonSerializerContext
 			)
 	{
 	}
@@ -43,3 +44,4 @@ public class ContosoObjectStore : InMemoryProjection, IContosoObjectStore
 		}
 	}
 }
+*/
