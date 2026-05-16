@@ -17,8 +17,8 @@
     <InternalsVisibleTo Include="Synqra" />
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
-    <PackageReference Include="System.Text.Json" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

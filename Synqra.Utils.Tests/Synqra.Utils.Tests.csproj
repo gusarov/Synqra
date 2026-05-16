@@ -26,9 +26,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="TUnit" Version="0.20" />
-    <PackageReference Include="MongoDB.Bson" Version="3.5.0" />
-    <PackageReference Include="MongoDB.Driver" Version="3.5.0" />
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="MongoDB.Bson" />
+    <PackageReference Include="MongoDB.Driver" />
   </ItemGroup>
   
 </Project>

@@ -48,22 +48,22 @@
     <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
     <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\Synqra.Tests.TestHelpers\Synqra.Tests.TestHelpers.csproj" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.3" Condition="'$(TargetFramework)'=='net10.0'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Condition="'$(TargetFramework)'=='net10.0'">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tasks" Version="9.0.0">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tasks">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="MongoDB.Bson" Version="3.5.0" />
-    <PackageReference Include="MongoDB.Driver" Version="3.5.0" />
-    <PackageReference Include="TUnit" Version="0.20" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="MongoDB.Bson" />
+    <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
   </ItemGroup>
 
   <ItemGroup>
