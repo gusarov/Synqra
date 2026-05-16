@@ -15,14 +15,14 @@
 
   <!--
   <ItemGroup Condition="'$(TargetFramework)'=='netstandard2.0' OR '$(TargetFramework)'=='netstandard2.1'">
-    <PackageReference Include="System.Runtime" Version="4.3.0" />
-    <PackageReference Include="System.Threading.Tasks" Version="4.3.0" />
+    <PackageReference Include="System.Runtime" />
+    <PackageReference Include="System.Threading.Tasks" />
   </ItemGroup>
  -->
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <InternalsVisibleTo Include="Synqra.Tests.MiniModel" /><!-- THIS IS SERIOUS LIMITATION THAT NEEDS TO BE LIFTED -->
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
