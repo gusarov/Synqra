@@ -2,15 +2,13 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
-
   <ItemGroup>
     <!-- System packages -->
     <PackageVersion Include="System.Memory" Version="4.6.3" />
     <PackageVersion Include="System.Runtime" Version="4.3.0" />
     <PackageVersion Include="System.Text.Json" Version="10.0.0" />
-    <PackageVersion Include="System.Threading.AccessControl" Version="10.0.0" />
+    <PackageVersion Include="System.Threading.AccessControl" Version="10.0.8" />
     <PackageVersion Include="System.Threading.Tasks" Version="4.3.0" />
-
     <!-- Microsoft.Extensions packages -->
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
@@ -19,36 +17,28 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
-
     <!-- Microsoft.AspNetCore packages -->
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.3" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.3" />
-
     <!-- Microsoft.Data packages -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.13" />
     <PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.3" />
-
     <!-- Microsoft.EntityFrameworkCore packages -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tasks" Version="10.0.3" />
-
     <!-- Microsoft.CodeAnalysis packages -->
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
-
     <!-- Microsoft.NET packages -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
-
     <!-- Microsoft.TypeScript -->
     <PackageVersion Include="Microsoft.TypeScript.MSBuild" Version="5.7.3" />
-
     <!-- MongoDB packages -->
     <PackageVersion Include="MongoDB.Bson" Version="3.5.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.5.0" />
-
     <!-- Testing packages -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
