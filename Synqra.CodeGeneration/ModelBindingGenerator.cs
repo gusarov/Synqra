@@ -493,6 +493,30 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var classMembers = classData.Clazz.Members;
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
+			// Detect [SynqraModel(OptimisticConcurrency = true)] on this class.
+			// When set, generated property setters submit commands with
+			// CommandSubmissionOptions { ExpectedTargetVersion = <currentVersion> } so
+			// the projection rejects stale writes (ConcurrencyException).
+			bool optimisticConcurrency = false;
+			foreach (var attr in classData.Data.GetAttributes())
+			{
+				if (attr.AttributeClass?.Name != "SynqraModelAttribute") continue;
+				foreach (var named in attr.NamedArguments)
+				{
+					if (named.Key == "OptimisticConcurrency"
+						&& named.Value.Value is bool b
+						&& b)
+					{
+						optimisticConcurrency = true;
+					}
+				}
+			}
+			// String fragment inserted right before the closing ')' of SubmitCommandAsync(...)
+			// Empty when opted out (preserves historical behaviour).
+			string submissionOptionsArg = optimisticConcurrency
+				? ", new global::Synqra.CommandSubmissionOptions { ExpectedTargetVersion = __store.GetTargetVersion(__store.GetId(this)) }"
+				: "";
+
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
 			{
@@ -1028,7 +1052,7 @@ $$"""
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
 					NewValue = value
-				});
+				}{{submissionOptionsArg}});
 				if (!OperatingSystem.IsBrowser())
 				{
 					task.GetAwaiter().GetResult();
