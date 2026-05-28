@@ -416,10 +416,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 #endif
 	}
 
-	public Task SubmitCommandAsync(ISynqraCommand newCommand)
-		=> SubmitCommandAsync(newCommand, options: null);
-
-	public Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options)
+	public Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
 		// Optimistic concurrency precondition. We check before any normalization or
 		// event production so a rejected command leaves NO trace in the event stream.

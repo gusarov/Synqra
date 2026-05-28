@@ -493,29 +493,17 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var classMembers = classData.Clazz.Members;
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
-			// Detect [SynqraModel(OptimisticConcurrency = true)] on this class.
-			// When set, generated property setters submit commands with
-			// CommandSubmissionOptions { ExpectedTargetVersion = <currentVersion> } so
-			// the projection rejects stale writes (ConcurrencyException).
-			bool optimisticConcurrency = false;
-			foreach (var attr in classData.Data.GetAttributes())
-			{
-				if (attr.AttributeClass?.Name != "SynqraModelAttribute") continue;
-				foreach (var named in attr.NamedArguments)
-				{
-					if (named.Key == "OptimisticConcurrency"
-						&& named.Value.Value is bool b
-						&& b)
-					{
-						optimisticConcurrency = true;
-					}
-				}
-			}
-			// String fragment inserted right before the closing ')' of SubmitCommandAsync(...)
-			// Empty when opted out (preserves historical behaviour).
-			string submissionOptionsArg = optimisticConcurrency
-				? ", new global::Synqra.CommandSubmissionOptions { ExpectedTargetVersion = __store.GetTargetVersion(__store.GetId(this)) }"
-				: "";
+			// Every generated setter submits with a CommandSubmissionOptions carrying the
+			// target's current version. The InMemoryProjection (and any future projection
+			// that wants the protection) checks this against its authoritative version and
+			// raises ConcurrencyException on mismatch.
+			//
+			// This is unconditional for setter-driven mutations — no per-model opt-in.
+			// Manually-constructed commands still flow through SubmitCommandAsync(cmd, null)
+			// (the default-null overload) and keep last-writer-wins semantics, so existing
+			// hand-written code is unaffected.
+			const string submissionOptionsArg =
+				", new global::Synqra.CommandSubmissionOptions { ExpectedTargetVersion = __store.GetTargetVersion(__store.GetId(this)) }";
 
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)

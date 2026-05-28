@@ -111,15 +111,18 @@ public partial class DerivedModel : BaseModel
 	}
 
 	[Test]
-	public void OptimisticConcurrency_opt_in_emits_CommandSubmissionOptions()
+	public void Setter_always_emits_CommandSubmissionOptions_with_ExpectedTargetVersion()
 	{
+		// Optimistic concurrency is the default for generated setters.
+		// No per-model opt-in is required; the projection-side check fires only
+		// when ExpectedTargetVersion is set, and the generator always sets it.
 		var source = @"
 using Synqra;
 namespace Test;
 
-[SynqraModel(OptimisticConcurrency = true)]
+[SynqraModel]
 [Schema(2026.500, ""1 Subject string?"")]
-public sealed partial class OptInModel
+public sealed partial class SomeModel
 {
 	public partial string? Subject { get; set; }
 }
@@ -129,55 +132,9 @@ public sealed partial class OptInModel
 		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
 
 		Assert.That(generated, Does.Contain("global::Synqra.CommandSubmissionOptions"),
-			"Opt-in setter should emit a CommandSubmissionOptions argument.");
+			"Generated setter must emit a CommandSubmissionOptions argument unconditionally.");
 		Assert.That(generated, Does.Contain("ExpectedTargetVersion = __store.GetTargetVersion"),
-			"Opt-in setter should request the current target version.");
-		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
-	}
-
-	[Test]
-	public void OptimisticConcurrency_opt_out_omits_CommandSubmissionOptions()
-	{
-		var source = @"
-using Synqra;
-namespace Test;
-
-[SynqraModel]
-[Schema(2026.500, ""1 Subject string?"")]
-public sealed partial class OptOutModel
-{
-	public partial string? Subject { get; set; }
-}
-";
-
-		var result = RunGenerator(source);
-		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
-
-		Assert.That(generated, Does.Not.Contain("CommandSubmissionOptions"),
-			"Default (opt-out) setter should NOT emit a CommandSubmissionOptions argument — last-writer-wins is preserved.");
-		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
-	}
-
-	[Test]
-	public void OptimisticConcurrency_false_omits_CommandSubmissionOptions()
-	{
-		var source = @"
-using Synqra;
-namespace Test;
-
-[SynqraModel(OptimisticConcurrency = false)]
-[Schema(2026.500, ""1 Subject string?"")]
-public sealed partial class OptOutExplicitModel
-{
-	public partial string? Subject { get; set; }
-}
-";
-
-		var result = RunGenerator(source);
-		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
-
-		Assert.That(generated, Does.Not.Contain("CommandSubmissionOptions"),
-			"Explicit OptimisticConcurrency=false should produce no options argument.");
+			"Generated setter must request the current target version.");
 		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
 	}
 

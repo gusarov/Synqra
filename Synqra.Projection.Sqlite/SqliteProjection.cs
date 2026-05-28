@@ -307,7 +307,7 @@ public class SqliteStore : IObjectStore
 		throw new NotImplementedException();
 	}
 
-	public async Task SubmitCommandAsync(ISynqraCommand newCommand)
+	public async Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
 	}
 

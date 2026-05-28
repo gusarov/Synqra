@@ -359,8 +359,13 @@ public static class FileSynqraExtensions
 #endif
 		}
 
-		public async Task SubmitCommandAsync(ISynqraCommand newCommand)
+		public async Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 		{
+			// File-backed projection does not yet implement optimistic-concurrency precondition
+			// checking. Options are accepted for interface conformance and forward-compat;
+			// when ExpectedTargetVersion is set here, callers get last-writer-wins semantics
+			// (the same behaviour Sqlite gives today). InMemoryProjection is the reference impl.
+			_ = options;
 			await _fileProjection.ProcessCommandAsync(newCommand);
 		}
 	}
