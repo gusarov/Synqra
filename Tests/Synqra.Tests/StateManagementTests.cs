@@ -38,6 +38,133 @@ public class InMemoryStateManageementTests : StateManagementTests
 		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
+
+	// ---- Optimistic concurrency tests (InMemoryProjection only) ----
+	//
+	// These verify the projection-side precondition check, which only the
+	// in-memory projection enforces today (file/sqlite accept options for
+	// interface conformance but don't reject — see _DI.cs notes).
+
+	[Test]
+	public async Task Should_30_track_LastEventId_after_setter_writes()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+		var targetId = _sut.GetId(model);
+
+		var afterCreate = _sut.GetLastEventId(targetId);
+		await Assert.That(afterCreate).IsNotEqualTo(Guid.Empty);
+		// "After ObjectCreatedEvent the projection should have stamped a creation-event id."
+
+		model.Name = "TestName"; // generated setter -> command -> property-changed event
+
+		var afterChange = _sut.GetLastEventId(targetId);
+		await Assert.That(afterChange).IsNotEqualTo(Guid.Empty);
+		await Assert.That(afterChange).IsNotEqualTo(afterCreate);
+		// "Each applied event advances LastEventId to its own EventId."
+	}
+
+	[Test]
+	public async Task Should_31_accept_command_with_current_ExpectedLastEventId()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+		var targetId = _sut.GetId(model);
+
+		var current = _sut.GetLastEventId(targetId);
+
+		await _sut.SubmitCommandAsync(
+			new ChangeObjectPropertyCommand
+			{
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetObject = model,
+				PropertyName = nameof(model.Name),
+				OldValue = null,
+				NewValue = "Accepted",
+			},
+			new CommandSubmissionOptions { ExpectedLastEventId = current });
+
+		await Assert.That(model.Name).IsEqualTo("Accepted");
+	}
+
+	[Test]
+	public async Task Should_32_reject_command_with_stale_ExpectedLastEventId()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+		var targetId = _sut.GetId(model);
+
+		// A nonexistent event id — guaranteed not to match.
+		var stale = GuidExtensions.CreateVersion7();
+
+		ConcurrencyException? caught = null;
+		try
+		{
+			await _sut.SubmitCommandAsync(
+				new ChangeObjectPropertyCommand
+				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					TargetObject = model,
+					PropertyName = nameof(model.Name),
+					OldValue = null,
+					NewValue = "Should not stick",
+				},
+				new CommandSubmissionOptions { ExpectedLastEventId = stale });
+		}
+		catch (ConcurrencyException ex)
+		{
+			caught = ex;
+		}
+
+		await Assert.That(caught).IsNotNull();
+		await Assert.That(caught!.TargetId).IsEqualTo(targetId);
+		await Assert.That(caught.ExpectedLastEventId).IsEqualTo(stale);
+		// The rejected command must NOT have mutated the model — projection state untouched.
+		await Assert.That(model.Name).IsNotEqualTo("Should not stick");
+	}
+
+	[Test]
+	public async Task Should_33_empty_ExpectedLastEventId_bypasses_check()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+
+		// Guid.Empty is the "don't care" sentinel — equivalent to passing no options.
+		// This is the path manually-constructed commands take when callers omit options.
+		await _sut.SubmitCommandAsync(
+			new ChangeObjectPropertyCommand
+			{
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetObject = model,
+				PropertyName = nameof(model.Name),
+				OldValue = null,
+				NewValue = "Bypassed",
+			},
+			new CommandSubmissionOptions { ExpectedLastEventId = Guid.Empty });
+
+		await Assert.That(model.Name).IsEqualTo("Bypassed");
+	}
+
+	[Test]
+	public async Task Should_34_null_options_bypasses_check()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+
+		// No options at all — the default-null path. Should behave the same
+		// as Guid.Empty: no check, last-writer-wins semantics.
+		await _sut.SubmitCommandAsync(
+			new ChangeObjectPropertyCommand
+			{
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetObject = model,
+				PropertyName = nameof(model.Name),
+				OldValue = null,
+				NewValue = "NoOptions",
+			});
+
+		await Assert.That(model.Name).IsEqualTo("NoOptions");
+	}
 }
 
 [InheritsTests]
