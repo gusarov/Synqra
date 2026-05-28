@@ -74,7 +74,7 @@ Useful commands:
 
 ## Testing Notes
 
-- Tests use **TUnit**, not xUnit/NUnit.
+- The main `Tests/Synqra.Tests` suite uses **TUnit**; some other test projects in the repository use **NUnit**.
 - The default CI-oriented filter excludes tests marked with `[Property("CI", "false")]`.
 - Performance tests are intentionally opt-in and should usually stay out of normal validation.
 - The Docker `buildaot` stage is important. It publishes `Tests/Synqra.Tests` for `linux-x64` and runs the published binary, so AOT regressions matter.
