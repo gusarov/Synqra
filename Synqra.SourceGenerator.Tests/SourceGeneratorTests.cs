@@ -111,11 +111,13 @@ public partial class DerivedModel : BaseModel
 	}
 
 	[Test]
-	public void Setter_always_emits_CommandSubmissionOptions_with_ExpectedTargetVersion()
+	public void Setter_always_emits_CommandSubmissionOptions_with_ExpectedLastEventId()
 	{
 		// Optimistic concurrency is the default for generated setters.
 		// No per-model opt-in is required; the projection-side check fires only
-		// when ExpectedTargetVersion is set, and the generator always sets it.
+		// when ExpectedLastEventId is non-empty, and the generator always sets it
+		// to the last event id the projection has applied to this target.
+		// Same semantic as `git push --force-with-lease=<sha>`.
 		var source = @"
 using Synqra;
 namespace Test;
@@ -133,8 +135,10 @@ public sealed partial class SomeModel
 
 		Assert.That(generated, Does.Contain("global::Synqra.CommandSubmissionOptions"),
 			"Generated setter must emit a CommandSubmissionOptions argument unconditionally.");
-		Assert.That(generated, Does.Contain("ExpectedTargetVersion = __store.GetTargetVersion"),
-			"Generated setter must request the current target version.");
+		Assert.That(generated, Does.Contain("ExpectedLastEventId = __store.GetLastEventId"),
+			"Generated setter must reference the current last event id of the target.");
+		Assert.That(generated, Does.Not.Contain("ExpectedTargetVersion"),
+			"The numeric-version field is gone; only event-id-based precondition remains.");
 		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
 	}
 

@@ -420,14 +420,16 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		// Optimistic concurrency precondition. We check before any normalization or
 		// event production so a rejected command leaves NO trace in the event stream.
-		if (options?.ExpectedTargetVersion is long expected
+		// Guid.Empty means "I don't care" — same semantic as omitting the precondition.
+		if (options is not null
+			&& options.ExpectedLastEventId != Guid.Empty
 			&& newCommand is SingleObjectCommand precheckSoc
 			&& precheckSoc.TargetId != default)
 		{
-			var actual = GetTargetVersion(precheckSoc.TargetId);
-			if (actual != expected)
+			var actual = GetLastEventId(precheckSoc.TargetId);
+			if (actual != options.ExpectedLastEventId)
 			{
-				throw new ConcurrencyException(precheckSoc.TargetId, expected, actual);
+				throw new ConcurrencyException(precheckSoc.TargetId, options.ExpectedLastEventId, actual);
 			}
 		}
 
@@ -755,7 +757,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		var data2 = GetAttachedData(newItem, ev.TargetId, collection, GetMode.GetOrCreate);
 		//if (!TryGetModel(ev.TargetId, out var data2))
 		{
-			
+
 			// Attach(newItem, collection);
 			// throw new Exception("The object is not attached yet");
 		}
@@ -768,6 +770,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			}
 		}
 		collection.AddByEvent(newItem);
+
+		// Record the creation event as the target's "last applied event" so that
+		// the first generated-setter write to this fresh object can pre-condition
+		// against it via ExpectedLastEventId.
+		if (data2 is not null)
+		{
+			data2.LastEventId = ev.EventId;
+		}
 		return Task.CompletedTask;
 	}
 
@@ -797,23 +807,26 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			throw new Exception($"Cannot change property of unknown object {ev.TargetId}");
 		}
 
-		// Bump the per-target version counter for optimistic concurrency checks.
-		// We bump only when an event is successfully applied — rejected commands leave it untouched.
+		// Record this event as the target's last-applied event id, for content-addressed
+		// optimistic-concurrency checks (the next write will pre-condition against it).
+		// We update only when the event is successfully applied — rejected commands
+		// leave LastEventId untouched, so a subsequent retry pre-conditioned against
+		// the same point in history still matches.
 		if (data.Attached is not null)
 		{
-			data.Attached.Version++;
+			data.Attached.LastEventId = ev.EventId;
 		}
 		return Task.CompletedTask;
 	}
 
 	/// <inheritdoc/>
-	public long GetTargetVersion(Guid targetId)
+	public Guid GetLastEventId(Guid targetId)
 	{
 		if (TryGetModel(targetId, out var data) && data.Attached is not null)
 		{
-			return data.Attached.Version;
+			return data.Attached.LastEventId;
 		}
-		return 0;
+		return Guid.Empty;
 	}
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
@@ -842,11 +855,12 @@ internal class AttachedObjectData
 	public required bool IsJustCreated { get; set; }
 
 	/// <summary>
-	/// Per-target version counter, incremented on every event applied to this object.
-	/// Used for optimistic concurrency checks via
-	/// <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/>.
+	/// Id of the last event applied to this target. Updated by event-visitor handlers
+	/// each time an event touches this object. Used for optimistic concurrency checks via
+	/// <see cref="CommandSubmissionOptions.ExpectedLastEventId"/> — same idea as
+	/// <c>git push --force-with-lease=&lt;sha&gt;</c>.
 	/// </summary>
-	public long Version { get; set; }
+	public Guid LastEventId { get; set; }
 }
 
 // It is not flags, as all possible permutations are defined explicitly

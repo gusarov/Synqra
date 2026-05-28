@@ -494,16 +494,16 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
 			// Every generated setter submits with a CommandSubmissionOptions carrying the
-			// target's current version. The InMemoryProjection (and any future projection
-			// that wants the protection) checks this against its authoritative version and
-			// raises ConcurrencyException on mismatch.
+			// id of the last event the projection applied to this target. The projection
+			// (InMemoryProjection today; future implementations as needed) checks the
+			// current LastEventId against this and raises ConcurrencyException on mismatch.
+			// Semantically identical to `git push --force-with-lease=<sha>`.
 			//
-			// This is unconditional for setter-driven mutations — no per-model opt-in.
+			// Unconditional for setter-driven mutations — no per-model opt-in.
 			// Manually-constructed commands still flow through SubmitCommandAsync(cmd, null)
-			// (the default-null overload) and keep last-writer-wins semantics, so existing
-			// hand-written code is unaffected.
+			// and get last-writer-wins, so existing hand-written code is unaffected.
 			const string submissionOptionsArg =
-				", new global::Synqra.CommandSubmissionOptions { ExpectedTargetVersion = __store.GetTargetVersion(__store.GetId(this)) }";
+				", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
 
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)

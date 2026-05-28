@@ -4,24 +4,24 @@ namespace Synqra;
 
 /// <summary>
 /// Thrown by <see cref="IObjectStore.SubmitCommandAsync"/> when a
-/// <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/> precondition does not
-/// match the projection's current version of the target object.
+/// <see cref="CommandSubmissionOptions.ExpectedLastEventId"/> precondition does not
+/// match the projection's current last-applied event id for the target object.
 /// <para>
 /// On the wire (HTTP) this typically maps to <c>412 Precondition Failed</c> with a body
-/// carrying <see cref="ExpectedVersion"/> and <see cref="ActualVersion"/>.
+/// carrying <see cref="ExpectedLastEventId"/> and <see cref="ActualLastEventId"/>.
 /// </para>
 /// </summary>
 public sealed class ConcurrencyException : Exception
 {
 	public Guid TargetId { get; }
-	public long ExpectedVersion { get; }
-	public long ActualVersion { get; }
+	public Guid ExpectedLastEventId { get; }
+	public Guid ActualLastEventId { get; }
 
-	public ConcurrencyException(Guid targetId, long expectedVersion, long actualVersion)
-		: base($"Concurrency check failed for target {targetId}: expected version {expectedVersion}, actual {actualVersion}.")
+	public ConcurrencyException(Guid targetId, Guid expectedLastEventId, Guid actualLastEventId)
+		: base($"Concurrency check failed for target {targetId}: expected last event id {expectedLastEventId}, actual {actualLastEventId}.")
 	{
 		TargetId = targetId;
-		ExpectedVersion = expectedVersion;
-		ActualVersion = actualVersion;
+		ExpectedLastEventId = expectedLastEventId;
+		ActualLastEventId = actualLastEventId;
 	}
 }
