@@ -418,21 +418,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
-		// Optimistic concurrency precondition. We check before any normalization or
-		// event production so a rejected command leaves NO trace in the event stream.
-		// Guid.Empty means "I don't care" — same semantic as omitting the precondition.
-		if (options is not null
-			&& options.ExpectedLastEventId != Guid.Empty
-			&& newCommand is SingleObjectCommand precheckSoc
-			&& precheckSoc.TargetId != default)
-		{
-			var actual = GetLastEventId(precheckSoc.TargetId);
-			if (actual != options.ExpectedLastEventId)
-			{
-				throw new ConcurrencyException(precheckSoc.TargetId, options.ExpectedLastEventId, actual);
-			}
-		}
-
+		// Normalize first — fill in CommandId, StreamId, and (for SingleObjectCommand)
+		// resolve TargetId / CollectionId / TargetTypeId from TargetObject if the caller
+		// gave us the model reference but not the ids. This is read-only state lookup,
+		// no events emitted, so it is safe to run before the precondition check.
 		if (newCommand is Command cmd)
 		{
 			if (cmd.CommandId == default)
@@ -477,6 +466,22 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				{
 					throw new Exception("The target object Type has different id");
 				}
+			}
+		}
+
+		// Optimistic concurrency precondition — runs AFTER normalization so the check
+		// sees the resolved TargetId, but BEFORE any event production so a rejected
+		// command leaves NO trace in the event stream.
+		// Guid.Empty means "I don't care" — same semantic as omitting the precondition.
+		if (options is not null
+			&& options.ExpectedLastEventId != Guid.Empty
+			&& newCommand is SingleObjectCommand precheckSoc
+			&& precheckSoc.TargetId != default)
+		{
+			var actual = GetLastEventId(precheckSoc.TargetId);
+			if (actual != options.ExpectedLastEventId)
+			{
+				throw new ConcurrencyException(precheckSoc.TargetId, options.ExpectedLastEventId, actual);
 			}
 		}
 

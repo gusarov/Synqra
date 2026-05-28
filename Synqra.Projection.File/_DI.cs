@@ -363,7 +363,7 @@ public static class FileSynqraExtensions
 		{
 			// File-backed projection does not yet implement optimistic-concurrency precondition
 			// checking. Options are accepted for interface conformance and forward-compat;
-			// when ExpectedTargetVersion is set here, callers get last-writer-wins semantics
+			// when ExpectedLastEventId is set here, callers get last-writer-wins semantics
 			// (the same behaviour Sqlite gives today). InMemoryProjection is the reference impl.
 			_ = options;
 			await _fileProjection.ProcessCommandAsync(newCommand);
