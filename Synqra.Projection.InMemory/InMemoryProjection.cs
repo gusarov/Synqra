@@ -417,7 +417,23 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	}
 
 	public Task SubmitCommandAsync(ISynqraCommand newCommand)
+		=> SubmitCommandAsync(newCommand, options: null);
+
+	public Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options)
 	{
+		// Optimistic concurrency precondition. We check before any normalization or
+		// event production so a rejected command leaves NO trace in the event stream.
+		if (options?.ExpectedTargetVersion is long expected
+			&& newCommand is SingleObjectCommand precheckSoc
+			&& precheckSoc.TargetId != default)
+		{
+			var actual = GetTargetVersion(precheckSoc.TargetId);
+			if (actual != expected)
+			{
+				throw new ConcurrencyException(precheckSoc.TargetId, expected, actual);
+			}
+		}
+
 		if (newCommand is Command cmd)
 		{
 			if (cmd.CommandId == default)
@@ -783,7 +799,24 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			throw new Exception($"Cannot change property of unknown object {ev.TargetId}");
 		}
+
+		// Bump the per-target version counter for optimistic concurrency checks.
+		// We bump only when an event is successfully applied — rejected commands leave it untouched.
+		if (data.Attached is not null)
+		{
+			data.Attached.Version++;
+		}
 		return Task.CompletedTask;
+	}
+
+	/// <inheritdoc/>
+	public long GetTargetVersion(Guid targetId)
+	{
+		if (TryGetModel(targetId, out var data) && data.Attached is not null)
+		{
+			return data.Attached.Version;
+		}
+		return 0;
 	}
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
@@ -810,6 +843,13 @@ internal class AttachedObjectData
 	public required Guid Id { get; init; }
 	public required StoreCollection Collection { get; init; }
 	public required bool IsJustCreated { get; set; }
+
+	/// <summary>
+	/// Per-target version counter, incremented on every event applied to this object.
+	/// Used for optimistic concurrency checks via
+	/// <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/>.
+	/// </summary>
+	public long Version { get; set; }
 }
 
 // It is not flags, as all possible permutations are defined explicitly

@@ -42,6 +42,33 @@ public interface IObjectStore
 	/// Submit command both locally and to the other participants.
 	/// </summary>
 	Task SubmitCommandAsync(ISynqraCommand newCommand);
+
+	/// <summary>
+	/// Submit command with per-call submission options (e.g. optimistic concurrency).
+	/// The options are <i>not</i> persisted in the event stream — they affect only
+	/// the validation/dispatch of this submission.
+	/// </summary>
+	/// <exception cref="ConcurrencyException">
+	/// Thrown when <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/> is set
+	/// and does not match the projection's current version of the target object.
+	/// </exception>
+	Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options)
+#if NET8_0_OR_GREATER
+		=> SubmitCommandAsync(newCommand)
+#endif
+		;
+
+	/// <summary>
+	/// Returns the projection's current version counter for the given target object id.
+	/// Used by generated setters to fill <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/>
+	/// when the model is opted into optimistic concurrency.
+	/// Returns 0 when the object is not yet known to this projection.
+	/// </summary>
+	long GetTargetVersion(Guid targetId)
+#if NET8_0_OR_GREATER
+		=> 0
+#endif
+		;
 }
 
 public interface ITypeMetadataProvider

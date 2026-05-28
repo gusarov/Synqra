@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,14 +8,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- NUnit framework -->
+    <!--
+      Versions intentionally omitted: when this project is built inside the host repo
+      (Quotaly), Central Package Management resolves versions from Directory.Packages.props.
+    -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="NUnit" />
-
-    <!-- Adapter for test discovery in Visual Studio / dotnet test -->
     <PackageReference Include="NUnit3TestAdapter" />
-
-    <!-- Test SDK required by most test runners -->
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
   </ItemGroup>
 
