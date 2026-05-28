@@ -10,7 +10,6 @@ namespace Contoso.Model;
 [Schema(2026.134, "1 ItemName string ItemName2 string")]
 [Schema(2026.188, "1 ItemName string ItemName2 string")]
 [Schema(2026.231, "1 ItemName string ItemName2 string")]
-[Schema(2026.231, "1 ItemName string ItemName2 string")]
 public partial class ContosoItem
 {
 	public partial string ItemName { get; set; }
