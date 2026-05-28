@@ -55,20 +55,21 @@ public interface IObjectStore
 	/// </para>
 	/// </summary>
 	/// <exception cref="ConcurrencyException">
-	/// Thrown when <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/> is set
-	/// and does not match the projection's current version of the target object.
+	/// Thrown when <see cref="CommandSubmissionOptions.ExpectedLastEventId"/> is set
+	/// (non-empty) and does not match the projection's current last-applied event id
+	/// for the target object.
 	/// </exception>
 	Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null);
 
 	/// <summary>
-	/// Returns the projection's current version counter for the given target object id.
-	/// Used by generated setters to fill <see cref="CommandSubmissionOptions.ExpectedTargetVersion"/>.
-	/// Returns 0 when the object is not yet known to this projection (which also matches
-	/// the freshly-attached object's starting version, so a first-write check is a no-op).
+	/// Returns the id of the last event applied to the given target object.
+	/// Used by generated setters to fill <see cref="CommandSubmissionOptions.ExpectedLastEventId"/>.
+	/// Returns <see cref="Guid.Empty"/> when the object is not yet known to this projection
+	/// (a first-write check therefore degenerates to a no-op via the empty-sentinel rule).
 	/// </summary>
-	long GetTargetVersion(Guid targetId)
+	Guid GetLastEventId(Guid targetId)
 #if NET8_0_OR_GREATER
-		=> 0
+		=> Guid.Empty
 #endif
 		;
 }
