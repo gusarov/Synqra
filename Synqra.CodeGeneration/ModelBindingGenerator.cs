@@ -493,17 +493,39 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var classMembers = classData.Clazz.Members;
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
-			// Every generated setter submits with a CommandSubmissionOptions carrying the
-			// id of the last event the projection applied to this target. The projection
-			// (InMemoryProjection today; future implementations as needed) checks the
-			// current LastEventId against this and raises ConcurrencyException on mismatch.
-			// Semantically identical to `git push --force-with-lease=<sha>`.
-			//
-			// Unconditional for setter-driven mutations — no per-model opt-in.
-			// Manually-constructed commands still flow through SubmitCommandAsync(cmd, null)
-			// and get last-writer-wins, so existing hand-written code is unaffected.
-			const string submissionOptionsArg =
-				", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
+			// Component detection: a [SynqraModel] class that implements Synqra.IComponent
+			// gets a component-flavored setter (emits ChangeComponentPropertyCommand
+			// targeting the container) plus an IBindableComponent impl with
+			// AttachToContainer plumbing. Otherwise it's a normal object — setter
+			// emits ChangeObjectPropertyCommand targeting `this`.
+			// Fully-qualified-name match — namespace.Name comparison was unreliable
+			// across Roslyn symbol shapes for nested vs file-scoped namespaces.
+			bool isComponent = classData.Data.AllInterfaces.Any(i =>
+				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IComponent");
+
+			// Setter-template fragments. These are interpolated into the property
+			// template below — same physical template, two emitted variants.
+			string commandTypeName        = isComponent ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
+			string preAttachGuardExtra    = isComponent ? " || __containerId == default" : "";
+			string targetObjectExpr       = isComponent ? "null" : "this";
+			string targetIdExpr           = isComponent ? "__containerId" : "__store.GetId(this)";
+			string targetTypeIdExpr       = isComponent ? "__containerTypeId" : "__store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId";
+			string collectionIdExpr       = isComponent ? "__containerCollectionId" : "__collectionId ?? Guid.Empty";
+			// Component commands carry two extra fields. ComponentId is filled from
+			// IIdentifiable<Guid>.Id at runtime when the class implements it
+			// (non-unique components); unique-by-type components leave it Guid.Empty
+			// and the projection resolves them by ComponentTypeId alone.
+			string componentExtraFields   = isComponent
+				? @",
+					ComponentTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId,
+					ComponentId = (this is global::Synqra.IIdentifiable<global::System.Guid> __idable ? __idable.Id : global::System.Guid.Empty)"
+				: "";
+			// Optimistic-concurrency precondition: probes the container's LastEventId
+			// for components (container is the conflict-boundary aggregate), the
+			// model's own id for plain objects.
+			string submissionOptionsArg = isComponent
+				? ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__containerId) }"
+				: ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
 
 			INamedTypeSymbol rootType = classData.Data;
 			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
@@ -560,7 +582,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine();
 			// body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
-			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}");
+			// Components also implement IBindableComponent so the projection can call
+			// AttachToContainer on them after ComponentAddedEvent applies.
+			var componentIface = isComponent ? ", global::Synqra.IBindableComponent" : "";
+			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}{componentIface}");
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}");
 			body.AppendLine("{");
 
@@ -674,6 +699,42 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		__collectionId = collectionId;
 		OnAttached();
 	}
+""");
+				if (isComponent)
+				{
+					body.AppendLine($$"""
+
+	// IBindableComponent: container linkage emitted only for IComponent classes.
+	// These fields are populated by the projection on ComponentAddedEvent apply,
+	// and consumed by the component's property setters (see below) when building
+	// ChangeComponentPropertyCommand — TargetId / TargetTypeId / CollectionId on
+	// that command refer to the CONTAINER, not the component itself.
+	protected global::System.Guid __containerId;
+	protected global::System.Guid __containerTypeId;
+	protected global::System.Guid __containerCollectionId;
+
+	void global::Synqra.IBindableComponent.AttachToContainer(
+		global::Synqra.IObjectStore store,
+		global::System.Guid containerId,
+		global::System.Guid containerTypeId,
+		global::System.Guid containerCollectionId)
+	{
+		if (__store is not null && __store != store)
+		{
+			throw new global::System.InvalidOperationException("Store can only be set once on a component.");
+		}
+		if (__containerId != default && __containerId != containerId)
+		{
+			throw new global::System.InvalidOperationException("Component is already attached to a different container.");
+		}
+		__store = store;
+		__containerId = containerId;
+		__containerTypeId = containerTypeId;
+		__containerCollectionId = containerCollectionId;
+	}
+""");
+				}
+				body.AppendLine($$"""
 
 	void IBindableModel.Set(string name, object? value)
 	{
@@ -1012,7 +1073,7 @@ $$"""
 		set
 		{
 			var oldValue = {{(doesSupportField ? "field" : GetFieldName(pro))}};
-			if (_assigning || __store is null)
+			if (_assigning || __store is null{{preAttachGuardExtra}})
 			{
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
@@ -1027,19 +1088,19 @@ $$"""
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
-				var task = __store.SubmitCommandAsync(new ChangeObjectPropertyCommand
+				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
 					StreamId = SynqraGuids.SynqraRootStreamId,
-					CollectionId = __collectionId ?? Guid.Empty,
+					CollectionId = {{collectionIdExpr}},
 
-					TargetObject = this,
-					TargetId = __store.GetId(this),
-					TargetTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId, // todo this should be collection type id
+					TargetObject = {{targetObjectExpr}},
+					TargetId = {{targetIdExpr}},
+					TargetTypeId = {{targetTypeIdExpr}}, // todo this should be collection type id
 
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
-					NewValue = value
+					NewValue = value{{componentExtraFields}}
 				}{{submissionOptionsArg}});
 				if (!OperatingSystem.IsBrowser())
 				{
