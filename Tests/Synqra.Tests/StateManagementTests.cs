@@ -661,6 +661,87 @@ public class InMemoryStateManageementTests : StateManagementTests
 	}
 
 	[Test]
+	public async Task Should_72b_GetWiresTo_returns_incoming_wires_only()
+	{
+		var n1 = new TestComponentNode { Name = "src1" };
+		var n2 = new TestComponentNode { Name = "src2" };
+		var n3 = new TestComponentNode { Name = "dst" };
+		_sut.GetCollection<TestComponentNode>().Add(n1);
+		_sut.GetCollection<TestComponentNode>().Add(n2);
+		_sut.GetCollection<TestComponentNode>().Add(n3);
+
+		var src1 = _sut.GetId(n1);
+		var src2 = _sut.GetId(n2);
+		var dst = _sut.GetId(n3);
+		var ct = TypeIdOf<TestUniqueComponent>();
+
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			SourceContainerId = src1, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			SourceContainerId = src2, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		var toDst = projection.GetWiresTo(new PortRef(dst, ct, Guid.Empty, "in"));
+		await Assert.That(toDst.Count).IsEqualTo(2);
+
+		var toUnknown = projection.GetWiresTo(new PortRef(src1, ct, Guid.Empty, "in"));
+		await Assert.That(toUnknown.Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_72c_AddWireCommand_with_explicit_wireId_round_trips_through_event()
+	{
+		var n1 = new TestComponentNode { Name = "src" };
+		var n2 = new TestComponentNode { Name = "dst" };
+		_sut.GetCollection<TestComponentNode>().Add(n1);
+		_sut.GetCollection<TestComponentNode>().Add(n2);
+
+		var src = _sut.GetId(n1);
+		var dst = _sut.GetId(n2);
+		var ct = TypeIdOf<TestUniqueComponent>();
+		var explicitId = GuidExtensions.CreateVersion7();
+
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = explicitId,
+			SourceContainerId = src, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		var wire = projection.Wires.Single();
+		// Caller's explicit WireId must be honoured — the projection only assigns one
+		// when the command came in with Guid.Empty.
+		await Assert.That(wire.Id).IsEqualTo(explicitId);
+	}
+
+	[Test]
+	public async Task Should_72d_DeleteWireCommand_for_unknown_wire_is_a_noop()
+	{
+		// Delete-without-create should not throw; it just leaves the index untouched.
+		await _sut.SubmitCommandAsync(new DeleteWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = GuidExtensions.CreateVersion7(), // never added
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		await Assert.That(projection.Wires.Count).IsEqualTo(0);
+	}
+
+	[Test]
 	public async Task Should_72_DeleteWireCommand_removes_wire_from_index()
 	{
 		var n1 = new TestComponentNode { Name = "src" };
