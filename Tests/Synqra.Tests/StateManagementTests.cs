@@ -509,6 +509,81 @@ public class InMemoryStateManageementTests : StateManagementTests
 		await Assert.That(afterComponentWrite).IsNotEqualTo(afterUnrelatedWrite);
 	}
 
+	// ---- Phase B-2: generator-emitted Components collection (StoreBoundComponentsCollection) ----
+	//
+	// These exercise the symmetric mirror of Phase B's setter-side generator —
+	// `container.Components.Add(c)` emits AddComponentCommand and
+	// `container.Components.Remove(c)` emits DeleteComponentCommand when the
+	// container is store-attached. The projection's event-apply path goes
+	// through TryAdd / BypassRemove so it never produces a recursive command.
+
+	[Test]
+	public async Task Should_60_Components_Add_emits_AddComponentCommand_when_attached()
+	{
+		var node = new TestGeneratedContainerNode { Name = "g1" };
+		_sut.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		var commandsBefore = _sut.GetCollection<Command>().OfType<AddComponentCommand>().Count();
+
+		var c = new TestUniqueComponent { Subject = "from generator" };
+		node.Components.Add(c); // generator-emitted path
+
+		var acs = _sut.GetCollection<Command>().OfType<AddComponentCommand>().ToArray();
+		await Assert.That(acs.Length).IsEqualTo(commandsBefore + 1);
+
+		var emitted = acs.Last();
+		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
+		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestUniqueComponent>());
+		await Assert.That(emitted.ComponentId).IsEqualTo(Guid.Empty);
+
+		var attached = node.Components.GetUniqueComponent(typeof(TestUniqueComponent));
+		await Assert.That(attached).IsSameReferenceAs(c);
+	}
+
+	[Test]
+	public async Task Should_61_Components_Remove_emits_DeleteComponentCommand_when_attached()
+	{
+		var node = new TestGeneratedContainerNode { Name = "g2" };
+		_sut.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		var c = new TestUniqueComponent { Subject = "doomed" };
+		node.Components.Add(c);
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+
+		var commandsBefore = _sut.GetCollection<Command>().OfType<DeleteComponentCommand>().Count();
+		node.Components.Remove(c);
+
+		var dcs = _sut.GetCollection<Command>().OfType<DeleteComponentCommand>().ToArray();
+		await Assert.That(dcs.Length).IsEqualTo(commandsBefore + 1);
+
+		var emitted = dcs.Last();
+		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
+		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestUniqueComponent>());
+
+		await Assert.That(node.Components.Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_62_Components_Add_pre_attach_falls_back_to_direct_mutation()
+	{
+		// Before the node is added to its store-collection, the wrapper has
+		// no store linkage — Add should mutate the inner data directly, just
+		// like the property setter does for early initializer-style code.
+		var node = new TestGeneratedContainerNode { Name = "g3" };
+		var c = new TestUniqueComponent { Subject = "early" };
+		node.Components.Add(c);
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+
+		// No commands should have been issued — there was no store yet.
+		// (We can't observe "no AddComponentCommand related to this node"
+		// because the command collection is global; just verify the node's
+		// state ended up correct.)
+		_sut.GetCollection<TestGeneratedContainerNode>().Add(node);
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+		await Assert.That(node.Components.GetUniqueComponent(typeof(TestUniqueComponent)))
+			.IsSameReferenceAs(c);
+	}
+
 	[Test]
 	public async Task Should_47_Activator_fires_with_IsReplay_false_on_originating_event()
 	{
@@ -676,6 +751,7 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			typeof(ChangeComponentPropertyCommand),
 			typeof(DeleteComponentCommand),
 			typeof(TestComponentNode),
+			typeof(TestGeneratedContainerNode),
 			typeof(TestUniqueComponent),
 			typeof(TestTaggingComponent),
 			typeof(TestActivatableComponent),
@@ -1002,7 +1078,8 @@ public partial class StorableModel
 
 // ---- Component substrate test fixtures (used by InMemoryStateManageementTests) ----
 
-/// <summary>Container exposing a manually-backed components collection (generator integration is Phase B).</summary>
+/// <summary>Container exposing a manually-backed components collection. Kept on the manual path so
+/// Phase A/B tests continue to exercise that code path (user code can still bring its own collection).</summary>
 [SynqraModel]
 [Schema(2026.405, "1 Name string?")]
 public partial class TestComponentNode : IComponentContainer
@@ -1013,6 +1090,15 @@ public partial class TestComponentNode : IComponentContainer
 
 	[JsonIgnore]
 	public IComponentsCollection Components => _components;
+}
+
+/// <summary>Container that does NOT declare Components — generator emits the wrapper.
+/// Exercises Phase B-2 (StoreBoundComponentsCollection routing).</summary>
+[SynqraModel]
+[Schema(2026.405, "1 Name string?")]
+public partial class TestGeneratedContainerNode : IComponentContainer
+{
+	public partial string? Name { get; set; }
 }
 
 /// <summary>Unique-by-class component: at most one instance per container.</summary>

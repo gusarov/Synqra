@@ -37,6 +37,22 @@ public interface IComponentsCollection : ICollection<IComponent>
 	/// distinguish acceptance from rejection without throwing.
 	/// (<see cref="ICollection{T}.Add"/> returns <c>void</c>; this variant exposes
 	/// the success bit.)
+	/// <para>
+	/// Critically, <see cref="TryAdd"/> is also the <i>command bypass</i> path:
+	/// generator-emitted wrappers route <see cref="ICollection{T}.Add"/> through
+	/// the command channel when the container is attached to a store, but always
+	/// route <see cref="TryAdd"/> directly into the inner data structure. The
+	/// projection calls <see cref="TryAdd"/> when applying
+	/// <see cref="ComponentAddedEvent"/> so it does not produce a recursive command.
+	/// </para>
 	/// </summary>
 	bool TryAdd(IComponent component);
+
+	/// <summary>
+	/// Command-bypass removal counterpart to <see cref="TryAdd"/>. Used by the
+	/// projection when applying <see cref="ComponentDeletedEvent"/>. User code
+	/// should use <see cref="ICollection{T}.Remove"/> instead, which routes
+	/// through the command channel when the container is store-attached.
+	/// </summary>
+	bool BypassRemove(IComponent component);
 }

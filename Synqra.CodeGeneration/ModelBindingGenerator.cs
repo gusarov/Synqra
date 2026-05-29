@@ -503,6 +503,22 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			bool isComponent = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IComponent");
 
+			// Container detection: an IComponentContainer-implementing class. The
+			// generator emits a `Components` property backed by a
+			// StoreBoundComponentsCollection — its ICollection<T>.Add/Remove route
+			// through AddComponentCommand/DeleteComponentCommand when the container
+			// is store-attached. We only emit when the user has NOT manually
+			// declared a Components member (existing manual-collection consumers
+			// remain unchanged).
+			bool isContainer = classData.Data.AllInterfaces.Any(i =>
+				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IComponentContainer");
+			bool userDeclaredComponents = classData.Clazz.Members
+				.OfType<PropertyDeclarationSyntax>()
+				.Any(p => p.Identifier.Text == "Components")
+				|| classData.Data.GetMembers("Components")
+					.Any(s => s is IPropertySymbol or IFieldSymbol);
+			bool emitComponentsCollection = isContainer && !userDeclaredComponents;
+
 			// Setter-template fragments. These are interpolated into the property
 			// template below — same physical template, two emitted variants.
 			string commandTypeName        = isComponent ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
@@ -697,9 +713,36 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 		__store = store;
 		__collectionId = collectionId;
+		{{(emitComponentsCollection ? "EnsureComponentsWrapper().Attach(store, collectionId);" : "")}}
 		OnAttached();
 	}
 """);
+				if (emitComponentsCollection)
+				{
+					body.AppendLine($$"""
+
+	// IComponentContainer: generator-emitted Components property. Backed by
+	// StoreBoundComponentsCollection so that user-driven `.Components.Add(c)` /
+	// `.Components.Remove(c)` produce AddComponentCommand / DeleteComponentCommand
+	// when the container is store-attached; the projection's event-apply path
+	// reaches the inner data via TryAdd / BypassRemove and stays command-free.
+	// Field is lazily allocated because `this` is unavailable in field initializers.
+	private global::Synqra.StoreBoundComponentsCollection? __components;
+
+	public global::Synqra.IComponentsCollection Components => EnsureComponentsWrapper();
+
+	global::Synqra.StoreBoundComponentsCollection EnsureComponentsWrapper()
+	{
+		var existing = __components;
+		if (existing is not null) return existing;
+		var wrapper = new global::Synqra.StoreBoundComponentsCollection(this);
+		// Thread-safe one-time assign; in a race the loser's allocation is discarded.
+		var prior = global::System.Threading.Interlocked.CompareExchange(
+			ref __components, wrapper, null);
+		return prior ?? wrapper;
+	}
+""");
+				}
 				if (isComponent)
 				{
 					body.AppendLine($$"""
