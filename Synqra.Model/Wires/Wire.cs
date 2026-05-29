@@ -9,7 +9,7 @@ namespace Synqra;
 /// only; non-Event port types stub the type system but have no runtime yet.
 /// </summary>
 [SynqraModel]
-[Schema(2026.406, "1 Id Guid SourceContainerId Guid SourceComponentTypeId Guid SourceComponentId Guid SourcePortName string? TargetContainerId Guid TargetComponentTypeId Guid TargetComponentId Guid TargetPortName string? Type int PortType PortType")]
+[Schema(2026.406, "1 Id Guid SourceContainerId Guid SourceComponentTypeId Guid SourceComponentId Guid SourcePortName string? TargetContainerId Guid TargetComponentTypeId Guid TargetComponentId Guid TargetPortName string? Type int")]
 public partial class Wire : IIdentifiable<Guid>
 {
 	/// <summary>Stable identity. The projection assigns this on AddWireCommand.</summary>
@@ -35,12 +35,8 @@ public partial class Wire : IIdentifiable<Guid>
 	/// </summary>
 	public partial int Type { get; set; }
 
-	/// <summary>Convenience accessor for <see cref="Type"/> as <see cref="PortType"/>.</summary>
-	public PortType PortType
-	{
-		get => (PortType)Type;
-		set => Type = (int)value;
-	}
+	/// <summary>Convenience accessor for <see cref="Type"/> as <see cref="PortType"/>. Read-only; set <see cref="Type"/> directly.</summary>
+	public PortType PortType => (PortType)Type;
 
 	Guid IIdentifiable<Guid>.Id => Id;
 
