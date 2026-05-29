@@ -926,6 +926,18 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it during replay. The event stream is inconsistent.");
 		}
 
+		// Wire up the container linkage so the component's generated property
+		// setters can build ChangeComponentPropertyCommands without the user
+		// having to pass the container reference manually.
+		if (component is IBindableComponent bindableComponent)
+		{
+			bindableComponent.AttachToContainer(
+				this,
+				ev.TargetId,
+				ev.TargetTypeId,
+				ev.CollectionId);
+		}
+
 		// Activation only fires on the originating event, never on replay.
 		// (LoadStateCoreAsync supplies a non-null EventVisitorContext with
 		// IsReplay = true; live event processing via ProcessEventAsync passes

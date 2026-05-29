@@ -412,6 +412,103 @@ public class InMemoryStateManageementTests : StateManagementTests
 		await Assert.That(node.Components.Count).IsEqualTo(0);
 	}
 
+	// ---- Phase B: natural-surface coverage (generator-emitted component setters) ----
+	//
+	// These don't construct ChangeComponentPropertyCommand by hand. They write
+	// `c.PropertyName = value` and rely on the generator to emit the command
+	// targeting the container.
+
+	[Test]
+	public async Task Should_50_Component_property_setter_emits_ChangeComponentPropertyCommand()
+	{
+		var node = new TestComponentNode { Name = "host" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var c = new TestUniqueComponent { Subject = "v1" };
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = c,
+		});
+		await Assert.That(c.Subject).IsEqualTo("v1");
+
+		var commandsBefore = _sut.GetCollection<Command>().OfType<ChangeComponentPropertyCommand>().Count();
+
+		c.Subject = "v2"; // generator-emitted path
+
+		var ccps = _sut.GetCollection<Command>().OfType<ChangeComponentPropertyCommand>().ToArray();
+		await Assert.That(ccps.Length).IsEqualTo(commandsBefore + 1);
+
+		var emitted = ccps.Last();
+		await Assert.That(emitted.PropertyName).IsEqualTo(nameof(TestUniqueComponent.Subject));
+		await Assert.That(emitted.NewValue).IsEqualTo("v2");
+		await Assert.That(emitted.OldValue).IsEqualTo("v1");
+		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
+		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestUniqueComponent>());
+		// Unique component: ComponentId stays Guid.Empty; resolver uses ComponentTypeId only.
+		await Assert.That(emitted.ComponentId).IsEqualTo(Guid.Empty);
+		await Assert.That(c.Subject).IsEqualTo("v2");
+	}
+
+	[Test]
+	public async Task Should_51_NonUnique_component_setter_fills_ComponentId_from_Identifiable()
+	{
+		var node = new TestComponentNode { Name = "host2" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var tagId = GuidExtensions.CreateVersion7();
+		var c = new TestTaggingComponent { Id = tagId, Tag = "alpha" };
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
+			ComponentId = tagId,
+			Data = c,
+		});
+
+		c.Tag = "beta"; // generator-emitted path
+
+		var ccps = _sut.GetCollection<Command>().OfType<ChangeComponentPropertyCommand>().ToArray();
+		var emitted = ccps.Last();
+		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestTaggingComponent>());
+		// Non-unique component: generator fills ComponentId from IIdentifiable<Guid>.Id.
+		await Assert.That(emitted.ComponentId).IsEqualTo(tagId);
+		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
+		await Assert.That(c.Tag).IsEqualTo("beta");
+	}
+
+	[Test]
+	public async Task Should_52_Component_setter_uses_container_LastEventId_for_concurrency()
+	{
+		// The optimistic-concurrency precondition emitted by a component setter
+		// must probe the *container* (the conflict-boundary aggregate), not the
+		// component itself. Verify by mutating the container between adding the
+		// component and writing to the component — the write should still succeed
+		// because the generator reads the freshest LastEventId at write time.
+		var node = new TestComponentNode { Name = "concurrency-host" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+		var c = new TestUniqueComponent { Subject = "v1" };
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = c,
+		});
+
+		node.Name = "concurrency-host-edited"; // unrelated container write
+		var afterUnrelatedWrite = _sut.GetLastEventId(_sut.GetId(node));
+
+		c.Subject = "v2"; // component setter — should succeed against the new LastEventId
+		await Assert.That(c.Subject).IsEqualTo("v2");
+
+		var afterComponentWrite = _sut.GetLastEventId(_sut.GetId(node));
+		await Assert.That(afterComponentWrite).IsNotEqualTo(afterUnrelatedWrite);
+	}
+
 	[Test]
 	public async Task Should_47_Activator_fires_with_IsReplay_false_on_originating_event()
 	{
@@ -929,6 +1026,7 @@ public partial class TestUniqueComponent : IComponent
 
 /// <summary>Non-unique component: requires its own Id so multiple instances are addressable.</summary>
 [SynqraModel]
+[Schema(2026.405, "1 Id Guid Tag string?")]
 public partial class TestTaggingComponent : IComponent, IIdentifiable<Guid>
 {
 	public partial Guid Id { get; set; }
@@ -943,6 +1041,7 @@ public partial class TestTaggingComponent : IComponent, IIdentifiable<Guid>
 /// </summary>
 [SynqraModel]
 [Component(IsUnique = true)]
+[Schema(2026.405, "1 Marker string?")]
 public partial class TestActivatableComponent : IComponent, IActivatableComponent
 {
 	public partial string? Marker { get; set; }
