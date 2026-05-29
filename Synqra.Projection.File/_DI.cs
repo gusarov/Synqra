@@ -800,6 +800,13 @@ public static class FileSynqraExtensions
 			return Task.CompletedTask;
 		}
 
+		// Component commands/events — File projection accepts but doesn't yet
+		// implement component state. InMemoryProjection is the reference impl
+		// for components. These stubs satisfy the visitor contract.
+		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+
 		public async Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 		{
 			if (ev.DataObject == null)
@@ -851,6 +858,10 @@ public static class FileSynqraExtensions
 		{
 			throw new NotImplementedException();
 		}
+
+		public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
 		public async Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 		{
