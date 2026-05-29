@@ -14,6 +14,8 @@ namespace Synqra;
 [JsonDerivedType(typeof(ComponentAddedEvent), "ComponentAddedEvent")]
 [JsonDerivedType(typeof(ComponentPropertyChangedEvent), "ComponentPropertyChangedEvent")]
 [JsonDerivedType(typeof(ComponentDeletedEvent), "ComponentDeletedEvent")]
+[JsonDerivedType(typeof(WireAddedEvent), "WireAddedEvent")]
+[JsonDerivedType(typeof(WireDeletedEvent), "WireDeletedEvent")]
 [SynqraModel]
 [Schema(2025.789, "1 EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2025.791, "1")]

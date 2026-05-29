@@ -584,6 +584,117 @@ public class InMemoryStateManageementTests : StateManagementTests
 			.IsSameReferenceAs(c);
 	}
 
+	// ---- Wires (Phase Wires) ----
+	//
+	// First substrate-level slice of the graph: typed connections between
+	// component ports. v0 just persists wires + offers projection-side
+	// from/to lookups; runtime routing comes in a later slice.
+
+	[Test]
+	public async Task Should_70_AddWireCommand_creates_a_wire_with_assigned_id()
+	{
+		// Two nodes with components participate as wire endpoints.
+		var n1 = new TestComponentNode { Name = "src" };
+		var n2 = new TestComponentNode { Name = "dst" };
+		_sut.GetCollection<TestComponentNode>().Add(n1);
+		_sut.GetCollection<TestComponentNode>().Add(n2);
+
+		var srcId = _sut.GetId(n1);
+		var dstId = _sut.GetId(n2);
+		var srcTypeId = TypeIdOf<TestUniqueComponent>();
+		var dstTypeId = TypeIdOf<TestUniqueComponent>();
+
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			SourceContainerId = srcId, SourceComponentTypeId = srcTypeId, SourcePortName = "out",
+			TargetContainerId = dstId, TargetComponentTypeId = dstTypeId, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		await Assert.That(projection.Wires.Count).IsEqualTo(1);
+
+		var wire = projection.Wires.Single();
+		await Assert.That(wire.Id).IsNotEqualTo(Guid.Empty);
+		await Assert.That(wire.SourceContainerId).IsEqualTo(srcId);
+		await Assert.That(wire.TargetContainerId).IsEqualTo(dstId);
+		await Assert.That(wire.PortType).IsEqualTo(PortType.Event);
+	}
+
+	[Test]
+	public async Task Should_71_GetWiresFrom_returns_outgoing_wires_only()
+	{
+		var n1 = new TestComponentNode { Name = "src" };
+		var n2 = new TestComponentNode { Name = "dst1" };
+		var n3 = new TestComponentNode { Name = "dst2" };
+		_sut.GetCollection<TestComponentNode>().Add(n1);
+		_sut.GetCollection<TestComponentNode>().Add(n2);
+		_sut.GetCollection<TestComponentNode>().Add(n3);
+
+		var src = _sut.GetId(n1);
+		var dst1 = _sut.GetId(n2);
+		var dst2 = _sut.GetId(n3);
+		var ct = TypeIdOf<TestUniqueComponent>();
+
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			SourceContainerId = src, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst1, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			SourceContainerId = src, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst2, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		var fromSrc = projection.GetWiresFrom(new PortRef(src, ct, Guid.Empty, "out"));
+		await Assert.That(fromSrc.Count).IsEqualTo(2);
+
+		var fromUnknown = projection.GetWiresFrom(new PortRef(dst1, ct, Guid.Empty, "out"));
+		await Assert.That(fromUnknown.Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_72_DeleteWireCommand_removes_wire_from_index()
+	{
+		var n1 = new TestComponentNode { Name = "src" };
+		var n2 = new TestComponentNode { Name = "dst" };
+		_sut.GetCollection<TestComponentNode>().Add(n1);
+		_sut.GetCollection<TestComponentNode>().Add(n2);
+
+		var src = _sut.GetId(n1);
+		var dst = _sut.GetId(n2);
+		var ct = TypeIdOf<TestUniqueComponent>();
+		var wireId = GuidExtensions.CreateVersion7();
+
+		await _sut.SubmitCommandAsync(new AddWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = wireId,
+			SourceContainerId = src, SourceComponentTypeId = ct, SourcePortName = "out",
+			TargetContainerId = dst, TargetComponentTypeId = ct, TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+
+		var projection = (InMemoryProjection)_sut;
+		await Assert.That(projection.Wires.Count).IsEqualTo(1);
+
+		await _sut.SubmitCommandAsync(new DeleteWireCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = wireId,
+		});
+
+		await Assert.That(projection.Wires.Count).IsEqualTo(0);
+		await Assert.That(projection.GetWiresFrom(new PortRef(src, ct, Guid.Empty, "out")).Count).IsEqualTo(0);
+	}
+
 	[Test]
 	public async Task Should_47_Activator_fires_with_IsReplay_false_on_originating_event()
 	{
@@ -750,6 +861,9 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			typeof(AddComponentCommand),
 			typeof(ChangeComponentPropertyCommand),
 			typeof(DeleteComponentCommand),
+			typeof(AddWireCommand),
+			typeof(DeleteWireCommand),
+			typeof(Wire),
 			typeof(TestComponentNode),
 			typeof(TestGeneratedContainerNode),
 			typeof(TestUniqueComponent),
