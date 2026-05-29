@@ -165,6 +165,275 @@ public class InMemoryStateManageementTests : StateManagementTests
 
 		await Assert.That(model.Name).IsEqualTo("NoOptions");
 	}
+
+	// ---- Phase C: component substrate runtime coverage ----
+	//
+	// These use manually-constructed commands (Phase A substrate is complete; the
+	// generator integration that lets you write `node.Components.Add(c)` and have
+	// it emit the command for you is Phase B and will live in its own commit).
+	// Until then, the substrate is reachable by passing AddComponentCommand /
+	// ChangeComponentPropertyCommand / DeleteComponentCommand directly.
+
+	Guid TypeIdOf<T>() => _sut.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
+
+	[Test]
+	public async Task Should_40_AddComponent_attaches_to_container()
+	{
+		var node = new TestComponentNode { Name = "n1" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var component = new TestUniqueComponent { Subject = "hello" };
+
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = component,
+		});
+
+		var attached = node.Components.GetUniqueComponent(typeof(TestUniqueComponent));
+		await Assert.That(attached).IsNotNull();
+		await Assert.That(attached).IsSameReferenceAs(component);
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Should_41_AddComponent_unique_constraint_rejects_second()
+	{
+		var node = new TestComponentNode { Name = "n2" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = new TestUniqueComponent { Subject = "first" },
+		});
+
+		// Adding a second [Component(IsUnique = true)] of the same type must fail
+		// during event apply (the projection refuses to attach when the unique slot
+		// is filled).
+		InvalidOperationException? caught = null;
+		try
+		{
+			await _sut.SubmitCommandAsync(new AddComponentCommand
+			{
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetObject = node,
+				ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+				Data = new TestUniqueComponent { Subject = "second" },
+			});
+		}
+		catch (InvalidOperationException ex)
+		{
+			caught = ex;
+		}
+
+		await Assert.That(caught).IsNotNull();
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+		await Assert.That(((TestUniqueComponent)node.Components.GetUniqueComponent(typeof(TestUniqueComponent))!).Subject)
+			.IsEqualTo("first");
+	}
+
+	[Test]
+	public async Task Should_42_ChangeComponentProperty_updates_unique_component_by_type()
+	{
+		var node = new TestComponentNode { Name = "n3" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var c = new TestUniqueComponent { Subject = "before" };
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = c,
+		});
+
+		// Unique components are addressed by type alone; ComponentId stays empty.
+		await _sut.SubmitCommandAsync(new ChangeComponentPropertyCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			PropertyName = nameof(c.Subject),
+			OldValue = "before",
+			NewValue = "after",
+		});
+
+		await Assert.That(c.Subject).IsEqualTo("after");
+	}
+
+	[Test]
+	public async Task Should_43_NonUnique_components_addressed_by_id()
+	{
+		var node = new TestComponentNode { Name = "n4" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var aId = GuidExtensions.CreateVersion7();
+		var bId = GuidExtensions.CreateVersion7();
+
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
+			ComponentId = aId,
+			Data = new TestTaggingComponent { Id = aId, Tag = "alpha" },
+		});
+
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
+			ComponentId = bId,
+			Data = new TestTaggingComponent { Id = bId, Tag = "beta" },
+		});
+
+		await Assert.That(node.Components.Count).IsEqualTo(2);
+
+		// Change just the second one. ComponentId disambiguates among instances of the same type.
+		await _sut.SubmitCommandAsync(new ChangeComponentPropertyCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
+			ComponentId = bId,
+			PropertyName = nameof(TestTaggingComponent.Tag),
+			OldValue = "beta",
+			NewValue = "beta-updated",
+		});
+
+		var aComp = node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == aId);
+		var bComp = node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == bId);
+		await Assert.That(aComp.Tag).IsEqualTo("alpha");
+		await Assert.That(bComp.Tag).IsEqualTo("beta-updated");
+	}
+
+	[Test]
+	public async Task Should_44_DeleteComponent_removes_from_collection()
+	{
+		var node = new TestComponentNode { Name = "n5" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = new TestUniqueComponent { Subject = "doomed" },
+		});
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+
+		await _sut.SubmitCommandAsync(new DeleteComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+		});
+
+		await Assert.That(node.Components.Count).IsEqualTo(0);
+		await Assert.That(node.Components.GetUniqueComponent(typeof(TestUniqueComponent))).IsNull();
+	}
+
+	[Test]
+	public async Task Should_45_Component_edit_advances_container_LastEventId()
+	{
+		var node = new TestComponentNode { Name = "n6" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+		var nodeId = _sut.GetId(node);
+
+		var beforeAdd = _sut.GetLastEventId(nodeId);
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			Data = new TestUniqueComponent { Subject = "x" },
+		});
+		var afterAdd = _sut.GetLastEventId(nodeId);
+		await Assert.That(afterAdd).IsNotEqualTo(beforeAdd);
+		// "Container's LastEventId advances on ComponentAddedEvent so concurrent edits conflict at container granularity."
+
+		await _sut.SubmitCommandAsync(new ChangeComponentPropertyCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			PropertyName = nameof(TestUniqueComponent.Subject),
+			OldValue = "x",
+			NewValue = "y",
+		});
+		var afterChange = _sut.GetLastEventId(nodeId);
+		await Assert.That(afterChange).IsNotEqualTo(afterAdd);
+
+		await _sut.SubmitCommandAsync(new DeleteComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+		});
+		var afterDelete = _sut.GetLastEventId(nodeId);
+		await Assert.That(afterDelete).IsNotEqualTo(afterChange);
+	}
+
+	[Test]
+	public async Task Should_46_Stale_LastEventId_rejects_AddComponent()
+	{
+		var node = new TestComponentNode { Name = "n7" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		// Forge a "stale" precondition. The component attach must be rejected
+		// with no events produced; the container's state stays unchanged.
+		var stale = GuidExtensions.CreateVersion7();
+
+		ConcurrencyException? caught = null;
+		try
+		{
+			await _sut.SubmitCommandAsync(
+				new AddComponentCommand
+				{
+					CommandId = GuidExtensions.CreateVersion7(),
+					TargetObject = node,
+					ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+					Data = new TestUniqueComponent { Subject = "ghost" },
+				},
+				new CommandSubmissionOptions { ExpectedLastEventId = stale });
+		}
+		catch (ConcurrencyException ex)
+		{
+			caught = ex;
+		}
+
+		await Assert.That(caught).IsNotNull();
+		await Assert.That(node.Components.Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_47_Activator_fires_with_IsReplay_false_on_originating_event()
+	{
+		var node = new TestComponentNode { Name = "n8" };
+		_sut.GetCollection<TestComponentNode>().Add(node);
+
+		var c = new TestActivatableComponent { Marker = "ready" };
+		await _sut.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetObject = node,
+			ComponentTypeId = TypeIdOf<TestActivatableComponent>(),
+			Data = c,
+		});
+
+		await Assert.That(c.ActivationCount).IsEqualTo(1);
+		await Assert.That(c.LastActivationWasReplay).IsEqualTo(false);
+		// (Replay path — IsReplay = true — is covered indirectly: LoadStateCoreAsync
+		// constructs an EventVisitorContext with IsReplay=true, and the same handler
+		// branches on it. A dedicated replay-storage test requires storing real Data
+		// payloads, which is Phase D — JSON polymorphism for components.)
+	}
 }
 
 [InheritsTests]
@@ -306,6 +575,13 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 			typeof(Command),
 			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
+			typeof(AddComponentCommand),
+			typeof(ChangeComponentPropertyCommand),
+			typeof(DeleteComponentCommand),
+			typeof(TestComponentNode),
+			typeof(TestUniqueComponent),
+			typeof(TestTaggingComponent),
+			typeof(TestActivatableComponent),
 			typeof(Item),
 		]);
 
@@ -625,6 +901,63 @@ public partial class StorableModel
 	public partial string Key { get; set; }
 
 	public partial string Title { get; set; }
+}
+
+// ---- Component substrate test fixtures (used by InMemoryStateManageementTests) ----
+
+/// <summary>Container exposing a manually-backed components collection (generator integration is Phase B).</summary>
+[SynqraModel]
+[Schema(2026.405, "1 Name string?")]
+public partial class TestComponentNode : IComponentContainer
+{
+	readonly ComponentsCollection _components = new();
+
+	public partial string? Name { get; set; }
+
+	[JsonIgnore]
+	public IComponentsCollection Components => _components;
+}
+
+/// <summary>Unique-by-class component: at most one instance per container.</summary>
+[SynqraModel]
+[Component(IsUnique = true)]
+[Schema(2026.405, "1 Subject string?")]
+public partial class TestUniqueComponent : IComponent
+{
+	public partial string? Subject { get; set; }
+}
+
+/// <summary>Non-unique component: requires its own Id so multiple instances are addressable.</summary>
+[SynqraModel]
+public partial class TestTaggingComponent : IComponent, IIdentifiable<Guid>
+{
+	public partial Guid Id { get; set; }
+	public partial string? Tag { get; set; }
+
+	Guid IIdentifiable<Guid>.Id => Id;
+}
+
+/// <summary>
+/// Activatable component used to verify replay-skip semantics. Sets <see cref="LastActivationWasReplay"/>
+/// on activation so tests can check whether activation fired at all and in which mode.
+/// </summary>
+[SynqraModel]
+[Component(IsUnique = true)]
+public partial class TestActivatableComponent : IComponent, IActivatableComponent
+{
+	public partial string? Marker { get; set; }
+
+	[JsonIgnore]
+	public int ActivationCount { get; private set; }
+
+	[JsonIgnore]
+	public bool? LastActivationWasReplay { get; private set; }
+
+	void IActivatableComponent.Activate(ComponentActivationContext context)
+	{
+		ActivationCount++;
+		LastActivationWasReplay = context.IsReplay;
+	}
 }
 
 [SynqraModel]

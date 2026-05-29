@@ -927,12 +927,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 
 		// Activation only fires on the originating event, never on replay.
-		// (ctx.IsReplay is set by LoadStateCoreAsync.)
+		// (LoadStateCoreAsync supplies a non-null EventVisitorContext with
+		// IsReplay = true; live event processing via ProcessEventAsync passes
+		// null, which is treated as "not replay".)
 		// Skipped silently when no IServiceProvider was supplied at construction —
 		// component activators that need DI would simply fail if called without
 		// one, so the projection refuses to start the call.
+		var isReplay = ctx is not null && ctx.IsReplay;
 		if (component is IActivatableComponent activatable
-			&& !ctx.IsReplay
+			&& !isReplay
 			&& _serviceProvider is not null)
 		{
 			activatable.Activate(new ComponentActivationContext
