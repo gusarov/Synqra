@@ -54,7 +54,12 @@ public sealed class ComponentsCollection : IComponentsCollection
 		return true;
 	}
 
-	public bool Remove(IComponent component)
+	// Base ComponentsCollection has no command channel — both Remove and
+	// BypassRemove just mutate the inner data. StoreBoundComponentsCollection
+	// wraps this and overrides ICollection<T>.Remove to emit a command.
+	public bool Remove(IComponent component) => BypassRemove(component);
+
+	public bool BypassRemove(IComponent component)
 	{
 		var index = _components.IndexOf(component);
 		if (index < 0) return false;

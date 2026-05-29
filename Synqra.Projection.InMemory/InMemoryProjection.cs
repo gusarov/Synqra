@@ -1007,7 +1007,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		var container = ResolveContainer(ev.TargetId);
 		var component = ResolveComponent(container, ev);
 
-		if (!container.Components.Remove(component))
+		// BypassRemove rather than Remove: when the container is wrapped in
+		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a
+		// command. The projection is APPLYING an event, so it must skip the command
+		// channel — otherwise it would generate a recursive delete command.
+		if (!container.Components.BypassRemove(component))
 		{
 			throw new InvalidOperationException(
 				$"ComponentDeletedEvent {ev.EventId}: component instance was located but the collection refused to remove it. The event stream is inconsistent.");
