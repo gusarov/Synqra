@@ -694,6 +694,13 @@ public class InMemoryStateManageementTests : StateManagementTests
 		var toDst = projection.GetWiresTo(new PortRef(dst, ct, Guid.Empty, "in"));
 		await Assert.That(toDst.Count).IsEqualTo(2);
 
+		// Directionality check: src1's "out" IS a source endpoint of one wire.
+		// If GetWiresTo accidentally read the from-index, this would return 1
+		// instead of 0 — pinning the from/to split.
+		var fromIndexLeak = projection.GetWiresTo(new PortRef(src1, ct, Guid.Empty, "out"));
+		await Assert.That(fromIndexLeak.Count).IsEqualTo(0);
+
+		// And a fully-unrelated port returns 0 (catches over-broad indexing).
 		var toUnknown = projection.GetWiresTo(new PortRef(src1, ct, Guid.Empty, "in"));
 		await Assert.That(toUnknown.Count).IsEqualTo(0);
 	}
