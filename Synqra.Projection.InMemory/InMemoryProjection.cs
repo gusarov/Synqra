@@ -56,6 +56,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public ITypeMetadataProvider TypeMetadataProvider { get; }
 
 	private readonly IEventReplicationService? _eventReplicationService;
+	private readonly IServiceProvider? _serviceProvider;
 	private readonly Dictionary<Guid, InMemoryStoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -71,12 +72,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
+		, IServiceProvider? serviceProvider = null
 		)
 	{
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
 		_eventReplicationService = eventReplicationService;
+		_serviceProvider = serviceProvider;
 		_jsonSerializerOptions = jsonSerializerOptions;
 		if (jsonSerializerContext != null)
 		{
@@ -120,7 +123,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			{
 				ProjectionStatus = "Loading...";
 				var sw = Stopwatch.StartNew();
-				var ctx = new EventVisitorContext();
+				// Replay mode: activators with one-shot side effects skip during this loop.
+				var ctx = new EventVisitorContext { IsReplay = true };
 				long cnt = 0;
 				await foreach (var item in _eventStorage.GetAllAsync())
 				{
@@ -682,6 +686,64 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
+	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx)
+	{
+		// Uniqueness / veto checks happen during event apply (where the live
+		// ComponentsCollection lives). Command handling here just turns the
+		// command into the event — same pattern as ChangeObjectProperty.
+		ctx.Events.Add(new ComponentAddedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+			Data = cmd.Data,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new ComponentPropertyChangedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+			PropertyName = cmd.PropertyName,
+			OldValue = cmd.OldValue,
+			NewValue = cmd.NewValue,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new ComponentDeletedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+		});
+		return Task.CompletedTask;
+	}
+
 	#endregion
 
 	#region Event Handler
@@ -846,6 +908,203 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		commands.AddByEvent(ev.Data);
 		return Task.CompletedTask;
 		// throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
+	}
+
+	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+
+		// Instantiate the component. Lookup the concrete type via the type registry,
+		// reuse the model-binding pathway so JSON payloads round-trip the same way
+		// as for normal SynqraModel objects.
+		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var component = MaterializeComponent(componentType, ev.Data);
+
+		if (!container.Components.TryAdd(component))
+		{
+			throw new InvalidOperationException(
+				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it during replay. The event stream is inconsistent.");
+		}
+
+		// Activation only fires on the originating event, never on replay.
+		// (ctx.IsReplay is set by LoadStateCoreAsync.)
+		// Skipped silently when no IServiceProvider was supplied at construction —
+		// component activators that need DI would simply fail if called without
+		// one, so the projection refuses to start the call.
+		if (component is IActivatableComponent activatable
+			&& !ctx.IsReplay
+			&& _serviceProvider is not null)
+		{
+			activatable.Activate(new ComponentActivationContext
+			{
+				ServiceProvider = _serviceProvider,
+				Container = container,
+				ContainerId = ev.TargetId,
+				Component = component,
+				IsReplay = false,
+			});
+		}
+
+		// Component attach is a state-changing event on the container — bump
+		// the container's LastEventId so optimistic-concurrency precondition
+		// against (container, component-edit) catches concurrent edits.
+		if (TryGetModel(ev.TargetId, out var data) && data.Attached is not null)
+		{
+			data.Attached.LastEventId = ev.EventId;
+		}
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+		var component = ResolveComponent(container, ev);
+
+		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.)
+		// fire naturally. Components that don't implement IBindableModel fall back to
+		// reflection.
+		if (component is IBindableModel bindable)
+		{
+			bindable.Set(ev.PropertyName, ev.NewValue);
+		}
+		else
+		{
+			var pi = component.GetType().GetProperty(ev.PropertyName)
+				?? throw new InvalidOperationException(
+					$"Component '{component.GetType().Name}' has no property '{ev.PropertyName}'.");
+			var value = ev.NewValue;
+			if (value is IConvertible c)
+			{
+				value = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+			}
+			pi.SetValue(component, value);
+		}
+
+		if (TryGetModel(ev.TargetId, out var data) && data.Attached is not null)
+		{
+			data.Attached.LastEventId = ev.EventId;
+		}
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+		var component = ResolveComponent(container, ev);
+
+		if (!container.Components.Remove(component))
+		{
+			throw new InvalidOperationException(
+				$"ComponentDeletedEvent {ev.EventId}: component instance was located but the collection refused to remove it. The event stream is inconsistent.");
+		}
+
+		if (TryGetModel(ev.TargetId, out var data) && data.Attached is not null)
+		{
+			data.Attached.LastEventId = ev.EventId;
+		}
+		return Task.CompletedTask;
+	}
+
+	// ---- Component apply helpers ----
+
+	IComponentContainer ResolveContainer(Guid targetId)
+	{
+		if (!TryGetModel(targetId, out var data) || data.Model is null)
+		{
+			throw new InvalidOperationException($"Container {targetId} not found while applying component event.");
+		}
+		if (data.Model is not IComponentContainer container)
+		{
+			throw new InvalidOperationException(
+				$"Object {targetId} is a '{data.Model.GetType().Name}' which does not implement IComponentContainer.");
+		}
+		return container;
+	}
+
+	IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev)
+	{
+		// Both ChangeComponentProperty and DeleteComponent carry (ComponentTypeId, ComponentId).
+		// Address by:
+		//   - ComponentId, when set: walk the list, find by identity (non-unique components)
+		//   - ComponentTypeId alone: lookup the unique slot for the resolved type
+		var componentType = TypeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
+		var componentId = GetComponentId(ev);
+
+		if (componentId != Guid.Empty)
+		{
+			foreach (var c in container.Components)
+			{
+				if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
+				{
+					return c;
+				}
+			}
+			throw new InvalidOperationException(
+				$"Component {componentId} of type '{componentType.Name}' not found on container.");
+		}
+
+		var unique = container.Components.GetUniqueComponent(componentType);
+		if (unique is null)
+		{
+			throw new InvalidOperationException(
+				$"No unique-component slot for '{componentType.Name}' is filled on this container.");
+		}
+		return unique;
+	}
+
+	static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
+	{
+		ComponentPropertyChangedEvent p => p.ComponentTypeId,
+		ComponentDeletedEvent d => d.ComponentTypeId,
+		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
+	};
+
+	static Guid GetComponentId(SingleObjectEvent ev) => ev switch
+	{
+		ComponentPropertyChangedEvent p => p.ComponentId,
+		ComponentDeletedEvent d => d.ComponentId,
+		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
+	};
+
+	IComponent MaterializeComponent(Type componentType, object? data)
+	{
+		// Three cases:
+		//   - data is already an instance of componentType (typical when emitted locally)
+		//   - data is a json-shaped IDictionary<string, object?> (post-rehydrate from event store)
+		//   - data is null (component has no payload, e.g. a bare marker)
+		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
+		{
+			return ready;
+		}
+
+		var instance = Activator.CreateInstance(componentType)
+			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
+		var component = (IComponent)instance;
+
+		// Hydrate from dictionary via the bindable-model set path when the component
+		// is a SynqraModel; fall back to reflection otherwise.
+		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
+		{
+			foreach (var (key, value) in bag)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else if (data is IDictionary<string, object?> reflectBag)
+		{
+			foreach (var (key, value) in reflectBag)
+			{
+				var pi = componentType.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(component, v);
+			}
+		}
+		return component;
 	}
 
 	#endregion

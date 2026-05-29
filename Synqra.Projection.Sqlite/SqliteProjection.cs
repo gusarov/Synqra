@@ -338,6 +338,19 @@ public class SqliteProjection : IProjection
 	{
 	}
 
+	public async Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx)
+	{
+		// SQLite projection is a stub; components are not yet wired here.
+	}
+
+	public async Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx)
+	{
+	}
+
+	public async Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx)
+	{
+	}
+
 	#endregion
 
 	#region Event Visitor
@@ -359,6 +372,19 @@ public class SqliteProjection : IProjection
 	}
 
 	public async Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
+	{
+	}
+
+	public async Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
+	{
+		// SQLite projection is a stub; components are not yet wired here.
+	}
+
+	public async Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
+	{
+	}
+
+	public async Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 	}
 
