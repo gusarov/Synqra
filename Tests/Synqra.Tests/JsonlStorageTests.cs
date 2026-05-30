@@ -599,4 +599,60 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 
 """.NormalizeNewLines());
 	}
+
+	// Durable-log serialization of wire events. A wire's whole shape is primitive
+	// (Guids/strings/int) and lives directly on WireAdded/WireDeletedEvent — no
+	// polymorphic component payload. This pins that those events survive a real
+	// serialize -> restart -> deserialize cycle through the JSONL log, which is the
+	// concern that matters when picking a durable backend (file today, Mongo next):
+	// the event body must round-trip losslessly so replay can rebuild wire state.
+	[Test]
+	public async Task Should_round_trip_wire_events_through_jsonl()
+	{
+		var wireId = Guid.Parse("00000010-0001-7000-8000-00000000aa01");
+		var srcContainer = Guid.Parse("00000010-0002-7000-8000-00000000aa02");
+		var srcType = Guid.Parse("00000010-0003-7000-8000-00000000aa03");
+		var tgtContainer = Guid.Parse("00000010-0004-7000-8000-00000000aa04");
+		var tgtType = Guid.Parse("00000010-0005-7000-8000-00000000aa05");
+
+		await _storage.AppendAsync(new WireAddedEvent
+		{
+			EventId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = wireId,
+			SourceContainerId = srcContainer,
+			SourceComponentTypeId = srcType,
+			SourcePortName = "out",
+			TargetContainerId = tgtContainer,
+			TargetComponentTypeId = tgtType,
+			TargetPortName = "in",
+			Type = (int)PortType.Event,
+		});
+		await _storage.AppendAsync(new WireDeletedEvent
+		{
+			EventId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			WireId = wireId,
+		});
+
+		await ReopenAsync();
+
+		var events = _storage.GetAllAsync().ToBlockingEnumerable().ToArray();
+		await Assert.That(events).HasCount(2);
+
+		var added = events[0] as WireAddedEvent;
+		await Assert.That(added).IsNotNull();
+		await Assert.That(added!.WireId).IsEqualTo(wireId);
+		await Assert.That(added.SourceContainerId).IsEqualTo(srcContainer);
+		await Assert.That(added.SourceComponentTypeId).IsEqualTo(srcType);
+		await Assert.That(added.SourcePortName).IsEqualTo("out");
+		await Assert.That(added.TargetContainerId).IsEqualTo(tgtContainer);
+		await Assert.That(added.TargetComponentTypeId).IsEqualTo(tgtType);
+		await Assert.That(added.TargetPortName).IsEqualTo("in");
+		await Assert.That(added.Type).IsEqualTo((int)PortType.Event);
+
+		var deleted = events[1] as WireDeletedEvent;
+		await Assert.That(deleted).IsNotNull();
+		await Assert.That(deleted!.WireId).IsEqualTo(wireId);
+	}
 }
