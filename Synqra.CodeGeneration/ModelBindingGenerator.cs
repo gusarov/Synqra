@@ -878,8 +878,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro, doesSupportField: false)
 							: "this." + pro.Name;
-						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
-					}
+							body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+						}
 					body.AppendLine($"\t\t}}");
 					els = "else ";
 				}
@@ -1020,8 +1020,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
 							? GetFieldName(pro, doesSupportField: false)
 							: "this." + pro.Name;
-						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
-					}
+							body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+						}
 					body.AppendLine($"\t\t}}");
 					els = "else ";
 				}
@@ -1233,7 +1233,23 @@ $$"""
 		{
 			// Handle Nullable<T>
 			if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && named.TypeArguments.Length == 1)
-				return DeserializeMethod(named.TypeArguments[0], debug: debug);
+			{
+				var innerType = named.TypeArguments[0];
+				if (innerType is INamedTypeSymbol innerNamed)
+				{
+					switch (innerNamed.SpecialType)
+					{
+						// case SpecialType.System_Single: return "NullableSingle";
+						// case SpecialType.System_Double: return "NullableDouble";
+						case SpecialType.None:
+						{
+
+							break;
+						}
+					}
+				}
+				return "Nullable" + DeserializeMethod(innerType, debug: debug);
+			}
 
 			// Handle primitive & predefined types
 			switch (named.SpecialType)

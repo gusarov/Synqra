@@ -53,6 +53,38 @@ public partial class SampleFieldIntModel
 }
 
 [SynqraModel]
+[Schema(1, "1 Data float")]
+[Schema(2026.188, "1 Data float")]
+public partial class SampleFieldFloatModel
+{
+	public partial float Data { get; set; }
+}
+
+[SynqraModel]
+[Schema(1, "1 Data double")]
+[Schema(2026.188, "1 Data double")]
+public partial class SampleFieldDoubleModel
+{
+	public partial double Data { get; set; }
+}
+
+[SynqraModel]
+[Schema(1, "1 Data float?")]
+[Schema(2026.188, "1 Data float?")]
+public partial class SampleFieldNullableFloatModel
+{
+	public partial float? Data { get; set; }
+}
+
+[SynqraModel]
+[Schema(1, "1 Data double?")]
+[Schema(2026.188, "1 Data double?")]
+public partial class SampleFieldNullableDoubleModel
+{
+	public partial double? Data { get; set; }
+}
+
+[SynqraModel]
 [Schema(1, "1 Data object")]
 [Schema(2025.791, "1")]
 [Schema(2025.792, "1 Data object")]
