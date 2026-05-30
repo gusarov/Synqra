@@ -76,6 +76,11 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(SampleSealedDerivedModel))]
 [JsonSerializable(typeof(SampleSealedModel))]
 
+[JsonSerializable(typeof(SampleFieldFloatModel))]
+[JsonSerializable(typeof(SampleFieldDoubleModel))]
+[JsonSerializable(typeof(SampleFieldNullableFloatModel))]
+[JsonSerializable(typeof(SampleFieldNullableDoubleModel))]
+
 [JsonSerializable(typeof(SampleFieldListIntModel))]
 [JsonSerializable(typeof(SampleFieldListObjectModel))]
 [JsonSerializable(typeof(SampleFieldListBaseModel))]
@@ -83,6 +88,8 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(SampleFieldListBaseModel_))]
 [JsonSerializable(typeof(SampleFieldEnumerableBaseModel))]
 [JsonSerializable(typeof(SampleFieldEnumerableBaseModel_))]
+
+[JsonSerializable(typeof(SampleFieldDictionaryStringObjectModel))]
 
 [JsonSerializable(typeof(List<SampleBaseModel>))]
 [JsonSerializable(typeof(List<SampleDerivedModel>))]

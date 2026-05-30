@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
 using System.Collections;
@@ -75,8 +75,8 @@ public class SbxSerializer : ISbxSerializer
 		AsRequested = -1, // same type as requested
 
 		// System primitives going down
-		SignedInteger = -2, // varint
-		UnsignedInteger = -3, // zigzag varint
+		SignedInteger = -2, // zigzag varint
+		UnsignedInteger = -3, // varint
 		Utf8String = -4, // zero-tailed utf8 or an interned pointer (using 0x80-0xC1 range blocked in utf8)
 		Guid = -5, // custom compression for guids
 
@@ -104,7 +104,9 @@ public class SbxSerializer : ISbxSerializer
 		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1, // -23, there is a unit test to ensure this value is correct
 		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
 
-		// TEMPORAY:
+		// TEMPORAY/EXPERIMENTAL:
+		SingleFloating = -28,
+		DoubleFloating = -29,
 		DictStrObj = -30,
 		DictStrStr = -31,
 	}
@@ -162,6 +164,22 @@ public class SbxSerializer : ISbxSerializer
 
 	static UTF8Encoding _utf8 = new(false, true);
 	static Guid _guidMax = new Guid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
+	private static uint SingleFloatNegativeZero;
+	private static ulong DoubleFloatNegativeZero;
+
+	unsafe static SbxSerializer()
+	{
+		{
+			var nf = float.NegativeZero;
+			var pf = (uint*)&nf;
+			SingleFloatNegativeZero = *pf;
+		}
+		{
+			var nd = double.NegativeZero;
+			var pd = (ulong*)&nd;
+			DoubleFloatNegativeZero = *pd;
+		}
+	}
 
 	/// <summary>
 	/// Version/Schema specific epoch for compression. All time can now be calculated as varbinary of s/ms from this custom epoch (when stream started). This is to save space.
@@ -323,7 +341,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, T? obj
+		, in T? obj
 		, ref int pos
 		)
 	{
@@ -332,7 +350,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, T? obj
+		, in T? obj
 		, ref int pos
 		, bool? emitTypeId = null
 		)
@@ -348,7 +366,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(
 		  in Span<byte> buffer
-		, object? obj
+		, in object? obj
 		, ref int pos
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type requestedType
 		, bool? emitTypeId = null
@@ -483,10 +501,10 @@ public class SbxSerializer : ISbxSerializer
 			*/
 			if (requestedType.IsAssignableTo(typeof(IEnumerable)))
 			{
-				SerializeNullableUnsigned(buffer, null, ref pos);
+				Serialize(buffer, (ulong?)null, ref pos);
 				return;
 			}
-			throw new NotSupportedException("Need to track capability of a type to encode null state inside value");
+			throw new NotSupportedException("Need to track capability of a type to encode null state inside value. You likely hitting generic overload of Serialize instead of some specific type capable to encode nullability.");
 		}
 
 		if (obj is IBindableModel bm)
@@ -521,6 +539,14 @@ public class SbxSerializer : ISbxSerializer
 		else if (obj is ulong ul)
 		{
 			Serialize(in buffer, (ulong)ul, ref pos);
+		}
+		else if (obj is float f)
+		{
+			Serialize(in buffer, f, ref pos);
+		}
+		else if (obj is double d)
+		{
+			Serialize(in buffer, d, ref pos);
 		}
 		else if (obj is Guid g)
 		{
@@ -610,7 +636,7 @@ public class SbxSerializer : ISbxSerializer
 		)
 	{
 		return (T)Deserialize(
-			  buffer
+			  in buffer
 			, ref pos
 			, requestedType: typeof(T)
 			);
@@ -623,7 +649,7 @@ public class SbxSerializer : ISbxSerializer
 		)
 	{
 		return (T)Deserialize(
-			  buffer
+			  in buffer
 			, ref pos
 			, requestedType: typeof(T)
 			, consumeTypeId
@@ -790,6 +816,14 @@ public class SbxSerializer : ISbxSerializer
 		else if (typeId == TypeId.Guid || type == typeof(Guid))
 		{
 			return DeserializeGuid(in buffer, ref pos);
+		}
+		else if (typeId == TypeId.SingleFloating || type == typeof(float))
+		{
+			return DeserializeSingle(in buffer, ref pos);
+		}
+		else if (typeId == TypeId.DoubleFloating || type == typeof(double))
+		{
+			return DeserializeDouble(in buffer, ref pos);
 		}
 		/*
 		else if ((typeId >= TypeId.ListTypeTo && typeId <= TypeId.ListTypeTo) || type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
@@ -987,7 +1021,7 @@ public class SbxSerializer : ISbxSerializer
 
 		if (enumerable is null)
 		{
-			SerializeNullableUnsigned(buffer, null, ref pos);
+			Serialize(buffer, (ulong?)null, ref pos);
 			return;
 		}
 
@@ -996,7 +1030,7 @@ public class SbxSerializer : ISbxSerializer
 		var cnt = materialized.Count;
 		// if (cnt > 0)
 		{
-			SerializeNullableUnsigned(buffer, (ulong?)cnt, ref pos);
+			Serialize(buffer, (ulong?)cnt, ref pos);
 		}
 		foreach (var item in materialized)
 		{
@@ -1291,6 +1325,10 @@ public class SbxSerializer : ISbxSerializer
 				return TypeId.Utf8String;
 			case Type t when t == typeof(Guid):
 				return TypeId.Guid;
+			case Type t when t == typeof(Single):
+				return TypeId.SingleFloating;
+			case Type t when t == typeof(Double):
+				return TypeId.DoubleFloating;
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, string>)):
 				return TypeId.DictStrStr; // artificial mark, requre a call to GetTypeIdForList
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, object>)):
@@ -1316,6 +1354,8 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.UnsignedInteger => typeof(ulong),
 			TypeId.Utf8String => typeof(string),
 			TypeId.Guid => typeof(Guid),
+			TypeId.SingleFloating => typeof(float),
+			TypeId.DoubleFloating => typeof(double),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}
@@ -1351,6 +1391,11 @@ public class SbxSerializer : ISbxSerializer
 	#region String v2 (NullTerm)
 
 	public string DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		return DeserializeNullableString(buffer, ref pos) ?? throw new InvalidOperationException("String is not supposed to be null here");
+	}
+
+	public string? DeserializeNullableString(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		var b = buffer[pos];
 
@@ -1426,7 +1471,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 	}
 
-	public void Serialize(in Span<byte> buffer, string data, ref int pos)
+	public void Serialize(in Span<byte> buffer, string? data, ref int pos)
 	{
 		if (data == null)
 		{
@@ -1509,9 +1554,117 @@ public class SbxSerializer : ISbxSerializer
 
 	#endregion
 
+	#region Floating Point
+
+	public unsafe void Serialize(in Span<byte> buffer, float data, ref int pos)
+	{
+		var bytes = (byte*)&data;
+		buffer[pos++] = bytes[0];
+		buffer[pos++] = bytes[1];
+		buffer[pos++] = bytes[2];
+		buffer[pos++] = bytes[3];
+	}
+	public unsafe void Serialize(in Span<byte> buffer, double data, ref int pos)
+	{
+		/*
+		// test single downgrade
+		var single = Convert.ToSingle(data);
+		if (single == data)
+		{
+			Serialize(buffer, single, ref pos);
+		}
+		else
+		{
+			throw new NotImplementedException();
+		}
+		*/
+		var bytes = (byte*)&data;
+		buffer[pos++] = bytes[0];
+		buffer[pos++] = bytes[1];
+		buffer[pos++] = bytes[2];
+		buffer[pos++] = bytes[3];
+		buffer[pos++] = bytes[4];
+		buffer[pos++] = bytes[5];
+		buffer[pos++] = bytes[6];
+		buffer[pos++] = bytes[7];
+	}
+	public unsafe void Serialize(in Span<byte> buffer, float? data, ref int pos)
+	{
+		if (data == null)
+		{
+			Serialize(buffer, float.NegativeZero, ref pos);
+		}
+		/*
+		else if (SingleFloatNegativeZero == *(float*)&data)
+		{
+			Serialize(buffer, 0f, ref pos); // silent normalization
+		}
+		*/
+		else
+		{
+			Serialize(buffer, data.Value, ref pos);
+		}
+	}
+	public void Serialize(in Span<byte> buffer, double? data, ref int pos)
+	{
+		if (data == null)
+		{
+			Serialize(buffer, double.NegativeZero, ref pos);
+		}
+		/*
+		else if (double.IsNegative(data.Value) && )
+		{
+			Serialize(buffer, 0d, ref pos); // silent normalization
+		}
+		*/
+		else
+		{
+			Serialize(buffer, data.Value, ref pos);
+		}
+	}
+	public unsafe float DeserializeSingle(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		float result = 0;
+		var bytes = (byte*)&result;
+		bytes[0] = buffer[pos++];
+		bytes[1] = buffer[pos++];
+		bytes[2] = buffer[pos++];
+		bytes[3] = buffer[pos++];
+		return result;
+	}
+	public unsafe double DeserializeDouble(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		double result = 0;
+		var bytes = (byte*)&result;
+		bytes[0] = buffer[pos++];
+		bytes[1] = buffer[pos++];
+		bytes[2] = buffer[pos++];
+		bytes[3] = buffer[pos++];
+		bytes[4] = buffer[pos++];
+		bytes[5] = buffer[pos++];
+		bytes[6] = buffer[pos++];
+		bytes[7] = buffer[pos++];
+		return result;
+	}
+
+	public unsafe float? DeserializeNullableSingle(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var f = DeserializeSingle(buffer, ref pos);
+		// compare as uint bit state to avoid zero equality logic
+		return (*(uint*)&f) == SingleFloatNegativeZero ? null : f;
+	}
+	public unsafe double? DeserializeNullableDouble(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var d = DeserializeDouble(buffer, ref pos);
+		// compare as uint bit state to avoid zero equality logic
+		return (*(ulong*)&d) == DoubleFloatNegativeZero ? null : d;
+	}
+
+	#endregion
+
 	#region Nullable Signed Integer
 
-	public void SerializeNullableSigned(in Span<byte> buffer, long? data, ref int pos)
+	public void Serialize(in Span<byte> buffer, long? data, ref int pos)
 	{
 		// ZigZag encode the signed int with null offset
 		if (data == null)
@@ -1561,7 +1714,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Signed Integer
 
-	private void Serialize(in Span<byte> buffer, in TypeId data, ref int pos)
+	private void Serialize(in Span<byte> buffer, TypeId data, ref int pos)
 	{
 		Serialize(buffer, (long)data, ref pos);
 	}
@@ -1569,7 +1722,7 @@ public class SbxSerializer : ISbxSerializer
 #if DEBUG
 	public List<(int, int, string)> Tokens = new List<(int, int, string)>();
 
-	public void Serialize(in Span<byte> buffer, in long data, ref int pos, string tokenDebugData)
+	public void Serialize(in Span<byte> buffer, long data, ref int pos, string tokenDebugData)
 	{
 		var start = pos;
 		Serialize(in buffer, in data, ref pos);
@@ -1577,7 +1730,7 @@ public class SbxSerializer : ISbxSerializer
 	}
 #endif
 
-	public void Serialize(in Span<byte> buffer, in long data, ref int pos)
+	public void Serialize(in Span<byte> buffer, long data, ref int pos)
 	{
 		// ZigZag encode the signed int
 		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
@@ -1639,7 +1792,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Nullable Unsigned Integer
 
-	public void SerializeNullableUnsigned(in Span<byte> buffer, ulong? value, ref int pos)
+	public void Serialize(in Span<byte> buffer, ulong? value, ref int pos)
 	{
 		if (value == null)
 		{
@@ -1684,6 +1837,7 @@ public class SbxSerializer : ISbxSerializer
 		buffer[pos++] = (byte)value;
 	}
 
+	/*
 	public void Serialize(ref Span<byte> buffer, ulong value)
 	{
 		// Protobuf-style varint encoding for uint32 (little-endian, 7 bits per byte, MSB=1 means more)
@@ -1700,6 +1854,7 @@ public class SbxSerializer : ISbxSerializer
 		buffer[count++] = (byte)value;
 		buffer = buffer[count..];
 	}
+	*/
 
 	public ulong DeserializeUnsigned(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
@@ -1720,6 +1875,7 @@ public class SbxSerializer : ISbxSerializer
 		return result;
 	}
 
+	/*
 	public ulong DeserializeUnsigned(ref ReadOnlySpan<byte> buffer)
 	{
 		ulong result = 0;
@@ -1740,10 +1896,13 @@ public class SbxSerializer : ISbxSerializer
 		buffer = buffer.Slice(count);
 		return result;
 	}
+	*/
 
 	#endregion
 
-	public void SerializeNullable(in Span<byte> buffer, Guid? data, ref int pos)
+	#region Guid
+
+	public void Serialize(in Span<byte> buffer, Guid? data, ref int pos)
 	{
 		if (data == null)
 		{
@@ -1751,7 +1910,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else
 		{
-			Serialize(buffer, data, ref pos);
+			Serialize<Guid?>(buffer, data, ref pos);
 		}
 	}
 
@@ -1916,7 +2075,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 	}
 
-	public Guid? DeserializeNullableGuid(in Span<byte> buffer, Guid? data, ref int pos)
+	public Guid? DeserializeNullableGuid(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 		var glyph = buffer[pos++];
 		if (glyph == 0x03) // glyph for null object
@@ -2050,6 +2209,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 	}
 
+	#endregion
 }
 
 internal static class TypeIdConverter
@@ -2064,3 +2224,4 @@ internal static class TypeIdConverter
 		return (SbxSerializer.TypeId)(SbxSerializer.TypeId.ListTypeFrom - (byte)listTypeId);
 	}
 }
+

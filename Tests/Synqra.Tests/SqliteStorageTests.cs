@@ -16,7 +16,7 @@ namespace Synqra.Tests;
 /// </summary>
 file class TestBinarySerializer : ISbxSerializer
 {
-	public void Serialize<T>(in Span<byte> buffer, T value, ref int pos)
+	public void Serialize<T>(in Span<byte> buffer, in T value, ref int pos)
 	{
 		if (value is SqliteTestItem item)
 		{
@@ -49,12 +49,36 @@ file class TestBinarySerializer : ISbxSerializer
 
 	public void Snapshot() { }
 	public void Reset() { }
-	public void Serialize(in Span<byte> buffer, string value, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, in long value, ref int pos) => throw new NotImplementedException();
+
+	//// SERIALIZE
+	public void Serialize(in Span<byte> buffer, long value, ref int pos) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ulong value, ref int pos) => throw new NotImplementedException();
-	public string? DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	// public void Serialize(in Span<byte> buffer, string value, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, Guid data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, float data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, double data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, long? value, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ulong? value, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, string? data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, Guid? data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, float? data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, double? data, ref int pos) => throw new NotImplementedException();
+
+	//// DESERIALIZE
 	public long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public ulong DeserializeUnsigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public string DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public Guid DeserializeGuid(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public float DeserializeSingle(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public double DeserializeDouble(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+
+	public long? DeserializeNullableSigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public ulong? DeserializeNullableUnsigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public string? DeserializeNullableString(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public Guid? DeserializeNullableGuid(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public float? DeserializeNullableSingle(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public double? DeserializeNullableDouble(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+
 	public IList<T> DeserializeList<T>(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 }

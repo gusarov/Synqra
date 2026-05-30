@@ -306,21 +306,73 @@ internal class BinarySerializationGuidTests : BaseTest
 
 }
 
+internal class BinarySerializationFloatingPointTests : BaseTest
+{
+	[Test]
+	[Arguments(0, null, "00000080")]
+	[Arguments(1, 0f, "00000000")]
+	[Arguments(2, -1f, "000080BF")]
+	[Arguments(3, -1.1f, "CDCC8CBF")]
+	[Arguments(4, 1f, "0000803F")]
+	[Arguments(5, 1.1f, "CDCC8C3F")]
+	public void Should_serialize_single_floats_with_test_vectors(int id, float? f, string hex)
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		var ser = new SbxSerializer();
+		int pos = 0;
+		ser.Serialize(buffer, f, ref pos);
+		Assert.That(pos).IsLessThan(5).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.DeserializeNullableSingle(buffer, ref pos2);
+		Assert.That(deserialized).IsEqualTo(f).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
+	}
+
+	[Test]
+	[Arguments(0, null, "0000000000000080")]
+	[Arguments(1, 0d, "0000000000000000")]
+	[Arguments(2, -1d, "000000000000F0BF")]
+	[Arguments(3, -1.1d, "9A9999999999F1BF")]
+	[Arguments(4, 1d, "000000000000F03F")]
+	[Arguments(5, 1.1d, "9A9999999999F13F")]
+	public void Should_serialize_double_floats_with_test_vectors(int id, double? f, string hex)
+	{
+		Span<byte> buffer = stackalloc byte[10];
+		var ser = new SbxSerializer();
+		int pos = 0;
+		ser.Serialize(buffer, f, ref pos);
+		Assert.That(pos).IsLessThan(9).GetAwaiter().GetResult();
+		var pos2 = 0;
+		var deserialized = ser.DeserializeNullableDouble(buffer, ref pos2);
+		Assert.That(deserialized).IsEqualTo(f).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
+	}
+
+}
+
 internal class BinarySerializationSignedTests : BaseTest
 {
 	[Test]
-	[Arguments(1,0, "00")]
-	[Arguments(2,-1, "01")]
-	[Arguments(3,1, "02")]
-	[Arguments(4,63, "7E")]
-	[Arguments(5,-64, "7F")]
-	[Arguments(6,64, "8001")]
-	[Arguments(7,-65, "8101")]
-	[Arguments(8,65, "8201")]
-	[Arguments(9,127, "FE01")]
-	[Arguments(11,-128, "FF01")]
-	[Arguments(12,128, "8002")]
-	[Arguments(13,-129, "8102")]
+	[Arguments(10, 0, "00")]
+	[Arguments(11, 1, "02")]
+	[Arguments(12, 2, "04")]
+	[Arguments(13,-1, "01")]
+	[Arguments(14,-2, "03")]
+	[Arguments(15,-8, "0F")]
+
+	[Arguments(1,63, "7E")]
+	[Arguments(2,-64, "7F")]
+	[Arguments(3,64, "8001")]
+	[Arguments(4,-65, "8101")]
+	[Arguments(5,65, "8201")]
+	[Arguments(6,127, "FE01")]
+	[Arguments(7,-128, "FF01")]
+	[Arguments(8,128, "8002")]
+	[Arguments(9,-129, "8102")]
 	/*
 	[Arguments(14,-32766, "")]
 	[Arguments(15,-32767, "")]
@@ -378,7 +430,7 @@ internal class BinarySerializationSignedTests : BaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		int pos = 0;
 		var ser = new SbxSerializer();
-		ser.SerializeNullableSigned(buffer, i, ref pos);
+		ser.Serialize(buffer, (long?)i, ref pos);
 		ReadOnlySpan<byte> buffer2 = buffer;
 		int pos2 = 0;
 		var deserialized = ser.DeserializeNullableSigned(buffer2, ref pos2);
@@ -561,6 +613,52 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	}
 
 	[Test]
+	public void Should_11_serialize_generic_float_without_type()
+	{
+		var ser = new SbxSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = 4.44f;
+
+		ser.Serialize<float>(buffer, data, ref pos, emitTypeId: false);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<float>(buffer, ref pos2, consumeTypeId: false);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("7B148E40").GetAwaiter().GetResult();
+	}
+
+	[Test]
+	public void Should_12_serialize_generic_double_without_type()
+	{
+		var ser = new SbxSerializer();
+		Span<byte> buffer = stackalloc byte[1024];
+		int pos = 0;
+
+		var data = 4.44d;
+
+		ser.Serialize<double>(buffer, data, ref pos, emitTypeId: false);
+
+		buffer = buffer[0..pos];
+		HexDump(buffer);
+
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<double>(buffer, ref pos2, consumeTypeId: false);
+
+		Assert.That(deserialized).IsEquivalentTo(data).GetAwaiter().GetResult();
+		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
+
+		Assert.That(Convert.ToHexString(buffer)).IsEqualTo("C3F5285C8FC21140").GetAwaiter().GetResult();
+	}
+
+	[Test]
 	public void Should_10_serialize_generic_int_with_type()
 	{
 		var ser = new SbxSerializer();
@@ -652,6 +750,14 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		yield return () => SP(() => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14030A0C"));
 		yield return () => SP(() => (53, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { } } /*                                                              */, "1601")); // no list type id but count 0
 		yield return () => SP(() => (54, new SampleFieldListSealedModel() { Data = new List<SampleSealedModel> { new SampleSealedModel { Id = 5 }, new SampleSealedModel { Id = 5 } } }, "16030A0A"));
+
+		// Float and Double models
+		yield return () => SP(() => (55, new SampleFieldFloatModel() { Data = 3.14f }, "20C3F54840"));
+		yield return () => SP(() => (56, new SampleFieldDoubleModel() { Data = 3.14 }, "221F85EB51B81E0940"));
+		yield return () => SP(() => (57, new SampleFieldNullableFloatModel() { Data = 2.71f }, "24A4702D40"));
+		yield return () => SP(() => (58, new SampleFieldNullableFloatModel() { Data = null }, "2400000080")); // null is float.NegativeZero
+		yield return () => SP(() => (59, new SampleFieldNullableDoubleModel() { Data = 2.71 }, "26AE47E17A14AE0540"));
+		yield return () => SP(() => (60, new SampleFieldNullableDoubleModel() { Data = null }, "260000000000000080")); // null is double.NegativeZero
 
 		// Dictionary
 		yield return () => SP(() => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A"));
@@ -767,6 +873,10 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		ser.Map(13 /* 1A */, typeof(SampleFieldEnumerableBaseModel));
 		ser.Map(14 /* 1C */, typeof(SampleFieldDictionaryStringObjectModel));
 		ser.Map(15 /* 1E */, typeof(SampleTaskModel));
+		ser.Map(16 /* 20 */, typeof(SampleFieldFloatModel));
+		ser.Map(17 /* 22 */, typeof(SampleFieldDoubleModel));
+		ser.Map(18 /* 24 */, typeof(SampleFieldNullableFloatModel));
+		ser.Map(19 /* 26 */, typeof(SampleFieldNullableDoubleModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
@@ -1031,7 +1141,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 		for (uint? i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
-			ser.SerializeNullableUnsigned(buffer, i, ref pos);
+			ser.Serialize(buffer, (ulong?)i, ref pos);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
@@ -1040,7 +1150,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 		}
 		{
 			int pos = 0;
-			ser.SerializeNullableUnsigned(buffer, null, ref pos);
+			ser.Serialize(buffer, (ulong?)null, ref pos);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
