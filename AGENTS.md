@@ -74,10 +74,24 @@ Useful commands:
 
 ## Code Style / Formatting
 
+These mirror Quotaly's `AGENTS.md` (this repo is co-developed with it). Core principle:
+**every logical item must be independently changeable without touching adjacent lines** —
+minimal, auto-merge-safe diffs.
+
 - **Indentation is TABS, not spaces.** There is no `.editorconfig`, so the convention is
   implicit — match the surrounding files. New `.cs` files written with 4-space indentation
   are wrong and will need converting; editors that auto-insert spaces must be configured to
   use tabs for this repo. (Quotaly, which consumes this submodule, follows the same tab convention.)
+- **All `if` / `while` / `for` / `foreach` statements MUST have braces `{ }`, even for
+  single-line bodies.** Braces go on their own line (Allman). No `if (x) return;` one-liners.
+- **Multiline lists use a trailing comma where the language allows it** (collection and object
+  initializers, attributes, enum members) — Style A. **Where a trailing comma is illegal**
+  (parameter / argument lists), use a **leading comma** — Style B: the comma goes at the start
+  of each continuation line, last line has no comma.
+- **Closing brackets / parentheses go on their own line** when a call or initializer spans
+  multiple lines, so elements can be added/removed without editing a neighbouring line.
+- **Boolean chains put the operator at the start of the line** (`&& cond`, `|| cond`), often
+  led by a `true`/`false` seed so every real clause is its own addable/removable line.
 - Match the brace, spacing, and `using`-ordering style of the nearest existing file rather
   than imposing a different formatter.
 - When a convenience property must NOT be persisted/serialized (e.g. a computed accessor on a
