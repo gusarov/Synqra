@@ -63,6 +63,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="MongoDB.Bson" />
     <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="Mongo2Go" />
     <PackageReference Include="TUnit" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
   </ItemGroup>
