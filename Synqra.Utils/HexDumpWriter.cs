@@ -6,6 +6,22 @@ public class HexDumpWriter
 {
 	// Encoding _encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
+	public void HexDumpSmall(ReadOnlySpan<byte> span, Action<string> write, Action<char>? writeChar = null)
+	{
+		if (writeChar == null)
+		{
+			writeChar = (c) => write(c.ToString());
+		}
+		for (int i = 0, m = span.Length; i < m; i++)
+		{
+			write(span[i].ToString("X2"));
+			if ((i + 1) % 4 == 0)
+			{
+				writeChar(' ');
+			}
+		}
+	}
+
 	public void HexDump(ReadOnlySpan<byte> span, Action<string> write, Action<char>? writeChar = null)
 	{
 		if (writeChar == null)

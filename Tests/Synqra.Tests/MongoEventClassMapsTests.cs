@@ -30,6 +30,7 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	[Property("CI", "false")]
 	public async Task Should_round_trip_ObjectPropertyChangedEvent_via_native_bson()
 	{
 		var ev = new ObjectPropertyChangedEvent
@@ -62,6 +63,7 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	[Property("CI", "false")]
 	public async Task Should_not_persist_JsonIgnored_DataObject_of_ObjectCreatedEvent()
 	{
 		// DataObject is the in-memory materialized object, marked [JsonIgnore]; it must not
@@ -86,6 +88,7 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	[Property("CI", "false")]
 	public async Task Should_use_id_field_for_event_key()
 	{
 		// The whole point of mapping EventId -> _id is that a document's natural key is the

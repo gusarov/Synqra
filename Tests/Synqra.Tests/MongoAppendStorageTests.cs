@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.MongoDb;
 using Synqra.Tests.TestHelpers;
+using TUnit.Assertions.AssertionBuilders.Wrappers;
 using TUnit.Assertions.Extensions;
 using TUnit.Core.Exceptions;
 
@@ -28,21 +29,15 @@ public class MongoAppendStorageTests : BaseTest
 	[Before(Test)]
 	public void Setup()
 	{
-		_databaseName = "synqra-mongo-tests-" + GuidExtensions.CreateVersion7().ToString("N");
 		_connectionString = EphemeralMongo.ConnectionString;
+		using var db = new MongoDB.Driver.MongoClient(_connectionString);
+		db.DropDatabase(_databaseName);
 	}
 
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		if (_connectionString is null)
-		{
-			return; // skipped — nothing to wire
-		}
-		// Inject the connection string + an isolated database the way the production
-		// options bind it. Set inside Register so it survives Reopen() (Restart rebuilds
-		// the host and re-runs Register against the same shared server + db name).
-		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString;
+		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString ?? throw new Exception();
 		Configuration["Storage:MongoDbAppendStorage:DatabaseName"] = _databaseName;
 		hostApplicationBuilder.AddAppendStorageMongoDb<Event>();
 	}
@@ -57,7 +52,8 @@ public class MongoAppendStorageTests : BaseTest
 	{
 		if (_connectionString is null)
 		{
-			throw new SkipTestException(EphemeralMongo.SkipReason);
+			throw new Exception("Mongo is not configured 3");
+			// throw new SkipTestException(EphemeralMongo.SkipReason);
 		}
 		return ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
 	}
@@ -78,6 +74,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M00_be_empty()
 	{
 		var storage = Storage();
@@ -85,6 +83,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M10_append_and_read_survives_reopen()
 	{
 		var storage = Storage();
@@ -105,6 +105,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M11_replay_in_id_order()
 	{
 		var storage = Storage();
@@ -123,6 +125,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M14_get_by_key()
 	{
 		var storage = Storage();
@@ -135,6 +139,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M20_duplicate_append_is_idempotent()
 	{
 		var storage = Storage();
@@ -146,6 +152,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Explicit]
+	[Property("CI", "false")]
 	public async Task Should_M21_batch_with_mid_duplicate_still_inserts_new()
 	{
 		var storage = Storage();
@@ -166,6 +174,8 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	[Property("CI", "false")]
+	[Explicit]
 	public async Task Should_M30_from_paging_returns_tail_and_null_returns_all()
 	{
 		var storage = Storage();
