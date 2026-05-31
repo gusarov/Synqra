@@ -104,7 +104,7 @@ public class SbxSerializer : ISbxSerializer
 		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1, // -23, there is a unit test to ensure this value is correct
 		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
 
-		// TEMPORAY/EXPERIMENTAL:
+		// TEMPORARY/EXPERIMENTAL:
 		SingleFloating = -28,
 		DoubleFloating = -29,
 		DictStrObj = -30,
@@ -1392,7 +1392,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public string DeserializeString(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
-		return DeserializeNullableString(buffer, ref pos) ?? throw new InvalidOperationException("String is not supposed to be null here");
+		return DeserializeNullableString(buffer, ref pos)!; // ?? throw new InvalidOperationException("String is not supposed to be null here");
 	}
 
 	public string? DeserializeNullableString(in ReadOnlySpan<byte> buffer, ref int pos)
@@ -1594,12 +1594,10 @@ public class SbxSerializer : ISbxSerializer
 		{
 			Serialize(buffer, float.NegativeZero, ref pos);
 		}
-		/*
-		else if (SingleFloatNegativeZero == *(float*)&data)
+		else if (data == 0f)
 		{
-			Serialize(buffer, 0f, ref pos); // silent normalization
+			Serialize(buffer, 0f, ref pos); // silent normalization of nezative zero
 		}
-		*/
 		else
 		{
 			Serialize(buffer, data.Value, ref pos);
@@ -1611,12 +1609,10 @@ public class SbxSerializer : ISbxSerializer
 		{
 			Serialize(buffer, double.NegativeZero, ref pos);
 		}
-		/*
-		else if (double.IsNegative(data.Value) && )
+		else if (data == 0d)
 		{
-			Serialize(buffer, 0d, ref pos); // silent normalization
+			Serialize(buffer, 0d, ref pos); // silent normalization of nezative zero
 		}
-		*/
 		else
 		{
 			Serialize(buffer, data.Value, ref pos);

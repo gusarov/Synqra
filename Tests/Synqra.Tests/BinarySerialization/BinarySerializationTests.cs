@@ -315,6 +315,7 @@ internal class BinarySerializationFloatingPointTests : BaseTest
 	[Arguments(3, -1.1f, "CDCC8CBF")]
 	[Arguments(4, 1f, "0000803F")]
 	[Arguments(5, 1.1f, "CDCC8C3F")]
+	[Arguments(6, -0.0f, "00000000")]
 	public void Should_serialize_single_floats_with_test_vectors(int id, float? f, string hex)
 	{
 		Span<byte> buffer = stackalloc byte[10];
@@ -337,6 +338,7 @@ internal class BinarySerializationFloatingPointTests : BaseTest
 	[Arguments(3, -1.1d, "9A9999999999F1BF")]
 	[Arguments(4, 1d, "000000000000F03F")]
 	[Arguments(5, 1.1d, "9A9999999999F13F")]
+	[Arguments(6, -0.0d, "0000000000000000")]
 	public void Should_serialize_double_floats_with_test_vectors(int id, double? f, string hex)
 	{
 		Span<byte> buffer = stackalloc byte[10];
@@ -476,7 +478,7 @@ internal class BinarySerializationStringTests : BaseTest
 		Assert.That(pos).IsEqualTo(hex.Length / 2).GetAwaiter().GetResult();
 
 		var pos2 = 0;
-		var deserialized = ser.DeserializeString(buffer, ref pos2);
+		var deserialized = ser.DeserializeNullableString(buffer, ref pos2);
 		Assert.That(deserialized).IsEqualTo(data).GetAwaiter().GetResult();
 		Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
 		Assert.That(Convert.ToHexString(buffer.Slice(0, pos))).IsEqualTo(hex).GetAwaiter().GetResult();
