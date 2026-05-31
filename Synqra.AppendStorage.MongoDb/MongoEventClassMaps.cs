@@ -10,12 +10,13 @@ namespace Synqra.AppendStorage.MongoDb;
 /// Mongo event log stores events as first-class, queryable BSON documents (not
 /// opaque blobs).
 /// <para>
-/// Polymorphism uses MongoDB's default discriminator element (<c>_t</c>) with the
-/// same discriminator <em>values</em> the System.Text.Json log uses
-/// (<c>"WireAddedEvent"</c>, …). Keeping the field name and the values aligned means
-/// a document is self-describing and reads identically whether it came through the
-/// JSON-lines log or Mongo — and a future migration between the two is a copy, not a
-/// transform.
+/// Polymorphism uses MongoDB's default <em>scalar</em> discriminator element (<c>_t</c>)
+/// holding a single type name (e.g. <c>"ObjectPropertyChangedEvent"</c>) — the same field
+/// name and values the System.Text.Json log uses. (We deliberately don't mark the base a
+/// root class, which would switch <c>_t</c> to the hierarchical type-chain array; we never
+/// query the log by base type, so the scalar form is enough and matches the JSON log.)
+/// A document is therefore self-describing and reads identically whether it came through
+/// the JSON-lines log or Mongo — a future migration between the two is a copy, not a transform.
 /// </para>
 /// <para>
 /// <see cref="Event.EventId"/> maps to <c>_id</c> (the natural document key).
@@ -59,7 +60,14 @@ public static class MongoEventClassMaps
 				BsonClassMap.RegisterClassMap<Event>(cm =>
 				{
 					cm.AutoMap();
-					cm.SetIsRootClass(true);
+					// NOTE: intentionally NOT SetIsRootClass(true). Root classes opt the
+					// hierarchy into MongoDB's hierarchical discriminator, which writes _t as
+					// the whole type chain (["Event","ObjectPropertyChangedEvent"]). We don't
+					// query the log by base type, so the default scalar discriminator
+					// (_t: "ObjectPropertyChangedEvent") is enough — smaller, and identical to
+					// the scalar _t the JSON-lines log uses. Discriminator-required so _t is
+					// always present even if an event is ever serialized as its concrete type.
+					cm.SetDiscriminatorIsRequired(true);
 					cm.MapIdProperty(e => e.EventId);
 					// StreamId (out-of-band routing) and any other [JsonIgnore] field are not
 					// part of the persisted event body — drop them, matching the JSON log.
