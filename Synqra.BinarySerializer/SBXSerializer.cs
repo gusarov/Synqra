@@ -84,31 +84,32 @@ public class SbxSerializer : ISbxSerializer
 		Null = -6,
 		Object = -7, // e.g. to specify as List<T> type argument
 
-		// Lists
-		ListTypeFrom =  -8,
-		    List_R_E =  -8, // List<RequestedType>(empty)
-		    List_R_R =  -9, // List<RequestedType>(all items are of the same type R, not prefixed)
-		    List_R_S = -10, // List<RequestedType>(all items are of the same Specified type, not prefixed)
-		    List_R_H = -11, // List<RequestedType>(heterogeneous, each item prefixed)
-		    List_S_E = -12, // List<Specified>(empty)
-		    List_S_R = -13, // List<Specified>(all items are of the same type as T, not prefixed)
-		    List_S_S = -14, // List<Specified>(all items are of the same Specified type, not prefixed)
-		    List_S_H = -15, // List<Specified>(heterogeneous, each item prefixed)
-		SpecList_R_E = -16, // Specified<RequestedType>(empty)
-		SpecList_R_R = -17, // Specified<RequestedType>(all items are of the same type R, not prefixed)
-		SpecList_R_S = -18, // Specified<RequestedType>(all items are of the same Specified type, not prefixed)
-		SpecList_R_H = -19, // Specified<RequestedType>(heterogeneous, each item prefixed)
-		SpecList_S_E = -20, // Specified<Specified>(empty)
-		SpecList_S_R = -21, // Specified<Specified>(all items are of the same type as T, not prefixed)
-		SpecList_S_S = -22, // Specified<Specified>(all items are of the same Specified type, not prefixed)
-		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1, // -23, there is a unit test to ensure this value is correct
-		SpecList_S_H = -23, // Specified<Specified>(heterogeneous, each item prefixed)
+		SingleFloating = -8,
+		DoubleFloating = -9,
 
 		// TEMPORARY/EXPERIMENTAL:
-		SingleFloating = -28,
-		DoubleFloating = -29,
-		DictStrObj = -30,
-		DictStrStr = -31,
+		DictStrObj = -10,
+		DictStrStr = -11,
+
+		// Lists
+		ListTypeFrom = -17,
+		    List_R_E = -17, // List<RequestedType>(empty)
+		    List_R_R = -18, // List<RequestedType>(all items are of the same type R, not prefixed)
+		    List_R_S = -19, // List<RequestedType>(all items are of the same Specified type, not prefixed)
+		    List_R_H = -20, // List<RequestedType>(heterogeneous, each item prefixed)
+		    List_S_E = -21, // List<Specified>(empty)
+		    List_S_R = -22, // List<Specified>(all items are of the same type as T, not prefixed)
+		    List_S_S = -23, // List<Specified>(all items are of the same Specified type, not prefixed)
+		    List_S_H = -24, // List<Specified>(heterogeneous, each item prefixed)
+		SpecList_R_E = -25, // Specified<RequestedType>(empty)
+		SpecList_R_R = -26, // Specified<RequestedType>(all items are of the same type R, not prefixed)
+		SpecList_R_S = -27, // Specified<RequestedType>(all items are of the same Specified type, not prefixed)
+		SpecList_R_H = -28, // Specified<RequestedType>(heterogeneous, each item prefixed)
+		SpecList_S_E = -29, // Specified<Specified>(empty)
+		SpecList_S_R = -30, // Specified<Specified>(all items are of the same type as T, not prefixed)
+		SpecList_S_S = -31, // Specified<Specified>(all items are of the same Specified type, not prefixed)
+		SpecList_S_H = -32, // Specified<Specified>(heterogeneous, each item prefixed)
+		ListTypeTo = ListTypeFrom - ListTypeId.MAX + 1, // -32, there is a unit test to ensure this value is correct
 	}
 
 	internal enum ListTypeId : byte
@@ -207,17 +208,20 @@ public class SbxSerializer : ISbxSerializer
 		// 0          | Custom type specified by full name
 		// +1  ..+127 | Positive ids are consumer-driven
 		// +128..     | Same, but multibyte
-		Map(-100, 1, typeof(KeyValuePair<string, object>), new KeyValuePairModelBinder<string, object>());
-		Map(-101, 1, typeof(KeyValuePair<string, string>), new KeyValuePairModelBinder<string, string>());
-		Map(-99, typeof(TransportOperation));
-		Map(-98, typeof(NewEvent1));
-		Map(-97, typeof(ObjectCreatedEvent));
-		Map(-96, typeof(CreateObjectCommand));
-		Map(-95, typeof(ChangeObjectPropertyCommand));
-		Map(-94, typeof(ObjectPropertyChangedEvent));
-		Map(-93, typeof(Event));
-		Map(-92, typeof(Command));
-		Map(-91, typeof(CommandCreatedEvent));
+
+
+		Map(-53, 1, typeof(KeyValuePair<string, string>), new KeyValuePairModelBinder<string, string>());
+		Map(-54, 1, typeof(KeyValuePair<string, object>), new KeyValuePairModelBinder<string, object>());
+		Map(-55, typeof(CommandCreatedEvent));
+		Map(-56, typeof(Command));
+		Map(-57, typeof(Event));
+		Map(-58, typeof(ObjectPropertyChangedEvent));
+		Map(-59, typeof(ChangeObjectPropertyCommand));
+		Map(-60, typeof(CreateObjectCommand));
+		Map(-61, typeof(ObjectCreatedEvent));
+		Map(-62, typeof(NewEvent1));
+		Map(-63, typeof(TransportOperation));
+		// Map(-64, typeof(RESERVED)); // THIS IS LOWEST 1 BYTE VARINT
 	}
 
 	SbxSerializer? _spanshotPrimitives;
@@ -2212,7 +2216,7 @@ internal static class TypeIdConverter
 {
 	public static SbxSerializer.ListTypeId ListTypeId(this SbxSerializer.TypeId typeId)
 	{
-		return (SbxSerializer.ListTypeId)(-((int)typeId + 8));
+		return (SbxSerializer.ListTypeId)(-((int)typeId - (int)SbxSerializer.TypeId.ListTypeFrom));
 	}
 
 	public static SbxSerializer.TypeId TypeId(this SbxSerializer.ListTypeId listTypeId)

@@ -1,4 +1,5 @@
-﻿using MongoDB.Bson;
+﻿using Microsoft.Testing.Platform.Extensions.Messages;
+using MongoDB.Bson;
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
@@ -458,6 +459,25 @@ internal class BinarySerializationSignedTests : BaseTest
 			Assert.That(pos2).IsEqualTo(pos2).GetAwaiter().GetResult();
 		}
 	}
+
+	[Test]
+	public void Should_serialize_signed_integers_print()
+	{
+		var ser = new SbxSerializer();
+		Span<byte> buffer = stackalloc byte[10];
+		for (int i = -200; i <= 200; i++)
+		{
+			int pos = 0;
+			ser.Serialize(buffer, i, ref pos);
+			int pos2 = 0;
+			var deserialized = ser.DeserializeSigned(buffer, ref pos2);
+			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
+			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
+			Assert.That(pos2).IsEqualTo(pos2).GetAwaiter().GetResult();
+			HexDumpWriter.HexDumpSmall(buffer[..pos], Console.Write, Console.Write);
+			Console.WriteLine("\t" + i);
+		}
+	}
 }
 
 internal class BinarySerializationStringTests : BaseTest
@@ -729,24 +749,24 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 		yield return () => SP(() => (15, new SampleFieldListIntModel() { Data = [1, 2, 3] }, "1404020406"));
 		yield return () => SP(() => (16, new SampleFieldListSealedModel() { Data = [new SampleSealedModel { Id = 5 }] }, "16020A"));
 
-		yield return () => SP(() => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "180F"));     // List_R_E // No, I still need typeID here. Yes, it is not covariant, but it is not sealed either, but items can be derived...
-		yield return () => SP(() => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1811030A0A")); // List_R_R
-		yield return () => SP(() => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18130A030A000A00"));   // List_R_S
-		yield return () => SP(() => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18150308010A0C00"));   // List_R_H
+		yield return () => SP(() => (21, new SampleFieldListBaseModel() { Data = [] }/*                                                                          */, "1821"));     // List_R_E // No, I still need typeID here. Yes, it is not covariant, but it is not sealed either, but items can be derived...
+		yield return () => SP(() => (22, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = 5 }, new SampleBaseModel /*   */ { Id = 5 }] }, "1823030A0A")); // List_R_R
+		yield return () => SP(() => (23, new SampleFieldListBaseModel() { Data = [new SampleDerivedModel /**/ { Id = 5 }, new SampleDerivedModel /**/ { Id = 5 }] }, "18250A030A000A00"));   // List_R_S
+		yield return () => SP(() => (24, new SampleFieldListBaseModel() { Data = [new SampleBaseModel /*   */ { Id = -1 }, new SampleDerivedModel /**/ { Id = 6 }] }, "18270308010A0C00"));   // List_R_H
 
-		yield return () => SP(() => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "1A0F")); // List_S_E
-		yield return () => SP(() => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A11030A0A")); // List_S_R
-		yield return () => SP(() => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5, DerId = 3, }, new SampleDerivedModel { Id = 5, DerId = 3, } } }, "1A130A030A060A06")); // List_S_S
-		yield return () => SP(() => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5, DerId = 2, }    } }, "1A1503080A0A0A04")); // List_S_H
-		yield return () => SP(() => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "1A170A")); // List_S_E
-		yield return () => SP(() => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A190A030A000A00")); // List_S_S
+		yield return () => SP(() => (31, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ /*                                                                */ } }, "1A21")); // List_S_E
+		yield return () => SP(() => (32, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 }       } }, "1A23030A0A")); // List_S_R
+		yield return () => SP(() => (33, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleDerivedModel { Id = 5, DerId = 3, }, new SampleDerivedModel { Id = 5, DerId = 3, } } }, "1A250A030A060A06")); // List_S_S
+		yield return () => SP(() => (34, new SampleFieldEnumerableBaseModel() { Data = new List<SampleBaseModel>/**/{ new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5, DerId = 2, }    } }, "1A2703080A0A0A04")); // List_S_H
+		yield return () => SP(() => (35, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { /*                                                                */ } }, "1A290A")); // List_S_E
+		yield return () => SP(() => (37, new SampleFieldEnumerableBaseModel() { Data = new List<SampleDerivedModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "1A2B0A030A000A00")); // List_S_S
 		yield return () => SP(() => (38, new SampleFieldEnumerableBaseModel() { Data = null }, "1A0B")); // Null
 		// Todo: Add DerivedDerivedModel to make use of ElementType flags
 
-		yield return () => SP(() => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C1708")); // List_S_E
-		yield return () => SP(() => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C1908030A0A")); // List_S_R
-		yield return () => SP(() => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1B080A030A000A00")); // List_S_S
-		yield return () => SP(() => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C1D0803080A0A0A00")); // List_S_H
+		yield return () => SP(() => (45, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { } } /*                                                                */, "0C2908")); // List_S_E
+		yield return () => SP(() => (46, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleBaseModel { Id = 5 } } }, "0C2B08030A0A")); // List_S_R
+		yield return () => SP(() => (47, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleDerivedModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C2D080A030A000A00")); // List_S_S
+		yield return () => SP(() => (48, new SampleFieldObjectModel() { Data = new List<SampleBaseModel> { new SampleBaseModel { Id = 5 }, new SampleDerivedModel { Id = 5 } } }, "0C2F0803080A0A0A00")); // List_S_H
 
 		yield return () => SP(() => (51, new SampleFieldListIntModel() { Data = new List<int> { } } /*    */, "1401")); // no list type id but count 0
 		yield return () => SP(() => (52, new SampleFieldListIntModel() { Data = new List<int> { 5, 6 } }/**/, "14030A0C"));
@@ -793,7 +813,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					},
 				},
 			},
-		}, "C301B5010000BF0100000000001E5461736B310002"));
+		}, "7B6D00007700000000001E5461736B310002"));
 
 		yield return () => SP(() => (71, new NewEvent1
 		{
@@ -832,7 +852,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 					},
 				},
 			},
-		}, "C301B50104DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B0002BF0104DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D1E5461736B310002"));
+		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B00027704DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D1E5461736B310002"));
 
 		yield return () => SP(() => (72, new NewEvent1
 		{
@@ -846,7 +866,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 				StreamId = default,
 				EventId      = new Guid("0199eeb4-33df-7430-a02a-d9fd1bf847f8"),
 			},
-		}, "C301BB0104DFEFAAFC5C30602AD9FD1BF847F804DCEFAAFC5CB2B1C5AB90B83BE68304DBEFAAFC5CDB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
+		}, "7B7304DFEFAAFC5C30602AD9FD1BF847F804DCEFAAFC5CB2B1C5AB90B83BE68304DBEFAAFC5CDB216DF966E2C9F33D9849FAB0BD8BB7A456DE154556297525BDC5A48A7ABE8DF9580C63FBC206D7707375626A656374000B0B"));
 	}
 
 	[Test]
@@ -919,6 +939,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 			var typeId = (TypeId)(TypeId.ListTypeFrom - i);
 			int pos = 0;
 			ser.Serialize(buffer, (long)typeId, ref pos);
+			Assert.That(pos).IsEqualTo(1).GetAwaiter().GetResult();
 			Console.WriteLine($"{i,2} {listTypeId,12} <--> {(int)typeId,3} 0z{buffer[0],2:X2} {typeId,12}"); // z - for ZigZag
 			Assert.That(typeId.ToString()).Contains(listTypeId.ToString()).GetAwaiter().GetResult();
 

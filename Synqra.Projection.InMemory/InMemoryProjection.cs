@@ -508,6 +508,20 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	}
 
 	/// <summary>
+	/// When <c>false</c>, <see cref="CommandCreatedEvent"/>s are still applied in-memory (so
+	/// the <c>Command</c> collection is populated) but are NOT written to the durable event
+	/// store. Domain events alone rebuild state on replay, so the command audit isn't needed
+	/// for correctness.
+	/// <para>
+	/// This is a temporary opt-out for durable backends (e.g. MongoDB) whose serializer
+	/// can't yet take the live command payload (<see cref="SingleObjectCommand.TargetObject"/>
+	/// and create-command data are arbitrary CLR objects). Re-enable once command payloads
+	/// are persistable — the command log is wanted later for undo/redo.
+	/// </para>
+	/// </summary>
+	public bool PersistCommandEvents { get; set; } = true;
+
+	/// <summary>
 	/// Process and apply it locally
 	/// </summary>
 	private async Task ProcessCommandAsync(ISynqraCommand newCommand)
@@ -524,7 +538,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		if (_eventStorage != null)
 		{
-			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
+			// Domain events are always durable. CommandCreatedEvents are only persisted when
+			// PersistCommandEvents is on — see that property for the temporary opt-out used by
+			// backends that can't yet serialize the live command payload.
+			var toStore = PersistCommandEvents
+				? (IEnumerable<Event>)commandHandlingContext.Events
+				: commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent).ToList();
+			await _eventStorage.AppendBatchAsync(toStore); // store event in storage and trigger replication
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);

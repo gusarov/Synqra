@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Mongo2Go;
 
 namespace Synqra.Tests;
@@ -21,31 +24,42 @@ static class EphemeralMongo
 {
 	static readonly object _sync = new();
 	static MongoDbRunner? _runner;
-	static string? _skipReason;
+	static string? _connectionString;
 
 	/// <summary>The shared connection string, or <c>null</c> if mongod could not start.</summary>
 	public static string? ConnectionString
 	{
 		get
 		{
+			if (_connectionString is not null)
+			{
+				return _connectionString;
+			}
 			if (_runner is not null)
 			{
 				return _runner.ConnectionString;
 			}
-			if (_skipReason is not null)
-			{
-				return null;
-			}
 			lock (_sync)
 			{
+				if (_connectionString is not null)
+				{
+					return _connectionString;
+				}
 				if (_runner is not null)
 				{
 					return _runner.ConnectionString;
 				}
-				if (_skipReason is not null)
+				var app = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 				{
-					return null;
+					EnvironmentName = Environments.Development,
+				});
+				app.Configuration.AddUserSecrets(typeof(EphemeralMongo).Assembly);
+				_connectionString = app.Configuration.GetConnectionString("Mongodb");
+				if (!string.IsNullOrWhiteSpace(_connectionString))
+				{
+					return _connectionString;
 				}
+
 				try
 				{
 					SweepStaleMongodOnWindows();
@@ -54,15 +68,12 @@ static class EphemeralMongo
 				}
 				catch (Exception ex)
 				{
-					_skipReason = "Bundled mongod could not start in this environment: " + ex.Message;
-					return null;
+					EmergencyLog.Default.LogError(ex, $"MongoDbRunner");
+					throw;
 				}
 			}
 		}
 	}
-
-	/// <summary>Why the tests are skipping, when <see cref="ConnectionString"/> is null.</summary>
-	public static string SkipReason => _skipReason ?? "Ephemeral mongod is unavailable";
 
 	[Conditional("DEBUG")]
 	static void SweepStaleMongodOnWindows()
