@@ -72,12 +72,32 @@ Useful commands:
 - `migrate.cmd <MigrationName>`
   Updates EF migrations/scripts for `Synqra.Projection.Sqlite` and the test project.
 
+## Code Style / Formatting
+
+- **Indentation is TABS, not spaces.** There is no `.editorconfig`, so the convention is
+  implicit — match the surrounding files. New `.cs` files written with 4-space indentation
+  are wrong and will need converting; editors that auto-insert spaces must be configured to
+  use tabs for this repo. (Quotaly, which consumes this submodule, follows the same tab convention.)
+- Match the brace, spacing, and `using`-ordering style of the nearest existing file rather
+  than imposing a different formatter.
+- When a convenience property must NOT be persisted/serialized (e.g. a computed accessor on a
+  `[SynqraModel]`), make it a read-only expression-bodied member. A `{ get; set; }` property is
+  treated by the model-binding generator as a stored field and gets stamped into `[Schema]`
+  (and emits a backing-field reference that may not exist). See `Wire.PortType` for the pattern.
+
 ## Testing Notes
 
 - Tests use **TUnit**, not xUnit/NUnit.
 - The default CI-oriented filter excludes tests marked with `[Property("CI", "false")]`.
 - Performance tests are intentionally opt-in and should usually stay out of normal validation.
 - The Docker `buildaot` stage is important. It publishes `Tests/Synqra.Tests` for `linux-x64` and runs the published binary, so AOT regressions matter.
+- **MongoDB integration tests use Mongo2Go** (an ephemeral, self-contained `mongod`), mirroring
+  Quotaly's `Quotaly.Features.Testing.IntegrationTests/IntegrationTestBase.cs`. Use a single
+  static `MongoDbRunner` started once per process and reused (never disposed per-test; isolate
+  via a unique database name) — per-test runners are slow and prone to port-rebind flakiness.
+  Inject the connection string through configuration the same way the production DI binds it.
+  Synqra's CI image has no Mongo service (Quotaly gets one from docker-compose), so these tests
+  should **skip** (not fail) when the bundled `mongod` can't start. See `MongoAppendStorageTests`.
 
 ## AOT And Serialization Constraints
 
