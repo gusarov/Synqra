@@ -15,6 +15,7 @@
     <EFOptimizeContext>false</EFOptimizeContext>
     <EFPrecompileQueriesStage>none</EFPrecompileQueriesStage>
     <EFScaffoldModelStage>none</EFScaffoldModelStage>
+    <UserSecretsId>a8c1f590-82d6-4271-8d94-f887c7d14272</UserSecretsId>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0')) or $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <IsAotCompatible>true</IsAotCompatible>

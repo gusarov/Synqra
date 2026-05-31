@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
@@ -60,7 +61,9 @@ public static class MongoEventClassMaps
 					cm.AutoMap();
 					cm.SetIsRootClass(true);
 					cm.MapIdProperty(e => e.EventId);
-					cm.UnmapProperty(e => e.StreamId); // out-of-band routing concern, not part of the event body
+					// StreamId (out-of-band routing) and any other [JsonIgnore] field are not
+					// part of the persisted event body — drop them, matching the JSON log.
+					UnmapJsonIgnored(cm);
 				});
 			}
 
@@ -89,6 +92,26 @@ public static class MongoEventClassMaps
 		{
 			cm.AutoMap();
 			cm.SetDiscriminator(discriminator);
+			// e.g. ObjectCreatedEvent.DataObject is the in-memory materialized object,
+			// marked [JsonIgnore] — it must not be persisted into the durable log.
+			UnmapJsonIgnored(cm);
 		});
+	}
+
+	/// <summary>
+	/// Drop every member this class map declares that the model marks
+	/// <see cref="JsonIgnoreAttribute"/>, so the durable Mongo log persists exactly the
+	/// same surface as the JSON log. Only declared members are considered — inherited
+	/// ones (e.g. <c>Event.StreamId</c>) are owned by the base class map.
+	/// </summary>
+	static void UnmapJsonIgnored(BsonClassMap cm)
+	{
+		foreach (var memberMap in cm.DeclaredMemberMaps.ToArray())
+		{
+			if (memberMap.MemberInfo.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
+			{
+				cm.UnmapMember(memberMap.MemberInfo);
+			}
+		}
 	}
 }
