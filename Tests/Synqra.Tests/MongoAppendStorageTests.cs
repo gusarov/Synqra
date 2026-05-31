@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -12,46 +14,93 @@ namespace Synqra.Tests;
 
 /// <summary>
 /// Integration tests for <see cref="MongoAppendStorage{T,TKey}"/> against a real
-/// <c>mongod</c>. Uses Mongo2Go to spin up a self-contained, ephemeral MongoDB
-/// (no external service / Docker dependency — same spirit as the connection-string
-/// injection Quotaly uses for its Mongo tests, except the server is bundled). The
-/// connection string is injected through configuration
-/// (<c>Storage:MongoDbAppendStorage:ConnectionString</c>), exactly the path the
-/// production DI extension binds.
+/// <c>mongod</c>, provided by Mongo2Go — the same ephemeral-Mongo mechanism Quotaly's
+/// <c>IntegrationTestBase</c> uses. The connection string is injected through
+/// configuration (<c>Storage:MongoDbAppendStorage:ConnectionString</c>), the exact path
+/// the production DI extension binds.
 /// <para>
-/// If the bundled mongod cannot start in this environment (e.g. a CI image lacking
-/// the shared libraries it needs), the tests <b>skip</b> rather than fail — they prove
-/// the behavior wherever a mongod can run, without turning CI red where it can't.
+/// Following Quotaly's hard-won pattern, a single <see cref="MongoDbRunner"/> is started
+/// once per test process and reused (not one-per-test): mongod startup is slow and
+/// re-binding ports is flaky, so sharing is both faster and steadier. The runner is
+/// deliberately never disposed per-test — Mongo2Go's finalizer reaps it at process exit,
+/// and (on Windows dev boxes) stale mongod processes are swept on first use. Per-test
+/// isolation comes from a unique database name instead.
+/// </para>
+/// <para>
+/// If the bundled mongod cannot start here (e.g. a CI image lacking its shared libraries)
+/// the tests <b>skip</b> rather than fail.
 /// </para>
 /// </summary>
 [NotInParallel]
 public class MongoAppendStorageTests : BaseTest
 {
-    MongoDbRunner? _runner;
-    string? _connectionString;
-    string _databaseName = "synqra-mongo-tests";
-    string? _skipReason;
+    static readonly object _sync = new();
+    static MongoDbRunner? _runner;
+    static string? _skipReason;
 
-    [Before(Test)]
-    public void StartMongo()
+    /// <summary>
+    /// Lazily start (once) the shared ephemeral mongod and return its connection string,
+    /// or null if it could not be started (tests then skip). Mirrors the shared-runner
+    /// approach in Quotaly's IntegrationTestBase.
+    /// </summary>
+    static string? SharedConnectionString()
     {
-        _databaseName = "synqra-mongo-tests-" + GuidExtensions.CreateVersion7().ToString("N");
-        try
+        if (_runner is not null) return _runner.ConnectionString;
+        if (_skipReason is not null) return null;
+        lock (_sync)
         {
-            _runner = MongoDbRunner.Start(singleNodeReplSet: false);
-            _connectionString = _runner.ConnectionString;
-        }
-        catch (Exception ex)
-        {
-            _skipReason = "Bundled mongod could not start in this environment: " + ex.Message;
+            if (_runner is not null) return _runner.ConnectionString;
+            if (_skipReason is not null) return null;
+            try
+            {
+                SweepStaleMongodOnWindows();
+                // Standalone (not a replica set): the append-storage path does only plain
+                // inserts/finds — no multi-document transactions — so it doesn't need the
+                // replica set Quotaly's app-level base starts (that base uses
+                // singleNodeReplSet: true because the application itself runs transactions).
+                // Standalone also starts faster and more reliably.
+                _runner = MongoDbRunner.Start(singleNodeReplSet: false);
+                return _runner.ConnectionString;
+            }
+            catch (Exception ex)
+            {
+                _skipReason = "Bundled mongod could not start in this environment: " + ex.Message;
+                return null;
+            }
         }
     }
 
-    [After(Test)]
-    public void StopMongo()
+    [Conditional("DEBUG")]
+    static void SweepStaleMongodOnWindows()
     {
-        _runner?.Dispose();
-        _runner = null;
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+        // A never-disposed shared runner can leave a mongod behind across runs on dev
+        // machines; sweep ones older than a minute (never elevated, so we can't and won't
+        // touch other users' processes).
+        foreach (var p in Process.GetProcessesByName("mongod").Concat(Process.GetProcessesByName("mongod.exe")))
+        {
+            try
+            {
+                if (DateTime.UtcNow - p.StartTime.ToUniversalTime() > TimeSpan.FromMinutes(1))
+                {
+                    p.Kill();
+                }
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Owned by another user — skip, let Mongo2Go work around it.
+            }
+        }
+    }
+
+    string _databaseName = "synqra-mongo-tests";
+    string? _connectionString;
+
+    [Before(Test)]
+    public void Setup()
+    {
+        _databaseName = "synqra-mongo-tests-" + GuidExtensions.CreateVersion7().ToString("N");
+        _connectionString = SharedConnectionString();
     }
 
     protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
@@ -61,9 +110,9 @@ public class MongoAppendStorageTests : BaseTest
         {
             return; // skipped — nothing to wire
         }
-        // Inject the connection string + an isolated database the same way the
-        // production options bind it. Set inside Register so it survives Reopen()
-        // (Restart rebuilds the host and re-runs Register).
+        // Inject the connection string + an isolated database the way the production
+        // options bind it. Set inside Register so it survives Reopen() (Restart rebuilds
+        // the host and re-runs Register against the same shared server + db name).
         Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString;
         Configuration["Storage:MongoDbAppendStorage:DatabaseName"] = _databaseName;
         hostApplicationBuilder.AddAppendStorageMongoDb<Event>();
@@ -77,9 +126,9 @@ public class MongoAppendStorageTests : BaseTest
 
     IAppendStorage<Event, Guid> Storage()
     {
-        if (_skipReason is not null)
+        if (_connectionString is null)
         {
-            throw new SkipTestException(_skipReason);
+            throw new SkipTestException(_skipReason ?? "Ephemeral mongod is unavailable");
         }
         return ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
     }
