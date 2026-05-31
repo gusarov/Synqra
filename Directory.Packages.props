@@ -39,6 +39,7 @@
     <!-- MongoDB packages -->
     <PackageVersion Include="MongoDB.Bson" Version="3.5.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.5.0" />
+    <PackageVersion Include="Mongo2Go" Version="4.1.0" />
     <!-- Testing packages -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
