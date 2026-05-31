@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Synqra.AppendStorage.MongoDb;
@@ -11,6 +10,13 @@ namespace Synqra.AppendStorage.MongoDb;
 /// the event's key (a v7 GUID, so insertion order ≈ time order ≈ <c>_id</c> order),
 /// which gives a stable replay sequence without a separate ordering column.
 /// <para>
+/// <b>Key contract:</b> the item's key field must be mapped to <c>_id</c> in its BSON
+/// class map (<see cref="MongoEventClassMaps"/> maps <c>EventId → _id</c> for the
+/// <see cref="Event"/> hierarchy). The storage queries and orders by <c>_id</c>
+/// directly, so it never needs a key-extraction delegate — Mongo reads the key from
+/// the document itself on insert.
+/// </para>
+/// <para>
 /// Append-only: <see cref="AppendAsync"/> inserts; there is no update path. A
 /// duplicate key (same event appended twice) is treated as idempotent and ignored,
 /// matching the "events are immutable facts" model.
@@ -21,12 +27,10 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
     where TKey : notnull
 {
     readonly IMongoCollection<T> _collection;
-    readonly Func<T, TKey> _getKey;
 
-    public MongoAppendStorage(IMongoCollection<T> collection, Func<T, TKey> getKey)
+    public MongoAppendStorage(IMongoCollection<T> collection)
     {
         _collection = collection ?? throw new ArgumentNullException(nameof(collection));
-        _getKey = getKey ?? throw new ArgumentNullException(nameof(getKey));
     }
 
     public async Task AppendAsync(T item, CancellationToken cancellationToken = default)
@@ -55,21 +59,28 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
         }
         try
         {
-            await _collection.InsertManyAsync(list, new InsertManyOptions { IsOrdered = true }, cancellationToken);
+            // IsOrdered = false: a duplicate in the middle of the batch must NOT stop the
+            // remaining new events from being inserted. With unordered inserts Mongo tries
+            // every document and reports the failures; we swallow duplicate-key errors
+            // (idempotent re-append) and rethrow anything else.
+            await _collection.InsertManyAsync(list, new InsertManyOptions { IsOrdered = false }, cancellationToken);
         }
         catch (MongoBulkWriteException ex) when (ex.WriteErrors.All(e => e.Category == ServerErrorCategory.DuplicateKey))
         {
-            // Whole batch already present — idempotent replay of an already-stored batch.
+            // Every failure was a duplicate — the non-duplicate documents were still
+            // inserted (unordered), so this is a fully idempotent outcome.
         }
     }
 
     public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var filter = Builders<T>.Filter.Eq("_id", BsonValue.Create(key));
+        // Typed filter so the key's serializer (e.g. the Standard GuidSerializer) renders
+        // the value the same way it is stored in _id — no representation mismatch.
+        var filter = Builders<T>.Filter.Eq("_id", key);
         var found = await _collection.Find(filter).FirstOrDefaultAsync(cancellationToken);
         if (found is null)
         {
-            throw new KeyNotFoundException($"Event with key '{key}' was not found");
+            throw new KeyNotFoundException($"{typeof(T).Name} with key '{key}' was not found");
         }
         return found;
     }
@@ -77,9 +88,13 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
     public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var filterBuilder = Builders<T>.Filter;
-        var filter = Equals(from, default(TKey))
+        // `from` is TKey? — for the common Guid key this defaults to null, which means
+        // "from the beginning". Check for null explicitly (Equals(null, default(Guid))
+        // would be false and wrongly build `_id >= null`). Use a typed filter so the
+        // bound serializes with the same representation as the stored _id.
+        var filter = from is null
             ? filterBuilder.Empty
-            : filterBuilder.Gte("_id", BsonValue.Create(from));
+            : filterBuilder.Gte("_id", (TKey)from);
 
         // Replay in id order — v7 GUID ids are time-ordered, so this is append order.
         var sort = Builders<T>.Sort.Ascending("_id");

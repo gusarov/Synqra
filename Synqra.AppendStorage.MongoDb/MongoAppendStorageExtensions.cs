@@ -24,10 +24,14 @@ public static class MongoAppendStorageExtensions
     /// <typeparamref name="TKey"/>. Events are stored as native BSON documents; the
     /// <see cref="MongoEventClassMaps"/> are registered for the <see cref="Event"/>
     /// hierarchy so polymorphic events round-trip with the <c>_t</c> discriminator.
+    /// <para>
+    /// Unlike the file/line backends, no key-extraction delegate is needed: the key
+    /// field is mapped to <c>_id</c> in the BSON class map, so Mongo reads the key from
+    /// the document itself on insert and the storage queries/orders by <c>_id</c>.
+    /// </para>
     /// </summary>
     public static IHostApplicationBuilder AddAppendStorageMongoDb<T, TKey>(
         this IHostApplicationBuilder hostBuilder,
-        Func<T, TKey> getKey,
         string? collectionName = null)
         where T : class
         where TKey : notnull
@@ -49,17 +53,16 @@ public static class MongoAppendStorageExtensions
                 .Replace("[TypeName]", typeof(T).Name)
                 .Replace("[Type]", typeof(T).Name);
             var collection = db.GetCollection<T>(name);
-            return new MongoAppendStorage<T, TKey>(collection, getKey);
+            return new MongoAppendStorage<T, TKey>(collection);
         });
         return hostBuilder;
     }
 
     public static IHostApplicationBuilder AddAppendStorageMongoDb<T>(
         this IHostApplicationBuilder hostBuilder,
-        Func<T, Guid> getKey,
         string? collectionName = null)
         where T : class
-        => hostBuilder.AddAppendStorageMongoDb<T, Guid>(getKey, collectionName);
+        => hostBuilder.AddAppendStorageMongoDb<T, Guid>(collectionName);
 
     internal static void AddAppendStorageMongoDbCore(this IHostApplicationBuilder hostBuilder)
     {
