@@ -128,6 +128,8 @@ public class TestUtils : PerformanceTestUtils
 
 public class BaseTest : TestUtils
 {
+	protected string? _connectionString => field ??= EphemeralMongo.ConnectionString;
+
 	public IServiceCollection ServiceCollection => HostBuilder.Services;
 
 	IConfiguration? _configuration;

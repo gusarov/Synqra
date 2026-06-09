@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.MongoDb;
@@ -10,6 +11,34 @@ using TUnit.Assertions.Extensions;
 using TUnit.Core.Exceptions;
 
 namespace Synqra.Tests;
+
+public class MongoTestsIsolationAssumptions : BaseTest
+{
+	[Test]
+	public async Task Should_1()
+	{
+		var url = new MongoUrl(_connectionString);
+		using var client = new MongoClient(url);
+		var db = client.GetDatabase(url.DatabaseName);
+		var test = db.GetCollection<BsonDocument>("test");
+		await test.InsertOneAsync(new BsonDocument { ["_id"] = 1 });
+		Console.WriteLine(GetHashCode());
+		Console.WriteLine(_connectionString);
+		Console.WriteLine(_connectionString);
+	}
+
+	[Test]
+	public async Task Should_2()
+	{
+		await Should_1();
+	}
+
+	[Test]
+	public async Task Should_3()
+	{
+		await Should_1();
+	}
+}
 
 /// <summary>
 /// Integration tests for <see cref="MongoAppendStorage{T,TKey}"/> against a real
@@ -21,34 +50,11 @@ namespace Synqra.Tests;
 /// If the bundled mongod cannot start here, the tests <b>skip</b> rather than fail.
 /// </para>
 /// </summary>
-[NotInParallel]
 public class MongoAppendStorageTests : BaseTest
 {
-	string? _connectionString;
-
-	[Before(Test)]
-	public void Setup()
-	{
-		_connectionString = EphemeralMongo.ConnectionString;
-		var defaultDatabaseName = "synqra-mongo-tests";
-		using var db = new MongoClient(_connectionString);
-		db.DropDatabase(defaultDatabaseName);
-		var url = new MongoUrlBuilder(_connectionString);
-		if (string.IsNullOrWhiteSpace(url.DatabaseName))
-		{
-			url.DatabaseName = defaultDatabaseName;
-			_connectionString = url.ToString();
-		}
-		else
-		{
-			defaultDatabaseName = url.DatabaseName;
-		}
-	}
-
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		// Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString ?? throw new Exception();
 		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 	}
 
@@ -84,8 +90,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M00_be_empty()
 	{
 		var storage = Storage();
@@ -93,8 +97,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M10_append_and_read_survives_reopen()
 	{
 		var storage = Storage();
@@ -115,8 +117,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M11_replay_in_id_order()
 	{
 		var storage = Storage();
@@ -135,8 +135,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M14_get_by_key()
 	{
 		var storage = Storage();
@@ -149,8 +147,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M20_duplicate_append_is_idempotent()
 	{
 		var storage = Storage();
@@ -162,8 +158,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Explicit]
-	[Property("CI", "false")]
 	public async Task Should_M21_batch_with_mid_duplicate_still_inserts_new()
 	{
 		var storage = Storage();
@@ -184,8 +178,6 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	[Property("CI", "false")]
-	[Explicit]
 	public async Task Should_M30_from_paging_returns_tail_and_null_returns_all()
 	{
 		var storage = Storage();

@@ -17,6 +17,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mc \
  && rm -rf /var/lib/apt/lists/*
 RUN dotnet workload install wasm-tools
+# provision built-in mongo instance. You can run it in background in the same RUN as test
+COPY --from=mongo:8.0 /usr/bin/mongod /usr/local/bin/mongod
+RUN cat > /usr/local/bin/withmongo <<'EOF' && chmod +x /usr/local/bin/withmongo
+#!/bin/sh
+set -eux
+mkdir -p /tmp/mdb
+mongod \
+  --dbpath /tmp/mdb \
+  --bind_ip 127.0.0.1 \
+  --port 27017 \
+  --fork \
+  --logpath /tmp/mongod.log
+trap 'mongod --dbpath /tmp/mdb --shutdown || true' EXIT
+export ConnectionStrings__Mongodb="mongodb://127.0.0.1:27017"
+exec "$@"
+EOF
 ARG BUILD_CONFIGURATION=Release
 # && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
 # && chmod +x /tmp/dotnet-install.sh \
@@ -31,7 +47,7 @@ RUN dotnet build Synqra.CodeGeneration -c $BUILD_CONFIGURATION --no-restore "-cl
 RUN dotnet build                       -c $BUILD_CONFIGURATION --no-restore "-clp:ErrorsOnly;NoSummary" -nologo -tl:off
 
 FROM build AS test
-RUN dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+RUN withmongo dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM build AS pack
 ARG BUILD_BUILDNUMBER
@@ -43,8 +59,8 @@ RUN printenv > /out/env.txt
 FROM build AS buildaot
 RUN dotnet nuget enable source nuget.org
 RUN dotnet publish -f net10.0 Tests/Synqra.Tests -c Release -r linux-x64
-RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests
-RUN Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests; \
+    withmongo Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM scratch AS art
 COPY --from=pack /out /

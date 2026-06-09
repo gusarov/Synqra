@@ -89,39 +89,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 
 	protected IAppendStorage<Event, Guid> Events() => ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
 
-	// MongoDB test database — shared by the event log and the read-model projection. Same pattern as
-	// MongoAppendStorageTests: a CONSTANT name (reused and dropped each run, so it never leaks on a real
-	// local Mongo that EphemeralMongo may return from user-secrets), baked into the connection string,
-	// dropped before each test; Mongo-touching fixtures are [NotInParallel] to avoid cross-test war. A db
-	// already named in the (user-secrets) connection string is respected. Only Mongo-using cells call
-	// these, so non-Mongo cells take no Mongo dependency.
-	const string MongoTestDatabaseName = "synqra-cobra-tests";
-
-	protected static string MongoTestConnectionString()
-	{
-		var url = new MongoUrlBuilder(EphemeralMongo.ConnectionString
-			?? throw new global::System.Exception("Mongo is not available for the matrix tests"));
-		if (string.IsNullOrWhiteSpace(url.DatabaseName))
-		{
-			url.DatabaseName = MongoTestDatabaseName;
-		}
-		return url.ToString();
-	}
-
-	protected static void DropMongoTestDatabase()
-	{
-		var connectionString = EphemeralMongo.ConnectionString
-			?? throw new global::System.Exception("Mongo is not available for the matrix tests");
-		var databaseName = new MongoUrlBuilder(connectionString).DatabaseName;
-		if (string.IsNullOrWhiteSpace(databaseName))
-		{
-			databaseName = MongoTestDatabaseName;
-		}
-		new MongoClient(connectionString).DropDatabase(databaseName);
-	}
-
-	protected void UseMongoProjectionStore(IServiceCollection services)
-		=> services.AddMongoDbSynqraStore(MongoTestConnectionString());
+	protected void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
 
 	[Test]
 	public async Task Should_10_persist_property_change_to_event_log()
@@ -182,15 +150,9 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 /// <summary>Event log = MongoDB (native, queryable BSON documents) — durable.</summary>
 public abstract class Cobra_MongoEventStorageContract : Cobra_DurableSynqraStoreContractTests
 {
-	[Before(Test)]
-	public void DropDatabase() => DropMongoTestDatabase();
-
 	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder)
 	{
-		// Connection string carries the constant test database; the db is dropped before each test.
-		var constr = MongoTestConnectionString();
-		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = constr; // just in case, in fact it is passed down here
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(constr);
+		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 	}
 }
 
