@@ -32,42 +32,11 @@ namespace Synqra.Tests;
 /// </para>
 /// </summary>
 [NotInParallel]
-[Property("CI", "false")]
-[Explicit]
 public class MongoObjectStoreEndToEndTests : BaseTest
 {
-	const string ConnectionStringKey = "Storage:MongoDbAppendStorage:ConnectionString";
-	const string DatabaseNameKey = "Storage:MongoDbAppendStorage:DatabaseName";
-
-	string _databaseName = "synqra-store-e2e";
-	string? _connectionString;
-
-	[Before(Test)]
-	public void Setup()
-	{
-		// Touch the config so Register resolves the connection string + database name.
-		_ = Configuration;
-		if (_connectionString is null)
-		{
-			return;
-		}
-		// Fixed database name (a user-secrets connection string points at one local db),
-		// so start each test clean by dropping it.
-		new MongoClient(_connectionString).DropDatabase(_databaseName);
-	}
-
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-
-		// var configured = hostApplicationBuilder.Configuration[ConnectionStringKey];
-		// _connectionString = configured ?? EphemeralMongo.ConnectionString;
-		_connectionString = EphemeralMongo.ConnectionString;
-		if (_connectionString is null)
-		{
-			throw new Exception();
-		}
-		// _databaseName = hostApplicationBuilder.Configuration[DatabaseNameKey] ?? _databaseName;
 
 		hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
 		hostApplicationBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
@@ -84,9 +53,7 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 			ser.Snapshot();
 		});
 
-		Configuration[ConnectionStringKey] = _connectionString;
-		Configuration[DatabaseNameKey] = _databaseName;
-		hostApplicationBuilder.AddAppendStorageMongoDb<Event>();
+		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 
