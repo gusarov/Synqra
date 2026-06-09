@@ -171,7 +171,7 @@ internal class EmergencyLogImplementation
 				{
 					var fi = new FileInfo(_logFilePath);
 
-					const int maxSizeBytes = 20 * 1024 * 1024;
+					const int maxSizeBytes = 512 * 1024 * 1024;
 					if (fi.Exists && (fi.Length > maxSizeBytes))
 					{
 						// slide 50% of file inside! UPD: slide till maxSize/2

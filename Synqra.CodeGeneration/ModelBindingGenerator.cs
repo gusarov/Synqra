@@ -637,16 +637,23 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var b = clazz.AttributeLists.First().Span.End;
 				var c = clazz.AttributeLists.Last().Span.Start;
 				var d = clazz.AttributeLists.Last().Span.End;
+				var lastAttribute = originalSourceContent.Substring(c, (d - c));
+				var i = lastAttribute.IndexOf('"');
+				var e = lastAttribute.LastIndexOf('"');
+				var lastAttributeSchema = lastAttribute.Substring(i + 1, e - i - 1);
 				// DebugLog($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
 
 				var lastSchemaEntry = schemas.Length == 0
 					? (0d, string.Empty)
 					: schemas.OrderBy(s => s.Item1).Last();
 				double lastVer = lastSchemaEntry.Item1;
-				string lastSchema = lastSchemaEntry.Item2;
+				string lastSchema = string.IsNullOrWhiteSpace(lastSchemaEntry.Item2) ? lastAttributeSchema : lastSchemaEntry.Item2;
 				var sb = new StringBuilder(originalSourceContent);
+				DebugLog($"GeneratorV 2");
 				if (lastSchema != suggestedSchema)
 				{
+					DebugLog($"lastSchema {lastSchema.Utf8().Hex()}");
+					DebugLog($"suggestedSchema {suggestedSchema.Utf8().Hex()}");
 					var now = DateTime.Now;
 					var year1 = new DateTime(now.Date.Year, 1, 1);
 					var year2 = new DateTime(now.Date.Year + 1, 1, 1);
@@ -655,8 +662,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						ver = lastVer + 0.001;
 					}
-					DebugLog($"*********** Schema drift! path={clazz.SyntaxTree.FilePath} clazz={clazz}");
-					sb.Insert(d, $"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]");
+					DebugLog($"*********** Schema drift! path={clazz.SyntaxTree.FilePath} clazz={clazz} lastSchema={lastSchema} suggestedSchema={suggestedSchema} lastAttribute={lastAttribute} lastAttributeSchema={lastAttributeSchema}");
+					sb.Insert(d, FormattableString.Invariant($"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]"));
 					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
 				}
 				else
