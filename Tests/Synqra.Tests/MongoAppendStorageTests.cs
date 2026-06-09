@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MongoDB.Driver;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.MongoDb;
 using Synqra.Tests.TestHelpers;
@@ -23,23 +24,32 @@ namespace Synqra.Tests;
 [NotInParallel]
 public class MongoAppendStorageTests : BaseTest
 {
-	string _databaseName = "synqra-mongo-tests";
 	string? _connectionString;
 
 	[Before(Test)]
 	public void Setup()
 	{
 		_connectionString = EphemeralMongo.ConnectionString;
-		using var db = new MongoDB.Driver.MongoClient(_connectionString);
-		db.DropDatabase(_databaseName);
+		var defaultDatabaseName = "synqra-mongo-tests";
+		using var db = new MongoClient(_connectionString);
+		db.DropDatabase(defaultDatabaseName);
+		var url = new MongoUrlBuilder(_connectionString);
+		if (string.IsNullOrWhiteSpace(url.DatabaseName))
+		{
+			url.DatabaseName = defaultDatabaseName;
+			_connectionString = url.ToString();
+		}
+		else
+		{
+			defaultDatabaseName = url.DatabaseName;
+		}
 	}
 
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString ?? throw new Exception();
-		Configuration["Storage:MongoDbAppendStorage:DatabaseName"] = _databaseName;
-		hostApplicationBuilder.AddAppendStorageMongoDb<Event>();
+		// Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString ?? throw new Exception();
+		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 	}
 
 	void Reopen()

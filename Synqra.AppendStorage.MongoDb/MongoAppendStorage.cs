@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
 
 namespace Synqra.AppendStorage.MongoDb;
@@ -28,7 +29,7 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 {
 	readonly IMongoCollection<T> _collection;
 
-	public MongoAppendStorage(IMongoCollection<T> collection)
+	public MongoAppendStorage([FromKeyedServices("Synqra.AppendStorage")] IMongoCollection<T> collection)
 	{
 		_collection = collection ?? throw new ArgumentNullException(nameof(collection));
 	}
