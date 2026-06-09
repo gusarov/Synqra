@@ -522,7 +522,7 @@ public static class GuidExtensions
 	internal static bool SwitchValidateNamespaceId => AppContext.TryGetSwitch(SwitchValidateNamespaceIdKey, out var v) ? v : true;
 
 #if NET9_0_OR_GREATER
-	[FeatureSwitchDefinition(SwitchValidateNamespaceIdKey)] // hint for AOT trimmer
+	[FeatureSwitchDefinition(SwitchValidateNamespaceIdHashChainKey)] // hint for AOT trimmer
 #endif
 	internal static bool SwitchValidateNamespaceIdHashChain => AppContext.TryGetSwitch(SwitchValidateNamespaceIdHashChainKey, out var v) ? v : true;
 

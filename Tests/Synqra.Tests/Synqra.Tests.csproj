@@ -37,6 +37,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.BlobStorage\Synqra.AppendStorage.BlobStorage.csproj" />
+    <ProjectReference Include="..\..\Synqra.AppendStorage.InMemory\Synqra.AppendStorage.InMemory.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.JsonLines\Synqra.AppendStorage.JsonLines.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.MongoDb\Synqra.AppendStorage.MongoDb.csproj" />
     <ProjectReference Include="..\..\Synqra.BlobStorage.File\Synqra.BlobStorage.File.csproj" />
