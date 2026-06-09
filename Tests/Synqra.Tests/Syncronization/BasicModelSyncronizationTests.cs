@@ -68,7 +68,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 		await Should_have_node_with_model(); // Works on Node A
 		var collection = _nodeB.StoreContext.GetCollection<SampleTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
-		while (collection.Count < 1 && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
+		while (collection.Count < 5 && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}

@@ -10,6 +10,7 @@ using Synqra.AppendStorage.MongoDb;
 using Synqra.BinarySerializer;
 using Synqra.BlobStorage.File;
 using Synqra.Projection.InMemory;
+using Synqra.Projection.MongoDb;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using TUnit.Assertions.Extensions;
@@ -88,6 +89,40 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 
 	protected IAppendStorage<Event, Guid> Events() => ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
 
+	// MongoDB test database — shared by the event log and the read-model projection. Same pattern as
+	// MongoAppendStorageTests: a CONSTANT name (reused and dropped each run, so it never leaks on a real
+	// local Mongo that EphemeralMongo may return from user-secrets), baked into the connection string,
+	// dropped before each test; Mongo-touching fixtures are [NotInParallel] to avoid cross-test war. A db
+	// already named in the (user-secrets) connection string is respected. Only Mongo-using cells call
+	// these, so non-Mongo cells take no Mongo dependency.
+	const string MongoTestDatabaseName = "synqra-cobra-tests";
+
+	protected static string MongoTestConnectionString()
+	{
+		var url = new MongoUrlBuilder(EphemeralMongo.ConnectionString
+			?? throw new global::System.Exception("Mongo is not available for the matrix tests"));
+		if (string.IsNullOrWhiteSpace(url.DatabaseName))
+		{
+			url.DatabaseName = MongoTestDatabaseName;
+		}
+		return url.ToString();
+	}
+
+	protected static void DropMongoTestDatabase()
+	{
+		var connectionString = EphemeralMongo.ConnectionString
+			?? throw new global::System.Exception("Mongo is not available for the matrix tests");
+		var databaseName = new MongoUrlBuilder(connectionString).DatabaseName;
+		if (string.IsNullOrWhiteSpace(databaseName))
+		{
+			databaseName = MongoTestDatabaseName;
+		}
+		new MongoClient(connectionString).DropDatabase(databaseName);
+	}
+
+	protected void UseMongoProjectionStore(IServiceCollection services)
+		=> services.AddMongoDbSynqraStore(MongoTestConnectionString());
+
 	[Test]
 	public async Task Should_10_persist_property_change_to_event_log()
 	{
@@ -147,23 +182,15 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 /// <summary>Event log = MongoDB (native, queryable BSON documents) — durable.</summary>
 public abstract class Cobra_MongoEventStorageContract : Cobra_DurableSynqraStoreContractTests
 {
-	// EphemeralMongo prefers the user-secrets "Mongodb" connection (the developer's local Mongo),
-	// falling back to a Mongo2Go instance. Captured once so it stays stable across Restart().
-	readonly string _connectionString = EphemeralMongo.ConnectionString
-		?? throw new global::System.Exception("Mongo is not available for the matrix tests");
-
-	// Unique db per test fixture; dropped before the test so each run starts clean. Stable across
-	// Restart() so the replay test reads the same database it wrote.
-	readonly string _databaseName = "synqra-matrix-" + Guid.NewGuid().ToString("N");
-
 	[Before(Test)]
-	public void DropDatabase() => new MongoClient(_connectionString).DropDatabase(_databaseName);
+	public void DropDatabase() => DropMongoTestDatabase();
 
 	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder)
 	{
-		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = _connectionString;
-		Configuration["Storage:MongoDbAppendStorage:DatabaseName"] = _databaseName;
-		hostBuilder.AddAppendStorageMongoDb<Event>();
+		// Connection string carries the constant test database; the db is dropped before each test.
+		var constr = MongoTestConnectionString();
+		Configuration["Storage:MongoDbAppendStorage:ConnectionString"] = constr; // just in case, in fact it is passed down here
+		hostBuilder.Services.AddAppendStorageMongoDb<Event>(constr);
 	}
 }
 
@@ -206,9 +233,7 @@ public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventSt
 [Property("CI", "false")]
 public sealed class Cobra_Mongo_Storage_With_Mongo_Store : Cobra_MongoEventStorageContract
 {
-	protected override void RegisterStore(IServiceCollection services)
-		=> throw new global::System.NotImplementedException(
-			"RED: no MongoDB IObjectStore/IProjection yet (Synqra.Projection.MongoDb is a stub). Build it and expose AddMongoDbSynqraStore().");
+	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
 }
 
 [InheritsTests]
@@ -220,9 +245,7 @@ public sealed class Cobra_SbxFile_Storage_With_InMemory_Store : Cobra_SbxFileEve
 [InheritsTests]
 public sealed class Cobra_SbxFile_Storage_With_Mongo_Store : Cobra_SbxFileEventStorageContract
 {
-	protected override void RegisterStore(IServiceCollection services)
-		=> throw new global::System.NotImplementedException(
-			"RED: no MongoDB IObjectStore/IProjection yet (Synqra.Projection.MongoDb is a stub). Build it and expose AddMongoDbSynqraStore().");
+	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
 }
 
 [InheritsTests]
@@ -234,7 +257,5 @@ public sealed class Cobra_InMemory_Storage_With_InMemory_Store : Cobra_InMemoryE
 [InheritsTests]
 public sealed class Cobra_InMemory_Storage_With_Mongo_Store : Cobra_InMemoryEventStorageContract
 {
-	protected override void RegisterStore(IServiceCollection services)
-		=> throw new global::System.NotImplementedException(
-			"RED: no MongoDB IObjectStore/IProjection yet (Synqra.Projection.MongoDb is a stub). Build it and expose AddMongoDbSynqraStore().");
+	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
 }
