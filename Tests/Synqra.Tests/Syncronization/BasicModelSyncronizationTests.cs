@@ -33,7 +33,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 	}
 
 	// [Test] // actually attach is internal method!!
-	public async Task Should_attach_new_object_and_it_should_persist()
+	public async Task Should_05_attach_new_object_and_it_should_persist()
 	{
 		// the Attach() call alone should persist new object. This allows to make snapshot of new obejct with all properties and start tracking changes
 		var task = new SampleTaskModel { Subject = "Task 1" };
@@ -42,7 +42,7 @@ internal class BasicModelSyncronizationTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_have_node_with_model()
+	public async Task Should_10_have_node_with_model()
 	{
 		var collection = _nodeA.StoreContext.GetCollection<SampleTaskModel>();
 		await Assert.That(collection).IsEmpty();
@@ -53,8 +53,23 @@ internal class BasicModelSyncronizationTests : BaseTest
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
 	}
 
-	[Test] // in progress
-	public async Task Should_synchronize_simple_models()
+	[Test]
+	public async Task Should_15_have_node_with_model()
+	{
+		var collection = _nodeA.StoreContext.GetCollection<SampleTaskModel>();
+		await Assert.That(collection).IsEmpty();
+		var task = new SampleTaskModel { Subject = "Task 1" };
+		collection.Add(task);
+		await Assert.That(collection).HasCount(1);
+		for (int i = 0; i < 50; i++)
+		{
+			task.Subject = "Task 1 - updated " + i;
+			await Assert.That(task.Subject).IsEqualTo("Task 1 - updated " + i);
+		}
+	}
+
+	[Test]
+	public async Task Should_20_synchronize_simple_models()
 	{
 		while (true)
 		{
@@ -64,24 +79,22 @@ internal class BasicModelSyncronizationTests : BaseTest
 			}
 			await Task.Delay(100);
 		}
-		EmergencyLog.Default.Message("°0 <==========> Should_synchronize_simple_models");
-		await Should_have_node_with_model(); // Works on Node A
+		EmergencyLog.Default.Message("°0 <==========> Should_20_synchronize_simple_models");
+		await Should_10_have_node_with_model(); // Works on Node A
 		var collection = _nodeB.StoreContext.GetCollection<SampleTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
-		while (collection.Count < 5 && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
+		while (collection.Count < 1 && (sw.ElapsedMilliseconds < 2_000 || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}
-
 		await Assert.That(collection).HasCount(1);
 		var task = collection.First();
-
 		sw = Stopwatch.StartNew();
-		while (task.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < 2000 || Debugger.IsAttached))
+		while (task.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < 2_000 || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
-		EmergencyLog.Default.Message("°0 </==========> Should_synchronize_simple_models");
+		EmergencyLog.Default.Message("°0 </==========> Should_20_synchronize_simple_models");
 	}
 }

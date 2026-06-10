@@ -165,10 +165,11 @@ public static class AppendStorageJsonLinesExtensions
 			}
 		}
 
-		public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
+		public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
 		{
-			string? _currentLine;
-			StreamReader? _streamReader;
+			/*
+			string? currentLine;
+			StreamReader? streamReader;
 
 			if (File.Exists(FileName))
 			{
@@ -180,14 +181,14 @@ public static class AppendStorageJsonLinesExtensions
 					, bufferSize: 1024 * 64
 					, FileOptions.SequentialScan | FileOptions.Asynchronous
 					);
-				_streamReader = new StreamReader(stream, encoding: _utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
+				streamReader = new StreamReader(stream, encoding: _utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
 			}
 			else
 			{
 				yield break;
 			}
 
-			var lineHeader = await _streamReader.ReadLineAsync();
+			var lineHeader = await streamReader.ReadLineAsync();
 			if (lineHeader == null)
 			{
 				throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
@@ -202,23 +203,23 @@ public static class AppendStorageJsonLinesExtensions
 				throw new Exception("File version is newer than expected");
 			}
 
-			var _fromStr = _getPathFromKey(from);
-			if (_fromStr.Length == 64 && _fromStr.TrimEnd('0').Length <= 32)
+			var fromStr = _getPathFromKey(from);
+			if (fromStr.Length == 64 && fromStr.TrimEnd('0').Length <= 32)
 			{
-				_fromStr = _fromStr[..32];
+				fromStr = fromStr[..32];
 			}
 
-			while (!_streamReader.EndOfStream)
+			while (!streamReader.EndOfStream)
 			{
-				_currentLine = await _streamReader.ReadLineAsync();
+				currentLine = await streamReader.ReadLineAsync();
 
-				var parts = _currentLine.Split(new[] { '§' }, 2);
+				var parts = currentLine.Split(new[] { '§' }, 2);
 				var (keyStr, json) = (parts[0], parts[1]);
 				TKey key = _getKeyFromPath(keyStr);
 
 				if (!Equals(from, default(TKey)))
 				{
-					if (!keyStr.StartsWith(_fromStr))
+					if (!keyStr.StartsWith(fromStr))
 					{
 						continue;
 					}
@@ -243,8 +244,8 @@ public static class AppendStorageJsonLinesExtensions
 				}
 
 			}
-
-			// return new JsonLinesAsyncEnumerable(this, from, cancellationToken);
+			*/
+			return new JsonLinesAsyncEnumerable(this, from, cancellationToken);
 		}
 
 		private class JsonLinesAsyncEnumerable : IAsyncEnumerable<T>
@@ -498,6 +499,7 @@ public static class AppendStorageJsonLinesExtensions
 				#endregion
 
 				_streamWriter.WriteLine($"{keyStr}§{json}");
+				_streamWriter.Flush();
 
 #elif SEMAPHORE
 				await _streamWriter.WriteLineAsync(json);

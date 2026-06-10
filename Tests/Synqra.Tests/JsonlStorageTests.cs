@@ -502,7 +502,7 @@ public class JsonLinesStorageRegistrationPerformance : BaseTest
 public class TestItemJsonlStorageTests : JsonAppendStorageTests<TestItem, int>
 {
 	[Test]
-	public async Task Should_allow_append_and_read_items()
+	public async Task Should_10_allow_append_and_read_items()
 	{
 		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1", });
 		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2", });
@@ -520,7 +520,7 @@ public class TestItemJsonlStorageTests : JsonAppendStorageTests<TestItem, int>
 	}
 
 	[Test]
-	public async Task Should_store_objects_as_jsonl()
+	public async Task Should_10_store_objects_as_jsonl()
 	{
 		await _storage.AppendAsync(new TestItem { Id = 1, Name = "Test Item 1", });
 		await _storage.AppendAsync(new TestItem { Id = 2, Name = "Test Item 2", });
@@ -559,21 +559,24 @@ public class TestItemJsonlStorageTests : JsonAppendStorageTests<TestItem, int>
 	}
 
 	[Test]
-	[Explicit] // This no longer works after the change to generated enumerator. Most likely I made it up.
-	public async Task Should_continue_reading_with_same_iterator()
+	public async Task Should_20_continue_reading_with_same_iterator()
 	{
 		await _storage.AppendAsync(new TestItem { Id = 1, Name = "For iterator", });
 
-		var iterator = _storage.GetAllAsync().GetAsyncEnumerator();
+		var asyncEnumerable = _storage.GetAllAsync();
+		var asyncEnumerator = asyncEnumerable.GetAsyncEnumerator();
 
-		await Assert.That(await iterator.MoveNextAsync()).IsTrue();
-		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end
-		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end
+		await Assert.That(await asyncEnumerator.MoveNextAsync()).IsTrue();
+		await Assert.That(await asyncEnumerator.MoveNextAsync()).IsFalse(); // reached the end
+		await Assert.That(await asyncEnumerator.MoveNextAsync()).IsFalse(); // reached the end
 
 		await _storage.AppendAsync(new TestItem { Id = 2, Name = "For iterator" });
 
-		await Assert.That(await iterator.MoveNextAsync()).IsTrue(); // continued!!
-		await Assert.That(await iterator.MoveNextAsync()).IsFalse(); // reached the end again
+		await Assert.That(await asyncEnumerator.MoveNextAsync()).IsTrue(); // continued!!
+		await Assert.That(await asyncEnumerator.MoveNextAsync()).IsFalse(); // reached the end again
+
+		(asyncEnumerator as IDisposable)?.Dispose();
+		(asyncEnumerable as IDisposable)?.Dispose();
 	}
 }
 

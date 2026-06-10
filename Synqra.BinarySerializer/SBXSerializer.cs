@@ -515,7 +515,7 @@ public class SbxSerializer : ISbxSerializer
 		{
 			if (_idByType.TryGetValue(actualType, out var typeInfo1))
 			{
-				EmergencyLog.Default.Debug($"Syncron Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
+				EmergencyLog.Default.Debug($"SBX Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
 				bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
 			}
 			else

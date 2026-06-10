@@ -94,13 +94,24 @@ internal class SynqraTestNode
 #else
 	public Microsoft.AspNetCore.Builder.WebApplication Host { get; private set; }
 #endif
-	IObjectStore __storeContext;
 
-	public IObjectStore StoreContext { get =>
+	public IObjectStore StoreContext
+	{
+		get =>
 #if NETFRAMEWORK
 			throw new NotImplementedException();
 #else
-			__storeContext ??= Host.Services.GetRequiredService<IObjectStore>();
+			field ??= Host.Services.GetRequiredService<IObjectStore>(); private set;
+#endif
+	}
+
+	public IAppendStorage<Event, Guid> Events
+	{
+		get =>
+#if NETFRAMEWORK
+			throw new NotImplementedException();
+#else
+			field ??= Host.Services.GetRequiredService<IAppendStorage<Event, Guid>>(); private set;
 #endif
 	}
 

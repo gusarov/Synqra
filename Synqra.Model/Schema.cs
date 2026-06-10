@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 namespace Synqra;
 
 /// <summary>
-/// A schema for Syncron serializer
+/// A schema for SBX serializer
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Interface, AllowMultiple = true)]
 public class SchemaAttribute : Attribute

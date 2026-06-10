@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
 using System;
@@ -14,7 +15,7 @@ namespace Synqra;
 /// <summary>
 /// Client-side service that connect to WS Master
 /// </summary>
-public class EventReplicationService : IHostedService, IEventReplicationService
+public class EventReplicationService : BackgroundService, IEventReplicationService
 {
 	public const int DefaultFrameSize = 8192;
 
@@ -24,14 +25,15 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 	private readonly Lazy<IProjection> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
 
-	private ClientWebSocket? _connection;
-
 	private readonly INetworkSerializationService _networkSerializationService;
 
-	private AutoResetEvent _autoResetEvent = new AutoResetEvent(false);
+	private SemaphoreSlim _autoResetEvent = new SemaphoreSlim(0, 1);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
 
-	public bool IsOnline { get; private set; }
+	volatile bool _isOnline;
+	public bool IsOnline { get => _isOnline; private set => _isOnline = value; }
+
+	private Task? _readerTask;
 
 	public EventReplicationService(
 		  IOptions<EventReplicationConfig> options
@@ -51,27 +53,26 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 		_config = config ?? options.Value;
 	}
 
-	public async Task StartAsync(CancellationToken cancellationToken)
-	{
-		await Task.Yield();
-		_ = StartWorker();
-	}
-
 	HashSet<Guid> _skipSet = new HashSet<Guid>();
 	LinkedList<Guid> _skipList = new LinkedList<Guid>();
 
 	async Task ProcessEvent(Event @event)
 	{
-		if (_skipSet.Contains(@event.EventId))
+		lock (_skipSet)
 		{
-			return;
+			if (_skipSet.Contains(@event.EventId))
+			{
+				return;
+			}
 		}
 		await @event.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)_synqraStoreContext.Value, null!);
-		if (_skipSet.Add(@event.EventId))
+		lock (_skipSet)
 		{
-			_skipList.AddLast(@event.EventId);
+			if (_skipSet.Add(@event.EventId))
+			{
+				_skipList.AddLast(@event.EventId);
+			}
 		}
-		Console.WriteLine();
 	}
 
 	static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
@@ -89,12 +90,11 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 					return null;
 				}
 
-				if (res.Count == 0)
+				if (res.Count > 0)
 				{
-					break;
+					ms.Write(rent, 0, res.Count);
 				}
 
-				ms.Write(rent, 0, res.Count);
 				if (res.EndOfMessage)
 				{
 					break;
@@ -108,7 +108,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 		}
 	}
 
-	async Task StartWorker()
+	protected async override Task ExecuteAsync(CancellationToken stoppingToken)
 	{
 		var ctx = _synqraStoreContext.Value ?? throw new ArgumentException();
 		await foreach (var ev in _storage.GetAllAsync(from: default))
@@ -116,20 +116,13 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 			await ev.AcceptAsync(ctx, null);
 		}
 
+		ClientWebSocket wsConnection;
 		for (int i = 0; ; i++)
 		{
 			try
 			{
-				var ws = new ClientWebSocket();
-				await ws.ConnectAsync(new Uri($"ws://localhost:{_config.Port}/api/synqra/ws"), _cts.Token);
-				/*
-				connection.On("NewEvent1", async (Event eventObject) =>
-				{
-					await ProcessEvent(eventObject);
-				});
-				*/
-				// await _connection.StartAsync();
-				_connection = ws;
+				wsConnection = new ClientWebSocket();
+				await wsConnection.ConnectAsync(new Uri($"ws://localhost:{_config.Port}/api/synqra/ws"), _cts.Token);
 				_networkSerializationService.Reinitialize();
 				IsOnline = true;
 				break;
@@ -139,10 +132,11 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 				await Task.Delay(1000);
 			}
 		}
-		async void Reader()
+
+		async Task Reader()
 		{
 			#region HELLO
-			var magicBytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
+			var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
 			if (magicBytes == null || magicBytes.Length == 0)
 			{
 				IsOnline = false;
@@ -162,7 +156,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 			#endregion
 			while (!_cts.IsCancellationRequested)
 			{
-				var bytes = await ReceiveFullMessageAsync(_connection, _cts.Token);
+				var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
 				if (bytes == null || bytes.Length == 0)
 				{
 					IsOnline = false;
@@ -173,6 +167,7 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 				{
 					case NewEvent1 ne1:
 						await _storage.AppendAsync(ne1.Event);
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ne1.Event}");
 						await ProcessEvent(ne1.Event);
 						break;
 					default:
@@ -180,24 +175,29 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 				}
 			}
 		}
-		Reader();
+		_readerTask = Reader();
+
 		#region HELLO
-		var buffer = ArrayPool<byte>.Shared.Rent(8);
-		try
 		{
-			BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
-			await _connection.SendAsync(new ArraySegment<byte>(buffer, 0, 8), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
-		}
-		finally
-		{
-			ArrayPool<byte>.Shared.Return(buffer);
+			var buffer = ArrayPool<byte>.Shared.Rent(8);
+			try
+			{
+				BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
+				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, 8), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+			}
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(buffer);
+			}
 		}
 		#endregion
+
 		var myEnumerable = _storage.GetAllAsync(from: _eventReplicationState.LastEventIdFromMe);
 		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
 		{
-			_autoResetEvent.WaitOne();
+			await _autoResetEvent.WaitAsync();
+			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> <TRIGGERED LOOP>");
 			if (_cts.IsCancellationRequested)
 			{
 				break;
@@ -206,9 +206,12 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 			while (await myEnumerator.MoveNextAsync())
 			{
 				var ev = myEnumerator.Current;
-				if (_skipSet.Add(ev.EventId))
+				lock (_skipSet)
 				{
-					_skipList.AddLast(ev.EventId);
+					if (_skipSet.Add(ev.EventId))
+					{
+						_skipList.AddLast(ev.EventId);
+					}
 				}
 				// await _connection.InvokeAsync("NewEvent1", ev);
 
@@ -222,7 +225,8 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 				try
 				{
 					var serialized = _networkSerializationService.Serialize<TransportOperation>(inv, bytes);
-					await _connection.SendAsync(serialized, _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+					await wsConnection.SendAsync(serialized, _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 				}
 				finally
 				{
@@ -232,25 +236,36 @@ public class EventReplicationService : IHostedService, IEventReplicationService
 				_eventReplicationState.LastEventIdFromMe = ev.EventId;
 				_eventReplicationState.Save();
 			}
+			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
 
 			// get events from server and apply them locally
 		}
 	}
 
+	/*
 	public async Task StopAsync(CancellationToken cancellationToken)
 	{
-		_cts.Cancel();
+		await _cts.CancelAsync();
 		_autoResetEvent.Set();
 		// _ = _connection?.StopAsync();
 		if (_connection != null && _connection.State == WebSocketState.Open)
 		{
-			await _connection.CloseAsync(WebSocketCloseStatus.Empty, null, cancellationToken);
+			await _connection.CloseAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
+		}
+		if (_readerTask != null)
+		{
+			await _readerTask.WaitAsync(cancellationToken);
+		}
+		if (_writerTask != null)
+		{
+			await _writerTask.WaitAsync(cancellationToken);
 		}
 		// return Task.CompletedTask;
 	}
+	*/
 
 	public void Trigger(Command command, IReadOnlyList<Event> events)
 	{
-		_autoResetEvent.Set();
+		_autoResetEvent.Release();
 	}
 }

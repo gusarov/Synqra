@@ -692,7 +692,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx)
 	{
-		var created = new ObjectPropertyChangedEvent
+		var ev = new ObjectPropertyChangedEvent
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
@@ -710,7 +710,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
 			// DataObject = cmd.DataObject, // or may be entire object
 		};
-		ctx.Events.Add(created);
+		ctx.Events.Add(ev);
 
 		return Task.CompletedTask;
 	}
