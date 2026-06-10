@@ -117,7 +117,7 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 		int pos = 0;
 		var des = _sbxSerializerReceiver.Deserialize<T>(bytes, ref pos);
-		EmergencyLog.Default.Debug($"°9 SBC Received: {des}{Environment.NewLine}{JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation)}");
+		EmergencyLog.Default.Debug($"°9 SBX Received: {des}{Environment.NewLine}{JsonSerializer.Serialize(des, AppJsonContext.Default.TransportOperation)}");
 		if (pos != bytes.Length)
 		{
 			throw new Exception("Did not consume all bytes");
