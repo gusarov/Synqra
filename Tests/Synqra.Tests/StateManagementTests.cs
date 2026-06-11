@@ -1024,6 +1024,11 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 
 		model.Name = "TestName"; // this should emit a command and broadcast it
 
+		// But it also needs to be applied
+		await Assert.That(model.Name).IsEqualTo("TestName");
+		await Assert.That(_sut.GetCollection<DemoModel>().Count).IsEqualTo(1);
+		await Assert.That(_sut.GetCollection<DemoModel>().First().Name).IsEqualTo("TestName");
+
 		var commands = _sut.GetCollection<Command>().ToArray();
 
 		var jso = ServiceProvider.GetRequiredService<JsonSerializerOptions>();
@@ -1042,9 +1047,6 @@ public abstract class StateManagementTests : BaseTest<IObjectStore>
 		await Assert.That(cop.PropertyName).IsEqualTo(nameof(model.Name));
 		await Assert.That(cop.OldValue).IsEqualTo(null);
 		await Assert.That(cop.NewValue).IsEqualTo("TestName");
-
-		// But it also needs to be applied
-		await Assert.That(model.Name).IsEqualTo("TestName");
 	}
 
 	[Test]

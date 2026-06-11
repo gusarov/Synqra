@@ -10,7 +10,7 @@ namespace Synqra.BlobStorage.MongoDb;
 
 public class MongoDbBlobStorageOptions
 {
-	public string ConnectionString { get; set; } = "mongodb://localhost:27017";
+	public string ConnectionString { get; set; } = "mongodb://localhost";
 	public string DatabaseName { get; set; } = "synqra";
 	public string CollectionName { get; set; } = "blobs";
 }
