@@ -276,7 +276,7 @@ public static class AppendStorageJsonLinesExtensions
 			private static Encoding _utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
 			private readonly JsonLinesStorage<T, TKey> _storage;
 			private readonly TKey? _from;
-			private readonly string _fromStr;
+			private readonly string? _fromStr;
 			private readonly string _fileName;
 			private readonly JsonSerializerOptions _jsonSerializerOptions;
 			private readonly CancellationToken? _cancellationToken;
@@ -289,7 +289,15 @@ public static class AppendStorageJsonLinesExtensions
 			{
 				_storage = storage;
 				_from = from;
-				_fromStr = _storage._getPathFromKey(from);
+				if (from != null && !Equals(from, default(TKey)))
+				{
+					var fromStr = _storage._getPathFromKey(from);
+					if (fromStr.Length == 64 && fromStr.TrimEnd('0').Length <= 32)
+					{
+						fromStr = fromStr[..32]; // second key component is empty - prefix-match by the first component only
+					}
+					_fromStr = fromStr;
+				}
 				_fileName = fileName;
 				_jsonSerializerOptions = jsonSerializerOptions;
 				_cancellationToken = cancellationToken;
@@ -384,8 +392,23 @@ public static class AppendStorageJsonLinesExtensions
 
 				#endregion
 
-				_currentLine = await _streamReader.ReadLineAsync();
-				return _currentLine != null;
+				while (true)
+				{
+					_currentLine = await _streamReader.ReadLineAsync();
+					if (_currentLine == null)
+					{
+						return false;
+					}
+					if (_fromStr == null)
+					{
+						return true;
+					}
+					var keyStr = _currentLine.Split(new[] { '§' }, 2)[0];
+					if (keyStr.StartsWith(_fromStr, StringComparison.Ordinal))
+					{
+						return true;
+					}
+				}
 			}
 		}
 

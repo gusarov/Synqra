@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
+using Synqra.AppendStorage.BlobStorage;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.BlobStorage.File;
 using Synqra.BinarySerializer;
@@ -69,6 +70,9 @@ public class TestsAppendStorageFile : AppendStorageTests
 		HostBuilder.AddBlobStorageFile<Event>(x => x.EventId);
 		HostBuilder.AddBlobStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
 		HostBuilder.AddBlobStorageFile<Item>(x => (x.StreamId, x.ObjectId));
+		HostBuilder.AddAppendStorageBlob<Event, Guid>(nameof(Event), x => x.EventId);
+		HostBuilder.AddAppendStorageBlob<StorableModel, string>(nameof(StorableModel), x => x.Key);
+		HostBuilder.AddAppendStorageBlob<Item, (Guid, Guid)>(nameof(Item), x => (x.StreamId, x.ObjectId));
 		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
 		Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
 	}
