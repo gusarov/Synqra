@@ -71,30 +71,71 @@ internal class BasicModelSyncronizationTests : BaseTest
 	[Test]
 	public async Task Should_20_synchronize_simple_models()
 	{
-		while (true)
-		{
-			if (_nodeA.StoreContext.IsOnline() && _nodeB.StoreContext.IsOnline())
-			{
-				break;
-			}
-			await Task.Delay(100);
-		}
+		await WaitForOnlineAsync();
 		EmergencyLog.Default.Message("°0 <==========> Should_20_synchronize_simple_models");
 		await Should_10_have_node_with_model(); // Works on Node A
 		var collection = _nodeB.StoreContext.GetCollection<SampleTaskModel>(); //Same happened with Node B!!
 		var sw = Stopwatch.StartNew();
-		while (collection.Count < 1 && (sw.ElapsedMilliseconds < 2_000 || Debugger.IsAttached))
+		while (collection.Count < 1 && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}
 		await Assert.That(collection).HasCount(1);
 		var task = collection.First();
 		sw = Stopwatch.StartNew();
-		while (task.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < 2_000 || Debugger.IsAttached))
+		while (task.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
 		{
 			await Task.Delay(100); // wait until all commands are processed
 		}
 		await Assert.That(task.Subject).IsEqualTo("Task 1 - updated");
 		EmergencyLog.Default.Message("°0 </==========> Should_20_synchronize_simple_models");
+	}
+
+	[Test]
+	public async Task Should_30_synchronize_update_made_after_initial_sync()
+	{
+		await WaitForOnlineAsync();
+		var collectionA = _nodeA.StoreContext.GetCollection<SampleTaskModel>();
+		var taskA = new SampleTaskModel { Subject = "Task 1" };
+		collectionA.Add(taskA);
+
+		// Let the create propagate to node B before updating, so node A's replication
+		// sender provably drained its event log to the end in between. This pins the
+		// regression where an exhausted log enumerator never resumed, silently dropping
+		// every event appended after the drain.
+		var collectionB = _nodeB.StoreContext.GetCollection<SampleTaskModel>();
+		var sw = Stopwatch.StartNew();
+		while (collectionB.Count < 1 && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
+		{
+			await Task.Delay(100);
+		}
+		await Assert.That(collectionB).HasCount(1);
+
+		taskA.Subject = "Task 1 - updated";
+
+		var taskB = collectionB.First();
+		sw = Stopwatch.StartNew();
+		while (taskB.Subject != "Task 1 - updated" && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
+		{
+			await Task.Delay(100);
+		}
+		await Assert.That(taskB.Subject).IsEqualTo("Task 1 - updated");
+	}
+
+	// Generous because CI runs these targets in parallel inside docker; the polling
+	// loops above exit as soon as the condition is met, so the happy path never waits.
+	const int PropagationTimeoutMs = 10_000;
+
+	async Task WaitForOnlineAsync()
+	{
+		var sw = Stopwatch.StartNew();
+		while (!(_nodeA.StoreContext.IsOnline() && _nodeB.StoreContext.IsOnline()))
+		{
+			if (sw.ElapsedMilliseconds > 30_000 && !Debugger.IsAttached)
+			{
+				throw new TimeoutException("Nodes did not come online within 30s");
+			}
+			await Task.Delay(100);
+		}
 	}
 }

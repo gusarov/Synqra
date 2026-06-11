@@ -124,7 +124,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				wsConnection = new ClientWebSocket();
 				await wsConnection.ConnectAsync(new Uri($"ws://localhost:{_config.Port}/api/synqra/ws"), _cts.Token);
 				_networkSerializationService.Reinitialize();
-				IsOnline = true;
+				// Not online yet — that is declared only after the HELLO handshake completes,
+				// when the master is guaranteed to have registered this node for broadcasts.
 				break;
 			}
 			catch (Exception ex) when (i < 10)
@@ -153,6 +154,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			{
 				throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
 			}
+			IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
 			#endregion
 			while (!_cts.IsCancellationRequested)
 			{

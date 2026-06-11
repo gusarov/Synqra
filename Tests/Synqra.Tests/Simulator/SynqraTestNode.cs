@@ -319,11 +319,23 @@ internal class SynqraTestNode
 				}
 				#endregion
 				#region HELLO - to client
+				// Register for broadcasts BEFORE answering HELLO, and do both under the
+				// broadcast semaphore: the moment a client observes the HELLO reply (and
+				// reports IsOnline), every subsequent broadcast is guaranteed to reach it,
+				// and the reply cannot interleave with a concurrent broadcast SendAsync on
+				// the same socket.
 				var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
-				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+				await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
+				try
+				{
+					_sockets.Add(socket);
+					await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+				}
+				finally
+				{
+					_semaphoreSlim.Release();
+				}
 				#endregion
-
-				_sockets.Add(socket);
 
 				try
 				{
