@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
-using Synqra.AppendStorage.BlobStorage;
+using Synqra.AppendStorage.BlobStorage.File;
 using Synqra.AppendStorage.InMemory;
 using Synqra.AppendStorage.MongoDb;
 using Synqra.BinarySerializer;
@@ -166,8 +166,7 @@ public abstract class Cobra_SbxFileEventStorageContract : Cobra_DurableSynqraSto
 	{
 		_folder ??= CreateTestFolder(); // stable across Restart() so replay reads the same files
 		Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
-		hostBuilder.AddBlobStorageFile<Event>(x => x.EventId);
-		hostBuilder.AddAppendStorageBlob<Event, Guid>(nameof(Event), x => x.EventId);
+		hostBuilder.AddAppendStorageBlobFile<Event>(x => x.EventId);
 	}
 }
 

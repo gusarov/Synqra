@@ -266,6 +266,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	public void Trigger(Command command, IReadOnlyList<Event> events)
 	{
-		_autoResetEvent.Release();
+		try
+		{
+			_autoResetEvent.Release();
+		}
+		catch (SemaphoreFullException)
+		{
+			// already signaled - concurrent triggers coalesce into one loop iteration
+		}
 	}
 }
