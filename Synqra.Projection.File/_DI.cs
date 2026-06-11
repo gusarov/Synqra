@@ -818,8 +818,8 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
-				ActualStreamId = ev.StreamId,
-				CollectionId = ev.CollectionId,
+				StreamId = ev.StreamId,
+				// CollectionId = ev.CollectionId,
 				Blob = ev.DataObject,
 			});
 		}
@@ -852,7 +852,7 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
-				StreamId = ev.CollectionId,
+				StreamId = ev.StreamId,
 				Blob = model,
 			});
 		}
@@ -872,7 +872,8 @@ public static class FileSynqraExtensions
 		{
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
-				StreamId = _objectStore.TypeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
+				// StreamId = _objectStore.TypeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
+				StreamId = ev.StreamId,
 				ObjectId = ev.CommandId,
 				Blob = ev.Data,
 			});
@@ -900,14 +901,15 @@ public static class FileSynqraExtensions
 [Schema(3000.0, "1 ObjectId Guid Blob object")]
 [Schema(2026.213, "1 ObjectId Guid Blob object")]
 [Schema(3000.001, "1 ObjectId Guid CollectionId Guid Blob object")]
-internal sealed partial class Item
+[Schema(3000.002, "1 ObjectId Guid Blob object")]
+public sealed partial class Item
 {
 	public partial Guid ObjectId { get; set; }
 
 	[JsonIgnore]
-	public required Guid ActualStreamId { get; set; }
+	public Guid StreamId { get; set; }
 
-	public required Guid CollectionId { get; init; }
+	// public Guid CollectionId { get; set; }
 
 	public partial object Blob { get; set; }
 }

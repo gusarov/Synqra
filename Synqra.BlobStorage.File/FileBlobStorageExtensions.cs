@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Synqra.AppendStorage.BlobStorage;
+// using Synqra.AppendStorage.BlobStorage;
 using Synqra.BlobStorage;
 
 namespace Synqra.BlobStorage.File;
@@ -48,7 +48,7 @@ public static class FileBlobStorageExtensions
 	{
 		storeName ??= typeof(T).Name;
 		hostBuilder.AddBlobStorageFile(storeName, getKeyHex, getHexKey);
-		hostBuilder.AddBlobAppendStorage(storeName, getKey);
+		// hostBuilder.AddBlobAppendStorage(storeName, getKey);
 		return hostBuilder;
 	}
 
