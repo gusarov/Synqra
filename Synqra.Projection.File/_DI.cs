@@ -536,11 +536,11 @@ public static class FileSynqraExtensions
 
 		public class Enumerator : IEnumerator<T>
 		{
-			private readonly FileObjectCollection _fileObjectCollection;
+			private readonly FileObjectCollection<T> _fileObjectCollection;
 			private IEnumerable<Item> _enumerable;
 			private IEnumerator<Item> _enumerator;
 
-			public Enumerator(FileObjectCollection fileObjectCollection)
+			public Enumerator(FileObjectCollection<T> fileObjectCollection)
 			{
 				_fileObjectCollection = fileObjectCollection;
 				_enumerable = _fileObjectCollection._store.AppendStores.ItemAppendStorage.GetAllAsync((fileObjectCollection.CollectionId, default)).ToBlockingEnumerable();
@@ -818,7 +818,8 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
-				StreamId = ev.CollectionId,
+				ActualStreamId = ev.StreamId,
+				CollectionId = ev.CollectionId,
 				Blob = ev.DataObject,
 			});
 		}
@@ -898,12 +899,15 @@ public static class FileSynqraExtensions
 [Schema(1, "0")]
 [Schema(3000.0, "1 ObjectId Guid Blob object")]
 [Schema(2026.213, "1 ObjectId Guid Blob object")]
-[Schema(2026.213, "1 ObjectId Guid Blob object")]
-public sealed partial class Item
+[Schema(3000.001, "1 ObjectId Guid CollectionId Guid Blob object")]
+internal sealed partial class Item
 {
 	public partial Guid ObjectId { get; set; }
 
 	[JsonIgnore]
-	public Guid StreamId { get; set; }
+	public required Guid ActualStreamId { get; set; }
+
+	public required Guid CollectionId { get; init; }
+
 	public partial object Blob { get; set; }
 }
