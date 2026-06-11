@@ -828,7 +828,7 @@ public class TestsStateManageementFile : TestsStateManagement
 		{
 			if (e.StreamId == default)
 			{
-				throw new Exception("Unknown collection id");
+				throw new Exception("Unknown StreamId id");
 			}
 			return (e.StreamId, e.ObjectId);
 		});
