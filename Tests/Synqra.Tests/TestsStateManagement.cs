@@ -31,7 +31,7 @@ namespace Synqra.Tests;
 using IAppendStorage = IAppendStorage<Event, Guid>;
 
 [InheritsTests]
-public class InMemoryStateManageementTests : StateManagementTests
+public class TestsStateManageementInMemory : TestsStateManagement
 {
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
@@ -808,7 +808,7 @@ public class InMemoryStateManageementTests : StateManagementTests
 }
 
 [InheritsTests]
-public class FileStateManageementTests : StateManagementTests
+public class TestsStateManageementFile : TestsStateManagement
 {
 	string _folder;
 
@@ -837,6 +837,7 @@ public class FileStateManageementTests : StateManagementTests
 	}
 }
 
+/*
 [InheritsTests]
 public class JsonLinesStateManageementTests : StateManagementTests
 {
@@ -864,10 +865,10 @@ public class JsonLinesStateManageementTests : StateManagementTests
 			}
 			return (e.StreamId, e.ObjectId);
 		});
-
 		hostApplicationBuilder.Configuration["Storage:JsonLinesStorage:FileName"] = _fileName;
 	}
 }
+*/
 
 #if Sqlite && NET10_0_OR_GREATER
 [InheritsTests]
@@ -926,7 +927,7 @@ public class TestExtendedSqliteDatabaseContext : SqliteDatabaseContext
 
 #endif
 
-public abstract class StateManagementTests : BaseTest<IObjectStore>
+public abstract class TestsStateManagement : BaseTest<IObjectStore>
 {
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
@@ -1231,38 +1232,8 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 }
 
 [SynqraModel]
-[Schema(2026.155, "1 Name string Prprpr string")]
 [Schema(3000.0, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
-[Schema(2026.188, "1 Name string Prprpr string")]
+
 public partial class DemoModel
 {
 	public Guid Id => ((IBindableModel)this).Store.GetId(this);

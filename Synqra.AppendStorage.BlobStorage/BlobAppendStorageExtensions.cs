@@ -9,15 +9,15 @@ namespace Synqra.AppendStorage.BlobStorage;
 
 public static class BlobAppendStorageExtensions
 {
-	public static IHostApplicationBuilder AddBlobAppendStorage<T, TKey>(this IHostApplicationBuilder hostBuilder, string storeName, Func<T, TKey> getKey)
+	public static IHostApplicationBuilder AddAppendStorageBlob<T, TKey>(this IHostApplicationBuilder hostBuilder, string storeName, Func<T, TKey> getKey)
 		where T : class
 		where TKey : notnull, IComparable<TKey>
 	{
-		hostBuilder.Services.AddBlobAppendStorage(storeName, getKey);
+		hostBuilder.Services.AddAppendStorageBlob(storeName, getKey);
 		return hostBuilder;
 	}
 
-	public static IServiceCollection AddBlobAppendStorage<T, TKey>(this IServiceCollection services, string storeName, Func<T, TKey> getKey)
+	public static IServiceCollection AddAppendStorageBlob<T, TKey>(this IServiceCollection services, string storeName, Func<T, TKey> getKey)
 		where T : class
 		where TKey : notnull, IComparable<TKey>
 	{

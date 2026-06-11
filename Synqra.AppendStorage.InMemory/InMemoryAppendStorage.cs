@@ -7,15 +7,15 @@ namespace Synqra.AppendStorage.InMemory;
 
 public static class InMemoryAppendStorageExtensions
 {
-	public static IHostApplicationBuilder AddInMemoryAppendStorage<T, TKey>(this IHostApplicationBuilder hostBuilder, Func<T, TKey> getKey)
+	public static IHostApplicationBuilder AddAppendStorageInMemory<T, TKey>(this IHostApplicationBuilder hostBuilder, Func<T, TKey> getKey)
 		where T : class
 		where TKey : notnull, IComparable<TKey>
 	{
-		hostBuilder.Services.AddInMemoryAppendStorage(getKey);
+		hostBuilder.Services.AddAppendStorageInMemory(getKey);
 		return hostBuilder;
 	}
 
-	public static IServiceCollection AddInMemoryAppendStorage<T, TKey>(this IServiceCollection services, Func<T, TKey> getKey)
+	public static IServiceCollection AddAppendStorageInMemory<T, TKey>(this IServiceCollection services, Func<T, TKey> getKey)
 		where T : class
 		where TKey : notnull, IComparable<TKey>
 	{
