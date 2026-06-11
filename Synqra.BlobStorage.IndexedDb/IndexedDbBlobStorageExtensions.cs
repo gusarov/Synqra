@@ -38,7 +38,7 @@ public static class IndexedDbBlobStorageExtensions
 	{
 		storeName ??= typeof(T).Name;
 		services.AddBlobStorageIndexedDb(storeName, getKeyText, getKeyFromText, configuration);
-		services.AddBlobAppendStorage(storeName, keyAccessor);
+		services.AddAppendStorageBlob(storeName, keyAccessor);
 		return services;
 	}
 

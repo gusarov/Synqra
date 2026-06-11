@@ -23,7 +23,7 @@ public static class SqliteBlobStorageExtensions
 	{
 		storeName ??= typeof(T).Name;
 		hostBuilder.AddBlobStorageSqlite<TKey>(storeName);
-		hostBuilder.AddBlobAppendStorage(storeName, getKey);
+		hostBuilder.AddAppendStorageBlob(storeName, getKey);
 		return hostBuilder;
 	}
 

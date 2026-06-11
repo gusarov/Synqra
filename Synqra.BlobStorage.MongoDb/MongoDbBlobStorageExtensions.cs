@@ -25,7 +25,7 @@ public static class MongoDbBlobStorageExtensions
 	{
 		storeName ??= typeof(T).Name;
 		hostBuilder.AddBlobStorageMongoDb<TKey>(storeName);
-		hostBuilder.AddBlobAppendStorage(storeName, getKey);
+		hostBuilder.AddAppendStorageBlob(storeName, getKey);
 		return hostBuilder;
 	}
 

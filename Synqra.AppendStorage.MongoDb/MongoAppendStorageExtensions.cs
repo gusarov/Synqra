@@ -51,7 +51,7 @@ public static class MongoAppendStorageExtensions
 			o.ConnectionString = connectionString;
 			o.CollectionName = collectionName ?? MongoAppendStorageOptions.DefaultCollectionName;
 		});
-		return services.AddMongoAppendStorageCore<T, TKey>();
+		return services.AddAppendStorageMongoDbCore<T, TKey>();
 	}
 
 	/// <summary>
@@ -59,7 +59,7 @@ public static class MongoAppendStorageExtensions
 	/// applicable) and registers the single <see cref="IAppendStorage{T, TKey}"/> factory, which reads
 	/// everything it needs from <see cref="MongoAppendStorageOptions"/>.
 	/// </summary>
-	private static IServiceCollection AddMongoAppendStorageCore<T, TKey>(this IServiceCollection services)
+	private static IServiceCollection AddAppendStorageMongoDbCore<T, TKey>(this IServiceCollection services)
 		where T : class
 		where TKey : notnull
 	{
@@ -107,7 +107,7 @@ public static class MongoAppendStorageExtensions
 		where TKey : notnull
 	{
 		EnsureOptionsBound(services, configuration, properties);
-		return services.AddMongoAppendStorageCore<T, TKey>();
+		return services.AddAppendStorageMongoDbCore<T, TKey>();
 	}
 
 	public static IServiceCollection AddAppendStorageMongoDb<T>(

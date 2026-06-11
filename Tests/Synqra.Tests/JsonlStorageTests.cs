@@ -24,7 +24,7 @@ public class TestItem //: IIdentifiable<int>
 }
 
 [InheritsTests]
-public class JsonAppendStorageTests : AppendStorageTests
+public class TestsAppendStorageJson : AppendStorageTests
 {
 	string _file;
 
@@ -52,7 +52,7 @@ public class JsonAppendStorageTests : AppendStorageTests
 }
 
 [InheritsTests]
-public class FileAppendStorageTests : AppendStorageTests
+public class TestsAppendStorageFile : AppendStorageTests
 {
 	string _folder;
 
