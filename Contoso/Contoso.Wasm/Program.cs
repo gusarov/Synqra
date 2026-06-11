@@ -4,14 +4,14 @@ using Contoso.Projection.InMemory;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Synqra;
-using Synqra.BlobStorage.IndexedDb;
+using Synqra.AppendStorage.BlobStorage.IndexedDb;
 using Synqra.BinarySerializer;
 using System.Text.Json.Serialization;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
 // Event Storage
-builder.Services.AddBlobStorageIndexedDb<Event>(x => x.EventId, builder.Configuration);
+builder.Services.AddAppendStorageBlobIndexedDb<Event>(x => x.EventId, builder.Configuration);
 // builder.Services.AddSingleton<Func<Event, Guid>>(x => x.EventId);
 builder.Services.AddSbxSerializer(ser =>
 {

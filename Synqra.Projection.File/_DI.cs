@@ -819,7 +819,7 @@ public static class FileSynqraExtensions
 			{
 				ObjectId = ev.TargetId,
 				StreamId = ev.StreamId,
-				// CollectionId = ev.CollectionId,
+				CollectionId = ev.CollectionId,
 				Blob = ev.DataObject,
 			});
 		}
@@ -853,6 +853,7 @@ public static class FileSynqraExtensions
 			{
 				ObjectId = ev.TargetId,
 				StreamId = ev.StreamId,
+				CollectionId = ev.CollectionId,
 				Blob = model,
 			});
 		}
@@ -872,8 +873,8 @@ public static class FileSynqraExtensions
 		{
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
-				// StreamId = _objectStore.TypeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
 				StreamId = ev.StreamId,
+				CollectionId = _typeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
 				ObjectId = ev.CommandId,
 				Blob = ev.Data,
 			});
@@ -909,7 +910,8 @@ public sealed partial class Item
 	[JsonIgnore]
 	public Guid StreamId { get; set; }
 
-	// public Guid CollectionId { get; set; }
+	[JsonIgnore]
+	public Guid CollectionId { get; set; } // first component of the storage key (collection lookups are by (CollectionId, ObjectId)), not persisted in the payload
 
 	public partial object Blob { get; set; }
 }

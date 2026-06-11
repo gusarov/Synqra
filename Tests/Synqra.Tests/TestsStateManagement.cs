@@ -21,6 +21,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Synqra.BinarySerializer;
 using Synqra.Projection.File;
+using Synqra.AppendStorage.BlobStorage.File;
 using Synqra.BlobStorage.File;
 using Synqra.Projection;
 using Synqra.AppendStorage.JsonLines;
@@ -822,15 +823,16 @@ public class TestsStateManageementFile : TestsStateManagement
 	{
 		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.AddFileSynqraStore();
-		hostApplicationBuilder.AddBlobStorageFile<Event>(e => e.EventId);
-		hostApplicationBuilder.AddBlobStorageFile<Command>(e => e.CommandId);
-		hostApplicationBuilder.AddBlobStorageFile<Item>(e =>
+		// IAppendStorage<Event, Guid> stays FakeAppendStorage from base.Register (Reopen carries it across restarts)
+		hostApplicationBuilder.AddAppendStorageBlobFile<Event>(e => e.EventId);
+		hostApplicationBuilder.AddAppendStorageBlobFile<Command>(e => e.CommandId);
+		hostApplicationBuilder.AddAppendStorageBlobFile<Item>(e =>
 		{
-			if (e.StreamId == default)
+			if (e.CollectionId == default)
 			{
-				throw new Exception("Unknown StreamId id");
+				throw new Exception("Unknown CollectionId");
 			}
-			return (e.StreamId, e.ObjectId);
+			return (e.CollectionId, e.ObjectId);
 		});
 
 		hostApplicationBuilder.Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
@@ -859,11 +861,11 @@ public class JsonLinesStateManageementTests : StateManagementTests
 		hostApplicationBuilder.AddAppendStorageJsonLines<Command>("", e => e.CommandId);
 		hostApplicationBuilder.AddAppendStorageJsonLines<Item>("", e =>
 		{
-			if (e.StreamId == default)
+			if (e.CollectionId == default)
 			{
 				throw new Exception("Unknown collection id");
 			}
-			return (e.StreamId, e.ObjectId);
+			return (e.CollectionId, e.ObjectId);
 		});
 		hostApplicationBuilder.Configuration["Storage:JsonLinesStorage:FileName"] = _fileName;
 	}

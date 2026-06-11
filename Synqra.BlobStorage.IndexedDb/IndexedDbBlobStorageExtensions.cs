@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using System.Runtime.InteropServices;
-using Synqra.AppendStorage.BlobStorage;
 using Synqra.BlobStorage;
 
 namespace Synqra.BlobStorage.IndexedDb;
@@ -20,27 +19,7 @@ public class IndexedDbBlobStorageOptions
 
 public static class IndexedDbBlobStorageExtensions
 {
-	public static IServiceCollection AddBlobStorageIndexedDb<T>(this IServiceCollection services, Func<T, Guid> keyAccessor, IConfiguration configuration, string? storeName = null)
-		where T : class
-	{
-		return services.AddBlobStorageIndexedDb(keyAccessor, x => x.ToString("N"), Guid.Parse, configuration, storeName);
-	}
-
-	public static IServiceCollection AddBlobStorageIndexedDb<T, TKey>(
-		this IServiceCollection services,
-		Func<T, TKey> keyAccessor,
-		Func<TKey, string> getKeyText,
-		Func<string, TKey> getKeyFromText,
-		IConfiguration configuration,
-		string? storeName = null)
-		where T : class
-		where TKey : notnull, IComparable<TKey>
-	{
-		storeName ??= typeof(T).Name;
-		services.AddBlobStorageIndexedDb(storeName, getKeyText, getKeyFromText, configuration);
-		services.AddAppendStorageBlob(storeName, keyAccessor);
-		return services;
-	}
+	// IAppendStorage adapter on top of this blob storage is registered by Synqra.AppendStorage.BlobStorage.IndexedDb (AddAppendStorageBlobIndexedDb)
 
 	public static IServiceCollection AddBlobStorageIndexedDb<TKey>(
 		this IServiceCollection services,

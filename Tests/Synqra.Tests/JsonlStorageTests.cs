@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
-using Synqra.AppendStorage.BlobStorage;
+using Synqra.AppendStorage.BlobStorage.File;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.BlobStorage.File;
 using Synqra.BinarySerializer;
@@ -42,7 +42,7 @@ public class TestsAppendStorageJson : AppendStorageTests
 		HostBuilder.AddAppendStorageJsonLines<TestItem, int>("Id", x => x.Id, x => x.ToString(), x => int.Parse(x));
 		HostBuilder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
 		HostBuilder.AddAppendStorageJsonLines<StorableModel, string>("Key", x => x.Key, x => x, x => x);
-		HostBuilder.AddAppendStorageJsonLines<Item>("", x => (x.StreamId, x.ObjectId));
+		HostBuilder.AddAppendStorageJsonLines<Item>("", x => (x.CollectionId, x.ObjectId));
 
 		// ServiceCollection.AddSingleton(SampleJsonSerializerContext.Default);
 		ServiceCollection.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
@@ -67,12 +67,9 @@ public class TestsAppendStorageFile : AppendStorageTests
 	{
 		base.Register(hostApplicationBuilder);
 		// HostBuilder.AddAppendStorageFile<TestItem, int>(x => x.Id);
-		HostBuilder.AddBlobStorageFile<Event>(x => x.EventId);
-		HostBuilder.AddBlobStorageFile<StorableModel, string>(x => x.Key, x => x, x => x);
-		HostBuilder.AddBlobStorageFile<Item>(x => (x.StreamId, x.ObjectId));
-		HostBuilder.AddAppendStorageBlob<Event, Guid>(nameof(Event), x => x.EventId);
-		HostBuilder.AddAppendStorageBlob<StorableModel, string>(nameof(StorableModel), x => x.Key);
-		HostBuilder.AddAppendStorageBlob<Item, (Guid, Guid)>(nameof(Item), x => (x.StreamId, x.ObjectId));
+		HostBuilder.AddAppendStorageBlobFile<Event>(x => x.EventId);
+		HostBuilder.AddAppendStorageBlobFile<StorableModel, string>(x => x.Key, x => x, x => x);
+		HostBuilder.AddAppendStorageBlobFile<Item>(x => (x.CollectionId, x.ObjectId));
 		// HostBuilder.AddAppendStorageFile<StorableModel, (Guid, Guid)>(x => (, x.Key), x => x, x => x);
 		Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
 	}
@@ -346,7 +343,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item0 = new Item
 		{
-			StreamId = GuidExtensions.CreateVersion7(), // different collection
+			CollectionId = GuidExtensions.CreateVersion7(), // different collection
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -358,7 +355,7 @@ public abstract class AppendStorageTests : BaseTest
 		var collectionId1 = GuidExtensions.CreateVersion7();
 		var item1 = new Item
 		{
-			StreamId = collectionId1,
+			CollectionId = collectionId1,
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -369,7 +366,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item2 = new Item
 		{
-			StreamId = collectionId1,
+			CollectionId = collectionId1,
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -380,7 +377,7 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item3 = new Item
 		{
-			StreamId = GuidExtensions.CreateVersion7(), // different collection
+			CollectionId = GuidExtensions.CreateVersion7(), // different collection
 			ObjectId = GuidExtensions.CreateVersion7(),
 			Blob = new MyPocoTask
 			{
@@ -406,7 +403,7 @@ public abstract class AppendStorageTests : BaseTest
 		var hitRange = storage.GetAllAsync((collectionId1, item2.ObjectId)).ToBlockingEnumerable().ToArray();
 		foreach (var item in hitRange)
 		{
-			EmergencyLog.Default.LogDebug($"ByExactRange: {item.StreamId} {item.ObjectId} {item.Blob}");
+			EmergencyLog.Default.LogDebug($"ByExactRange: {item.CollectionId} {item.ObjectId} {item.Blob}");
 		}
 		await Assert.That(hitRange).HasCount(1);
 		await Assert.That(((MyPocoTask)hitRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
