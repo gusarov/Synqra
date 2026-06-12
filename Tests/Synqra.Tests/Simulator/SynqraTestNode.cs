@@ -117,6 +117,13 @@ internal class SynqraTestNode
 
 	public ushort Port { get; set; }
 
+	/// <summary>
+	/// Completes when the node's web host is listening. For the master node this is also
+	/// the moment <see cref="Port"/> carries the real OS-assigned port — await it before
+	/// constructing client nodes that target the master.
+	/// </summary>
+	public Task Started { get; private set; } = Task.CompletedTask;
+
 	SemaphoreSlim _semaphoreSlim = new(1, 1);
 	long _masterSeq = 0;
 
@@ -172,11 +179,13 @@ internal class SynqraTestNode
 			EnvironmentName = Environments.Development,
 			ContentRootPath = synqraTestsCurrentPath,
 		});
-		var port = Port = GetNextAvailablePort();
 		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 		{
 			["Storage:JsonLinesStorage:FileName"] = Path.Combine(synqraTestsCurrentPath, "[TypeName].jsonl"),
-			["URLS"] = "http://*:" + port,
+			// Port 0: Kestrel asks the OS for a free port at bind time. Reserving a port
+			// up front (listen, read, release, rebind) raced with parallel tests — the
+			// released port could be taken again before Kestrel bound it.
+			["URLS"] = "http://127.0.0.1:0",
 		});
 
 		builder.Services.AddInMemorySynqraStore();
@@ -441,9 +450,22 @@ internal class SynqraTestNode
 			});
 		}
 
-		_ = Host.StartAsync();
+		Started = StartHostAsync(app, masterHost);
 #endif
 	}
+
+#if !NETFRAMEWORK
+	async Task StartHostAsync(Microsoft.AspNetCore.Builder.WebApplication app, bool masterHost)
+	{
+		await app.StartAsync();
+		if (masterHost)
+		{
+			// Kestrel bound to 127.0.0.1:0 — publish the OS-assigned port so clients can
+			// target it. Client nodes keep the master port assigned by the test instead.
+			Port = checked((ushort)new Uri(app.Urls.First()).Port);
+		}
+	}
+#endif
 
 	static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
 	{
