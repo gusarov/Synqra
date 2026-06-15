@@ -142,6 +142,58 @@ public sealed partial class SomeModel
 		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
 	}
 
+	[Test]
+	public void Should_generate_code_when_Schema_attribute_is_absent()
+	{
+		// Regression: the drift detector used to parse the quotes of the class's last
+		// attribute unconditionally. With no [Schema("...")] present, there are no quotes,
+		// so Substring(0, -1) threw and the generator emitted a broken .Errors.Generated.cs
+		// (CS8802/CS9248). The schema must be seedable from scratch.
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+public partial class SampleModel
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var result = RunGenerator(source);
+
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("partial class SampleModel")), Is.True,
+			"Generator must produce the model partial even without a pre-populated [Schema].");
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("ERROR DURING CODE GENERATION")), Is.False,
+			"Generator must not emit the error-diagnostic file when [Schema] is absent.");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Should_generate_code_when_last_attribute_has_no_quoted_string()
+	{
+		// Regression: a non-Schema attribute as the LAST attribute (no quoted argument)
+		// must not trip the textual quote-parsing in the drift detector.
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Component(IsUnique = true)]
+public partial class SampleComponent : IComponent
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var result = RunGenerator(source);
+
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("partial class SampleComponent")), Is.True);
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("ERROR DURING CODE GENERATION")), Is.False,
+			"Generator must not emit the error-diagnostic file when the last attribute has no quotes.");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
 	private static (string[] GeneratedSources, Diagnostic[] Errors) RunGenerator(string source)
 	{
 		var generator = new ModelBindingGenerator();

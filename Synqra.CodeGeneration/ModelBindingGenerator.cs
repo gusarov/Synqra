@@ -640,7 +640,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var lastAttribute = originalSourceContent.Substring(c, (d - c));
 				var i = lastAttribute.IndexOf('"');
 				var e = lastAttribute.LastIndexOf('"');
-				var lastAttributeSchema = lastAttribute.Substring(i + 1, e - i - 1);
+				// The last attribute is only a [Schema("...")] fallback source when it actually
+				// carries a quoted string. When it doesn't (e.g. [SynqraModel] alone, or
+				// [Component(IsUnique = true)] with no quotes), there is no textual schema to
+				// extract — treat it as empty rather than computing Substring(0, -1), which would
+				// throw and make the generator emit a broken .Errors.Generated.cs. An empty
+				// fallback lets the drift detector below seed a fresh [Schema] attribute.
+				var lastAttributeSchema = (i >= 0 && e > i) ? lastAttribute.Substring(i + 1, e - i - 1) : string.Empty;
 				// DebugLog($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
 
 				var lastSchemaEntry = schemas.Length == 0
