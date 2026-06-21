@@ -1,4 +1,4 @@
-// Copy this to a model you need to trace:
+﻿// Copy this to a model you need to trace:
 // #define SYNQRA_CODEGEN_TRACE
 
 using Microsoft.CodeAnalysis;
@@ -9,22 +9,13 @@ using Microsoft.Extensions.Logging;
 using Synqra;
 using System;
 using System.Collections.Immutable;
-using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
-using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
-using System.Security.Claims;
 using System.Text;
-using System.Transactions;
 
-using BuildPropsProviderT = (
-	  string Tfm
-	, string SynqraBuildBox
-	);
-// using TheSource = (Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax clazz, Microsoft.CodeAnalysis.SemanticModel sem, string? data);
+using static Synqra.CodeGeneration.CodeGenHelpers;
+
 using ClassesProviderT = (
 	  string? errorMessage
 	, System.Exception? exception
@@ -32,25 +23,17 @@ using ClassesProviderT = (
 	, Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax Clazz
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Data
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ibm
-	, Microsoft.CodeAnalysis.INamedTypeSymbol Ssa
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ipc
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ipcg
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pceh
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pcgeh
 	);
 
-/*
-using AttributesProviderT = (
-	  Microsoft.CodeAnalysis.INamedTypeSymbol Type
-	, Microsoft.CodeAnalysis.AttributeData Attr
-	);
-*/
-
 namespace Synqra.CodeGeneration;
 
 using TheCombinedSource = (
-		ClassesProviderT ClassData // 1
-	, BuildPropsProviderT BuildProps // 2
+		ClassesProviderT ClassData
+	, string Tfm
 	);
 
 [Generator(LanguageNames.CSharp)]
@@ -85,14 +68,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
-		// AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve;
-		// AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
 		InitializeCore(context);
 	}
 
 	private System.Reflection.Assembly? CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
 	{
-		// SynqraEmergencyLog.Default.LogMessage($"[Asm Resolve] {args.Name}");
 		return null;
 	}
 
@@ -101,50 +81,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	{
 		try
 		{
-			/*
-			const string SchemaAttributeFullName = "Synqra.SchemaAttribute";
-
-			var attributesProvider = context.SyntaxProvider.ForAttributeWithMetadataName<AttributesProviderT>(
-				fullyQualifiedMetadataName: SchemaAttributeFullName,
-				predicate: static (node, _) => node is TypeDeclarationSyntax, // class/struct/record
-				transform: static (ctx, _) =>
-				{
-					// The target symbol (class/record/struct)
-					var type = (INamedTypeSymbol)ctx.TargetSymbol;
-
-					// The specific attribute instance that matched
-					var attr = ctx.Attributes[0]; // there can be multiple matches; handle as needed
-
-					return (Type: type, Attr: attr);
-				});
-			*/
-
-			/*
-			var schemaAttrSymbol =
-				context.CompilationProvider.Select(static (c, _) =>
-					c.GetTypeByMetadataName(SchemaAttr));
-			*/
-
 			var buildPropsProvider = context.AnalyzerConfigOptionsProvider.Select((provider, _) =>
 			{
 				var g = provider.GlobalOptions;
 				string Get(string name) => g.TryGetValue(name, out var v) ? v : string.Empty;
-
-				// Commonly useful properties:
-				var tfm = Get("build_property.TargetFramework");           // e.g. "net8.0", "net8.0-windows10.0.19041.0"
-				var SynqraBuildBox = Get("build_property.SynqraBuildBox");           // e.g. "net8.0", "net8.0-windows10.0.19041.0"
-				/*
-				var tfms = Get("build_property.TargetFrameworks");          // multi-target list (design-time only; normal builds run per TFM)
-				var tpi = Get("build_property.TargetPlatformIdentifier");  // e.g. "windows" (present when using OS-specific TFMs)
-				var tpv = Get("build_property.TargetPlatformVersion");     // e.g. "10.0.19041.0"
-				var rid = Get("build_property.RuntimeIdentifier");         // e.g. "win-x64"
-				var rids = Get("build_property.RuntimeIdentifiers");        // e.g. "win-x64;linux-x64"
-				var conf = Get("build_property.Configuration");             // Debug/Release
-				var osver = Get("build_property.TargetOSVersion");           // newer SDKs
-				var osid = Get("build_property.TargetOS");                  // newer SDKs
-				return new BuildProps(tfm, tfms, tpi, tpv, rid, rids, conf, osid, osver);
-				*/
-				return (tfm, SynqraBuildBox);
+				return Get("build_property.TargetFramework");
 			});
 
 			var missingReferences = context.CompilationProvider.Select((comp, _) =>
@@ -152,8 +93,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				var missing = new List<string>();
 				if (comp.GetTypeByMetadataName("Synqra.IBindableModel") is null)
 					missing.Add("Synqra.IBindableModel");
-				if (comp.GetTypeByMetadataName("Synqra.SchemaAttribute") is null)
-					missing.Add("Synqra.SchemaAttribute");
 				return missing;
 			});
 
@@ -174,14 +113,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var classesProvider = context.SyntaxProvider.CreateSyntaxProvider<ClassesProviderT>(
 				predicate: static (SyntaxNode node, CancellationToken cancelToken) =>
 				{
-					//the predicate should be super lightweight to filter out items that are not of interest quickly
 					try
 					{
 						var exp = node is ClassDeclarationSyntax classDeclaration
-							&& (classDeclaration.AttributeLists.Any(al => al.Attributes.Any(a => a.Name.ToString() == "SynqraModel"))) // TestExtendedSqliteDatabaseContextModel
+							&& (classDeclaration.AttributeLists.Any(al => al.Attributes.Any(a => a.Name.ToString() == "SynqraModel")))
 							&& classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword
 							);
-						// GeneratorLogging.LogMessage($"[+] Checking {node.GetType().Name} {node}: {exp}");
 						return exp;
 					}
 					catch (Exception ex)
@@ -196,46 +133,35 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						cancelToken.ThrowIfCancellationRequested();
 
-						//the transform is called only when the predicate returns true, so it can do a bit more heavyweight work but should mainly be about getting the data we want to work with later
 						var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 						var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, cancelToken) ?? throw new Exception("symbol");
 
 						var comp = ctx.SemanticModel.Compilation;
 
 						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
-						var ssa = comp.GetTypeByMetadataName("Synqra.SchemaAttribute");
-						if (ibm is null || ssa is null)
+						if (ibm is null)
 						{
-							return (null, null, default!, default!, default!, default!, default!, default!, default!, default!);
+							return (null, null, default!, default!, default!, default!, default!, default!, default!);
 						}
 						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanged");
 						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanging");
 						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangedEventHandler");
 						var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangingEventHandler");
-						// var schemaAttribute = comp.GetTypeByMetadataName("Synqra.SchemaAttribute") ?? throw new Exception("Synqra.SchemaAttribute");
 
 						cancelToken.ThrowIfCancellationRequested();
 
-						/*
-						var schemaAttrs = (schemaAttribute is null)
-							? ImmutableArray<AttributeData>.Empty
-							: all.Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, schemaAttribute))
-								 .ToImmutableArray();
-						*/
-
-						return (null, null, classDeclaration, symbol, ibm, ssa, ipc, ipcg, pceh, pcgeh);
+						return (null, null, classDeclaration, symbol, ibm, ipc, ipcg, pceh, pcgeh);
 					}
 					catch (Exception ex)
 					{
 						EmergencyLog.Default.Error($"transform", ex);
-						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!, default!, default!);
-						// throw;
+						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!, default!);
 					}
 				});
 
 			context.RegisterSourceOutput(
-				  classesProvider //1
-				  .Combine(buildPropsProvider) //2
+				  classesProvider
+				  .Combine(buildPropsProvider)
 				, Execute
 				);
 		}
@@ -246,215 +172,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	static string FQN(ITypeSymbol t) =>
-		(t ?? throw new InvalidOperationException("Type not found"))
-		.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-	static (double, string) GetSchemaData(AttributeData attr)
-	{
-		DebugLog("Schema: " + attr);
-		return ((double)attr.ConstructorArguments[0].Value!, (string)attr.ConstructorArguments[1].Value!);
-	}
-
-	static IEnumerable<(double, string)> GetAllSchemasSymbol(ITypeSymbol symbol, ITypeSymbol schemaAttribute)
-	{
-		return symbol.GetAttributes()
-#if DEBUG1
-			.Where(attr => attr.AttributeClass?.Name == schemaAttribute.Name)
-#else
-			.Where(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, schemaAttribute))
-#endif
-			.Select(GetSchemaData);
-	}
-
-	static IEnumerable<(double, string)> GetAllSchemas(ClassDeclarationSyntax clazz)
-	{
-		foreach (var attr in clazz.AttributeLists)
-		{
-			// bool useAttribute = false;
-			int i = 0;
-			DebugLog("> AttrNode: " + attr.ToFullString());
-			foreach (var item in attr.ChildNodes())
-			{
-				DebugLog(">> ChildNode: " + item.ToFullString());
-				foreach (var item2 in item.ChildNodes())
-				{
-					DebugLog(">>> ChildNode: " + item2.ToFullString());
-					if (item2.ToFullString() == "Schema")
-					{
-						DebugLog("!!! " + i);
-					}
-					foreach (var item3 in item2.ChildNodes())
-					{
-						DebugLog(">>>> ChildNode: " + item3.ToFullString());
-					}
-					if (i++ == 0)
-					{
-						if (item2.ToFullString() == "Schema")
-						{
-							DebugLog("! SELECTED NEXT AFTER: " + item2.ToFullString());
-							i = -1;
-							continue;
-						}
-					}
-					else if (i == 0)
-					{
-						int sc = 0;
-						double ver = 0;
-						DebugLog("! ChildNode: " + item2.ToFullString());
-						foreach (var item3 in item2.ChildNodes())
-						{
-							DebugLog(">>>> ChildNode: " + item3.ToFullString());
-							if (sc++ == 0)
-							{
-								if (double.TryParse(item3.ToFullString(), out ver))
-								{
-									DebugLog("!!! Schema Version: " + ver);
-									continue;
-								}
-							}
-							else
-							{
-								var s = item3.ToFullString().Trim('"');
-								DebugLog("!!! Schema String: " + s);
-								yield return (ver, s);
-								break;
-							}
-						}
-					}
-				}
-
-				if (i == -1)
-				{
-					/*
-					EmergencyLog.Default.Debug("! ChildNode: " + item.ToFullString());
-					foreach (var item2 in item.ChildNodes())
-					{
-						EmergencyLog.Default.Debug(">> ChildNode: " + item2.ToFullString());
-						foreach (var item3 in item2.ChildNodes())
-						{
-							EmergencyLog.Default.Debug(">>> ChildNode: " + item3.ToFullString());
-						}
-						if (sc++ == 0)
-						{
-						}
-						else
-						{
-
-						}
-					}
-					*/
-				}
-				else if (i++ == 0)
-				{
-					if (item.ToFullString() == "Schema")
-					{
-						i = -1;
-						// continue;
-					}
-				}
-			}
-		}
-	}	
-
-
-	static string GetSchemaTypeDeclaration(TypeSyntax propertyType)
-	{
-		return propertyType.ToString();
-		/*
-		switch (type)
-		{
-			case Type t when t == typeof(string):
-				return "str?";
-			default:
-				break;
-		}
-		*/
-	}
-
-	static bool HasIgnoreAttribute(IPropertySymbol p)
-	{
-		foreach (var attr in p.GetAttributes())
-		{
-			var fullName = attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-			if (fullName is "global::System.Text.Json.Serialization.JsonIgnoreAttribute"
-				|| fullName is "global::SbxIgnoreAttribute"
-				|| fullName is "SbxIgnoreAttribute")
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesOfType(INamedTypeSymbol type)
-	{
-		foreach (var p in type.GetMembers().OfType<IPropertySymbol>())
-		{
-			if (p.IsStatic) continue;
-			if (p.IsIndexer) continue;
-			// Skip private members of base types
-			if (p.DeclaredAccessibility == Accessibility.Private && !SymbolEqualityComparer.Default.Equals(p.ContainingType, type))
-				continue;
-			// if (!seen.Add(p.Name)) continue; // prefer most-base
-
-			// Exclude properties marked with [JsonIgnore] or [SbxIgnore]
-			if (p.SetMethod == null || p.GetMethod == null)
-			{
-				continue;
-			}
-			if (p.GetAttributes().Any())
-			{
-				DebugLog($"SBX Generator {p.Name} {p.GetAttributes()[0]} | {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
-			}
-			if (HasIgnoreAttribute(p))
-			{
-				DebugLog($"SBX Generator Ignored {p.Name} by {p.GetAttributes()[0].AttributeClass?.ToDisplayString()}");
-				continue;
-			}
-
-			yield return p;
-		}
-	}
-
-	// Enumerate instance properties across the full inheritance chain, most-base first, no duplicates by name.
-	static IEnumerable<IPropertySymbol> GetAllInstancePropertiesWithAncestors(INamedTypeSymbol type, ISet<INamedTypeSymbol> except)
-	{
-		var seen = new HashSet<string>(StringComparer.Ordinal);
-		var types = new List<INamedTypeSymbol>();
-
-		for (var t = type; t != null; t = t.BaseType)
-		{
-			if (!except.Contains(t))
-			{
-				types.Add(t);
-			}
-		}
-
-		types.Reverse(); // base types first
-
-		foreach (var t in types)
-		{
-			foreach (var p in GetAllInstancePropertiesOfType(t))
-			{
-				if (seen.Add(p.Name) && !p.Name.Contains("IBindableModel"))
-				{
-					yield return p;
-				}
-			}
-		}
-	}
-
 	/// <summary>
-	/// This method is where the real work of the generator is done
-	/// This ensures optimal performance by only executing the generator when needed
-	/// The method can be named whatever you want but Execute seems to be the standard 
+	/// This method is where the real work of the generator is done.
 	/// </summary>
 	static void Execute(SourceProductionContext context, TheCombinedSource combinedData)
 	{
 		var errorBody = new StringBuilder();
 
-		// convey an error message from analyzer:
 		if (combinedData.ClassData.errorMessage is not null || combinedData.ClassData.exception is not null)
 		{
 			var message = combinedData.ClassData.exception is null
@@ -477,15 +201,14 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				classData.Ibm,
 			};
 
-			string tfm = combinedData.BuildProps.Tfm;
-			string SynqraBuildBox = combinedData.BuildProps.SynqraBuildBox;
+			string tfm = combinedData.Tfm;
 			if (tfm == null || classData.Clazz is null)
 			{
 				return;
 			}
 
 			var netVer = tfm.StartsWith("net") ? Version.TryParse(tfm[3..], out var version) ? version : null : null;
-			var doesSupportField = false; // netVer != null && netVer.Major >= 6;
+			var doesSupportField = false;
 
 			var clazz = classData.Clazz;
 			filePath = clazz.SyntaxTree.FilePath;
@@ -493,23 +216,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var classMembers = classData.Clazz.Members;
 			DebugLog($"GENERATE FOR {clazz.Identifier} : {classData.Data.BaseType} ({clazz.SyntaxTree.FilePath})...");
 
-			// Component detection: a [SynqraModel] class that implements Synqra.IComponent
-			// gets a component-flavored setter (emits ChangeComponentPropertyCommand
-			// targeting the container) plus an IBindableComponent impl with
-			// AttachToContainer plumbing. Otherwise it's a normal object — setter
-			// emits ChangeObjectPropertyCommand targeting `this`.
-			// Fully-qualified-name match — namespace.Name comparison was unreliable
-			// across Roslyn symbol shapes for nested vs file-scoped namespaces.
 			bool isComponent = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IComponent");
 
-			// Container detection: an IComponentContainer-implementing class. The
-			// generator emits a `Components` property backed by a
-			// StoreBoundComponentsCollection — its ICollection<T>.Add/Remove route
-			// through AddComponentCommand/DeleteComponentCommand when the container
-			// is store-attached. We only emit when the user has NOT manually
-			// declared a Components member (existing manual-collection consumers
-			// remain unchanged).
 			bool isContainer = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IComponentContainer");
 			bool userDeclaredComponents = classData.Clazz.Members
@@ -519,45 +228,25 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					.Any(s => s is IPropertySymbol or IFieldSymbol);
 			bool emitComponentsCollection = isContainer && !userDeclaredComponents;
 
-			// Setter-template fragments. These are interpolated into the property
-			// template below — same physical template, two emitted variants.
 			string commandTypeName        = isComponent ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
 			string preAttachGuardExtra    = isComponent ? " || __containerId == default" : "";
 			string targetObjectExpr       = isComponent ? "null" : "this";
 			string targetIdExpr           = isComponent ? "__containerId" : "__store.GetId(this)";
 			string targetTypeIdExpr       = isComponent ? "__containerTypeId" : "__store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId";
 			string collectionIdExpr       = isComponent ? "__containerCollectionId" : "__collectionId ?? Guid.Empty";
-			// Component commands carry two extra fields. ComponentId is filled from
-			// IIdentifiable<Guid>.Id at runtime when the class implements it
-			// (non-unique components); unique-by-type components leave it Guid.Empty
-			// and the projection resolves them by ComponentTypeId alone.
 			string componentExtraFields   = isComponent
 				? @",
 					ComponentTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId,
 					ComponentId = (this is global::Synqra.IIdentifiable<global::System.Guid> __idable ? __idable.Id : global::System.Guid.Empty)"
 				: "";
-			// Optimistic-concurrency precondition: probes the container's LastEventId
-			// for components (container is the conflict-boundary aggregate), the
-			// model's own id for plain objects.
 			string submissionOptionsArg = isComponent
 				? ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__containerId) }"
 				: ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
-
-			INamedTypeSymbol rootType = classData.Data;
-			while (rootType.BaseType is not null && rootType.BaseType.SpecialType != SpecialType.System_Object)
-			{
-				DebugLog($"{rootType} PARENT IS {rootType.BaseType}");
-				rootType = rootType.BaseType;
-			}
 
 			bool isRootType = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
 			bool isSealed = classData.Data.IsSealed;
 			var virtualKeyword = isSealed ? "" : " virtual";
 
-			// check if the methods we want to add exist already 
-			// var setMethod = classMembers.FirstOrDefault(member => member is MethodDeclarationSyntax method && method.Identifier.Text == "Set");
-
-			// this string builder will hold our source code for the methods we want to add
 			var body = new StringBuilder();
 			body.AppendLine("#nullable enable");
 			HashSet<string> usingsSet = new HashSet<string>();
@@ -592,14 +281,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			{
 				EmergencyLog.Default.Error($"Could not find namespace for {clazz.Identifier}", null);
 			}
-			// DebugLog($"Found calcClassNamespace={calcClassNamespace?.Name}");
 			body.AppendLine($"");
 			body.AppendLine($"namespace {calcClassNamespace?.Name};");
 			body.AppendLine();
-			// body.AppendLine($"// Synqra Model Target: {Synqra.SynqraTargetInfo.TargetFramework}");
 			body.AppendLine();
-			// Components also implement IBindableComponent so the projection can call
-			// AttachToContainer on them after ComponentAddedEvent applies.
 			var componentIface = isComponent ? ", global::Synqra.IBindableComponent" : "";
 			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}{componentIface}");
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}");
@@ -610,80 +295,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"\t\tSynqraJsonTypeInfoResolver.RegisterGeneratedModel<{clazz.Identifier}>();");
 			body.AppendLine($"\t}}");
 			body.AppendLine($"");
-
-
-			#region SchemaDetection
-			string suggestedSchema = "1";
-			// Append inherited properties to schema suggestion (minimally qualified to keep it compact)
-			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude)/*.Where(p => !classData.Data.Equals(p.ContainingType, SymbolEqualityComparer.Default))*/)
-			{
-				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-			}
-
-			// EmergencyLog.Default.Debug("[+] Added methods to generated class");
-
-			var originalSourceContent = clazz.SyntaxTree.GetText().ToString();
-			DebugLog($"EXECUTE SyntaxTree.FilePath={clazz.SyntaxTree.FilePath}");
-			var line = clazz.SyntaxTree.GetLineSpan(clazz.GetLocation().SourceSpan).StartLinePosition.Line;
-
-			var schemas = GetAllSchemasSymbol(classData.Data, classData.Ssa).ToArray();
-			if (clazz.AttributeLists.Count == 0)
-			{
-				// DebugLog($"GetLineSpan() {line} {clazz.Span.Start}");
-			}
-			else
-			{
-				var a = clazz.AttributeLists.First().Span.Start;
-				var b = clazz.AttributeLists.First().Span.End;
-				var c = clazz.AttributeLists.Last().Span.Start;
-				var d = clazz.AttributeLists.Last().Span.End;
-				var lastAttribute = originalSourceContent.Substring(c, (d - c));
-				var i = lastAttribute.IndexOf('"');
-				var e = lastAttribute.LastIndexOf('"');
-				var lastAttributeSchema = lastAttribute.Substring(i + 1, e - i - 1);
-				// DebugLog($"GetLineSpan() {line}/{a}/{b}/{c}/{d}");
-
-				var lastSchemaEntry = schemas.Length == 0
-					? (0d, string.Empty)
-					: schemas.OrderBy(s => s.Item1).Last();
-				double lastVer = lastSchemaEntry.Item1;
-				string lastSchema = string.IsNullOrWhiteSpace(lastSchemaEntry.Item2) ? lastAttributeSchema : lastSchemaEntry.Item2;
-				var sb = new StringBuilder(originalSourceContent);
-				DebugLog($"GeneratorV 2");
-				if (lastSchema != suggestedSchema)
-				{
-					DebugLog($"lastSchema {lastSchema.Utf8().Hex()}");
-					DebugLog($"suggestedSchema {suggestedSchema.Utf8().Hex()}");
-					var now = DateTime.Now;
-					var year1 = new DateTime(now.Date.Year, 1, 1);
-					var year2 = new DateTime(now.Date.Year + 1, 1, 1);
-					var ver = now.Year + Math.Round((now - year1).TotalHours / (year2 - year1).TotalHours, 3);
-					if (lastVer >= ver)
-					{
-						ver = lastVer + 0.001;
-					}
-					DebugLog($"*********** Schema drift! path={clazz.SyntaxTree.FilePath} clazz={clazz} lastSchema={lastSchema} suggestedSchema={suggestedSchema} lastAttribute={lastAttribute} lastAttributeSchema={lastAttributeSchema}");
-					sb.Insert(d, FormattableString.Invariant($"\r\n[Schema({ver:F3}, \"{suggestedSchema}\")]"));
-					CodeGenUtils.Default.WriteFile(SynqraBuildBox, clazz.SyntaxTree.FilePath, originalSourceContent, sb.ToString());
-				}
-				else
-				{
-					DebugLog("*********** Schema already present as latest: " + lastSchema);
-				}
-				// EmergencyLog.Default.Debug(sb.ToString());
-
-			}
-			#endregion
-
-			// Build property lookup and schema field mapping for per-version serialization
-			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).ToArray();
-			var propertyLookup = new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal);
-			foreach (var p in allProperties)
-				propertyLookup[p.Name] = p;
-			var currentPropertyNames = new HashSet<string>(propertyLookup.Keys, StringComparer.Ordinal);
-			var schemaFieldMapping = BuildSchemaFieldMapping(
-				schemas.Select(s => (s.Item1, s.Item2)).ToArray(),
-				currentPropertyNames);
 
 			if (isRootType)
 			{
@@ -733,7 +344,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	// `.Components.Remove(c)` produce AddComponentCommand / DeleteComponentCommand
 	// when the container is store-attached; the projection's event-apply path
 	// reaches the inner data via TryAdd / BypassRemove and stays command-free.
-	// Field is lazily allocated because `this` is unavailable in field initializers.
 	private global::Synqra.StoreBoundComponentsCollection? __components;
 
 	public global::Synqra.IComponentsCollection Components => EnsureComponentsWrapper();
@@ -743,7 +353,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		var existing = __components;
 		if (existing is not null) return existing;
 		var wrapper = new global::Synqra.StoreBoundComponentsCollection(this);
-		// Thread-safe one-time assign; in a race the loser's allocation is discarded.
 		var prior = global::System.Threading.Interlocked.CompareExchange(
 			ref __components, wrapper, null);
 		return prior ?? wrapper;
@@ -755,10 +364,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					body.AppendLine($$"""
 
 	// IBindableComponent: container linkage emitted only for IComponent classes.
-	// These fields are populated by the projection on ComponentAddedEvent apply,
-	// and consumed by the component's property setters (see below) when building
-	// ChangeComponentPropertyCommand — TargetId / TargetTypeId / CollectionId on
-	// that command refer to the CONTAINER, not the component itself.
 	protected global::System.Guid __containerId;
 	protected global::System.Guid __containerTypeId;
 	protected global::System.Guid __containerCollectionId;
@@ -800,22 +405,11 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	void IBindableModel.Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
-	{
-		GetCore(serializer, version, in buffer, ref pos);
-	}
-
-	void IBindableModel.Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
-	{
-		SetCore(serializer, version, in buffer, ref pos);
-	}
-
 	protected{{virtualKeyword}} void SetCore(string name, object? value)
 	{
 		switch (name)
 		{
 """);
-				// Include properties from this class and all base classes that have a setter
 				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null))
 				{
 					if (pro.Type.ToString() == "int")
@@ -848,102 +442,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	$$"""
 		}
 	}
-
-	protected{{virtualKeyword}} void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
-	{
-""");
-				string? els = null;
-				FormattableString x;
-				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get\");");
-
-#if DEBUG
-				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
-				if (isUnitTest)
-				{
-					schemas = [(1.2f, "1")];
-				}
-#endif
-				bool any = false;
-				foreach (var item in schemas)
-				{
-					any = true;
-					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
-					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Serialize fields in the order defined by this schema version
-					var getCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-					foreach (var (schemaName, pro) in getCoreFields)
-					{
-						if (pro is null)
-						{
-							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-							continue;
-						}
-						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
-						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
-						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-							? GetFieldName(pro, doesSupportField: false)
-							: "this." + pro.Name;
-							body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
-						}
-					body.AppendLine($"\t\t}}");
-					els = "else ";
-				}
-				if (any)
-				{
-					body.AppendLine($"\t\telse");
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
-					body.AppendLine($"\t\t}}");
-				}
-				body.AppendLine($$"""
-	}
-
-
-	protected{{virtualKeyword}} void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
-	{
-""");
-					els = null;
-					foreach (var item in schemas)
-					{
-						any = true;
-						x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-						body.AppendLine($"\t\t{{");
-						body.AppendLine($"\t\t\t// Positional Fields:");
-					// Deserialize fields in the order defined by this schema version
-					var setCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-					foreach (var (schemaName, pro) in setCoreFields)
-					{
-						if (pro is null)
-						{
-							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-							continue;
-						}
-						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-							? GetFieldName(pro)
-							: "this." + pro.Name;
-						// body.AppendLine($"\t\t\tif (pos >= buffer.Length)");
-						// body.AppendLine($"\t\t\t{{");
-						// body.AppendLine($"\t\t\t\treturn;");
-						// body.AppendLine($"\t\t\t}}");
-						body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
-					}
-						body.AppendLine($"\t\t}}");
-						els = "else ";
-					}
-					if (any)
-					{
-						body.AppendLine($"\t\telse");
-					}
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of {clazz.Identifier}\");");
-					body.AppendLine($"\t\t}}");
-
-					body.AppendLine("""
-						}
 """);
 			}
 			else
@@ -954,7 +452,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		switch (name)
 		{
 """);
-				// Include properties from this class and all base classes that have a setter
 				foreach (var pro in GetAllInstancePropertiesOfType(classData.Data))
 				{
 					if (pro.Type.ToString() == "int")
@@ -985,105 +482,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				}
 				body.AppendLine(
 """
-			default:
-				base.SetCore(name, value);
-				break;
-		}
+		default:
+			base.SetCore(name, value);
+			break;
 	}
-
-	protected override void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
-	{
+}
 """);
-				string? els = null;
-				FormattableString x;
-				body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get\");");
-
-#if DEBUG
-				var isUnitTest = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "nunit.engine");
-				if (isUnitTest)
-				{
-					schemas = [(1.2f, "1")];
-				}
-#endif
-				bool any = false;
-				foreach (var item in schemas)
-				{
-					any = true;
-					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
-					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Serialize fields in the order defined by this schema version
-					var getCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-					foreach (var (schemaName, pro) in getCoreFields)
-					{
-						if (pro is null)
-						{
-							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-							continue;
-						}
-						body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
-						// Use backing field only for properties declared in this class when we generated one; otherwise use the property
-						var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-							? GetFieldName(pro, doesSupportField: false)
-							: "this." + pro.Name;
-							body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
-						}
-					body.AppendLine($"\t\t}}");
-					els = "else ";
-				}
-				if (any)
-				{
-					body.AppendLine($"\t\telse");
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Get - unknown version {{version}}\");");
-					body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
-					body.AppendLine($"\t\t}}");
-				}
-				body.AppendLine("""
-	}
-
-	protected override void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
-	{
-""");
-				els = null;
-				foreach (var item in schemas)
-				{
-					any = true;
-					x = $"\t\t{els}if (version == {item.Item1}f)"; body.AppendLine(x.ToString(System.Globalization.CultureInfo.InvariantCulture));
-					body.AppendLine($"\t\t{{");
-					body.AppendLine($"\t\t\t// Positional Fields:");
-					// Deserialize fields in the order defined by this schema version
-					var setCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-					foreach (var (schemaName, pro) in setCoreFields)
-					{
-						if (pro is null)
-						{
-							body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-							continue;
-						}
-						var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-							? GetFieldName(pro)
-							: "this." + pro.Name;
-						body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: classData.Data.Name)}(in buffer, ref pos);");
-					}
-					body.AppendLine($"\t\t}}");
-					els = "else ";
-				}
-				if (any)
-				{
-					body.AppendLine($"\t\telse");
-				}
-				body.AppendLine($"\t\t{{");
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Error($\"SBX {clazz.Identifier} IBindableModel.Set - unknown version {{version}}\");");
-				body.AppendLine($"\t\t\tthrow new Exception($\"Unknown schema version {{version}} of  {clazz.Identifier} \");");
-				body.AppendLine($"\t\t}}");
-
-				body.AppendLine("""
-	}
-""");
-					
-
 			}
 
 			#region Fields and Properties
@@ -1091,14 +495,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($$"""
 
 """);
-			// First: properties declared in this class (keep original textual type form to minimize schema noise)
 			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
 				if (!pro.Modifiers.Any(x => x.ToString() == "partial"))
 				{
 					continue;
 				}
-				// suggestedSchema += " " + pro.Identifier + " " + GetSchemaTypeDeclaration(pro.Type);
 
 				if (!doesSupportField)
 				{
@@ -1146,7 +548,7 @@ $$"""
 
 					TargetObject = {{targetObjectExpr}},
 					TargetId = {{targetIdExpr}},
-					TargetTypeId = {{targetTypeIdExpr}}, // todo this should be collection type id
+					TargetTypeId = {{targetTypeIdExpr}},
 
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
@@ -1167,11 +569,6 @@ $$"""
 
 			body.AppendLine("}");
 
-			// EmergencyLog.Default.Debug("!! SynqraBuildBox = " + SynqraBuildBox);
-
-
-			//to write our source file we can use the context object that was passed in
-			//this will automatically use the path we provided in the target projects csproj file
 			var fileName = $"{Path.GetFileNameWithoutExtension(clazz.SyntaxTree.FilePath)}_{clazz.Identifier}.Generated.cs";
 			context.AddSource(fileName, SourceText.From(body.ToString(), Encoding.UTF8));
 			DebugLog($"[+] Added source to context {fileName}");
@@ -1189,581 +586,6 @@ $$"""
 				EmergencyLog.Default.LogError(ex, $"Execute {ex}");
 			}
 			catch { }
-			// throw;
 		}
-	}
-
-	static string? GetFieldName(PropertyDeclarationSyntax syntax, bool? doesSupportField = null)
-	{
-		/*
-		if (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, classData.Data))
-		{
-			return 
-		}
-		*/
-		var identifier = syntax.Identifier.ToString();
-		if (char.IsUpper(identifier[0]))
-		{
-			identifier = "_" + char.ToLowerInvariant(identifier[0]) + identifier[1..];
-		}
-		else
-		{
-			identifier = "_" + identifier;
-		}
-		return identifier;
-	}
-
-	static string? GetFieldName(IPropertySymbol symbol, bool? doesSupportField = null)
-	{
-		var identifier = symbol.Name.ToString();
-		if (char.IsUpper(identifier[0]))
-		{
-			identifier = "_" + char.ToLowerInvariant(identifier[0]) + identifier[1..];
-		}
-		else
-		{
-			identifier = "_" + identifier;
-		}
-		return identifier;
-	}
-
-	static string? DeserializeMethod(ITypeSymbol type, string debug)
-	{
-		DebugLog($"[Type {debug}] <DeserializeMethod>: {type} ({type.GetType().Name})");
-		var res = DeserializeMethodCore(type, debug: debug);
-		DebugLog($"[Type {debug}] </DeserializeMethod>: {type} => {res}");
-		return res;
-	}
-	static string? DeserializeMethodCore(ITypeSymbol type, string debug)
-	{
-		if (type is INamedTypeSymbol named)
-		{
-			// Handle Nullable<T>
-			if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && named.TypeArguments.Length == 1)
-			{
-				var innerType = named.TypeArguments[0];
-				if (innerType is INamedTypeSymbol innerNamed)
-				{
-					switch (innerNamed.SpecialType)
-					{
-						// case SpecialType.System_Single: return "NullableSingle";
-						// case SpecialType.System_Double: return "NullableDouble";
-						case SpecialType.None:
-						{
-
-							break;
-						}
-					}
-				}
-				return "Nullable" + DeserializeMethod(innerType, debug: debug);
-			}
-
-			// Handle primitive & predefined types
-			switch (named.SpecialType)
-			{
-				case SpecialType.System_Boolean: return "Boolean";
-
-				case SpecialType.System_SByte:
-				case SpecialType.System_Int16:
-				case SpecialType.System_Int32:
-				case SpecialType.System_Int64:
-					return "Signed";
-
-				case SpecialType.System_Byte:
-				case SpecialType.System_UInt16:
-				case SpecialType.System_UInt32:
-				case SpecialType.System_UInt64:
-				case SpecialType.System_Char:
-					return "Unsigned";
-
-				case SpecialType.System_Single: return "Single";
-				case SpecialType.System_Double: return "Double";
-				case SpecialType.System_Decimal: return "Decimal";
-				case SpecialType.System_String: return "String";
-			}
-
-			// Fallback for generics like List<T> or IReadOnlyList<T>
-			if (named.IsGenericType &&
-				named.TypeArguments.Length == 1 &&
-				(named.Name is "IEnumerable" or "IList" or "IReadOnlyList" or "IReadOnlyCollection" or "List"))
-			{
-				DebugLog($"[Type {debug}] //// Lsit detected named.Name {named.Name}");
-
-				var arg = named.TypeArguments[0];
-				// return $"List<{arg.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-				return $"/*named.IsGenericType*/<{named.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-			}
-
-			// Try matching implemented IEnumerable<T> interface
-			DebugLog($"[Type {debug}] °2 {named}");
-			if (named.ToString().EndsWith("IDictionary<string, object>")
-				|| named.ToString().EndsWith("IDictionary<string, object>?")
-				|| named.ToString().EndsWith("IDictionary<string, object?>")
-				|| named.ToString().EndsWith("IDictionary<string, object?>?")
-				)
-			{
-				return "Dict<string, object>";
-			}
-			foreach (var i in named.AllInterfaces)
-			{
-				DebugLog($"[Type {debug}] °1 Detected Interface: {i}");
-			}
-			foreach (var i in named.AllInterfaces)
-			{
-				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
-				{
-					DebugLog($"[Type {debug}] °1 Selected Interface: {i}");
-					return $"List/*SpecialType*/<{i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-				}
-			}
-			// throw new Exception("Unknown collection type");
-		}
-
-		if (TryGetIDictionaryKeyAndElement(type, out var keyType, out var elementType1))
-		{
-			DebugLog($"[Type {debug}] //// Dictionary detected: {type} => Dict<{keyType}, {elementType1}>");
-			return $"Dict<{keyType}, {elementType1}>";
-		}
-		else
-		{
-			DebugLog($"[Type {debug}] //// Unknown collection type detected: {type}");
-		}
-
-		// Handle IEnumerable<T> (and subclasses like List<T>, T[])
-		if (TryGetIEnumerableElement(type, out var elementType2))
-		{
-			return $"List/*TryGetIEnumerableElement*/<{elementType2}>";
-		}
-
-		// Arrays as List<T>
-		if (type is IArrayTypeSymbol array)
-		{
-			return $"List/*BottomIsArray*/<{array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-		}
-
-		return $"/*None*/<{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}>";
-	}
-
-
-	static bool TryGetIEnumerableElement(ITypeSymbol type, out string elementTypeName)
-	{
-		// Handle arrays directly
-		if (type is IArrayTypeSymbol array)
-		{
-			elementTypeName = array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-			return true;
-		}
-
-		if (type is INamedTypeSymbol named)
-		{
-			// Directly generic IEnumerable<T>
-			if (named.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
-			{
-				elementTypeName = named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-				return true;
-			}
-
-			// Or any interface that implements it
-			foreach (var i in named.AllInterfaces)
-			{
-				if (i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
-				{
-					elementTypeName = i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-					return true;
-				}
-			}
-		}
-
-		elementTypeName = default!;
-		return false;
-	}
-
-	static bool TryGetIDictionaryKeyAndElement(ITypeSymbol type, out string keyTypeName, out string elementTypeName)
-	{
-		keyTypeName = default!;
-		elementTypeName = default!;
-
-		// Handle arrays directly (not a dictionary, but for compatibility)
-		if (type is IArrayTypeSymbol array)
-		{
-			elementTypeName = array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-			return false;
-		}
-
-		if (type is INamedTypeSymbol named)
-		{
-			// Check if type is IDictionary<TKey, TValue> or Dictionary<TKey, TValue>
-			if (named.IsGenericType &&
-				(named.Name == "IDictionary" || named.Name == "Dictionary") &&
-				named.TypeArguments.Length == 2)
-			{
-				keyTypeName = named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-				elementTypeName = named.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-				return true;
-			}
-
-			// Check interfaces for IDictionary<TKey, TValue>
-			foreach (var i in named.AllInterfaces)
-			{
-				if (i.IsGenericType &&
-					(i.Name == "IDictionary" || i.Name == "Dictionary") &&
-					i.TypeArguments.Length == 2)
-				{
-					keyTypeName = i.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-					elementTypeName = i.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-					return true;
-				}
-			}
-		}
-
-		return false;
-	}
-
-	/*
-	static string? DeserializeMethod(ITypeSymbol type)
-	{
-		// Pseudocode:
-		// 1) If type is Nullable<T>, unwrap to T.
-		// 2) If type is an array, return "List<elementType>".
-		// 3) If type (or its interfaces) is/implements IEnumerable<T> (or IList<T>/IReadOnlyList<T>/IReadOnlyCollection<T>/ICollection<T>), return "List<T>".
-		// 4) If type is an enum, map its underlying type to Signed/Unsigned suffix.
-		// 5) Map primitive/special types to known suffixes (Boolean, Signed, Unsigned, Single, Double, Decimal, String).
-		// 6) Otherwise return null (which results in calling serializer.Deserialize(...)).
-
-		// 1) Unwrap Nullable<T>
-		if (type is INamedTypeSymbol named && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
-		{
-			type = named.TypeArguments[0];
-		}
-
-		// 2) Arrays => treat as List<T>
-		if (type is IArrayTypeSymbol arrayType)
-		{
-			return $"List<{FQN(arrayType.ElementType)}>";
-		}
-
-		// 3) IEnumerable-like => treat as List<T>
-		if (TryGetEnumerableElement(type, out var elementType))
-		{
-			return $"List<{FQN(elementType)}>";
-		}
-
-		// 4) Enums => map underlying type to Signed/Unsigned
-		if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType && enumType.EnumUnderlyingType is { } underlying)
-		{
-			var enumSuffix = MapNumericSuffix(underlying.SpecialType);
-			if (enumSuffix is not null)
-				return enumSuffix;
-		}
-
-		// 5) Primitive/special types
-		var suffix = MapSpecialTypeSuffix(type.SpecialType);
-		if (suffix is not null)
-			return suffix;
-
-		// 6) Fallback: use generic Deserialize<T> (by returning null we produce "Deserialize(...)" in the generated code)
-		return null;
-
-		static string? MapSpecialTypeSuffix(SpecialType st)
-		{
-			switch (st)
-			{
-				case SpecialType.System_Boolean: return "Boolean";
-
-				// signed integers
-				case SpecialType.System_SByte:
-				case SpecialType.System_Int16:
-				case SpecialType.System_Int32:
-				case SpecialType.System_Int64:
-					return "Signed";
-
-				// unsigned integers (+ char as unsigned)
-				case SpecialType.System_Byte:
-				case SpecialType.System_UInt16:
-				case SpecialType.System_UInt32:
-				case SpecialType.System_UInt64:
-				case SpecialType.System_Char:
-					return "Unsigned";
-
-				case SpecialType.System_Single: return "Single";
-				case SpecialType.System_Double: return "Double";
-				case SpecialType.System_Decimal: return "Decimal";
-				case SpecialType.System_String: return "String";
-
-				default:
-					return null;
-			}
-		}
-
-		static string? MapNumericSuffix(SpecialType st)
-		{
-			// Map underlying enum numeric type to Signed/Unsigned
-			switch (st)
-			{
-				case SpecialType.System_SByte:
-				case SpecialType.System_Int16:
-				case SpecialType.System_Int32:
-				case SpecialType.System_Int64:
-					return "Signed";
-
-				case SpecialType.System_Byte:
-				case SpecialType.System_UInt16:
-				case SpecialType.System_UInt32:
-				case SpecialType.System_UInt64:
-				case SpecialType.System_Char:
-					return "Unsigned";
-
-				default:
-					return null;
-			}
-		}
-
-		static bool TryGetEnumerableElement(ITypeSymbol symbol, out ITypeSymbol elementType)
-		{
-			// Direct generic type check (e.g., IEnumerable<T>)
-			if (symbol is INamedTypeSymbol named && named.Arity == 1 && IsEnumerableLike(named))
-			{
-				elementType = named.TypeArguments[0];
-				return true;
-			}
-
-			// Check implemented interfaces (covers List<T>, IReadOnlyList<T>, etc.)
-			foreach (var iface in symbol.AllInterfaces)
-			{
-				if (iface is INamedTypeSymbol inamed && inamed.Arity == 1 && IsEnumerableLike(inamed))
-				{
-					elementType = inamed.TypeArguments[0];
-					return true;
-				}
-			}
-
-			elementType = null!;
-			return false;
-
-			static bool IsEnumerableLike(INamedTypeSymbol s)
-			{
-				var def = s.ConstructedFrom?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-				switch (def)
-				{
-					case "global::System.Collections.Generic.IEnumerable<T>":
-					case "global::System.Collections.Generic.IList<T>":
-					case "global::System.Collections.Generic.ICollection<T>":
-					case "global::System.Collections.Generic.IReadOnlyList<T>":
-					case "global::System.Collections.Generic.IReadOnlyCollection<T>":
-						return true;
-					default:
-						return false;
-				}
-			}
-		}
-	}
-	*/
-
-	/*
-	static string? DeserializeMethod(TypeSyntax type)
-	{
-		// Handle IEnumerable<T> (including fully-qualified names)
-		if (TryGetIEnumerableElement(type, out var elementTypeName))
-		{
-			// Expecting serializer to expose: DeserializeEnumerable<T>(...)
-			// return $"Enumerable<{elementTypeName}>";
-			return $"List<{elementTypeName}>";
-		}
-
-		switch (type)
-		{
-			case NullableTypeSyntax nts:
-				return DeserializeMethod(nts.ElementType);
-			case PredefinedTypeSyntax pts:
-				switch (pts.Keyword.Kind())
-				{
-					case SyntaxKind.BoolKeyword: return "Boolean";
-
-					case SyntaxKind.ByteKeyword: return "Unsigned";
-					case SyntaxKind.SByteKeyword: return "Signed";
-					case SyntaxKind.IntKeyword: return "Signed";
-					case SyntaxKind.UIntKeyword: return "Unsigned";
-					case SyntaxKind.ShortKeyword: return "Signed";
-					case SyntaxKind.UShortKeyword: return "Unsigned";
-					case SyntaxKind.LongKeyword: return "Signed";
-					case SyntaxKind.ULongKeyword: return "Unsigned";
-
-					case SyntaxKind.FloatKeyword: return "Single";
-					case SyntaxKind.DoubleKeyword: return "Double";
-					case SyntaxKind.DecimalKeyword: return "Decimal";
-					case SyntaxKind.StringKeyword: return "String";
-					case SyntaxKind.CharKeyword: return "Unsigned";
-					default:
-						return "?? PTS: " + pts.Keyword.Kind() +"??";
-				}
-			case GenericNameSyntax gns when (
-				   gns.Identifier.ValueText == "IEnumerable"
-				|| gns.Identifier.ValueText == "IList"
-				|| gns.Identifier.ValueText == "IReadOnlyList"
-				|| gns.Identifier.ValueText == "IReadOnlyCollection"
-				) && gns.TypeArgumentList.Arguments.Count == 1:
-				// Fallback if top-level is directly IEnumerable<T> without qualifier
-				// return $"Enumerable<{gns.TypeArgumentList.Arguments[0].ToString()}>";
-				return $"List<{gns.TypeArgumentList.Arguments[0].ToString()}>";
-
-			case QualifiedNameSyntax qns when qns.Right is GenericNameSyntax g2 && g2.Identifier.ValueText == "IEnumerable" && g2.TypeArgumentList.Arguments.Count == 1:
-				// System.Collections.Generic.IEnumerable<T>
-				// return $"Enumerable<{g2.TypeArgumentList.Arguments[0].ToString()}>";
-				return $"List<{g2.TypeArgumentList.Arguments[0].ToString()}>";
-
-			default:
-				return $"?? {type} ({type.GetType().Name}) ??";
-				// throw new Exception($"Unknown Deserialization method for {type} ({type.GetType().Name})");
-		}
-	}
-
-	static bool TryGetIEnumerableElement(TypeSyntax t, out string elementTypeName)
-	{
-		switch (t)
-		{
-			case GenericNameSyntax g when g.Identifier.ValueText == "IEnumerable" && g.TypeArgumentList.Arguments.Count == 1:
-				elementTypeName = g.TypeArgumentList.Arguments[0].ToString();
-				return true;
-
-			case QualifiedNameSyntax q when q.Right is GenericNameSyntax g2 && g2.Identifier.ValueText == "IEnumerable" && g2.TypeArgumentList.Arguments.Count == 1:
-				elementTypeName = g2.TypeArgumentList.Arguments[0].ToString();
-				return true;
-
-			case AliasQualifiedNameSyntax a when a.Name is GenericNameSyntax g3 && g3.Identifier.ValueText == "IEnumerable" && g3.TypeArgumentList.Arguments.Count == 1:
-				elementTypeName = g3.TypeArgumentList.Arguments[0].ToString();
-				return true;
-
-			default:
-				elementTypeName = default!;
-				return false;
-		}
-	}
-	*/
-
-	/// <summary>
-	/// Parses a schema string like "1 OldName string NewProp int" into ordered (name, type) pairs.
-	/// The first token is the schema format version prefix and is skipped.
-	/// </summary>
-	static List<(string Name, string Type)> ParseSchemaFields(string schemaString)
-	{
-		var result = new List<(string, string)>();
-		if (string.IsNullOrWhiteSpace(schemaString))
-			return result;
-
-		var tokens = schemaString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-		// First token is the schema format prefix (e.g. "1"), skip it.
-		// Remaining tokens are pairs: Name Type Name Type ...
-		for (int i = 1; i + 1 < tokens.Length; i += 2)
-		{
-			result.Add((tokens[i], tokens[i + 1]));
-		}
-		return result;
-	}
-
-	/// <summary>
-	/// Builds a mapping from any schema field name (including old/renamed names) to the current property name.
-	/// Walks consecutive schema versions: if a name disappears and a new name appears at the same position
-	/// with the same type, it is treated as a rename.
-	/// </summary>
-	static Dictionary<string, string> BuildSchemaFieldMapping(
-		(double Version, string SchemaString)[] schemas,
-		HashSet<string> currentPropertyNames)
-	{
-		var map = new Dictionary<string, string>(StringComparer.Ordinal);
-
-		// Add identity mappings for all current properties
-		foreach (var name in currentPropertyNames)
-			map[name] = name;
-
-		if (schemas.Length == 0)
-			return map;
-
-		var sorted = schemas.OrderBy(s => s.Version).ToArray();
-		var parsedSchemas = sorted.Select(s => (s.Version, Fields: ParseSchemaFields(s.SchemaString))).ToArray();
-
-		// Walk from oldest to newest, tracking renames between consecutive versions
-		for (int i = 0; i < parsedSchemas.Length - 1; i++)
-		{
-			var olderFields = parsedSchemas[i].Fields;
-			var newerFields = parsedSchemas[i + 1].Fields;
-
-			var newerNames = new HashSet<string>(newerFields.Select(f => f.Name), StringComparer.Ordinal);
-
-			for (int pos = 0; pos < olderFields.Count; pos++)
-			{
-				var oldField = olderFields[pos];
-				if (newerNames.Contains(oldField.Name))
-					continue; // name still exists in newer version, no rename
-
-				// Name disappeared — check if same position in newer has a new name with same type
-				if (pos < newerFields.Count && newerFields[pos].Type == oldField.Type)
-				{
-					var newName = newerFields[pos].Name;
-					// Only treat as rename if the new name wasn't in the older schema
-					var olderNames = new HashSet<string>(olderFields.Select(f => f.Name), StringComparer.Ordinal);
-					if (!olderNames.Contains(newName))
-					{
-						map[oldField.Name] = newName;
-					}
-				}
-			}
-		}
-
-		// Resolve transitive renames: A→B, B→C becomes A→C
-		foreach (var key in map.Keys.ToList())
-		{
-			var resolved = map[key];
-			var visited = new HashSet<string>(StringComparer.Ordinal) { key };
-			while (map.TryGetValue(resolved, out var next) && next != resolved && visited.Add(next))
-			{
-				resolved = next;
-			}
-			map[key] = resolved;
-		}
-
-		return map;
-	}
-
-	/// <summary>
-	/// For a given schema version, returns the ordered list of fields to serialize/deserialize,
-	/// each resolved to the current property symbol. Returns null entries for fields that
-	/// cannot be mapped (removed fields).
-	/// </summary>
-	static List<(string SchemaFieldName, IPropertySymbol? Property)> ResolveSchemaFieldsForVersion(
-		string schemaString,
-		Dictionary<string, string> fieldMapping,
-		Dictionary<string, IPropertySymbol> propertyLookup)
-	{
-		var schemaFields = ParseSchemaFields(schemaString);
-		var result = new List<(string, IPropertySymbol?)>(schemaFields.Count);
-
-		foreach (var (name, type) in schemaFields)
-		{
-			string currentName = fieldMapping.TryGetValue(name, out var mapped) ? mapped : name;
-			propertyLookup.TryGetValue(currentName, out var prop);
-			result.Add((name, prop));
-		}
-
-		return result;
 	}
 }
-
-/*
-public sealed class SchemaDriftFix : CodeFixProvider
-{
-	public override ImmutableArray<string> FixableDiagnosticIds => ImmutableArray.Create("SYNQRA001");
-
-	public override async Task RegisterCodeFixesAsync(CodeFixContext ctx)
-	{
-		var doc = ctx.Document;
-		ctx.RegisterCodeFix(CodeAction.Create("Update schema", ct => ApplyAsync(doc, ct), nameof(SchemaDriftFix)), ctx.Diagnostics);
-	}
-
-	private async Task<Microsoft.CodeAnalysis.Document> ApplyAsync(Microsoft.CodeAnalysis.Document doc, CancellationToken ct)
-	{
-		var oldText = await doc.GetTextAsync(ct);
-		var newText = "[Schema(11, \"New Schema!\")]"; // your generator’s logic/library
-		return doc.WithText(SourceText.From(newText, oldText.Encoding ?? Encoding.UTF8));
-	}
-}
-*/

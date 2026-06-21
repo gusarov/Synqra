@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="Synqra.Utils.Tests" />
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
+    <InternalsVisibleTo Include="Synqra.BinarySerializer.SourceGenerator" />
+    <InternalsVisibleTo Include="Synqra.BinarySerializer.Tests" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="System.Threading.AccessControl" />

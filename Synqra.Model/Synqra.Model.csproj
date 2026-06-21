@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.CodeGeneration\Synqra.CodeGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Synqra.BinarySerializer.SourceGenerator\Synqra.BinarySerializer.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <!--
     <ProjectReference Include="..\Synqra.CoreModel\Synqra.CoreModel.csproj" />
     -->
