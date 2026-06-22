@@ -1,4 +1,4 @@
-﻿// NOTE! this is a different class name - for experiments with manual code instead of generator
+// NOTE! this is a different class name - for experiments with manual code instead of generator
 /* THIS IS A SANDBOX AND DEMO OF WHAT NEEDS TO BE GENERATED */
 
 using Synqra.BinarySerializer;
@@ -179,7 +179,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 					CollectionId = default,
 
 					TargetObject = this,
-					TargetId = __store.GetId(this, null, GetMode.RequiredId),
+					TargetId = __store.GetId(this),
 					TargetTypeId = default,
 					// TargetTypeId = __store.GetId(this, null, GetMode.RequiredId),
 

@@ -47,7 +47,8 @@ RUN dotnet build Synqra.CodeGeneration -c $BUILD_CONFIGURATION --no-restore "-cl
 RUN dotnet build                       -c $BUILD_CONFIGURATION --no-restore "-clp:ErrorsOnly;NoSummary" -nologo -tl:off
 
 FROM build AS test
-RUN withmongo dotnet test Tests/Synqra.Tests     -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+RUN withmongo dotnet test Tests/Synqra.Tests             -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+RUN            dotnet test Tests/Synqra.BinarySerializer.Tests -c $BUILD_CONFIGURATION --no-restore --no-build -- --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM build AS pack
 ARG BUILD_BUILDNUMBER
@@ -61,6 +62,9 @@ RUN dotnet nuget enable source nuget.org
 RUN dotnet publish -f net10.0 Tests/Synqra.Tests -c Release -r linux-x64
 RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests; \
     withmongo Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+RUN dotnet publish Tests/Synqra.BinarySerializer.Tests -c Release -r linux-x64
+RUN chmod +777 Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests; \
+    Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 
 FROM scratch AS art
 COPY --from=pack /out /
