@@ -16,6 +16,7 @@
     <ProjectReference Include="..\Synqra.BinarySerializer.Abstractions\Synqra.BinarySerializer.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
     <InternalsVisibleTo Include="Synqra.Tests" />
+    <InternalsVisibleTo Include="Synqra.BinarySerializer.Tests" />
   </ItemGroup>
 
 </Project>

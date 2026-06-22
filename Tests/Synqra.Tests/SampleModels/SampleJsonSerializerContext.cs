@@ -2,7 +2,6 @@
 using MongoDB.Bson.Serialization.Attributes;
 using SharpCompress.Common;
 using Synqra.Projection.File;
-using Synqra.Tests.BinarySerialization;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.SampleModels.Syncronization;
@@ -61,7 +60,6 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
 
-[JsonSerializable(typeof(SampleTestDataPoco))]
 [JsonSerializable(typeof(TransportOperation))]
 
 [JsonSerializable(typeof(SampleTodoTaskPoco))]

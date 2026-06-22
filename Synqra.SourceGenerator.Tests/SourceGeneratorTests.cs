@@ -218,6 +218,249 @@ public partial class SampleComponent : IComponent
 		return (generatedSources, errors);
 	}
 
+	private static (string[] GeneratedSources, Diagnostic[] Errors) RunBothGenerators(string source)
+	{
+		var compilation = CSharpCompilation.Create("GeneratorUnitTest")
+			.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source))
+			.AddReferences(GetMetadataReferences())
+			.WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		var driver = CSharpGeneratorDriver.Create(
+				new ModelBindingGenerator()
+				, new Synqra.BinarySerializer.SourceGenerator.SbxBindingGenerator()
+			)
+			.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out _);
+
+		var runResult = driver.GetRunResult();
+		var generatedSources = runResult.Results
+			.SelectMany(x => x.GeneratedSources)
+			.Select(x => x.SourceText.ToString())
+			.ToArray();
+		var errors = outputCompilation.GetDiagnostics()
+			.Where(x => x.Severity == DiagnosticSeverity.Error)
+			.ToArray();
+
+		return (generatedSources, errors);
+	}
+
+	private static MetadataReference[] GetMetadataReferences()
+	{
+		var references = new HashSet<string>(
+			((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ?? string.Empty)
+				.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries),
+			StringComparer.OrdinalIgnoreCase);
+
+		references.Add(typeof(IBindableModel).Assembly.Location);
+		references.Add(typeof(SchemaAttribute).Assembly.Location);
+		references.Add(typeof(Synqra.BinarySerializer.ISbxSerializer).Assembly.Location);
+		references.Add(typeof(GuidExtensions).Assembly.Location);
+		references.Add(typeof(EmergencyLog).Assembly.Location);
+
+		return references
+			.Select(path => MetadataReference.CreateFromFile(path))
+			.ToArray();
+	}
+}
+
+[TestFixture]
+internal class SbxGeneratorTests
+{
+	[Test]
+	public void Should_generate_GetCore_and_SetCore_for_schema()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Subject string?"")]
+public sealed partial class SomeModel
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("GetCore")), Is.True,
+			"SBX generator must emit GetCore");
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("SetCore")), Is.True,
+			"SBX generator must emit SetCore");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Should_generate_IBindableModel_sbx_bridge_methods()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Value int"")]
+public sealed partial class FlatModel
+{
+	public partial int Value { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
+
+		Assert.That(generated, Does.Contain("IBindableModel.Get(ISbxSerializer"),
+			"SBX generator must emit IBindableModel.Get(ISbxSerializer...) bridge");
+		Assert.That(generated, Does.Contain("IBindableModel.Set(ISbxSerializer"),
+			"SBX generator must emit IBindableModel.Set(ISbxSerializer...) bridge");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Should_generate_schema_version_dispatch()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Name string"")]
+[Schema(2.0, ""1 Name string Age int"")]
+public sealed partial class VersionedModel
+{
+	public partial string Name { get; set; }
+	public partial int Age { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
+
+		Assert.That(generated, Does.Contain("version == 1"), "Schema version 1 dispatch must be present");
+		Assert.That(generated, Does.Contain("version == 2"), "Schema version 2 dispatch must be present");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Should_generate_code_when_Schema_attribute_is_absent()
+	{
+		// Regression: the drift detector used to parse the quotes of the class's last
+		// attribute unconditionally. With no [Schema("...")] present, there are no quotes,
+		// so Substring(0, -1) threw and the generator emitted a broken .Errors.Generated.cs
+		// (CS8802/CS9248). The schema must be seedable from scratch.
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+public partial class SampleModel
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("partial class SampleModel")), Is.True,
+			"Generator must produce the model partial even without a pre-populated [Schema].");
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("ERROR DURING CODE GENERATION")), Is.False,
+			"Generator must not emit the error-diagnostic file when [Schema] is absent.");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Should_generate_code_when_last_attribute_has_no_quoted_string()
+	{
+		// Regression: a non-Schema attribute as the LAST attribute (no quoted argument)
+		// must not trip the textual quote-parsing in the drift detector.
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Component(IsUnique = true)]
+public partial class SampleComponent : IComponent
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("partial class SampleComponent")), Is.True);
+		Assert.That(result.GeneratedSources.Any(s => s.Contains("ERROR DURING CODE GENERATION")), Is.False,
+			"Generator must not emit the error-diagnostic file when the last attribute has no quotes.");
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
+	public void Domain_generator_should_NOT_emit_ISbxSerializer_methods()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Subject string?"")]
+public sealed partial class SomeModel
+{
+	public partial string? Subject { get; set; }
+}
+";
+
+		var domainResult = RunDomainOnlyGenerator(source);
+		var domainGenerated = string.Join(Environment.NewLine, domainResult.GeneratedSources);
+
+		Assert.That(domainGenerated, Does.Not.Contain("ISbxSerializer"),
+			"Domain generator output must not contain any ISbxSerializer references");
+	}
+
+	private static (string[] GeneratedSources, Diagnostic[] Errors) RunSbxGenerator(string source)
+	{
+		var generator = new Synqra.BinarySerializer.SourceGenerator.SbxBindingGenerator();
+
+		var compilation = CSharpCompilation.Create("SbxGeneratorTest")
+			.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source))
+			.AddReferences(GetMetadataReferences())
+			.WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		var driver = CSharpGeneratorDriver.Create(generator)
+			.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out _);
+
+		var runResult = driver.GetRunResult();
+		var generatedSources = runResult.Results
+			.SelectMany(x => x.GeneratedSources)
+			.Select(x => x.SourceText.ToString())
+			.ToArray();
+		var errors = outputCompilation.GetDiagnostics()
+			.Where(x => x.Severity == DiagnosticSeverity.Error)
+			.ToArray();
+
+		return (generatedSources, errors);
+	}
+
+	private static (string[] GeneratedSources, Diagnostic[] Errors) RunDomainOnlyGenerator(string source)
+	{
+		var generator = new ModelBindingGenerator();
+
+		var compilation = CSharpCompilation.Create("DomainGeneratorTest")
+			.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source))
+			.AddReferences(GetMetadataReferences())
+			.WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		var driver = CSharpGeneratorDriver.Create(generator)
+			.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out _);
+
+		var runResult = driver.GetRunResult();
+		var generatedSources = runResult.Results
+			.SelectMany(x => x.GeneratedSources)
+			.Select(x => x.SourceText.ToString())
+			.ToArray();
+		var errors = outputCompilation.GetDiagnostics()
+			.Where(x => x.Severity == DiagnosticSeverity.Error)
+			.ToArray();
+
+		return (generatedSources, errors);
+	}
+
 	private static MetadataReference[] GetMetadataReferences()
 	{
 		var references = new HashSet<string>(

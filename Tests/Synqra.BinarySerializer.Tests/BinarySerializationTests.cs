@@ -1,11 +1,10 @@
 ﻿using Microsoft.Testing.Platform.Extensions.Messages;
-using MongoDB.Bson;
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.SampleModels.Syncronization;
-using Synqra.Tests.TestHelpers;
+using Synqra.BinarySerializer.Tests;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,7 +22,7 @@ namespace Synqra.Tests.BinarySerialization;
 
 #pragma warning disable TUnitAssertions0002 // Assert statements must be awaited
 
-internal class BinarySerializationGuidTests : BaseTest
+internal class BinarySerializationGuidTests : SbxBaseTest
 {
 	[Test]
 	[Arguments( 1, "00000000-0000-0000-0000-000000000000", "00")] // glyph zero
@@ -307,7 +306,7 @@ internal class BinarySerializationGuidTests : BaseTest
 
 }
 
-internal class BinarySerializationFloatingPointTests : BaseTest
+internal class BinarySerializationFloatingPointTests : SbxBaseTest
 {
 	[Test]
 	[Arguments(0, null, "00000080")]
@@ -357,7 +356,7 @@ internal class BinarySerializationFloatingPointTests : BaseTest
 
 }
 
-internal class BinarySerializationSignedTests : BaseTest
+internal class BinarySerializationSignedTests : SbxBaseTest
 {
 	[Test]
 	[Arguments(10, 0, "00")]
@@ -480,7 +479,7 @@ internal class BinarySerializationSignedTests : BaseTest
 	}
 }
 
-internal class BinarySerializationStringTests : BaseTest
+internal class BinarySerializationStringTests : SbxBaseTest
 {
 	[Test]
 	// [Arguments("Hi", "024869")]
@@ -609,7 +608,7 @@ internal class BinarySerializationStringTests : BaseTest
 	}
 }
 
-internal class BinarySerializationObjectPropertyTests : BaseTest
+internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 {
 	[Test]
 	public void Should_10_serialize_generic_int_without_type()
@@ -873,7 +872,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	[MethodDataSource(typeof(BinarySerializationObjectPropertyTests), nameof(Should_20_serialize_sample_1_model_source))]
 	public async Task Should_20_serialize_sample_1_model(int id, object model, string expectedHex)
 	{
-		var options = SampleJsonSerializerContext.DefaultOptions.Indented();
+		var options = SbxTestJsonSerializerContext.DefaultOptions.Indented();
 		var doubleCheckJson = id < 40 || id >= 50; // 40..49 are for object field with a lsit assigned, impossible in JSON
 
 		var modelJson = doubleCheckJson ? JsonSerializer.Serialize(model, options) : null;
@@ -951,7 +950,7 @@ internal class BinarySerializationObjectPropertyTests : BaseTest
 	}
 }
 
-internal class BinarySerializationListDictionaryTests : BaseTest
+internal class BinarySerializationListDictionaryTests : SbxBaseTest
 {
 	[Test]
 	public void Should_15_serialize_list_of_int()
@@ -1078,7 +1077,7 @@ internal class BinarySerializationListDictionaryTests : BaseTest
 }
 
 // [NotInParallel]
-internal class BinarySerializationUnsignedTests : BaseTest
+internal class BinarySerializationUnsignedTests : SbxBaseTest
 {
 	[Test]
 	[Arguments(0x00u, "00")]
@@ -1250,7 +1249,7 @@ internal class BinarySerializationUnsignedTests : BaseTest
 	*/
 }
 
-public class BinarySerializationTests : BaseTest
+public class BinarySerializationTests : SbxBaseTest
 {
 
 	[Test]
@@ -1306,7 +1305,7 @@ public class BinarySerializationTests : BaseTest
 
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
 		HexDump(buffer[..pos]);
-		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions)
+		HexDump(Encoding.ASCII.GetBytes(JsonSerializer.Serialize(testData, new JsonSerializerOptions(SbxTestJsonSerializerContext.DefaultOptions)
 		{
 			WriteIndented = false
 		})));
@@ -1391,7 +1390,7 @@ public class BinarySerializationTests : BaseTest
 	}
 }
 
-public class BinarySerializationSchemaEvolutionTests : BaseTest
+public class BinarySerializationSchemaEvolutionTests : SbxBaseTest
 {
 	byte[] _buffer = new byte[10240];
 	int pos = 0;
