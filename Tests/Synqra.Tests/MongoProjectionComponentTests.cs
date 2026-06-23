@@ -223,4 +223,5 @@ public class MongoProjectionComponentTests : BaseTest
 		var wire = Projection.Wires.Single();
 		await Assert.That(Projection.GetWiresFrom(wire.Source).Count).IsEqualTo(1);
 	}
+
 }

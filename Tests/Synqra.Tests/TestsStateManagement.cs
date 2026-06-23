@@ -783,29 +783,6 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		await Assert.That(projection.Wires.Count).IsEqualTo(0);
 		await Assert.That(projection.GetWiresFrom(new PortRef(src, ct, Guid.Empty, "out")).Count).IsEqualTo(0);
 	}
-
-	[Test]
-	public async Task Should_47_Activator_fires_with_IsReplay_false_on_originating_event()
-	{
-		var node = new TestComponentNode { Name = "n8" };
-		_sut.GetCollection<TestComponentNode>().Add(node);
-
-		var c = new TestActivatableComponent { Marker = "ready" };
-		await _sut.SubmitCommandAsync(new AddComponentCommand
-		{
-			CommandId = GuidExtensions.CreateVersion7(),
-			TargetObject = node,
-			ComponentTypeId = TypeIdOf<TestActivatableComponent>(),
-			Data = c,
-		});
-
-		await Assert.That(c.ActivationCount).IsEqualTo(1);
-		await Assert.That(c.LastActivationWasReplay).IsEqualTo(false);
-		// (Replay path — IsReplay = true — is covered indirectly: LoadStateCoreAsync
-		// constructs an EventVisitorContext with IsReplay=true, and the same handler
-		// branches on it. A dedicated replay-storage test requires storing real Data
-		// payloads, which is Phase D — JSON polymorphism for components.)
-	}
 }
 
 [InheritsTests]
@@ -959,7 +936,6 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 			typeof(TestGeneratedContainerNode),
 			typeof(TestUniqueComponent),
 			typeof(TestTaggingComponent),
-			typeof(TestActivatableComponent),
 			typeof(Item),
 		]);
 
@@ -1296,30 +1272,6 @@ public partial class TestTaggingComponent : IComponent, IIdentifiable<Guid>
 	public partial string? Tag { get; set; }
 
 	Guid IIdentifiable<Guid>.Id => Id;
-}
-
-/// <summary>
-/// Activatable component used to verify replay-skip semantics. Sets <see cref="LastActivationWasReplay"/>
-/// on activation so tests can check whether activation fired at all and in which mode.
-/// </summary>
-[SynqraModel]
-[Component(IsUnique = true)]
-[Schema(2026.405, "1 Marker string?")]
-public partial class TestActivatableComponent : IComponent, IActivatableComponent
-{
-	public partial string? Marker { get; set; }
-
-	[JsonIgnore]
-	public int ActivationCount { get; private set; }
-
-	[JsonIgnore]
-	public bool? LastActivationWasReplay { get; private set; }
-
-	void IActivatableComponent.Activate(ComponentActivationContext context)
-	{
-		ActivationCount++;
-		LastActivationWasReplay = context.IsReplay;
-	}
 }
 
 [SynqraModel]

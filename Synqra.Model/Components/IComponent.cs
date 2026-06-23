@@ -16,20 +16,6 @@ public interface IComponent
 }
 
 /// <summary>
-/// Component that needs runtime setup on attach (subscriptions, polling, etc.).
-/// <para>
-/// Activation fires only on the originating <c>ComponentAddedEvent</c>, never on
-/// projection replay — so subscriptions are not re-registered every time the
-/// projection rebuilds. The <see cref="ComponentActivationContext.IsReplay"/>
-/// flag is honoured by the projection.
-/// </para>
-/// </summary>
-public interface IActivatableComponent
-{
-	void Activate(ComponentActivationContext context);
-}
-
-/// <summary>
 /// Existing components can veto an incoming attach. Useful when one component
 /// implies invariants about its peers (e.g. an OS component refusing a peer of
 /// a contradictory OS).

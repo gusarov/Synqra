@@ -4,9 +4,8 @@ namespace Synqra;
 
 /// <summary>
 /// Event emitted in response to a successful <see cref="AddComponentCommand"/>.
-/// The projection applies it by instantiating the component, attaching it to
-/// the container's <see cref="IComponentContainer.Components"/> collection,
-/// and (when applicable) firing <see cref="IActivatableComponent.Activate"/>.
+/// The projection applies it by instantiating the component and attaching it to
+/// the container's <see cref="IComponentContainer.Components"/> collection.
 /// </summary>
 [SynqraModel]
 [Schema(2026.405, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid Data object?")]
