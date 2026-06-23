@@ -55,6 +55,39 @@ Core abstractions you will see repeatedly:
 - `Contoso`
   Example/demo app spanning model, projection, web host, WASM, and Playwright.
 
+## Git Worktree Setup Gotcha (submodule + linked worktrees)
+
+**Do not start an agent session rooted at this repo (`external/Synqra`) with a "create worktree"
+option enabled.** Synqra is a git submodule of Quotaly, and its main checkout is an *absorbed*
+gitdir (`external/Synqra/.git` is a file, not a directory). Absorbed submodule gitdirs rely on an
+explicit `core.worktree` setting to know where their one true working tree lives. When a worktree
+is created directly against this submodule's gitdir (`Quotaly/.git/modules/external/Synqra/...`)
+instead of against the Quotaly superproject, the linked worktree inherits that `core.worktree`
+setting and resolves it relative to its own (deeper) `$GIT_DIR` — landing one directory short, at
+the bare `.git/modules/...` path instead of the real worktree directory. The working directory then
+appears to contain nothing but `.git`/`.claude`, and `git status` lists git-internal plumbing files
+(`objects/`, `refs/`, `hooks/`, etc.) as "untracked" — even though the index and HEAD are correct and
+no data was lost.
+
+**If you are an agent and detect you are operating in a linked worktree rooted at this submodule**
+(working directory matches `external/Synqra/.claude/worktrees/<name>` or similar, i.e. the session
+was *not* rooted at the Quotaly superproject) — **stop and tell the user**, rather than silently
+working around it. Worktrees created against the superproject (`Quotaly` itself) do not hit this
+bug, because git computes a fresh, correct `core.worktree` per superproject-worktree instead of
+inheriting a shared one. Ask the user to recreate the session rooted at the Quotaly superproject
+with the worktree option there instead.
+
+If you must continue in a broken submodule-rooted worktree anyway (e.g. user asks you to proceed),
+the one-time per-worktree fix is:
+
+```
+git config --worktree core.worktree "<absolute-path-to-this-worktree>"
+git checkout -- .
+```
+
+This only touches this worktree's `config.worktree` (requires `extensions.worktreeConfig = true`,
+already set) — it does not affect the main checkout or other worktrees.
+
 ## Toolchain And Build
 
 - SDK is pinned by `global.json` to `.NET SDK 10.0.100`.
