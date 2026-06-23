@@ -45,7 +45,10 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	public override Type Type => typeof(T);
 
-	public int Count => (int)_mongo.CountDocuments(FilterDefinition<BsonDocument>.Empty);
+	// Documents of this type but belonging to other (named) Synqra collections are partitioned out by _cid.
+	FilterDefinition<BsonDocument> Scope => Builders<BsonDocument>.Filter.Eq("_cid", CollectionId.ToString());
+
+	public int Count => (int)_mongo.CountDocuments(Scope);
 
 	bool ICollection<T>.IsReadOnly => false;
 
@@ -67,7 +70,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _mongo.Find(FilterDefinition<BsonDocument>.Empty).ToList())
+		foreach (var doc in _mongo.Find(Scope).ToList())
 		{
 			var id = Guid.Parse(doc["_id"].AsString);
 			if (_projection.TryGetTracked(id, out var existing))
@@ -77,6 +80,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 			}
 			var model = (T)_projection.FromDocument(doc, typeof(T));
 			_projection.AttachWithId(model, id, CollectionId);
+			_projection.RehydrateComponents(model, doc, id, CollectionId);
 			yield return model;
 		}
 	}
