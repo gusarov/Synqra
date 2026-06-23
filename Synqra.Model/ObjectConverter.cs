@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Synqra.BinarySerializer;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -267,7 +268,7 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 		typeof(IBindableModel),
 	};
 
-	static Dictionary<string, Type> _descriminators = new ();
+	static ConcurrentDictionary<string, Type> _descriminators = new ();
 
 	public static void RegisterGeneratedModel(Type type)
 	{
