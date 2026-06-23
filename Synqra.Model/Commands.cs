@@ -14,8 +14,6 @@ namespace Synqra;
 [JsonDerivedType(typeof(AddComponentCommand), "AddComponentCommand")]
 [JsonDerivedType(typeof(ChangeComponentPropertyCommand), "ChangeComponentPropertyCommand")]
 [JsonDerivedType(typeof(DeleteComponentCommand), "DeleteComponentCommand")]
-[JsonDerivedType(typeof(AddWireCommand), "AddWireCommand")]
-[JsonDerivedType(typeof(DeleteWireCommand), "DeleteWireCommand")]
 [SynqraModel]
 [Schema(2025.1, "")]
 [Schema(2025.791, "1")]

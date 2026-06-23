@@ -62,15 +62,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
 	private byte _attachedMaintain;
 
-	// Wires: a flat map by id plus from/to indexes for routing lookups. Wires
-	// are projection-managed state (not in any user-visible collection) — the
-	// runtime calls GetWiresFrom / GetWiresTo to discover where to route a
-	// value emitted on a source port.
-	private readonly ConcurrentDictionary<Guid, Wire> _wiresById = new();
-	private readonly ConcurrentDictionary<PortRef, List<Wire>> _wiresFrom = new();
-	private readonly ConcurrentDictionary<PortRef, List<Wire>> _wiresTo = new();
-	private readonly object _wireIndexLock = new();
-
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
 
@@ -773,44 +764,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(AddWireCommand cmd, CommandHandlerContext ctx)
-	{
-		// Allocate WireId here if the caller left it default — wires are
-		// projection-managed, but the caller may pre-pick an id (e.g. for
-		// deterministic / idempotent operations).
-		var wireId = cmd.WireId == default ? GuidExtensions.CreateVersion7() : cmd.WireId;
-		ctx.Events.Add(new WireAddedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
-
-			WireId = wireId,
-			SourceContainerId = cmd.SourceContainerId,
-			SourceComponentTypeId = cmd.SourceComponentTypeId,
-			SourceComponentId = cmd.SourceComponentId,
-			SourcePortName = cmd.SourcePortName,
-			TargetContainerId = cmd.TargetContainerId,
-			TargetComponentTypeId = cmd.TargetComponentTypeId,
-			TargetComponentId = cmd.TargetComponentId,
-			TargetPortName = cmd.TargetPortName,
-			Type = cmd.Type,
-		});
-		return Task.CompletedTask;
-	}
-
-	public Task VisitAsync(DeleteWireCommand cmd, CommandHandlerContext ctx)
-	{
-		ctx.Events.Add(new WireDeletedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
-			WireId = cmd.WireId,
-		});
-		return Task.CompletedTask;
-	}
-
 	#endregion
 
 	#region Event Handler
@@ -967,72 +920,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		return Task.CompletedTask;
 		// throw new NotImplementedException("ObjectDeletedEvent is not implemented yet");
-	}
-
-	public Task VisitAsync(WireAddedEvent ev, EventVisitorContext ctx)
-	{
-		var wire = new Wire
-		{
-			Id = ev.WireId,
-			SourceContainerId = ev.SourceContainerId,
-			SourceComponentTypeId = ev.SourceComponentTypeId,
-			SourceComponentId = ev.SourceComponentId,
-			SourcePortName = ev.SourcePortName,
-			TargetContainerId = ev.TargetContainerId,
-			TargetComponentTypeId = ev.TargetComponentTypeId,
-			TargetComponentId = ev.TargetComponentId,
-			TargetPortName = ev.TargetPortName,
-			Type = ev.Type,
-		};
-		_wiresById[wire.Id] = wire;
-		lock (_wireIndexLock)
-		{
-			_wiresFrom.GetOrAdd(wire.Source, _ => new List<Wire>()).Add(wire);
-			_wiresTo.GetOrAdd(wire.Target, _ => new List<Wire>()).Add(wire);
-		}
-		return Task.CompletedTask;
-	}
-
-	public Task VisitAsync(WireDeletedEvent ev, EventVisitorContext ctx)
-	{
-		if (_wiresById.TryRemove(ev.WireId, out var wire))
-		{
-			lock (_wireIndexLock)
-			{
-				if (_wiresFrom.TryGetValue(wire.Source, out var fromList))
-				{
-					fromList.RemoveAll(w => w.Id == wire.Id);
-					if (fromList.Count == 0) _wiresFrom.TryRemove(wire.Source, out _);
-				}
-				if (_wiresTo.TryGetValue(wire.Target, out var toList))
-				{
-					toList.RemoveAll(w => w.Id == wire.Id);
-					if (toList.Count == 0) _wiresTo.TryRemove(wire.Target, out _);
-				}
-			}
-		}
-		return Task.CompletedTask;
-	}
-
-	/// <summary>All wires the projection currently knows about.</summary>
-	public IReadOnlyCollection<Wire> Wires => (IReadOnlyCollection<Wire>)_wiresById.Values;
-
-	/// <summary>Wires departing the given source port.</summary>
-	public IReadOnlyList<Wire> GetWiresFrom(PortRef source)
-	{
-		lock (_wireIndexLock)
-		{
-			return _wiresFrom.TryGetValue(source, out var list) ? list.ToArray() : Array.Empty<Wire>();
-		}
-	}
-
-	/// <summary>Wires arriving at the given target port.</summary>
-	public IReadOnlyList<Wire> GetWiresTo(PortRef target)
-	{
-		lock (_wireIndexLock)
-		{
-			return _wiresTo.TryGetValue(target, out var list) ? list.ToArray() : Array.Empty<Wire>();
-		}
 	}
 
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)

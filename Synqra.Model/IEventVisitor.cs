@@ -14,9 +14,6 @@ public interface IEventVisitor<in T>
 	Task VisitAsync(ComponentPropertyChangedEvent ev, T ctx);
 	Task VisitAsync(ComponentDeletedEvent ev, T ctx);
 
-	Task VisitAsync(WireAddedEvent ev, T ctx);
-	Task VisitAsync(WireDeletedEvent ev, T ctx);
-
 	/*
 	Task VisitAsync(CommandPatched ev, T ctx);
 	Task VisitAsync(WorldStateProvided ev, T ctx);

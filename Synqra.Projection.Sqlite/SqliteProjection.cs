@@ -351,15 +351,6 @@ public class SqliteProjection : IProjection
 	{
 	}
 
-	public async Task VisitAsync(AddWireCommand cmd, CommandHandlerContext ctx)
-	{
-		// SQLite projection: wires not yet implemented here. InMemoryProjection is the reference.
-	}
-
-	public async Task VisitAsync(DeleteWireCommand cmd, CommandHandlerContext ctx)
-	{
-	}
-
 	#endregion
 
 	#region Event Visitor
@@ -396,9 +387,6 @@ public class SqliteProjection : IProjection
 	public async Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 	}
-
-	public async Task VisitAsync(WireAddedEvent ev, EventVisitorContext ctx) { }
-	public async Task VisitAsync(WireDeletedEvent ev, EventVisitorContext ctx) { }
 
 	public async Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 	{
