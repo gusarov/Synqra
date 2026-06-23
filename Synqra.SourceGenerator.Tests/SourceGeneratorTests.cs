@@ -194,6 +194,24 @@ public partial class SampleComponent : IComponent
 		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
 	}
 
+	[Test]
+	public void Should_compare_floats_safely()
+	{
+		for (int i = 0; i < 1000; i++)
+		{
+			float f1 = float.Round(9999.0f + (i / 1000.0f), 3);
+			string s1 = f1.ToString("0000.000");
+
+			string s2 = $"9999.{i:000}";
+			var f2 = float.Parse(s2);
+
+			Console.WriteLine($"{s1} ({f1}) == {s2} ({f2})");
+
+			Assert.That(s1, Is.EqualTo(s2));
+			Assert.That(f1, Is.EqualTo(f2));
+		}
+	}
+
 	private static (string[] GeneratedSources, Diagnostic[] Errors) RunGenerator(string source)
 	{
 		var generator = new ModelBindingGenerator();
