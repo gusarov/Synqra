@@ -542,8 +542,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			// PersistCommandEvents is on — see that property for the temporary opt-out used by
 			// backends that can't yet serialize the live command payload.
 			var toStore = PersistCommandEvents
-				? (IEnumerable<Event>)commandHandlingContext.Events
-				: commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent).ToList();
+				? commandHandlingContext.Events
+				: commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent);
 			await _eventStorage.AppendBatchAsync(toStore); // store event in storage and trigger replication
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
