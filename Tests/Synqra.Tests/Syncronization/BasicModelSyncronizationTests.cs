@@ -13,6 +13,7 @@ using System.Xml.Linq;
 
 namespace Synqra.Tests.Syncronization;
 
+[NotInParallel]
 internal class BasicModelSyncronizationTests : BaseTest
 {
 	SynqraTestNode _nodeMaster;
