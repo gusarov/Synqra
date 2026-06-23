@@ -8,8 +8,6 @@ namespace Synqra;
 /// </summary>
 public sealed class ComponentActivationContext
 {
-	public required IServiceProvider ServiceProvider { get; init; }
-
 	public required IComponentContainer Container { get; init; }
 	public required Guid ContainerId { get; init; }
 	public required IComponent Component { get; init; }

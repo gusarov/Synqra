@@ -59,6 +59,8 @@ public static class MongoSynqraStoreExtensions
 
 	static IServiceCollection AddMongoDbSynqraStoreCore(this IServiceCollection services)
 	{
+		// Shared component activation (curated DI surface for IActivatableComponent).
+		services.AddSynqraComponentActivator();
 		services.AddSingleton<MongoProjection>(sp =>
 		{
 			var options = sp.GetRequiredService<IOptions<MongoProjectionOptions>>().Value;

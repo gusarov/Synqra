@@ -56,7 +56,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public ITypeMetadataProvider TypeMetadataProvider { get; }
 
 	private readonly IEventReplicationService? _eventReplicationService;
-	private readonly IServiceProvider? _serviceProvider;
+	private readonly ISynqraComponentActivator? _componentActivator;
 	private readonly Dictionary<Guid, InMemoryStoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -81,14 +81,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
-		, IServiceProvider? serviceProvider = null
+		, ISynqraComponentActivator? componentActivator = null
 		)
 	{
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
 		_eventReplicationService = eventReplicationService;
-		_serviceProvider = serviceProvider;
+		_componentActivator = componentActivator;
 		_jsonSerializerOptions = jsonSerializerOptions;
 		if (jsonSerializerContext != null)
 		{
@@ -1047,11 +1047,12 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var container = ResolveContainer(ev.TargetId);
 
-		// Instantiate the component. Lookup the concrete type via the type registry,
-		// reuse the model-binding pathway so JSON payloads round-trip the same way
-		// as for normal SynqraModel objects.
+		// Instantiate the component via the shared activator (construct through the curated DI
+		// surface + hydrate stored data), reusing the model-binding pathway so JSON payloads
+		// round-trip the same way as for normal SynqraModel objects.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = MaterializeComponent(componentType, ev.Data);
+		var activator = RequireActivator();
+		var component = activator.Materialize(componentType, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{
@@ -1071,27 +1072,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				ev.CollectionId);
 		}
 
-		// Activation only fires on the originating event, never on replay.
-		// (LoadStateCoreAsync supplies a non-null EventVisitorContext with
-		// IsReplay = true; live event processing via ProcessEventAsync passes
-		// null, which is treated as "not replay".)
-		// Skipped silently when no IServiceProvider was supplied at construction —
-		// component activators that need DI would simply fail if called without
-		// one, so the projection refuses to start the call.
-		var isReplay = ctx is not null && ctx.IsReplay;
-		if (component is IActivatableComponent activatable
-			&& !isReplay
-			&& _serviceProvider is not null)
-		{
-			activatable.Activate(new ComponentActivationContext
-			{
-				ServiceProvider = _serviceProvider,
-				Container = container,
-				ContainerId = ev.TargetId,
-				Component = component,
-				IsReplay = false,
-			});
-		}
+		// Activation only fires on the originating event, never on replay. (LoadStateCoreAsync
+		// supplies a non-null EventVisitorContext with IsReplay = true; live event processing via
+		// ProcessEventAsync passes null, treated as "not replay".) The activator owns the curated
+		// service provider handed to IActivatableComponent.Activate.
+		activator.Activate(component, container, ev.TargetId, isReplay: ctx is not null && ctx.IsReplay);
 
 		// Component attach is a state-changing event on the container — bump
 		// the container's LastEventId so optimistic-concurrency precondition
@@ -1218,46 +1203,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
 	};
 
-	IComponent MaterializeComponent(Type componentType, object? data)
-	{
-		// Three cases:
-		//   - data is already an instance of componentType (typical when emitted locally)
-		//   - data is a json-shaped IDictionary<string, object?> (post-rehydrate from event store)
-		//   - data is null (component has no payload, e.g. a bare marker)
-		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var instance = Activator.CreateInstance(componentType)
-			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
-		var component = (IComponent)instance;
-
-		// Hydrate from dictionary via the bindable-model set path when the component
-		// is a SynqraModel; fall back to reflection otherwise.
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
-		return component;
-	}
+	ISynqraComponentActivator RequireActivator()
+		=> _componentActivator ?? throw new InvalidOperationException(
+			"InMemoryProjection needs an ISynqraComponentActivator for component events — register it via AddSynqraComponentActivator() (AddInMemorySynqraStore does this).");
 
 	#endregion
 

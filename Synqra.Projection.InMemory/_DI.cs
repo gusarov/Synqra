@@ -20,6 +20,8 @@ public static class InMemorySynqraExtensions
 		where TI : class, IObjectStore // it is very confusing, but it really means it is - interface! Because next line trigger multiple inheritance otherwise
 		where T : InMemoryProjection, TI
 	{
+		// Shared component activation (curated DI surface for IActivatableComponent).
+		services.AddSynqraComponentActivator();
 		services.AddSingleton<TI, T>();
 		services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<T>());
 		services.AddSingleton<IProjection>(sp => sp.GetRequiredService<T>());

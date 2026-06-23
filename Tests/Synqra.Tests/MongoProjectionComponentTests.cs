@@ -37,6 +37,7 @@ public class MongoProjectionComponentTests : BaseTest
 			typeof(TestComponentNode),
 			typeof(TestUniqueComponent),
 			typeof(TestTaggingComponent),
+			typeof(TestActivatableComponent),
 			typeof(Command),
 			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
@@ -52,6 +53,7 @@ public class MongoProjectionComponentTests : BaseTest
 			ser.Map(210, typeof(TestComponentNode));
 			ser.Map(211, typeof(TestUniqueComponent));
 			ser.Map(212, typeof(TestTaggingComponent));
+			ser.Map(213, typeof(TestActivatableComponent));
 			ser.Snapshot();
 		});
 
@@ -222,5 +224,32 @@ public class MongoProjectionComponentTests : BaseTest
 		await Assert.That(Projection.Wires.Count).IsEqualTo(1);
 		var wire = Projection.Wires.Single();
 		await Assert.That(Projection.GetWiresFrom(wire.Source).Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Should_70_activates_component_on_add_but_not_on_rehydrate()
+	{
+		var node = NewNode("activatable-host");
+		var id = Store.GetId(node);
+		await Store.SubmitCommandAsync(new AddComponentCommand
+		{
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetId = id,
+			ComponentTypeId = TypeId<TestActivatableComponent>(),
+			Data = new TestActivatableComponent { Marker = "m" },
+		});
+
+		// The shared activator ran IActivatableComponent.Activate exactly once, live (not replay).
+		var live = (TestActivatableComponent)node.Components.GetUniqueComponent(typeof(TestActivatableComponent))!;
+		await Assert.That(live.ActivationCount).IsEqualTo(1);
+		await Assert.That(live.LastActivationWasReplay).IsEqualTo(false);
+
+		// Rehydrating from the Mongo read-model on restart must NOT re-activate it.
+		Restart();
+		var reloaded = Store.GetCollection<TestComponentNode>().FirstOrDefault(n => Store.GetId(n) == id);
+		await Assert.That(reloaded).IsNotNull();
+		var rehydrated = (TestActivatableComponent)reloaded!.Components.GetUniqueComponent(typeof(TestActivatableComponent))!;
+		await Assert.That(rehydrated.Marker).IsEqualTo("m");
+		await Assert.That(rehydrated.ActivationCount).IsEqualTo(0);
 	}
 }

@@ -39,7 +39,7 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	readonly ISbxSerializerFactory _serializerFactory;
 	readonly IAppendStorage? _eventStorage;
 	readonly JsonSerializerOptions _jsonSerializerOptions;
-	readonly IServiceProvider? _serviceProvider;
+	readonly ISynqraComponentActivator? _componentActivator;
 
 	// Tracking: model instance <-> id, so generated setters can route ChangeObjectPropertyCommands and
 	// GetId() resolves a live instance to its key. A strong id->model map keeps tracked instances alive
@@ -67,14 +67,14 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		, IAppendStorage<Event, Guid>? eventStorage = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
-		, IServiceProvider? serviceProvider = null
+		, ISynqraComponentActivator? componentActivator = null
 		)
 	{
 		_database = database ?? throw new ArgumentNullException(nameof(database));
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
-		_serviceProvider = serviceProvider;
+		_componentActivator = componentActivator;
 		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentException("MongoProjection requires JsonSerializerOptions to materialize documents.", nameof(jsonSerializerOptions));
 
 		if (jsonSerializerContext is not null)
@@ -519,7 +519,8 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	{
 		var container = ResolveContainer(ev.TargetId);
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = MaterializeComponent(componentType, ev.Data);
+		var activator = RequireActivator();
+		var component = activator.Materialize(componentType, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{
@@ -532,23 +533,16 @@ public sealed class MongoProjection : IObjectStore, IProjection
 			bindableComponent.AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
 		}
 
-		var isReplay = ctx is not null && ctx.IsReplay;
-		if (component is IActivatableComponent activatable && !isReplay && _serviceProvider is not null)
-		{
-			activatable.Activate(new ComponentActivationContext
-			{
-				ServiceProvider = _serviceProvider,
-				Container = container,
-				ContainerId = ev.TargetId,
-				Component = component,
-				IsReplay = false,
-			});
-		}
+		activator.Activate(component, container, ev.TargetId, isReplay: ctx is not null && ctx.IsReplay);
 
 		Upsert(ev.TargetTypeId, ev.CollectionId, ev.TargetId, container);
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
+
+	ISynqraComponentActivator RequireActivator()
+		=> _componentActivator ?? throw new InvalidOperationException(
+			"MongoProjection needs an ISynqraComponentActivator for component events — register it via AddSynqraComponentActivator() (AddMongoDbSynqraStore does this).");
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
@@ -730,40 +724,4 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
 	};
 
-	IComponent MaterializeComponent(Type componentType, object? data)
-	{
-		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var component = (IComponent)(Activator.CreateInstance(componentType)
-			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'."));
-
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null)
-				{
-					continue;
-				}
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
-		return component;
-	}
 }
