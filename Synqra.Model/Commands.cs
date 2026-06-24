@@ -87,12 +87,12 @@ public abstract partial class SingleObjectCommand : Command
 [Schema(2025.798, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
 [Schema(2025.799, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IBindableModel")]
 [Schema(2025.800, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
-[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
+[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data ObjectData")]
 public partial class CreateObjectCommand : SingleObjectCommand
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 
-	public partial object Data { get; set; }
+	public required partial ObjectData Data { get; set; }
 }
 
 [SynqraModel]

@@ -620,51 +620,33 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
-			// Data = cmd.Data,
+			Data = cmd.Data,
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
-			DataObject = cmd.TargetObject, // or may be entire object
+			MaterializedObject = cmd.TargetObject, // or may be entire object
 		};
 		ctx.Events.Add(created);
 
-		if (false && cmd.TargetObject is IBindableModel bm) // I just found it out while debugging, do not remember why originally, but it is likely because it is not implemented yet (and still not)
+		// cmd.Data is the canonical property bag (already normalized by ObjectData.From at the
+		// command boundary, with default-valued properties filtered out), so we just fan it out
+		// into one ObjectPropertyChangedEvent per non-null entry — no reflection, no type-sniffing.
+		foreach (var (propertyName, value) in cmd.Data)
 		{
-			
-		}
-		else
-		{
-			var pros = cmd.Data.GetType().GetProperties().Where(x => x.CanWrite && x.CanRead);
-			foreach (var pro in pros)
+			if (value is null)
 			{
-				// Skip computed/navigation accessors flagged as non-persisted (e.g. an edge's typed
-				// Source/Target, which merely project the scalar id columns). Persisting them would
-				// emit the whole referenced object as a property value and, on replay, set it before
-				// the scalar ids — corrupting reconstruction.
-				if (pro.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
-				{
-					continue;
-				}
-				var value = pro.GetValue(cmd.Data);
-				// SynqraTypeExtensions
-				if (Equals(value, pro.PropertyType.GetDefault()))
-				{
-					continue;
-				}
-				if (value != null)
-				{
-					ctx.Events.Add(new ObjectPropertyChangedEvent
-					{
-						StreamId = cmd.StreamId,
-						CommandId = cmd.CommandId,
-						CollectionId = cmd.CollectionId,
-						EventId = GuidExtensions.CreateVersion7(),
-						TargetTypeId = cmd.TargetTypeId,
-						TargetId = cmd.TargetId,
-						PropertyName = pro.Name,
-						OldValue = null,
-						NewValue = value,
-					});
-				}
+				continue;
 			}
+			ctx.Events.Add(new ObjectPropertyChangedEvent
+			{
+				StreamId = cmd.StreamId,
+				CommandId = cmd.CommandId,
+				CollectionId = cmd.CollectionId,
+				EventId = GuidExtensions.CreateVersion7(),
+				TargetTypeId = cmd.TargetTypeId,
+				TargetId = cmd.TargetId,
+				PropertyName = propertyName,
+				OldValue = null,
+				NewValue = value,
+			});
 		}
 
 		/*
@@ -850,27 +832,24 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 
 		object newItem;
-		if (ev.DataObject != null)
+		if (ev.MaterializedObject != null)
 		{
-			newItem = ev.DataObject;
+			// Locally-emitted create path: attach the very instance the caller created.
+			newItem = ev.MaterializedObject;
 		}
 		else if (TryGetModel(ev.TargetId, out var data))
 		{
 			newItem = data.Model;
 		}
-		/*
-		else if (ev.DataString != null)
-		{
-			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerOptions);
-		}
-		*/
-		else if (ev.Data != null)
-		{
-			newItem = ev.Data; //JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerOptions), typeMetadata.Type, _jsonSerializerOptions);
-		}
 		else
 		{
-			newItem = Activator.CreateInstance(typeMetadata.Type);
+			// Replayed/deserialized event: rebuild the instance from the canonical property bag.
+			newItem = Activator.CreateInstance(typeMetadata.Type)
+				?? throw new InvalidOperationException($"Could not instantiate '{typeMetadata.Type.Name}'.");
+			if (ev.Data.Count > 0)
+			{
+				HydrateFromData(newItem, typeMetadata.Type, ev.Data);
+			}
 		}
 
 		/*
@@ -1214,6 +1193,34 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		TryGetModel(targetId, out var data);
 		return ComponentApplyHelpers.ResolveContainer(data.Model, targetId);
+	}
+
+	// Apply a canonical property bag onto a freshly-created instance. Uses the bindable-model
+	// Set path for SynqraModel objects (no reflection) and falls back to reflection for plain
+	// POCOs, converting IConvertible values to each target property's type.
+	static void HydrateFromData(object instance, Type type, ObjectData data)
+	{
+		if (instance is IBindableModel bindable)
+		{
+			foreach (var (key, value) in data)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else
+		{
+			foreach (var (key, value) in data)
+			{
+				var pi = type.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(instance, v);
+			}
+		}
 	}
 
 	#endregion

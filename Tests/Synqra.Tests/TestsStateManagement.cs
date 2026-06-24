@@ -763,7 +763,7 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 
 		var q0 = new DemoModel(); // must register polimorfic before serializaiton
 		var q1 = new Item(); // must register polimorfic before serializaiton
-		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
+		var q2 = new CreateObjectCommand { Data = new ObjectData() }; // must register polimorfic before serializaiton
 		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();

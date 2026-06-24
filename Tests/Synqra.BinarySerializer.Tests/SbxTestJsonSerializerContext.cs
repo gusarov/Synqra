@@ -50,6 +50,7 @@ namespace Synqra.BinarySerializer.Tests;
 [JsonSerializable(typeof(Synqra.ObjectCreatedEvent))]
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
 [JsonSerializable(typeof(Synqra.CreateObjectCommand))]
+[JsonSerializable(typeof(Synqra.ObjectData))]
 [JsonSerializable(typeof(Synqra.Command))]
 [JsonSerializable(typeof(Synqra.Event))]
 

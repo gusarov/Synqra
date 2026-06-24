@@ -41,6 +41,7 @@ namespace Synqra;
 [JsonSerializable(typeof(TransportOperation))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
+[JsonSerializable(typeof(ObjectData))]
 public partial class AppJsonContext : JsonSerializerContext
 {
 	public static JsonSerializerOptions DefaultOptions { get; }

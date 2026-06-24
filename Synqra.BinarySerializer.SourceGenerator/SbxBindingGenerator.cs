@@ -320,6 +320,13 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			{
 				return "Dict<string, object>";
 			}
+			// Concrete IDictionary-derived types (e.g. ObjectData : Dictionary<string, object?>)
+			// must be detected as dictionaries here, before the IEnumerable fallback below would
+			// otherwise mis-classify them as List<KeyValuePair<,>> (Dictionary implements both).
+			if (TryGetIDictionaryKeyAndElement(named, out var namedDictKey, out var namedDictElem))
+			{
+				return $"Dict<{namedDictKey}, {namedDictElem}>";
+			}
 			foreach (var i in named.AllInterfaces)
 			{
 				DebugLog($"[Type {debug}] °1 Detected Interface: {i}");
@@ -845,7 +852,22 @@ public class SbxBindingGenerator : IIncrementalGenerator
 				var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
 					? GetFieldName(pro)
 					: "this." + pro.Name;
-				body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: containingType.Name)}(in buffer, ref pos);");
+				var method = DeserializeMethod(pro.Type, debug: containingType.Name);
+				var call = $"serializer.Deserialize{method}(in buffer, ref pos)";
+				if (method != null && method.StartsWith("Dict<")
+					&& pro.Type is INamedTypeSymbol dictType
+					&& dictType.TypeKind == TypeKind.Class
+					&& dictType.Name != "Dictionary")
+				{
+					// Concrete IDictionary-derived target (e.g. ObjectData): DeserializeDict returns a
+					// plain Dictionary, so copy-construct the target type rather than casting — a cast
+					// would throw because the runtime object isn't an instance of the subclass.
+					body.AppendLine($"\t\t\t{target} = new {FQN(pro.Type)}({call});");
+				}
+				else
+				{
+					body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)}){call};");
+				}
 			}
 			body.AppendLine($"\t\t}}");
 			els = "else ";

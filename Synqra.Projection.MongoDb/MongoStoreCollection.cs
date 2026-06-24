@@ -59,7 +59,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 			TargetTypeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetId = id,
-			Data = item,
+			Data = ObjectData.From(item),
 			TargetObject = item,
 		});
 		task.GetAwaiter().GetResult();

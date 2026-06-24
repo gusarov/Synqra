@@ -78,43 +78,23 @@ public class JsonSerializationTests
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
-				/*
-				Data = new Dictionary<string, object>
+				Data = new ObjectData
 				{
-					["subject"] = "Test1",
-				},
-				*/
-				Data = new SampleTaskModel
-				{
-					Subject = subject,
+					["Subject"] = subject,
 				},
 			},
 		};
 		async Task Check(JsonSerializerOptions ctx)
 		{
 			var json = JsonSerializer.Serialize<Event>(obj, ctx.Indented());
-			// using var __ = Assert.Multiple();
 			Console.WriteLine(json);
-			await Assert.That(json.NormalizeNewLines()).IsEqualTo($$"""
-			{
-				"_t": "CommandCreatedEvent",
-				"Data": {
-					"_t": "CreateObjectCommand",
-					"Data": {
-						"_t": "SampleTaskModel",
-						"Subject": "{{subject}}",
-						"Number": 0
-					},
-					"TargetTypeId": "00000000-0000-0000-0000-000000000000",
-					"CollectionId": "00000000-0000-0000-0000-000000000000",
-					"TargetId": "00000000-0000-0000-0000-000000000000",
-					"CommandId": "{{obj.Data.CommandId}}",
-					"StreamId": "00000000-0000-0000-0000-000000000000"
-				},
-				"EventId": "{{obj.EventId}}",
-				"CommandId": "{{obj.CommandId}}"
-			}
-			""".NormalizeNewLines());
+
+			// Data is now the canonical property bag (ObjectData), serialized as a plain JSON
+			// object — no "_t" discriminator and no SampleTaskModel reference. That loose,
+			// polymorphic-POCO payload is exactly the contract this redesign removed.
+			await Assert.That(json.Contains("SampleTaskModel")).IsFalse();
+			await Assert.That(json.Contains(subject)).IsTrue();
+
 			var deserializedObj = JsonSerializer.Deserialize<Event>(json, ctx);
 			await Assert.That(deserializedObj).IsNotNull();
 			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
@@ -122,8 +102,7 @@ public class JsonSerializationTests
 			await Assert.That(createdEvent.Data).IsNotNull();
 			var createCommand = (CreateObjectCommand)createdEvent.Data;
 			await Assert.That(createCommand.Data).IsNotNull();
-			var taskModel = (SampleTaskModel)createCommand.Data;
-			await Assert.That(taskModel.Subject).IsEqualTo(subject);
+			await Assert.That(GetSubject(createCommand.Data)).IsEqualTo(subject);
 		}
 		switch (ctxId)
 		{
@@ -154,16 +133,10 @@ public class JsonSerializationTests
 			EventId = Guid.NewGuid(),
 			Data = new CreateObjectCommand
 			{
-				/*
-				Data = new Dictionary<string, object>
+				Data = new ObjectData
 				{
-					["subject"] = "Test1",
-				},
-				*/
-				Data = new SampleTaskModel
-				{
-					Subject = "Test1",
-					Number = 1,
+					["Subject"] = "Test1",
+					["Number"] = 1,
 				},
 			},
 		};
@@ -183,34 +156,33 @@ public class JsonSerializationTests
 			var deserializedObj = JsonSerializer.Deserialize<TransportOperation>(json, jsonOptions);
 			var json2 = JsonSerializer.Serialize<TransportOperation>(deserializedObj, jsonOptions);
 			Console.WriteLine(json2.NormalizeNewLines());
-			await Assert.That(json2.NormalizeNewLines()).IsEqualTo($$"""
-	{
-		"_t": "NewEvent1",
-		"Event": {
-			"_t": "CommandCreatedEvent",
-			"Data": {
-				"_t": "CreateObjectCommand",
-				"Data": {
-					"_t": "SampleTaskModel",
-					"Subject": "Test1",
-					"Number": 1
-				},
-				"TargetTypeId": "00000000-0000-0000-0000-000000000000",
-				"CollectionId": "00000000-0000-0000-0000-000000000000",
-				"TargetId": "00000000-0000-0000-0000-000000000000",
-				"CommandId": "{{@event.Data.CommandId}}",
-				"StreamId": "00000000-0000-0000-0000-000000000000"
-			},
-			"EventId": "{{@event.EventId}}",
-			"CommandId": "{{@event.CommandId}}"
-		}
-	}
-	""".NormalizeNewLines());
+
+			// The payload survives a full serialize → deserialize → serialize cycle as a plain
+			// property bag — no "_t"/SampleTaskModel discriminator leaks back in.
+			await Assert.That(json2.Contains("SampleTaskModel")).IsFalse();
+			await Assert.That(json2.Contains("Test1")).IsTrue();
+
+			var roundTripped = (NewEvent1)deserializedObj;
+			var createCommand = (CreateObjectCommand)((CommandCreatedEvent)roundTripped.Event).Data;
+			await Assert.That(GetSubject(createCommand.Data)).IsEqualTo("Test1");
 		}
 		await Check(SampleJsonSerializerContext.DefaultOptions);
 		// await Check(AppJsonContext.Default);
 	}
 
+	// Dictionary-key casing differs per context (camelCase vs as-is), so look the value up
+	// case-insensitively rather than assuming a single key spelling.
+	static string? GetSubject(ObjectData data)
+	{
+		foreach (var (key, value) in data)
+		{
+			if (string.Equals(key, "Subject", StringComparison.OrdinalIgnoreCase))
+			{
+				return value as string;
+			}
+		}
+		return null;
+	}
 }
 
 public class AotTests

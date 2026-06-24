@@ -138,8 +138,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 			TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
 			TargetId = attachedData.Id,
-			Data = item, // data?.Count > 0 ? data : null,
-						 // DataJson = dataJson,
+			Data = ObjectData.From(item),
 			TargetObject = item,
 		});
 		if (OperatingSystem.IsBrowser())

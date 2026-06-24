@@ -226,7 +226,7 @@ public static class MongoEventClassMaps
 		{
 			cm.AutoMap();
 			cm.SetDiscriminator(discriminator);
-			// e.g. ObjectCreatedEvent.DataObject is the in-memory materialized object,
+			// e.g. ObjectCreatedEvent.MaterializedObject is the in-memory materialized object,
 			// marked [JsonIgnore] — it must not be persisted into the durable log.
 			UnmapJsonIgnored(cm);
 			configure?.Invoke(cm);
