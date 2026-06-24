@@ -19,7 +19,6 @@ namespace Synqra.Tests;
 /// <c>_c</c> array, and wires are persisted.
 /// </summary>
 [NotInParallel]
-[Property("CI", "false")]
 public class MongoProjectionComponentTests : BaseTest
 {
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)

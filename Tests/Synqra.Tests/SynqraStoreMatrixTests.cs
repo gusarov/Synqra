@@ -185,7 +185,6 @@ public abstract class Cobra_InMemoryEventStorageContract : Cobra_SynqraStoreCont
 
 [InheritsTests]
 [NotInParallel]
-[Property("CI", "false")]
 public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => services.AddInMemorySynqraStore();
@@ -193,7 +192,6 @@ public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventSt
 
 [InheritsTests]
 [NotInParallel]
-[Property("CI", "false")]
 public sealed class Cobra_Mongo_Storage_With_Mongo_Store : Cobra_MongoEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
