@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, IEdgeIndex
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -70,6 +70,12 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	private readonly ConcurrentDictionary<PortRef, List<Wire>> _wiresFrom = new();
 	private readonly ConcurrentDictionary<PortRef, List<Wire>> _wiresTo = new();
 	private readonly object _wireIndexLock = new();
+
+	// Edges: dedup by structural key plus a single by-ref incidence index. Inserted on
+	// ObjectCreatedEvent for any Edge-derived object — edges ride the plain object lifecycle,
+	// there is no dedicated edge command/event. See plans/edges.md.
+	private readonly ConcurrentDictionary<EdgeKey, Edge> _edgesByKey = new();
+	private readonly ConcurrentDictionary<Ref, List<Edge>> _edgesByRef = new();
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
@@ -905,6 +911,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		collection.AddByEvent(newItem);
 
+		if (newItem is Edge edge)
+		{
+			IndexEdge(ev, edge);
+		}
+
 		// Record the creation event as the target's "last applied event" so that
 		// the first generated-setter write to this fresh object can pre-condition
 		// against it via ExpectedLastEventId.
@@ -914,6 +925,49 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		return Task.CompletedTask;
 	}
+
+	/// <summary>
+	/// Registers a materialized <see cref="Edge"/> in the adjacency index, rejecting a
+	/// structural duplicate (same concrete type + endpoint pair) before it can be indexed.
+	/// Runs before the originating event reaches durable storage (see ProcessCommandAsync),
+	/// so a rejected edge is never persisted — same veto-as-exception pattern as
+	/// <see cref="IComponentsCollection.TryAdd"/> for ComponentAddedEvent.
+	/// </summary>
+	void IndexEdge(ObjectCreatedEvent ev, Edge edge)
+	{
+		var key = edge.StructuralKey;
+		if (!_edgesByKey.TryAdd(key, edge))
+		{
+			throw new InvalidOperationException(
+				$"ObjectCreatedEvent {ev.EventId} could not register a '{edge.GetType().Name}' edge — an equivalent edge already exists between the same endpoints.");
+		}
+		_edgesByRef.GetOrAdd(edge.A, _ => new List<Edge>()).Add(edge);
+		if (edge.B != edge.A)
+		{
+			_edgesByRef.GetOrAdd(edge.B, _ => new List<Edge>()).Add(edge);
+		}
+	}
+
+	// ---------------------------------------------------------------- IEdgeIndex
+
+	IReadOnlyCollection<Edge> IEdgeIndex.Edges => (IReadOnlyCollection<Edge>)_edgesByKey.Values;
+
+	IReadOnlyList<Edge> IEdgeIndex.EdgesFrom(Ref r) =>
+		_edgesByRef.TryGetValue(r, out var list)
+			? list.Where(e => e is UndirectedEdge || e.A == r).ToArray()
+			: Array.Empty<Edge>();
+
+	IReadOnlyList<Edge> IEdgeIndex.EdgesTo(Ref r) =>
+		_edgesByRef.TryGetValue(r, out var list)
+			? list.Where(e => e is UndirectedEdge || e.B == r).ToArray()
+			: Array.Empty<Edge>();
+
+	IReadOnlyList<Edge> IEdgeIndex.EdgesBetween(Ref a, Ref b) =>
+		_edgesByRef.TryGetValue(a, out var list)
+			? list.Where(e => (e.A == a && e.B == b) || (e.A == b && e.B == a)).ToArray()
+			: Array.Empty<Edge>();
+
+	bool IEdgeIndex.TryGetByKey(EdgeKey key, out Edge? edge) => _edgesByKey.TryGetValue(key, out edge);
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
