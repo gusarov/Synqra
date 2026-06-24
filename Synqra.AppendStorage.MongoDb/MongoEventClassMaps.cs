@@ -82,8 +82,6 @@ public static class MongoEventClassMaps
 			RegisterDerived<ComponentAddedEvent>("ComponentAddedEvent");
 			RegisterDerived<ComponentPropertyChangedEvent>("ComponentPropertyChangedEvent");
 			RegisterDerived<ComponentDeletedEvent>("ComponentDeletedEvent");
-			RegisterDerived<WireAddedEvent>("WireAddedEvent");
-			RegisterDerived<WireDeletedEvent>("WireDeletedEvent");
 
 			_registered = true;
 		}

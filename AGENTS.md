@@ -130,7 +130,7 @@ minimal, auto-merge-safe diffs.
 - When a convenience property must NOT be persisted/serialized (e.g. a computed accessor on a
   `[SynqraModel]`), make it a read-only expression-bodied member. A `{ get; set; }` property is
   treated by the model-binding generator as a stored field and gets stamped into `[Schema]`
-  (and emits a backing-field reference that may not exist). See `Wire.PortType` for the pattern.
+  (and emits a backing-field reference that may not exist).
 
 ## Testing Notes
 

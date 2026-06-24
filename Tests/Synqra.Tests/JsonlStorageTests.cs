@@ -604,39 +604,46 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 """.NormalizeNewLines());
 	}
 
-	// Durable-log serialization of wire events. A wire's whole shape is primitive
-	// (Guids/strings/int) and lives directly on WireAdded/WireDeletedEvent — no
-	// polymorphic component payload. This pins that those events survive a real
-	// serialize -> restart -> deserialize cycle through the JSONL log, which is the
-	// concern that matters when picking a durable backend (file today, Mongo next):
-	// the event body must round-trip losslessly so replay can rebuild wire state.
+	// Durable-log serialization of scalar-only events. A ComponentDeletedEvent's
+	// whole shape is primitive (Guids only) — no polymorphic component payload.
+	// This pins that such events survive a real serialize -> restart -> deserialize
+	// cycle through the JSONL log, which is the concern that matters when picking a
+	// durable backend (file today, Mongo next): the event body must round-trip
+	// losslessly so replay can rebuild state.
 	[Test]
-	public async Task Should_round_trip_wire_events_through_jsonl()
+	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
-		var wireId = Guid.Parse("00000010-0001-7000-8000-00000000aa01");
-		var srcContainer = Guid.Parse("00000010-0002-7000-8000-00000000aa02");
-		var srcType = Guid.Parse("00000010-0003-7000-8000-00000000aa03");
-		var tgtContainer = Guid.Parse("00000010-0004-7000-8000-00000000aa04");
-		var tgtType = Guid.Parse("00000010-0005-7000-8000-00000000aa05");
+		var targetId1 = Guid.Parse("00000010-0001-7000-8000-00000000aa01");
+		var targetType1 = Guid.Parse("00000010-0002-7000-8000-00000000aa02");
+		var collection1 = Guid.Parse("00000010-0003-7000-8000-00000000aa03");
+		var componentType1 = Guid.Parse("00000010-0004-7000-8000-00000000aa04");
+		var componentId1 = Guid.Parse("00000010-0005-7000-8000-00000000aa05");
 
-		await _storage.AppendAsync(new WireAddedEvent
+		var targetId2 = Guid.Parse("00000010-0006-7000-8000-00000000aa06");
+		var targetType2 = Guid.Parse("00000010-0007-7000-8000-00000000aa07");
+		var collection2 = Guid.Parse("00000010-0008-7000-8000-00000000aa08");
+		var componentType2 = Guid.Parse("00000010-0009-7000-8000-00000000aa09");
+		var componentId2 = Guid.Parse("00000010-000a-7000-8000-00000000aa0a");
+
+		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
 			EventId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			WireId = wireId,
-			SourceContainerId = srcContainer,
-			SourceComponentTypeId = srcType,
-			SourcePortName = "out",
-			TargetContainerId = tgtContainer,
-			TargetComponentTypeId = tgtType,
-			TargetPortName = "in",
-			Type = (int)PortType.Event,
+			TargetId = targetId1,
+			TargetTypeId = targetType1,
+			CollectionId = collection1,
+			ComponentTypeId = componentType1,
+			ComponentId = componentId1,
 		});
-		await _storage.AppendAsync(new WireDeletedEvent
+		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
 			EventId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			WireId = wireId,
+			TargetId = targetId2,
+			TargetTypeId = targetType2,
+			CollectionId = collection2,
+			ComponentTypeId = componentType2,
+			ComponentId = componentId2,
 		});
 
 		await ReopenAsync();
@@ -644,19 +651,20 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		var events = _storage.GetAllAsync().ToBlockingEnumerable().ToArray();
 		await Assert.That(events).HasCount(2);
 
-		var added = events[0] as WireAddedEvent;
-		await Assert.That(added).IsNotNull();
-		await Assert.That(added!.WireId).IsEqualTo(wireId);
-		await Assert.That(added.SourceContainerId).IsEqualTo(srcContainer);
-		await Assert.That(added.SourceComponentTypeId).IsEqualTo(srcType);
-		await Assert.That(added.SourcePortName).IsEqualTo("out");
-		await Assert.That(added.TargetContainerId).IsEqualTo(tgtContainer);
-		await Assert.That(added.TargetComponentTypeId).IsEqualTo(tgtType);
-		await Assert.That(added.TargetPortName).IsEqualTo("in");
-		await Assert.That(added.Type).IsEqualTo((int)PortType.Event);
+		var first = events[0] as ComponentDeletedEvent;
+		await Assert.That(first).IsNotNull();
+		await Assert.That(first!.TargetId).IsEqualTo(targetId1);
+		await Assert.That(first.TargetTypeId).IsEqualTo(targetType1);
+		await Assert.That(first.CollectionId).IsEqualTo(collection1);
+		await Assert.That(first.ComponentTypeId).IsEqualTo(componentType1);
+		await Assert.That(first.ComponentId).IsEqualTo(componentId1);
 
-		var deleted = events[1] as WireDeletedEvent;
-		await Assert.That(deleted).IsNotNull();
-		await Assert.That(deleted!.WireId).IsEqualTo(wireId);
+		var second = events[1] as ComponentDeletedEvent;
+		await Assert.That(second).IsNotNull();
+		await Assert.That(second!.TargetId).IsEqualTo(targetId2);
+		await Assert.That(second.TargetTypeId).IsEqualTo(targetType2);
+		await Assert.That(second.CollectionId).IsEqualTo(collection2);
+		await Assert.That(second.ComponentTypeId).IsEqualTo(componentType2);
+		await Assert.That(second.ComponentId).IsEqualTo(componentId2);
 	}
 }
