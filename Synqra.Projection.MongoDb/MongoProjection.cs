@@ -295,8 +295,6 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
 	public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
 	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(AddWireCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize wires yet.");
-	public Task VisitAsync(DeleteWireCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize wires yet.");
 
 	// ---------------------------------------------------------------- IEventVisitor
 
@@ -358,7 +356,5 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(WireAddedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize wires yet.");
-	public Task VisitAsync(WireDeletedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize wires yet.");
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 }
