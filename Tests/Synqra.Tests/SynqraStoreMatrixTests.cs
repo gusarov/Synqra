@@ -198,6 +198,87 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var ids = BuildGraph(store);
 		await AssertGraph(store, ids);
 	}
+
+	// ---------------------------------------------------------------- Cyclic graphs
+	//
+	// Nothing here checks for cycles, on purpose. Every nav property (Children/Parent/Parents/
+	// RelatedNodes/etc.) is a single-hop query over ILinkIndex — there is no recursive graph walk
+	// anywhere in the framework that a cycle could send into an infinite loop (the only
+	// "ancestors" walk in the whole codebase is ObjectConverter's CLR *type* inheritance helper,
+	// unrelated to link graphs). A directed link's structural key is ordered (A->B != B->A), so a
+	// mutual or ring cycle is just N distinct links, no different from any other graph shape. A
+	// self-loop (A->A) is explicitly accounted for in indexing (Source/Target collapse to one
+	// adjacency-list entry, not two) rather than merely "happening not to crash".
+
+	[Test]
+	public async Task Should_31_navigate_a_self_loop_without_issue()
+	{
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+
+		a.Children.Add(a);
+
+		await Assert.That(a.Children.Count).IsEqualTo(1);
+		await Assert.That(store.GetId(a.Children.First())).IsEqualTo(store.GetId(a));
+		await Assert.That(a.Parent).IsNotNull();
+		await Assert.That(store.GetId(a.Parent!)).IsEqualTo(store.GetId(a));
+		await Assert.That(a.Parents.Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Should_32_navigate_a_mutual_two_node_cycle_without_issue()
+	{
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+
+		a.Children.Add(b); // A -> B
+		b.Children.Add(a); // B -> A — directed, so this is a distinct link, not a duplicate
+
+		await Assert.That(store.GetId(a.Children.Single())).IsEqualTo(store.GetId(b));
+		await Assert.That(store.GetId(b.Children.Single())).IsEqualTo(store.GetId(a));
+		await Assert.That(store.GetId(a.Parent!)).IsEqualTo(store.GetId(b));
+		await Assert.That(store.GetId(b.Parent!)).IsEqualTo(store.GetId(a));
+	}
+
+	[Test]
+	public async Task Should_33_navigate_a_three_node_ring_cycle_without_issue()
+	{
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+		var c = AddNode(store, "c");
+
+		a.Children.Add(b); // A -> B -> C -> A
+		b.Children.Add(c);
+		c.Children.Add(a);
+
+		await Assert.That(store.GetId(a.Children.Single())).IsEqualTo(store.GetId(b));
+		await Assert.That(store.GetId(b.Children.Single())).IsEqualTo(store.GetId(c));
+		await Assert.That(store.GetId(c.Children.Single())).IsEqualTo(store.GetId(a));
+		await Assert.That(store.GetId(a.Parent!)).IsEqualTo(store.GetId(c));
+		await Assert.That(store.GetId(b.Parent!)).IsEqualTo(store.GetId(a));
+		await Assert.That(store.GetId(c.Parent!)).IsEqualTo(store.GetId(b));
+	}
+
+	[Test]
+	public async Task Should_34_navigate_an_undirected_ring_cycle_without_issue()
+	{
+		// Undirected folds A-B and B-A to the same structural key, so a "cycle" here means three
+		// distinct node pairs (A-B, B-C, C-A), not three attempts at the same link.
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+		var c = AddNode(store, "c");
+
+		a.RelatedNodes.Add(b);
+		b.RelatedNodes.Add(c);
+		c.RelatedNodes.Add(a);
+
+		await Assert.That(a.RelatedNodes.Count).IsEqualTo(2);
+		await Assert.That(b.RelatedNodes.Count).IsEqualTo(2);
+		await Assert.That(c.RelatedNodes.Count).IsEqualTo(2);
+	}
 }
 
 /// <summary>
@@ -249,6 +330,38 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		}
 
 		await AssertGraph(store2, ids);
+	}
+
+	[Test]
+	public async Task Should_41_cyclic_graph_survives_restart_via_replay()
+	{
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+		var c = AddNode(store, "c");
+		a.Children.Add(b); // A -> B -> C -> A
+		b.Children.Add(c);
+		c.Children.Add(a);
+		var idA = store.GetId(a);
+		var idB = store.GetId(b);
+		var idC = store.GetId(c);
+
+		Restart();
+
+		var store2 = ResolveStore();
+		if (store2 is InMemoryProjection projection)
+		{
+			await projection.LoadStateAsync();
+		}
+
+		var nodes = store2.GetCollection<TestGraphNode>().ToList();
+		var a2 = nodes.First(n => store2.GetId(n) == idA);
+		var b2 = nodes.First(n => store2.GetId(n) == idB);
+		var c2 = nodes.First(n => store2.GetId(n) == idC);
+
+		await Assert.That(store2.GetId(a2.Children.Single())).IsEqualTo(idB);
+		await Assert.That(store2.GetId(b2.Children.Single())).IsEqualTo(idC);
+		await Assert.That(store2.GetId(c2.Children.Single())).IsEqualTo(idA);
 	}
 }
 
