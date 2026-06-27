@@ -71,7 +71,7 @@ static class EphemeralMongo
 						{
 							if (databaseName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 							{
-								if (Guid.TryParse(databaseName[prefix.Length..], out var guid) && guid.GetVersion() == 7 && (now - guid.GetTimestamp()).TotalMinutes > 1)
+								if (Guid.TryParse(databaseName[prefix.Length..].Replace('_', '-'), out var guid) && guid.GetVersion() == 7 && (now - guid.GetTimestamp()).TotalMinutes > 1)
 								{
 									client.DropDatabase(databaseName);
 								}
@@ -88,7 +88,7 @@ static class EphemeralMongo
 
 			var builder = new MongoUrlBuilder(_engineConnectionString)
 			{
-				DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString("N").ToLowerInvariant(),
+				DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
 			};
 			return builder.ToString();
 		}
