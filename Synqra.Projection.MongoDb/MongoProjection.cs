@@ -473,7 +473,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var container = ResolveContainer(ev.TargetId);
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{
@@ -510,7 +510,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ResolveComponent(container, ev);
+		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
 
 		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.) fire
 		// naturally. Components that don't implement IBindableModel fall back to reflection.
@@ -538,7 +538,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ResolveComponent(container, ev);
+		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
 
 		// BypassRemove rather than Remove: when the container is wrapped in
 		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
@@ -558,7 +558,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx)
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
-		var link = MaterializeLink(linkType, ev.Data);
+		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
 		link.LinkId = ev.LinkId == default ? GuidExtensions.CreateVersion7() : ev.LinkId;
 		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
 		// remarks) — authoritative over whatever Data happened to carry.
@@ -627,100 +627,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		return null;
 	}
 
-	/// <summary>Same three-case materialization <see cref="MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
-	static Link MaterializeLink(Type linkType, object? data)
-	{
-		if (data is Link ready && linkType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var instance = (Link)(Activator.CreateInstance(linkType)
-			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
-
-		if (data is IDictionary<string, object?> bag && instance is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = linkType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(instance, v);
-			}
-		}
-		return instance;
-	}
-
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
 	// ---------------------------------------------------------------- Component apply helpers
 
 	IComponentContainer ResolveContainer(Guid targetId)
 	{
-		if (!TryGetTracked(targetId, out var model))
-		{
-			throw new InvalidOperationException($"Container {targetId} not found while applying component event.");
-		}
-		if (model is not IComponentContainer container)
-		{
-			throw new InvalidOperationException($"Object {targetId} is a '{model.GetType().Name}' which does not implement IComponentContainer.");
-		}
-		return container;
+		TryGetTracked(targetId, out var model);
+		return ComponentApplyHelpers.ResolveContainer(model, targetId);
 	}
-
-	IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev)
-	{
-		// Both ChangeComponentProperty and DeleteComponent carry (ComponentTypeId, ComponentId).
-		// Address by:
-		//   - ComponentId, when set: walk the list, find by identity (non-unique components)
-		//   - ComponentTypeId alone: lookup the unique slot for the resolved type
-		var componentType = TypeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
-		var componentId = GetComponentId(ev);
-
-		if (componentId != Guid.Empty)
-		{
-			foreach (var c in container.Components)
-			{
-				if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
-				{
-					return c;
-				}
-			}
-			throw new InvalidOperationException($"Component {componentId} of type '{componentType.Name}' not found on container.");
-		}
-
-		var unique = container.Components.GetUniqueComponent(componentType);
-		if (unique is null)
-		{
-			throw new InvalidOperationException($"No unique-component slot for '{componentType.Name}' is filled on this container.");
-		}
-		return unique;
-	}
-
-	static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
-	{
-		ComponentPropertyChangedEvent p => p.ComponentTypeId,
-		ComponentDeletedEvent d => d.ComponentTypeId,
-		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
-	};
-
-	static Guid GetComponentId(SingleObjectEvent ev) => ev switch
-	{
-		ComponentPropertyChangedEvent p => p.ComponentId,
-		ComponentDeletedEvent d => d.ComponentId,
-		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
-	};
 
 	const string ComponentsMongoCollectionName = "Components";
 
@@ -736,7 +651,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// (<c>JsonSerializer.Serialize(component, component.GetType(), ...)</c>), sidesteps the
 	/// polymorphism gap entirely — no declared-interface element type is ever involved. The
 	/// (container, type, id) triple this document is filtered on mirrors exactly how
-	/// <see cref="ResolveComponent"/> already addresses a component for the live, in-memory side
+	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> already addresses a component for the live, in-memory side
 	/// of this same apply path.
 	/// </summary>
 	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Guid componentTypeId, Guid componentId) =>
@@ -794,44 +709,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				bindableComponent.AttachToContainer(this, containerId, TypeMetadataProvider.GetTypeMetadata(container.GetType()).TypeId, containerCollectionId);
 			}
 		}
-	}
-
-	static IComponent MaterializeComponent(Type componentType, object? data)
-	{
-		// Three cases: data is already an instance of componentType (typical when emitted locally);
-		// data is a json-shaped IDictionary<string, object?> (post-rehydrate from event store); or
-		// data is null (component has no payload, e.g. a bare marker).
-		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var instance = Activator.CreateInstance(componentType)
-			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
-		var component = (IComponent)instance;
-
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
-		return component;
 	}
 
 	// ---------------------------------------------------------------- ILinkIndex
