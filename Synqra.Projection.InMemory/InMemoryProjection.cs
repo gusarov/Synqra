@@ -1020,6 +1020,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	// An undirected link is incident from either side; a directed link matches the requested role.
 	static bool IncidentAt(Link link, Guid nodeId, LinkEnd end) => end switch
 	{
+		LinkEnd.None => throw new ArgumentException("LinkEnd.None is not a valid link end.", nameof(end)),
 		LinkEnd.Source => link.SourceId == nodeId,
 		LinkEnd.Target => link.TargetId == nodeId,
 		_ => link.SourceId == nodeId || link.TargetId == nodeId,

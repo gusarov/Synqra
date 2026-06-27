@@ -752,6 +752,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var nodeIdString = nodeId.ToString();
 		var endpointFilter = end switch
 		{
+			LinkEnd.None => throw new ArgumentException("LinkEnd.None is not a valid link end.", nameof(end)),
 			LinkEnd.Source => Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
 			LinkEnd.Target => Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString),
 			_ => Builders<BsonDocument>.Filter.Or(

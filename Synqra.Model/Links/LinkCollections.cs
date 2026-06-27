@@ -21,6 +21,10 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 	protected LinkNavCollectionBase(IBindableModel owner, LinkEnd selfEnd)
 	{
 		_owner = owner ?? throw new System.ArgumentNullException(nameof(owner));
+		if (selfEnd == LinkEnd.None)
+		{
+			throw new System.ArgumentException("LinkEnd.None is not a valid link end — every navigation collection must specify Source, Target, or Either.", nameof(selfEnd));
+		}
 		_selfEnd = selfEnd;
 	}
 
