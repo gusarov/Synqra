@@ -916,7 +916,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	/// <summary>
 	/// Materializes the link from <see cref="AddLinkCommand.Data"/> the same way
-	/// <see cref="MaterializeComponent"/> does for a component (live instance / json-shaped dict /
+	/// <see cref="ComponentApplyHelpers.MaterializeComponent"/> does for a component (live instance / json-shaped dict /
 	/// fall back to reflection), attaches it to the store, and indexes it — rejecting a structural
 	/// duplicate (same concrete type + endpoint pair) before it can be persisted. Both endpoints are
 	/// always already set by the time this runs (the command carries the whole link, unlike a plain
@@ -929,7 +929,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	Task VisitLinkAddedCore(LinkAddedEvent ev)
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
-		var link = MaterializeLink(linkType, ev.Data);
+		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
 		link.LinkId = ev.LinkId;
 		link.SourceId = ev.SourceId;
 		link.TargetId = ev.TargetId;
@@ -986,41 +986,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			aware.OnLinkChanged(link.GetType(), selfEnd);
 		}
-	}
-
-	/// <summary>Same three-case materialization <see cref="MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
-	Link MaterializeLink(Type linkType, object? data)
-	{
-		if (data is Link ready && linkType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var instance = (Link)(Activator.CreateInstance(linkType)
-			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
-
-		if (data is IDictionary<string, object?> bag && instance is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = linkType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(instance, v);
-			}
-		}
-		return instance;
 	}
 
 	// ---------------------------------------------------------------- ILinkIndex
@@ -1132,7 +1097,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		// reuse the model-binding pathway so JSON payloads round-trip the same way
 		// as for normal SynqraModel objects.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{
@@ -1187,7 +1152,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ResolveComponent(container, ev);
+		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
 
 		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.)
 		// fire naturally. Components that don't implement IBindableModel fall back to
@@ -1219,7 +1184,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ResolveComponent(container, ev);
+		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
 
 		// BypassRemove rather than Remove: when the container is wrapped in
 		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a
@@ -1246,102 +1211,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	IComponentContainer ResolveContainer(Guid targetId)
 	{
-		if (!TryGetModel(targetId, out var data) || data.Model is null)
-		{
-			throw new InvalidOperationException($"Container {targetId} not found while applying component event.");
-		}
-		if (data.Model is not IComponentContainer container)
-		{
-			throw new InvalidOperationException(
-				$"Object {targetId} is a '{data.Model.GetType().Name}' which does not implement IComponentContainer.");
-		}
-		return container;
-	}
-
-	IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev)
-	{
-		// Both ChangeComponentProperty and DeleteComponent carry (ComponentTypeId, ComponentId).
-		// Address by:
-		//   - ComponentId, when set: walk the list, find by identity (non-unique components)
-		//   - ComponentTypeId alone: lookup the unique slot for the resolved type
-		var componentType = TypeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
-		var componentId = GetComponentId(ev);
-
-		if (componentId != Guid.Empty)
-		{
-			foreach (var c in container.Components)
-			{
-				if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
-				{
-					return c;
-				}
-			}
-			throw new InvalidOperationException(
-				$"Component {componentId} of type '{componentType.Name}' not found on container.");
-		}
-
-		var unique = container.Components.GetUniqueComponent(componentType);
-		if (unique is null)
-		{
-			throw new InvalidOperationException(
-				$"No unique-component slot for '{componentType.Name}' is filled on this container.");
-		}
-		return unique;
-	}
-
-	static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
-	{
-		ComponentPropertyChangedEvent p => p.ComponentTypeId,
-		ComponentDeletedEvent d => d.ComponentTypeId,
-		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
-	};
-
-	static Guid GetComponentId(SingleObjectEvent ev) => ev switch
-	{
-		ComponentPropertyChangedEvent p => p.ComponentId,
-		ComponentDeletedEvent d => d.ComponentId,
-		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
-	};
-
-	IComponent MaterializeComponent(Type componentType, object? data)
-	{
-		// Three cases:
-		//   - data is already an instance of componentType (typical when emitted locally)
-		//   - data is a json-shaped IDictionary<string, object?> (post-rehydrate from event store)
-		//   - data is null (component has no payload, e.g. a bare marker)
-		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
-		var instance = Activator.CreateInstance(componentType)
-			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
-		var component = (IComponent)instance;
-
-		// Hydrate from dictionary via the bindable-model set path when the component
-		// is a SynqraModel; fall back to reflection otherwise.
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
-		return component;
+		TryGetModel(targetId, out var data);
+		return ComponentApplyHelpers.ResolveContainer(data.Model, targetId);
 	}
 
 	#endregion
