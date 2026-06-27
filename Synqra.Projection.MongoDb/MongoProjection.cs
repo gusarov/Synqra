@@ -44,7 +44,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	}
 
 	const string LinksMongoCollectionName = "Links";
-	const string LinkTypeIdField = "_linkTypeId";
+
+	// Links of every concrete type share one collection (so a graph-wide scan is a single query),
+	// so each document needs a type marker. That marker is the same "_t" discriminator ToDocument
+	// already stamps for polymorphic deserialization — no separate type-id column. The value is the
+	// link type's simple name (what ObjectConverter writes), so a per-type query filters on it directly.
+	const string DiscriminatorField = "_t";
+	static FilterDefinition<BsonDocument> LinkTypeFilter(Type linkType)
+		=> Builders<BsonDocument>.Filter.Eq(DiscriminatorField, linkType.Name);
 
 	readonly IMongoDatabase _database;
 	readonly ISbxSerializerFactory _serializerFactory;
@@ -237,19 +244,38 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	internal IMongoCollection<BsonDocument> MongoCollectionFor(Type type, string collectionName)
 		=> _database.GetCollection<BsonDocument>(MongoCollectionName(type, collectionName));
 
-	internal object FromDocument(BsonDocument doc, Type type)
+	/// <summary>
+	/// Rehydrates a stored document into its concrete model. The concrete type is read from the
+	/// <c>_t</c> discriminator the document carries (written by <see cref="ToDocument"/> via the
+	/// polymorphic <see cref="ObjectConverter"/>) — the same discriminator convention Synqra's models
+	/// and the Mongo event log already use — so the caller never has to pre-resolve the type, and no
+	/// separate type-id side field is needed. <paramref name="addressingFields"/> names the projection's
+	/// own non-model bookkeeping columns (e.g. a component's <c>ContainerId</c>) to drop before
+	/// deserializing; <c>_id</c> is always dropped. Both are appended after <c>_t</c> on write, so
+	/// stripping them leaves <c>_t</c> first, where polymorphic deserialization requires it.
+	/// </summary>
+	internal object FromDocument(BsonDocument doc, params string[] addressingFields)
 	{
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove("_id");
-		clone.Remove(LinkTypeIdField); // present only on Links documents; harmless no-op otherwise
-		var model = JsonSerializer.Deserialize(clone.ToJson(), type, _jsonSerializerOptions)
-			?? throw new InvalidOperationException($"Failed to deserialize a '{type.Name}' document.");
-		return model;
+		foreach (var field in addressingFields)
+		{
+			clone.Remove(field);
+		}
+		return JsonSerializer.Deserialize(clone.ToJson(), typeof(object), _jsonSerializerOptions)
+			?? throw new InvalidOperationException("Failed to deserialize a stored document.");
 	}
 
+	/// <summary>
+	/// Serializes a model to a stored document through the polymorphic <see cref="ObjectConverter"/>
+	/// (inputType <c>object</c>), so STJ stamps a <c>_t</c> discriminator and every concrete field —
+	/// even when the value is held behind an interface/base (a component behind <c>IComponent</c>, a
+	/// link behind <c>Link</c>). <c>_t</c> is written first; <c>_id</c> and any addressing columns are
+	/// appended after, so a read can strip them and still find <c>_t</c> in the leading position.
+	/// </summary>
 	BsonDocument ToDocument(object model, Guid id)
 	{
-		var json = JsonSerializer.Serialize(model, model.GetType(), _jsonSerializerOptions);
+		var json = JsonSerializer.Serialize(model, typeof(object), _jsonSerializerOptions);
 		var doc = BsonDocument.Parse(json);
 		doc["_id"] = id.ToString();
 		return doc;
@@ -572,8 +598,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link ({duplicateId}) already exists between the same endpoints.");
 		}
 
+		// ToDocument already stamps the "_t" discriminator (= link type name) the per-type queries
+		// filter on, so no separate type column is written here.
 		var doc = ToDocument(link, link.LinkId);
-		doc[LinkTypeIdField] = ev.LinkTypeId.ToString();
 		linksMongo.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId.ToString()), doc, new ReplaceOptions { IsUpsert = true });
 
 		if (link is IBindableModel bindable && bindable.Store is null)
@@ -599,7 +626,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	Guid? FindStructuralDuplicate(IMongoCollection<BsonDocument> linksMongo, Link link, Guid excludeId)
 	{
-		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(link.GetType()).TypeId.ToString());
+		var typeIdFilter = LinkTypeFilter(link.GetType());
 		// SourceId/TargetId are stored as strings — ToDocument round-trips the model through
 		// JsonSerializer, which renders a Guid as a string, not the BSON Binary subtype the driver's
 		// own GuidSerializer would produce for a typed Guid filter value. Compare as strings to match.
@@ -618,7 +645,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			{
 				continue;
 			}
-			var candidate = (Link)FromDocument(doc, link.GetType());
+			var candidate = (Link)FromDocument(doc);
 			if (candidate.StructuralKey.Equals(link.StructuralKey))
 			{
 				return candidateId;
@@ -642,37 +669,38 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// <summary>
 	/// Components are persisted in their own shared Mongo collection — NOT embedded in their
 	/// container's own document the way the container's plain properties are. <see cref="IComponentsCollection"/>'s
-	/// element type is the marker interface <see cref="IComponent"/>, and <c>System.Text.Json</c>
-	/// serializes a collection element using its <i>declared</i> element type, not its runtime
-	/// type — so round-tripping the container's own <c>Components</c> property as embedded JSON
-	/// loses every component-specific field (confirmed empirically: the document came back as
-	/// <c>"Components": [{ }]</c>, an empty object, for a component that very much had properties).
-	/// Serializing each component on its own, via its own concrete type
-	/// (<c>JsonSerializer.Serialize(component, component.GetType(), ...)</c>), sidesteps the
-	/// polymorphism gap entirely — no declared-interface element type is ever involved. The
-	/// (container, type, id) triple this document is filtered on mirrors exactly how
-	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> already addresses a component for the live, in-memory side
-	/// of this same apply path.
+	/// element type is the marker interface <see cref="IComponent"/>; serialized naively through that
+	/// declared element type, <c>System.Text.Json</c> would drop every concrete field. The fix is the
+	/// polymorphic <see cref="ObjectConverter"/> (see <see cref="ToDocument"/>): serializing through
+	/// <c>object</c> stamps a <c>_t</c> discriminator and all concrete fields, and reading back through
+	/// <c>object</c> resolves the concrete type from <c>_t</c> alone. So the stored document needs no
+	/// separate type-id column — the <c>_t</c> discriminator doubles as the type filter, mirroring how
+	/// links are stored. The remaining (container, type, id) addressing matches how
+	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> addresses a component on the live, in-memory
+	/// side of this same apply path — with the type filtered via <c>_t</c> so a unique component
+	/// (<c>ComponentId == Guid.Empty</c>) is still distinguished from a peer of another type.
 	/// </summary>
-	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Guid componentTypeId, Guid componentId) =>
+	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
 			Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString()),
-			Builders<BsonDocument>.Filter.Eq("ComponentTypeId", componentTypeId.ToString()),
+			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
 			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId.ToString()));
 
 	void UpsertComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		var json = JsonSerializer.Serialize(component, component.GetType(), _jsonSerializerOptions);
+		// Through object -> ObjectConverter stamps "_t" first plus every concrete field; ContainerId /
+		// ComponentId are appended after, so a read strips them and still finds "_t" leading.
+		var json = JsonSerializer.Serialize(component, typeof(object), _jsonSerializerOptions);
 		var doc = BsonDocument.Parse(json);
 		doc["ContainerId"] = containerId.ToString();
-		doc["ComponentTypeId"] = componentTypeId.ToString();
 		doc["ComponentId"] = componentId.ToString();
-		componentsMongo.ReplaceOne(ComponentFilter(containerId, componentTypeId, componentId), doc, new ReplaceOptions { IsUpsert = true });
+		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	void DeleteComponentDoc(Guid containerId, Guid componentTypeId, Guid componentId)
-		=> _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName).DeleteOne(ComponentFilter(containerId, componentTypeId, componentId));
+		=> _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName)
+			.DeleteOne(ComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
 
 	/// <summary>
 	/// Re-attaches every persisted component onto a container as it's (re)loaded — called from
@@ -689,16 +717,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		foreach (var doc in componentsMongo.Find(Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString())).ToList())
 		{
-			var componentTypeId = Guid.Parse(doc["ComponentTypeId"].AsString);
-			var componentType = TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type;
-
-			var clone = (BsonDocument)doc.DeepClone();
-			clone.Remove("_id");
-			clone.Remove("ContainerId");
-			clone.Remove("ComponentTypeId");
-			clone.Remove("ComponentId");
-			var component = (IComponent)(JsonSerializer.Deserialize(clone.ToJson(), componentType, _jsonSerializerOptions)
-				?? throw new InvalidOperationException($"Failed to deserialize a '{componentType.Name}' component."));
+			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
+			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
+			var component = (IComponent)FromDocument(doc, "ContainerId", "ComponentId");
 
 			if (!container.Components.TryAdd(component))
 			{
@@ -718,12 +739,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// hands back must be attached, or its typed <c>Source</c>/<c>Target</c> accessors (which resolve
 	/// through <see cref="IBindableModel.Store"/>) would silently return null.
 	/// </summary>
-	Link LoadLink(BsonDocument doc, Type linkType)
+	Link LoadLink(BsonDocument doc)
 	{
-		var link = (Link)FromDocument(doc, linkType);
+		var link = (Link)FromDocument(doc); // concrete type resolved from the "_t" discriminator
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(link.GetType()).GetCollectionId(""));
 		}
 		return link;
 	}
@@ -733,21 +754,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		get
 		{
 			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-			var result = new List<Link>();
-			foreach (var doc in linksMongo.Find(FilterDefinition<BsonDocument>.Empty).ToList())
-			{
-				var linkTypeId = Guid.Parse(doc[LinkTypeIdField].AsString);
-				var linkType = TypeMetadataProvider.GetTypeMetadata(linkTypeId).Type;
-				result.Add(LoadLink(doc, linkType));
-			}
-			return result;
+			return linksMongo.Find(FilterDefinition<BsonDocument>.Empty).ToList()
+				.Select(LoadLink)
+				.ToArray();
 		}
 	}
 
 	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
 		// Compared as strings — see FindStructuralDuplicate's remark on why.
 		var nodeIdString = nodeId.ToString();
 		var endpointFilter = end switch
@@ -759,22 +774,21 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
 				Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString)),
 		};
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList()
-			.Select(doc => LoadLink(doc, linkType))
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
+			.Select(LoadLink)
 			.ToArray();
 	}
 
 	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
 		var aString = a.ToString();
 		var bString = b.ToString();
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", aString), Builders<BsonDocument>.Filter.Eq("TargetId", bString)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", bString), Builders<BsonDocument>.Filter.Eq("TargetId", aString)));
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList()
-			.Select(doc => LoadLink(doc, linkType))
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
+			.Select(LoadLink)
 			.ToArray();
 	}
 
@@ -782,22 +796,21 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linkType = key.LinkType;
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
 		var xString = key.X.ToString();
 		var yString = key.Y.ToString();
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", xString), Builders<BsonDocument>.Filter.Eq("TargetId", yString)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", yString), Builders<BsonDocument>.Filter.Eq("TargetId", xString)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
 			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
 			// for the actual match, which is what callers keep and navigate from.
-			var candidate = (Link)FromDocument(doc, linkType);
+			var candidate = (Link)FromDocument(doc);
 			if (candidate.StructuralKey.Equals(key))
 			{
-				link = LoadLink(doc, linkType);
+				link = LoadLink(doc);
 				return true;
 			}
 		}
@@ -814,9 +827,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			link = null;
 			return false;
 		}
-		var linkTypeId = Guid.Parse(doc[LinkTypeIdField].AsString);
-		var linkType = TypeMetadataProvider.GetTypeMetadata(linkTypeId).Type;
-		link = LoadLink(doc, linkType);
+		link = LoadLink(doc); // concrete type resolved from the "_t" discriminator
 		return true;
 	}
 }
