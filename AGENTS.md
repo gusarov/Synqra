@@ -13,6 +13,22 @@ This repository is also used as a **submodule of Quotaly**.
 - `master` remains the upstream/mainline branch that changes will eventually be merged into.
 - Be careful when discussing or preparing merges: in this repo, branch choice is part of the intended workflow, not an incidental local preference.
 
+### PR push + CI tracking
+
+- After pushing a commit to a PR branch, do **not** poll `gh pr checks` synchronously in a loop
+  that blocks the conversation — the Azure Pipelines build regularly takes 2-3+ minutes, and the
+  GitHub→Azure sync itself can lag well beyond that on top (observed: a pushed commit not
+  reflected in the PR's `head_sha` for 10+ minutes despite the git ref already being correct on
+  the remote).
+- Track the build in the background instead — a background subagent or background task/wakeup —
+  so the user's next messages get handled immediately rather than queuing behind a poll loop, and
+  surface the result (pass/fail, and the failure log if it's red) when it actually completes.
+- If a push doesn't trigger a build within a few minutes, check both ends before assuming
+  something is broken: `git fetch` + `git log` on the remote branch (did the push really land?)
+  and `gh api repos/<owner>/<repo>/pulls/<n>` for `head_sha` (has GitHub's PR object caught up?).
+  A mismatch between the two is a sync-lag symptom, not a push failure — don't force-push again or
+  re-trigger anything on the GitHub/Azure side without checking which end is actually stale first.
+
 The main runtime flow is:
 
 1. Commands are submitted to a store or projection.
@@ -143,8 +159,17 @@ minimal, auto-merge-safe diffs.
   static `MongoDbRunner` started once per process and reused (never disposed per-test; isolate
   via a unique database name) — per-test runners are slow and prone to port-rebind flakiness.
   Inject the connection string through configuration the same way the production DI binds it.
-  Synqra's CI image has no Mongo service (Quotaly gets one from docker-compose), so these tests
-  should **skip** (not fail) when the bundled `mongod` can't start. See `MongoAppendStorageTests`.
+  These tests should **skip** (not fail) when the bundled `mongod` can't start. See
+  `MongoAppendStorageTests`.
+- **CI does provision a real mongod** — the Dockerfile copies `mongod` straight out of the
+  `mongo:8.0` image and wraps the whole `dotnet test`/published-binary run in a `withmongo`
+  script that starts it and exports `ConnectionStrings__Mongodb` first. There is no environment
+  gap to work around: `[Property("CI", "false")]` on a Mongo-dependent test is therefore
+  unjustified — don't add it, and don't assume an existing one is correct without checking the
+  Dockerfile first. (An older note here claimed the opposite — "no Mongo service in CI" — which
+  was true at some point but went stale; that's almost certainly why so many of these tags
+  accumulated. `[NotInParallel]` is the actual constraint that still applies, since every
+  Mongo-backed test in the suite shares that one mongod instance.)
 
 ## AOT And Serialization Constraints
 
