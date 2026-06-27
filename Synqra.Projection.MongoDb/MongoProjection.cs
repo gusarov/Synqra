@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,22 +25,32 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// binary layout.
 /// </para>
 /// <para>
-/// This first implementation covers the object lifecycle (create + property change) — enough for the
-/// store contract. Components and wires are not materialized here yet (see the in-memory projection for
-/// the reference behaviour).
+/// <b>Tracking is per-process, not pre-warmed.</b> <see cref="GetId"/>, <see cref="ResolveObject"/>,
+/// component mutation, and (for links) endpoint navigation only see objects this projection instance has
+/// already touched (created, or loaded via enumerating a <see cref="GetCollection{T}"/>) — there is no
+/// startup replay that pre-populates the tracking cache. This is an existing, deliberate limitation (see
+/// <see cref="VisitAsync(ObjectPropertyChangedEvent, EventVisitorContext)"/>, which has always thrown for
+/// an untracked target) that components and links below intentionally match rather than work around, so
+/// behaviour stays consistent across everything this projection materializes. Link <i>queries</i>
+/// (<see cref="ILinkIndex"/>) are the exception — they always hit Mongo directly, since adjacency lookups
+/// need to work regardless of what this process has touched.
 /// </para>
 /// </summary>
-public sealed class MongoProjection : IObjectStore, IProjection
+public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 {
 	static MongoProjection()
 	{
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceIdHashChain", false);
 	}
 
+	const string LinksMongoCollectionName = "Links";
+	const string LinkTypeIdField = "_linkTypeId";
+
 	readonly IMongoDatabase _database;
 	readonly ISbxSerializerFactory _serializerFactory;
 	readonly IAppendStorage? _eventStorage;
 	readonly JsonSerializerOptions _jsonSerializerOptions;
+	readonly IServiceProvider? _serviceProvider;
 
 	// Tracking: model instance <-> id, so generated setters can route ChangeObjectPropertyCommands and
 	// GetId() resolves a live instance to its key. A strong id->model map keeps tracked instances alive
@@ -60,6 +71,7 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		, IAppendStorage<Event, Guid>? eventStorage = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
+		, IServiceProvider? serviceProvider = null
 		)
 	{
 		_database = database ?? throw new ArgumentNullException(nameof(database));
@@ -67,6 +79,7 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
 		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentException("MongoProjection requires JsonSerializerOptions to materialize documents.", nameof(jsonSerializerOptions));
+		_serviceProvider = serviceProvider;
 
 		if (jsonSerializerContext is not null)
 		{
@@ -119,6 +132,15 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		}
 		throw new InvalidOperationException("The object is not attached to this MongoProjection.");
 	}
+
+	/// <summary>
+	/// Resolves a tracked instance by id, or null. Tracked-only — see the type-level remarks on why
+	/// this projection does not fall back to a cross-collection Mongo lookup (there is no registry
+	/// mapping an arbitrary id to which per-type Mongo collection holds it). A caller that needs an
+	/// id resolved after a restart must first load it into tracking, e.g. by enumerating
+	/// <see cref="GetCollection{T}"/> for its type — exactly what <see cref="GetId"/> already requires.
+	/// </summary>
+	public object? ResolveObject(Guid id) => id == default ? null : (TryGetTracked(id, out var model) ? model : null);
 
 	public Guid GetLastEventId(Guid targetId)
 		=> _byId.TryGetValue(targetId, out var model) && _byModel.TryGetValue(model, out var tracked)
@@ -199,6 +221,15 @@ public sealed class MongoProjection : IObjectStore, IProjection
 		{
 			bindable.Attach(this, collectionId);
 		}
+		// A freshly-created container has nothing in the Components collection yet (the query just
+		// comes back empty) — this only does real work when re-attaching a container loaded from an
+		// existing document (MongoStoreCollection<T>'s enumerator), which is the only place a
+		// container's components need rehydrating from where they're actually persisted (see
+		// LoadComponentsInto's remarks on why that isn't the container's own document).
+		if (model is IComponentContainer container)
+		{
+			LoadComponentsInto(container, id, collectionId);
+		}
 	}
 
 	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
@@ -210,6 +241,7 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	{
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove("_id");
+		clone.Remove(LinkTypeIdField); // present only on Links documents; harmless no-op otherwise
 		var model = JsonSerializer.Deserialize(clone.ToJson(), type, _jsonSerializerOptions)
 			?? throw new InvalidOperationException($"Failed to deserialize a '{type.Name}' document.");
 		return model;
@@ -292,9 +324,91 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	}
 
 	public Task VisitAsync(DeleteObjectCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
+
+	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx)
+	{
+		// Uniqueness / veto checks happen during event apply (where the live ComponentsCollection
+		// lives) — same pattern as ChangeObjectProperty.
+		ctx.Events.Add(new ComponentAddedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+			Data = cmd.Data,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new ComponentPropertyChangedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+			PropertyName = cmd.PropertyName,
+			OldValue = cmd.OldValue,
+			NewValue = cmd.NewValue,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new ComponentDeletedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			CollectionId = cmd.CollectionId,
+			EventId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = cmd.TargetTypeId,
+			TargetId = cmd.TargetId,
+			ComponentTypeId = cmd.ComponentTypeId,
+			ComponentId = cmd.ComponentId,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx)
+	{
+		// Structural dedup happens during event apply (queried straight from Mongo, since link
+		// queries always hit Mongo directly — see the type-level remarks) — same pattern as
+		// AddComponentCommand's uniqueness check.
+		ctx.Events.Add(new LinkAddedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			EventId = GuidExtensions.CreateVersion7(),
+			LinkTypeId = cmd.LinkTypeId,
+			LinkId = cmd.LinkId,
+			SourceId = cmd.SourceId,
+			TargetId = cmd.TargetId,
+			Data = cmd.Data,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new LinkRemovedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			EventId = GuidExtensions.CreateVersion7(),
+			LinkId = cmd.LinkId,
+		});
+		return Task.CompletedTask;
+	}
 
 	// ---------------------------------------------------------------- IEventVisitor
 
@@ -353,8 +467,478 @@ public sealed class MongoProjection : IObjectStore, IProjection
 	}
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
-	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => throw new NotImplementedException("MongoProjection does not materialize components yet.");
+
+	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+
+		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var component = MaterializeComponent(componentType, ev.Data);
+
+		if (!container.Components.TryAdd(component))
+		{
+			throw new InvalidOperationException(
+				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it during replay. The event stream is inconsistent.");
+		}
+
+		// Wire up the container linkage so the component's generated property setters can build
+		// ChangeComponentPropertyCommands without the caller threading the container reference.
+		if (component is IBindableComponent bindableComponent)
+		{
+			bindableComponent.AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
+		}
+
+		// MongoProjection never replays (its documents ARE the durable state — see the type-level
+		// remarks), so every ComponentAddedEvent it applies is, by definition, an originating one.
+		if (component is IActivatableComponent activatable && _serviceProvider is not null)
+		{
+			activatable.Activate(new ComponentActivationContext
+			{
+				ServiceProvider = _serviceProvider,
+				Container = container,
+				ContainerId = ev.TargetId,
+				Component = component,
+				IsReplay = false,
+			});
+		}
+
+		UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
+		MarkApplied(ev.TargetId, ev.EventId);
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+		var component = ResolveComponent(container, ev);
+
+		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.) fire
+		// naturally. Components that don't implement IBindableModel fall back to reflection.
+		if (component is IBindableModel bindable)
+		{
+			bindable.Set(ev.PropertyName, ev.NewValue);
+		}
+		else
+		{
+			var pi = component.GetType().GetProperty(ev.PropertyName)
+				?? throw new InvalidOperationException($"Component '{component.GetType().Name}' has no property '{ev.PropertyName}'.");
+			var value = ev.NewValue;
+			if (value is IConvertible c)
+			{
+				value = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+			}
+			pi.SetValue(component, value);
+		}
+
+		UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
+		MarkApplied(ev.TargetId, ev.EventId);
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
+	{
+		var container = ResolveContainer(ev.TargetId);
+		var component = ResolveComponent(container, ev);
+
+		// BypassRemove rather than Remove: when the container is wrapped in
+		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
+		// projection is APPLYING an event, so it must skip the command channel — otherwise it would
+		// generate a recursive delete command.
+		if (!container.Components.BypassRemove(component))
+		{
+			throw new InvalidOperationException(
+				$"ComponentDeletedEvent {ev.EventId}: component instance was located but the collection refused to remove it. The event stream is inconsistent.");
+		}
+
+		DeleteComponentDoc(ev.TargetId, ev.ComponentTypeId, ev.ComponentId);
+		MarkApplied(ev.TargetId, ev.EventId);
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx)
+	{
+		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
+		var link = MaterializeLink(linkType, ev.Data);
+		link.LinkId = ev.LinkId == default ? GuidExtensions.CreateVersion7() : ev.LinkId;
+		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
+		// remarks) — authoritative over whatever Data happened to carry.
+		link.SourceId = ev.SourceId;
+		link.TargetId = ev.TargetId;
+
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		if (FindStructuralDuplicate(linksMongo, link, link.LinkId) is { } duplicateId)
+		{
+			throw new InvalidOperationException(
+				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link ({duplicateId}) already exists between the same endpoints.");
+		}
+
+		var doc = ToDocument(link, link.LinkId);
+		doc[LinkTypeIdField] = ev.LinkTypeId.ToString();
+		linksMongo.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId.ToString()), doc, new ReplaceOptions { IsUpsert = true });
+
+		if (link is IBindableModel bindable && bindable.Store is null)
+		{
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+		}
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
+	{
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		linksMongo.DeleteOne(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId.ToString())); // no-op (idempotent) if already gone
+		return Task.CompletedTask;
+	}
+
+	/// <summary>
+	/// Looks for an existing link with the same <see cref="Link.StructuralKey"/> as <paramref name="link"/>,
+	/// excluding <paramref name="excludeId"/> itself. Queries Mongo directly for the candidate set (both
+	/// endpoint orders, since an undirected duplicate can arrive reversed) and decides structural equality
+	/// in memory via <see cref="Link.StructuralKey"/> — sidesteps needing to translate <see cref="LinkKey"/>
+	/// into a Mongo filter.
+	/// </summary>
+	Guid? FindStructuralDuplicate(IMongoCollection<BsonDocument> linksMongo, Link link, Guid excludeId)
+	{
+		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(link.GetType()).TypeId.ToString());
+		// SourceId/TargetId are stored as strings — ToDocument round-trips the model through
+		// JsonSerializer, which renders a Guid as a string, not the BSON Binary subtype the driver's
+		// own GuidSerializer would produce for a typed Guid filter value. Compare as strings to match.
+		var endpointFilter = Builders<BsonDocument>.Filter.Or(
+			Builders<BsonDocument>.Filter.And(
+				Builders<BsonDocument>.Filter.Eq("SourceId", link.SourceId.ToString()),
+				Builders<BsonDocument>.Filter.Eq("TargetId", link.TargetId.ToString())),
+			Builders<BsonDocument>.Filter.And(
+				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId.ToString()),
+				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId.ToString())));
+
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
+		{
+			var candidateId = Guid.Parse(doc["_id"].AsString);
+			if (candidateId == excludeId)
+			{
+				continue;
+			}
+			var candidate = (Link)FromDocument(doc, link.GetType());
+			if (candidate.StructuralKey.Equals(link.StructuralKey))
+			{
+				return candidateId;
+			}
+		}
+		return null;
+	}
+
+	/// <summary>Same three-case materialization <see cref="MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
+	static Link MaterializeLink(Type linkType, object? data)
+	{
+		if (data is Link ready && linkType.IsInstanceOfType(ready))
+		{
+			return ready;
+		}
+
+		var instance = (Link)(Activator.CreateInstance(linkType)
+			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
+
+		if (data is IDictionary<string, object?> bag && instance is IBindableModel bindable)
+		{
+			foreach (var (key, value) in bag)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else if (data is IDictionary<string, object?> reflectBag)
+		{
+			foreach (var (key, value) in reflectBag)
+			{
+				var pi = linkType.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(instance, v);
+			}
+		}
+		return instance;
+	}
+
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+
+	// ---------------------------------------------------------------- Component apply helpers
+
+	IComponentContainer ResolveContainer(Guid targetId)
+	{
+		if (!TryGetTracked(targetId, out var model))
+		{
+			throw new InvalidOperationException($"Container {targetId} not found while applying component event.");
+		}
+		if (model is not IComponentContainer container)
+		{
+			throw new InvalidOperationException($"Object {targetId} is a '{model.GetType().Name}' which does not implement IComponentContainer.");
+		}
+		return container;
+	}
+
+	IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev)
+	{
+		// Both ChangeComponentProperty and DeleteComponent carry (ComponentTypeId, ComponentId).
+		// Address by:
+		//   - ComponentId, when set: walk the list, find by identity (non-unique components)
+		//   - ComponentTypeId alone: lookup the unique slot for the resolved type
+		var componentType = TypeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
+		var componentId = GetComponentId(ev);
+
+		if (componentId != Guid.Empty)
+		{
+			foreach (var c in container.Components)
+			{
+				if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
+				{
+					return c;
+				}
+			}
+			throw new InvalidOperationException($"Component {componentId} of type '{componentType.Name}' not found on container.");
+		}
+
+		var unique = container.Components.GetUniqueComponent(componentType);
+		if (unique is null)
+		{
+			throw new InvalidOperationException($"No unique-component slot for '{componentType.Name}' is filled on this container.");
+		}
+		return unique;
+	}
+
+	static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
+	{
+		ComponentPropertyChangedEvent p => p.ComponentTypeId,
+		ComponentDeletedEvent d => d.ComponentTypeId,
+		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
+	};
+
+	static Guid GetComponentId(SingleObjectEvent ev) => ev switch
+	{
+		ComponentPropertyChangedEvent p => p.ComponentId,
+		ComponentDeletedEvent d => d.ComponentId,
+		_ => throw new InvalidOperationException($"Unsupported component event type: {ev.GetType().Name}"),
+	};
+
+	const string ComponentsMongoCollectionName = "Components";
+
+	/// <summary>
+	/// Components are persisted in their own shared Mongo collection — NOT embedded in their
+	/// container's own document the way the container's plain properties are. <see cref="IComponentsCollection"/>'s
+	/// element type is the marker interface <see cref="IComponent"/>, and <c>System.Text.Json</c>
+	/// serializes a collection element using its <i>declared</i> element type, not its runtime
+	/// type — so round-tripping the container's own <c>Components</c> property as embedded JSON
+	/// loses every component-specific field (confirmed empirically: the document came back as
+	/// <c>"Components": [{ }]</c>, an empty object, for a component that very much had properties).
+	/// Serializing each component on its own, via its own concrete type
+	/// (<c>JsonSerializer.Serialize(component, component.GetType(), ...)</c>), sidesteps the
+	/// polymorphism gap entirely — no declared-interface element type is ever involved. The
+	/// (container, type, id) triple this document is filtered on mirrors exactly how
+	/// <see cref="ResolveComponent"/> already addresses a component for the live, in-memory side
+	/// of this same apply path.
+	/// </summary>
+	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Guid componentTypeId, Guid componentId) =>
+		Builders<BsonDocument>.Filter.And(
+			Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString()),
+			Builders<BsonDocument>.Filter.Eq("ComponentTypeId", componentTypeId.ToString()),
+			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId.ToString()));
+
+	void UpsertComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
+	{
+		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+		var json = JsonSerializer.Serialize(component, component.GetType(), _jsonSerializerOptions);
+		var doc = BsonDocument.Parse(json);
+		doc["ContainerId"] = containerId.ToString();
+		doc["ComponentTypeId"] = componentTypeId.ToString();
+		doc["ComponentId"] = componentId.ToString();
+		componentsMongo.ReplaceOne(ComponentFilter(containerId, componentTypeId, componentId), doc, new ReplaceOptions { IsUpsert = true });
+	}
+
+	void DeleteComponentDoc(Guid containerId, Guid componentTypeId, Guid componentId)
+		=> _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName).DeleteOne(ComponentFilter(containerId, componentTypeId, componentId));
+
+	/// <summary>
+	/// Re-attaches every persisted component onto a container as it's (re)loaded — called from
+	/// <see cref="AttachWithId"/>, so it runs for a container coming back out of Mongo via
+	/// <c>MongoStoreCollection&lt;T&gt;</c>'s enumerator (a brand new container has nothing to find
+	/// here; the query just comes back empty). Deliberately skips <see cref="IActivatableComponent"/>
+	/// activation: this is rehydration of pre-existing state, not an originating add — the same
+	/// distinction <see cref="VisitAsync(ComponentAddedEvent, EventVisitorContext)"/> draws via
+	/// <see cref="ComponentActivationContext.IsReplay"/>, just reached by a different path (Mongo
+	/// has no event-log replay at all, so there's no IsReplay flag already in flight to reuse here).
+	/// </summary>
+	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
+	{
+		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+		foreach (var doc in componentsMongo.Find(Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString())).ToList())
+		{
+			var componentTypeId = Guid.Parse(doc["ComponentTypeId"].AsString);
+			var componentType = TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type;
+
+			var clone = (BsonDocument)doc.DeepClone();
+			clone.Remove("_id");
+			clone.Remove("ContainerId");
+			clone.Remove("ComponentTypeId");
+			clone.Remove("ComponentId");
+			var component = (IComponent)(JsonSerializer.Deserialize(clone.ToJson(), componentType, _jsonSerializerOptions)
+				?? throw new InvalidOperationException($"Failed to deserialize a '{componentType.Name}' component."));
+
+			if (!container.Components.TryAdd(component))
+			{
+				continue; // defensive only — a freshly-deserialized component can't already violate uniqueness
+			}
+			if (component is IBindableComponent bindableComponent)
+			{
+				bindableComponent.AttachToContainer(this, containerId, TypeMetadataProvider.GetTypeMetadata(container.GetType()).TypeId, containerCollectionId);
+			}
+		}
+	}
+
+	static IComponent MaterializeComponent(Type componentType, object? data)
+	{
+		// Three cases: data is already an instance of componentType (typical when emitted locally);
+		// data is a json-shaped IDictionary<string, object?> (post-rehydrate from event store); or
+		// data is null (component has no payload, e.g. a bare marker).
+		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
+		{
+			return ready;
+		}
+
+		var instance = Activator.CreateInstance(componentType)
+			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
+		var component = (IComponent)instance;
+
+		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
+		{
+			foreach (var (key, value) in bag)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else if (data is IDictionary<string, object?> reflectBag)
+		{
+			foreach (var (key, value) in reflectBag)
+			{
+				var pi = componentType.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(component, v);
+			}
+		}
+		return component;
+	}
+
+	// ---------------------------------------------------------------- ILinkIndex
+
+	/// <summary>
+	/// Deserializes a link document and attaches it to this store — every link <see cref="ILinkIndex"/>
+	/// hands back must be attached, or its typed <c>Source</c>/<c>Target</c> accessors (which resolve
+	/// through <see cref="IBindableModel.Store"/>) would silently return null.
+	/// </summary>
+	Link LoadLink(BsonDocument doc, Type linkType)
+	{
+		var link = (Link)FromDocument(doc, linkType);
+		if (link is IBindableModel bindable && bindable.Store is null)
+		{
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+		}
+		return link;
+	}
+
+	IReadOnlyCollection<Link> ILinkIndex.Links
+	{
+		get
+		{
+			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+			var result = new List<Link>();
+			foreach (var doc in linksMongo.Find(FilterDefinition<BsonDocument>.Empty).ToList())
+			{
+				var linkTypeId = Guid.Parse(doc[LinkTypeIdField].AsString);
+				var linkType = TypeMetadataProvider.GetTypeMetadata(linkTypeId).Type;
+				result.Add(LoadLink(doc, linkType));
+			}
+			return result;
+		}
+	}
+
+	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
+	{
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
+		// Compared as strings — see FindStructuralDuplicate's remark on why.
+		var nodeIdString = nodeId.ToString();
+		var endpointFilter = end switch
+		{
+			LinkEnd.Source => Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
+			LinkEnd.Target => Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString),
+			_ => Builders<BsonDocument>.Filter.Or(
+				Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
+				Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString)),
+		};
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList()
+			.Select(doc => LoadLink(doc, linkType))
+			.ToArray();
+	}
+
+	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
+	{
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
+		var aString = a.ToString();
+		var bString = b.ToString();
+		var endpointFilter = Builders<BsonDocument>.Filter.Or(
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", aString), Builders<BsonDocument>.Filter.Eq("TargetId", bString)),
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", bString), Builders<BsonDocument>.Filter.Eq("TargetId", aString)));
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList()
+			.Select(doc => LoadLink(doc, linkType))
+			.ToArray();
+	}
+
+	bool ILinkIndex.TryGetByKey(LinkKey key, out Link? link)
+	{
+		var linkType = key.LinkType;
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		var typeIdFilter = Builders<BsonDocument>.Filter.Eq(LinkTypeIdField, TypeMetadataProvider.GetTypeMetadata(linkType).TypeId.ToString());
+		var xString = key.X.ToString();
+		var yString = key.Y.ToString();
+		var endpointFilter = Builders<BsonDocument>.Filter.Or(
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", xString), Builders<BsonDocument>.Filter.Eq("TargetId", yString)),
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", yString), Builders<BsonDocument>.Filter.Eq("TargetId", xString)));
+
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
+		{
+			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
+			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
+			// for the actual match, which is what callers keep and navigate from.
+			var candidate = (Link)FromDocument(doc, linkType);
+			if (candidate.StructuralKey.Equals(key))
+			{
+				link = LoadLink(doc, linkType);
+				return true;
+			}
+		}
+		link = null;
+		return false;
+	}
+
+	bool ILinkIndex.TryGetById(Guid linkId, out Link? link)
+	{
+		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
+		var doc = linksMongo.Find(Builders<BsonDocument>.Filter.Eq("_id", linkId.ToString())).FirstOrDefault();
+		if (doc is null)
+		{
+			link = null;
+			return false;
+		}
+		var linkTypeId = Guid.Parse(doc[LinkTypeIdField].AsString);
+		var linkType = TypeMetadataProvider.GetTypeMetadata(linkTypeId).Type;
+		link = LoadLink(doc, linkType);
+		return true;
+	}
 }

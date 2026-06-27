@@ -2,6 +2,7 @@
 using MongoDB.Bson.Serialization.Attributes;
 using SharpCompress.Common;
 using Synqra.Projection.File;
+using Synqra.Tests;
 using Synqra.Tests.SampleModels.Binding;
 using Synqra.Tests.SampleModels.Serialization;
 using Synqra.Tests.SampleModels.Syncronization;
@@ -94,6 +95,22 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(List<SampleSealedModel>))]
 [JsonSerializable(typeof(List<SampleFieldDictionaryStringObjectModel>))]
 
+[JsonSerializable(typeof(TestGraphNode))]
+[JsonSerializable(typeof(HierarchyLink))]
+[JsonSerializable(typeof(DependsOn))]
+[JsonSerializable(typeof(RelatedTo))]
+[JsonSerializable(typeof(WeightedLink))]
+[JsonSerializable(typeof(TestDocNode))]
+[JsonSerializable(typeof(TestFolderNode))]
+[JsonSerializable(typeof(TestTagNode))]
+[JsonSerializable(typeof(FiledIn))]
+[JsonSerializable(typeof(TaggedWith))]
+
+[JsonSerializable(typeof(TestGeneratedContainerNode))]
+[JsonSerializable(typeof(TestUniqueComponent))]
+[JsonSerializable(typeof(TestTaggingComponent))]
+[JsonSerializable(typeof(TestActivatableComponent))]
+
 [JsonConverter(typeof(ObjectConverter))] // re-supplied with extras below
 public partial class SampleJsonSerializerContext : JsonSerializerContext
 {
@@ -106,6 +123,20 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(Item),
 		typeof(MyPocoTask),
 		typeof(DemoModel),
+		typeof(TestGraphNode),
+		typeof(HierarchyLink),
+		typeof(DependsOn),
+		typeof(RelatedTo),
+		typeof(WeightedLink),
+		typeof(TestDocNode),
+		typeof(TestFolderNode),
+		typeof(TestTagNode),
+		typeof(FiledIn),
+		typeof(TaggedWith),
+		typeof(TestGeneratedContainerNode),
+		typeof(TestUniqueComponent),
+		typeof(TestTaggingComponent),
+		typeof(TestActivatableComponent),
 	];
 
 	static readonly object __sync = new object();

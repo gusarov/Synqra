@@ -72,6 +72,17 @@ public interface IObjectStore
 		=> Guid.Empty
 #endif
 		;
+
+	/// <summary>
+	/// Resolve a store-assigned identity back to its tracked model object, or null when the id is
+	/// unknown to this projection. Used by typed edge endpoints and generated edge-navigation
+	/// properties to turn stored endpoint ids into the consumer's own model objects.
+	/// </summary>
+	object? ResolveObject(Guid id)
+#if NET8_0_OR_GREATER
+		=> null
+#endif
+		;
 }
 
 public interface ITypeMetadataProvider

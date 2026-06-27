@@ -101,4 +101,133 @@ internal static class CodeGenHelpers
 		}
 		return identifier;
 	}
+
+	// ----------------------------------------------------------------- Link navigation
+
+	/// <summary>Classification of a <c>[To]</c>/<c>[From]</c>/<c>[Related]</c> navigation property.</summary>
+	internal sealed class LinkNavInfo
+	{
+		public string End = "";            // "Source" | "Target" | "Either"
+		public bool IsCollection;
+		public bool IsLinkTyped;
+		public string ElementTypeFqn = "";
+		public string LinkTypeFqn = "";
+		public bool LinkTypeResolved;
+		public bool IsPrimitiveLink = true;
+		public bool MissingLinkType;
+
+		/// <summary>
+		/// The user declared this single-valued node-typed property with a setter
+		/// (<c>{ get; set; }</c>, not <c>{ get; }</c>) — opt-in, never forced. Collections don't get
+		/// a setter regardless of this flag; "set the whole collection at once" isn't a sensible op.
+		/// </summary>
+		public bool WantsSetter;
+	}
+
+	/// <summary>Returns nav info when the property carries a link-navigation attribute, otherwise null.</summary>
+	internal static LinkNavInfo? TryGetLinkNav(IPropertySymbol prop)
+	{
+		AttributeData? navAttr = null;
+		string? end = null;
+		foreach (var a in prop.GetAttributes())
+		{
+			switch (a.AttributeClass?.Name)
+			{
+				case "ToAttribute": navAttr = a; end = "Source"; break;
+				case "FromAttribute": navAttr = a; end = "Target"; break;
+				case "RelatedAttribute": navAttr = a; end = "Either"; break;
+			}
+			if (navAttr != null)
+			{
+				break;
+			}
+		}
+		if (navAttr is null || end is null)
+		{
+			return null;
+		}
+
+		var info = new LinkNavInfo { End = end, WantsSetter = prop.SetMethod is not null };
+
+		ITypeSymbol elementType;
+		if (prop.Type is INamedTypeSymbol nt && nt.IsGenericType && nt.TypeArguments.Length == 1 && IsSupportedNavCollection(nt))
+		{
+			info.IsCollection = true;
+			elementType = nt.TypeArguments[0];
+		}
+		else
+		{
+			info.IsCollection = false;
+			elementType = prop.Type;
+		}
+
+		info.IsLinkTyped = InheritsLink(elementType);
+		info.ElementTypeFqn = FQN(elementType);
+
+		INamedTypeSymbol? linkTypeSymbol = null;
+		if (info.IsLinkTyped)
+		{
+			linkTypeSymbol = elementType as INamedTypeSymbol;
+		}
+		else if (navAttr.ConstructorArguments.Length > 0 && navAttr.ConstructorArguments[0].Value is INamedTypeSymbol et)
+		{
+			linkTypeSymbol = et;
+		}
+		else
+		{
+			info.MissingLinkType = true;
+		}
+
+		if (linkTypeSymbol is not null)
+		{
+			info.LinkTypeResolved = true;
+			info.LinkTypeFqn = FQN(linkTypeSymbol);
+			info.IsPrimitiveLink = IsPrimitiveLink(linkTypeSymbol);
+		}
+
+		return info;
+	}
+
+	static bool IsSupportedNavCollection(INamedTypeSymbol nt)
+	{
+		var def = nt.ConstructedFrom.ToDisplayString();
+		return def.StartsWith("System.Collections.Generic.ICollection<", StringComparison.Ordinal)
+			|| def.StartsWith("System.Collections.Generic.IList<", StringComparison.Ordinal)
+			|| def.StartsWith("System.Collections.Generic.IReadOnlyList<", StringComparison.Ordinal)
+			|| def.StartsWith("System.Collections.Generic.IReadOnlyCollection<", StringComparison.Ordinal)
+			|| def.StartsWith("System.Collections.Generic.IEnumerable<", StringComparison.Ordinal);
+	}
+
+	internal static bool InheritsLink(ITypeSymbol? t)
+	{
+		for (var b = t as INamedTypeSymbol; b is not null; b = b.BaseType)
+		{
+			if (b.Name == "Link" && b.ContainingNamespace?.ToDisplayString() == "Synqra")
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// A link is "primitive" when it adds no settable instance property of its own beyond the
+	// framework endpoints. Walk from the concrete type up, stopping at the Synqra framework bases.
+	static bool IsPrimitiveLink(INamedTypeSymbol linkType)
+	{
+		for (var t = linkType; t is not null; t = t.BaseType)
+		{
+			if ((t.Name is "Link" or "DirectedLink" or "UndirectedLink") && t.ContainingNamespace?.ToDisplayString() == "Synqra")
+			{
+				break;
+			}
+			foreach (var m in t.GetMembers().OfType<IPropertySymbol>())
+			{
+				if (!m.IsStatic && !m.IsIndexer && m.SetMethod is not null)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
 }

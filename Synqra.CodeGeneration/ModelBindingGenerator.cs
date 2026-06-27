@@ -8,6 +8,7 @@ using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using Synqra;
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
@@ -50,6 +51,14 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	private static readonly DiagnosticDescriptor GenerationFailureDiagnostic = new(
 		id: "SYNQRA002",
 		title: "Synqra model generator failed",
+		messageFormat: "{0}",
+		category: "Synqra.ModelBindingGenerator",
+		defaultSeverity: DiagnosticSeverity.Error,
+		isEnabledByDefault: true);
+
+	private static readonly DiagnosticDescriptor LinkNavDiagnostic = new(
+		id: "SYNQRA003",
+		title: "Invalid link navigation property",
 		messageFormat: "{0}",
 		category: "Synqra.ModelBindingGenerator",
 		defaultSeverity: DiagnosticSeverity.Error,
@@ -287,7 +296,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine();
 			var componentIface = isComponent ? ", global::Synqra.IBindableComponent" : "";
 			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}{componentIface}");
-			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}");
+			bool hasLinkNav = clazz.Members.OfType<PropertyDeclarationSyntax>()
+				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps) is not null);
+			var linkAwareIface = hasLinkNav ? (isRootType ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
+			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}{linkAwareIface}");
 			body.AppendLine("{");
 
 			body.AppendLine($"\tstatic {clazz.Identifier}()");
@@ -410,7 +422,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		switch (name)
 		{
 """);
-				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null))
+				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null && TryGetLinkNav(p) is null))
 				{
 					if (pro.Type.ToString() == "int")
 					{
@@ -454,6 +466,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 """);
 				foreach (var pro in GetAllInstancePropertiesOfType(classData.Data))
 				{
+					// Opt-in nav setters (e.g. Parent { get; set; }) have both accessors, so the
+					// get/set filter above doesn't exclude them — but they're a live query backed by
+					// SetSingle, not a stored field, so they must never be hydrated from a dictionary.
+					if (TryGetLinkNav(pro) is not null)
+					{
+						continue;
+					}
 					if (pro.Type.ToString() == "int")
 					{
 						body.AppendLine($$"""
@@ -495,10 +514,75 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($$"""
 
 """);
+			var linkAwareEntries = new List<(string LinkTypeFqn, string End, string PropertyName)>();
 			foreach (var pro in clazz.Members.OfType<PropertyDeclarationSyntax>())
 			{
 				if (!pro.Modifiers.Any(x => x.ToString() == "partial"))
 				{
+					continue;
+				}
+
+				// Link navigation: [To]/[From]/[Related] partial properties are not stored columns —
+				// the generator emits a live, store-backed view instead of a backing field + setter.
+				var propSymbol = classData.Data.GetMembers(pro.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault();
+				var nav = propSymbol is not null ? TryGetLinkNav(propSymbol) : null;
+				if (nav is not null)
+				{
+					if (nav.MissingLinkType)
+					{
+						context.ReportDiagnostic(Diagnostic.Create(LinkNavDiagnostic, pro.Identifier.GetLocation(),
+							$"Navigation property '{pro.Identifier}' is node-typed, so it must name its link type, e.g. [To(typeof(MyLink))]."));
+						continue;
+					}
+					if (!nav.IsLinkTyped && nav.LinkTypeResolved && !nav.IsPrimitiveLink)
+					{
+						context.ReportDiagnostic(Diagnostic.Create(LinkNavDiagnostic, pro.Identifier.GetLocation(),
+							$"Navigation property '{pro.Identifier}' is node-typed over link '{nav.LinkTypeFqn}', which carries payload. Expose the link itself (a collection of '{nav.LinkTypeFqn}') so the payload is reachable, or drop the payload to keep it a primitive link."));
+						continue;
+					}
+
+					linkAwareEntries.Add((nav.LinkTypeFqn, nav.End, pro.Identifier.Text));
+
+					string coll = nav.IsLinkTyped
+						? $"new global::Synqra.LinkEndCollection<{nav.LinkTypeFqn}>(this, global::Synqra.LinkEnd.{nav.End})"
+						: $"new global::Synqra.NodeLinkCollection<{nav.ElementTypeFqn}, {nav.LinkTypeFqn}>(this, global::Synqra.LinkEnd.{nav.End})";
+
+					if (nav.IsCollection)
+					{
+						body.AppendLine(
+$$"""
+
+	[global::System.Text.Json.Serialization.JsonIgnore]
+	public partial {{pro.Type}} {{pro.Identifier}} => {{coll}};
+
+""");
+					}
+					else if (nav.WantsSetter)
+					{
+						// Opt-in: the consumer declared { get; set; }, not { get; }. Setting replaces
+						// whatever single link already occupies this role (if any); null clears it.
+						body.AppendLine(
+$$"""
+
+	[global::System.Text.Json.Serialization.JsonIgnore]
+	public partial {{pro.Type}} {{pro.Identifier}}
+	{
+		get => {{coll}}.SingleOrDefault();
+		set => {{coll}}.SetSingle(value);
+	}
+
+""");
+					}
+					else
+					{
+						body.AppendLine(
+$$"""
+
+	[global::System.Text.Json.Serialization.JsonIgnore]
+	public partial {{pro.Type}} {{pro.Identifier}} => {{coll}}.SingleOrDefault();
+
+""");
+					}
 					continue;
 				}
 
@@ -566,6 +650,40 @@ $$"""
 			}
 
 			#endregion
+
+			if (hasLinkNav)
+			{
+				// One ILinkAware.OnLinkChanged per class, grouping every nav property by the (link
+				// type, end) it watches — the store calls this on both endpoints of every link change
+				// so live-query nav properties (no backing field, so nothing else would notice) still
+				// raise INotifyPropertyChanged. Comparing types via `==` on a `System.Type` parameter
+				// (not pattern-matching on the link's runtime type) keeps this exhaustive without a
+				// dependency on the link hierarchy.
+				body.AppendLine(
+$$"""
+
+	void global::Synqra.ILinkAware.OnLinkChanged(global::System.Type linkType, global::Synqra.LinkEnd selfEnd)
+	{
+""");
+				foreach (var group in linkAwareEntries.GroupBy(e => e.LinkTypeFqn))
+				{
+					body.AppendLine($"\t\tif (linkType == typeof({group.Key}))");
+					body.AppendLine("\t\t{");
+					foreach (var entry in group)
+					{
+						var endCheck = entry.End == "Either"
+							? "true"
+							: $"selfEnd == global::Synqra.LinkEnd.{entry.End}";
+						body.AppendLine($"\t\t\tif ({endCheck}) {{ OnPropertyChanged(nameof({entry.PropertyName})); }}");
+					}
+					body.AppendLine("\t\t}");
+				}
+				body.AppendLine(
+"""
+	}
+
+""");
+			}
 
 			body.AppendLine("}");
 
