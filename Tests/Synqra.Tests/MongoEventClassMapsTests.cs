@@ -110,6 +110,45 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	public async Task Should_not_duplicate_LinkId_SourceId_TargetId_inside_Data()
+	{
+		// LinkAddedEvent already carries LinkId/SourceId/TargetId as its own explicit fields (see
+		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
+		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
+		// essentially empty: just its own discriminator, nothing from the Link base).
+		var linkId = Guid.Parse("00000020-0013-8000-8000-0000000000c3");
+		var sourceId = Guid.Parse("00000020-0014-8000-8000-0000000000c4");
+		var targetId = Guid.Parse("00000020-0015-8000-8000-0000000000c5");
+		var ev = new LinkAddedEvent
+		{
+			EventId = Guid.Parse("00000020-0016-8000-8000-0000000000c6"),
+			CommandId = Guid.Parse("00000020-0017-8000-8000-0000000000c7"),
+			LinkTypeId = Guid.Parse("00000020-0018-8000-8000-0000000000c8"),
+			LinkId = linkId,
+			SourceId = sourceId,
+			TargetId = targetId,
+			Data = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId },
+		};
+
+		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
+		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("LinkAddedEvent");
+		// The event's own explicit fields are untouched.
+		await Assert.That(doc["LinkId"].AsGuid).IsEqualTo(linkId);
+		await Assert.That(doc["SourceId"].AsGuid).IsEqualTo(sourceId);
+		await Assert.That(doc["TargetId"].AsGuid).IsEqualTo(targetId);
+		// But the nested Data blob does not repeat them.
+		var data = doc["Data"].AsBsonDocument;
+		await Assert.That(data.Contains("LinkId")).IsFalse();
+		await Assert.That(data.Contains("SourceId")).IsFalse();
+		await Assert.That(data.Contains("TargetId")).IsFalse();
+
+		var back = (LinkAddedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.LinkId).IsEqualTo(linkId);
+		await Assert.That(back.SourceId).IsEqualTo(sourceId);
+		await Assert.That(back.TargetId).IsEqualTo(targetId);
+	}
+
+	[Test]
 	public async Task Should_use_id_field_for_event_key()
 	{
 		// The whole point of mapping EventId -> _id is that a document's natural key is the

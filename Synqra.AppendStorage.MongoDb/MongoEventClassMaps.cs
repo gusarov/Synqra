@@ -107,11 +107,25 @@ public static class MongoEventClassMaps
 	/// command-handling path) are nullable reference types, so without this every document carries
 	/// an explicit <c>"Field": null</c> for each one that happens not to apply.
 	/// </item>
+	/// <item>
+	/// Strips <see cref="Link.LinkId"/>/<see cref="Link.SourceId"/>/<see cref="Link.TargetId"/> from
+	/// the <see cref="Link"/> base's own class map — which is what every concrete link subtype's
+	/// auto-mapped chain shares (BSON builds one class map per level of the inheritance chain, and
+	/// caches/reuses <c>typeof(Link)</c>'s). Without this, <see cref="LinkAddedEvent.Data"/> (a
+	/// concrete <c>Link</c> instance, e.g. <c>HierarchyLink</c>) would duplicate the exact three
+	/// fields <see cref="LinkAddedEvent"/> itself already carries explicitly, persisted twice in the
+	/// same document. Safe to strip universally: nothing else round-trips a <c>Link</c> through this
+	/// native-BSON path — <c>MongoProjection</c>'s own "Links" collection storage goes through
+	/// <c>System.Text.Json</c> instead, an entirely separate serializer this convention never touches.
+	/// On replay, the materialized link's <c>LinkId</c>/<c>SourceId</c>/<c>TargetId</c> are always
+	/// re-stamped from the event's own explicit fields anyway (see <c>VisitLinkAddedCore</c>), so the
+	/// stripped fields were never read back even before this fix — purely dead weight on disk.
+	/// </item>
 	/// </list>
 	/// </summary>
 	static void RegisterJsonIgnoreConvention()
 	{
-		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true) };
+		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true), new LinkWellKnownFieldsConvention() };
 		ConventionRegistry.Register("Synqra.JsonIgnoreAndSkipNulls", pack, _ => true);
 	}
 
@@ -127,6 +141,23 @@ public static class MongoEventClassMaps
 				{
 					classMap.UnmapMember(memberMap.MemberInfo);
 				}
+			}
+		}
+	}
+
+	sealed class LinkWellKnownFieldsConvention : IClassMapConvention
+	{
+		public string Name => "Synqra.LinkWellKnownFields";
+
+		public void Apply(BsonClassMap classMap)
+		{
+			if (classMap.ClassType != typeof(Link))
+			{
+				return;
+			}
+			foreach (var memberMap in classMap.DeclaredMemberMaps.ToArray())
+			{
+				classMap.UnmapMember(memberMap.MemberInfo);
 			}
 		}
 	}
