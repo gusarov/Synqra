@@ -57,23 +57,35 @@ public partial class TestGraphNode
 	public partial string? Name { get; set; }
 
 	// Hierarchy (directed, primitive): node-typed both ways — the link is invisible.
-	[To(typeof(HierarchyLink))] public partial ICollection<TestGraphNode> Children { get; }
-	[From(typeof(HierarchyLink))] public partial IReadOnlyList<TestGraphNode> Parents { get; }
+	[To(typeof(HierarchyLink))]
+	public partial ICollection<TestGraphNode> Children { get; }
+
+	[From(typeof(HierarchyLink))]
+	public partial IReadOnlyList<TestGraphNode> Parents { get; }
+
 	// Opt-in setter: declaring { get; set; } (not { get; }) is what turns this on — see
 	// LinkNavigationAttributes.ToAttribute remarks. child.Parent = newParent replaces whatever
 	// single parent link already exists with a new one (or clears it on null).
-	[From(typeof(HierarchyLink))] public partial TestGraphNode? Parent { get; set; }
+	[From(typeof(HierarchyLink))]
+	public partial TestGraphNode? Parent { get; set; }
 
 	// Dependency (directed, primitive): a second, parallel axis between the same nodes.
-	[To(typeof(DependsOn))] public partial ICollection<TestGraphNode> Blocks { get; }
-	[From(typeof(DependsOn))] public partial IReadOnlyList<TestGraphNode> BlockedBy { get; }
+	[To(typeof(DependsOn))]
+	public partial ICollection<TestGraphNode> Blocks { get; }
+
+	[From(typeof(DependsOn))]
+	public partial IReadOnlyList<TestGraphNode> BlockedBy { get; }
 
 	// Undirected (primitive): incident from either side.
-	[Related(typeof(RelatedTo))] public partial ICollection<TestGraphNode> RelatedNodes { get; }
+	[Related(typeof(RelatedTo))]
+	public partial ICollection<TestGraphNode> RelatedNodes { get; }
 
 	// Payload link: navigated link-typed so Order is reachable.
-	[To] public partial ICollection<WeightedLink> WeightedChildren { get; }
-	[From] public partial IReadOnlyList<WeightedLink> WeightedParentLinks { get; }
+	[To]
+	public partial ICollection<WeightedLink> WeightedChildren { get; }
+
+	[From]
+	public partial IReadOnlyList<WeightedLink> WeightedParentLinks { get; }
 }
 
 // ---- Parametrized links between DIFFERENT node types ----
@@ -102,10 +114,12 @@ public partial class TestDocNode
 	public partial string? Title { get; set; }
 
 	// Node-typed nav to a *different* node type via a primitive link.
-	[To(typeof(FiledIn))] public partial ICollection<TestFolderNode> Folders { get; }
+	[To(typeof(FiledIn))]
+	public partial ICollection<TestFolderNode> Folders { get; }
 
 	// Link-typed nav to a payload link whose Target is yet another node type.
-	[To] public partial ICollection<TaggedWith> Tags { get; }
+	[To]
+	public partial ICollection<TaggedWith> Tags { get; }
 }
 
 [SynqraModel]
@@ -114,7 +128,8 @@ public partial class TestFolderNode
 {
 	public partial string? Name { get; set; }
 
-	[From(typeof(FiledIn))] public partial IReadOnlyList<TestDocNode> Documents { get; }
+	[From(typeof(FiledIn))]
+	public partial IReadOnlyList<TestDocNode> Documents { get; }
 }
 
 [SynqraModel]
@@ -123,7 +138,8 @@ public partial class TestTagNode
 {
 	public partial string? Label { get; set; }
 
-	[From] public partial IReadOnlyList<TaggedWith> TaggedDocuments { get; }
+	[From]
+	public partial IReadOnlyList<TaggedWith> TaggedDocuments { get; }
 }
 
 public class LinksTests
