@@ -86,6 +86,30 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	public async Task Should_not_write_a_null_field_at_all()
+	{
+		// Data is a plain (non-JsonIgnore'd) property, never populated by the current
+		// command-handling path for ObjectCreatedEvent — it's null on every real event of this
+		// kind. Without the global IgnoreIfNullConvention, the document would still carry an
+		// explicit "Data": null for every single event, just to record the absence of a value.
+		var ev = new ObjectCreatedEvent
+		{
+			EventId = Guid.Parse("00000020-000e-8000-8000-0000000000be"),
+			CommandId = Guid.Parse("00000020-000f-8000-8000-0000000000bf"),
+			TargetId = Guid.Parse("00000020-0010-8000-8000-0000000000c0"),
+			TargetTypeId = Guid.Parse("00000020-0011-8000-8000-0000000000c1"),
+			CollectionId = Guid.Parse("00000020-0012-8000-8000-0000000000c2"),
+			Data = null,
+		};
+
+		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
+		await Assert.That(doc.Contains("Data")).IsFalse();
+
+		var back = (ObjectCreatedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.Data).IsNull();
+	}
+
+	[Test]
 	public async Task Should_use_id_field_for_event_key()
 	{
 		// The whole point of mapping EventId -> _id is that a document's natural key is the

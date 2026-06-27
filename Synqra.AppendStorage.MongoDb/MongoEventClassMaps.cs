@@ -86,21 +86,33 @@ public static class MongoEventClassMaps
 	}
 
 	/// <summary>
-	/// Registers a global convention that strips every <see cref="JsonIgnoreAttribute"/>-marked
-	/// member from <em>any</em> class map BSON builds — including ones never explicitly registered
-	/// here. Without this, a dynamic <c>object</c>-typed event member that carries a live model
-	/// instance (e.g. <see cref="LinkAddedEvent.Data"/> holding a concrete <c>Link</c> subclass)
-	/// gets auto-mapped <em>implicitly</em> the first time BSON encounters it, and that implicit
-	/// auto-map never runs <see cref="UnmapJsonIgnored"/> — only the types this class explicitly
-	/// calls <see cref="RegisterDerived{T}"/> for get that treatment. A consumer-defined Link
-	/// subclass is exactly such a type: the framework has no way to know about it ahead of time, so
-	/// per-type registration can't cover it, but a convention applies to every AutoMap call,
-	/// explicit or implicit, uniformly.
+	/// Registers two global conventions applied to <em>any</em> class map BSON builds — including
+	/// ones never explicitly registered here:
+	/// <list type="bullet">
+	/// <item>
+	/// Strips every <see cref="JsonIgnoreAttribute"/>-marked member. Without this, a dynamic
+	/// <c>object</c>-typed event member that carries a live model instance (e.g.
+	/// <see cref="LinkAddedEvent.Data"/> holding a concrete <c>Link</c> subclass) gets auto-mapped
+	/// <em>implicitly</em> the first time BSON encounters it, and that implicit auto-map never runs
+	/// <see cref="UnmapJsonIgnored"/> — only the types this class explicitly calls
+	/// <see cref="RegisterDerived{T}"/> for get that treatment. A consumer-defined Link subclass is
+	/// exactly such a type: the framework has no way to know about it ahead of time, so per-type
+	/// registration can't cover it, but a convention applies to every AutoMap call, explicit or
+	/// implicit, uniformly.
+	/// </item>
+	/// <item>
+	/// Skips writing a member at all when its value is null (the driver's built-in
+	/// <see cref="IgnoreIfNullConvention"/>). Most event fields that aren't always populated for a
+	/// given event kind (e.g. <see cref="ObjectCreatedEvent.Data"/>, never set by the current
+	/// command-handling path) are nullable reference types, so without this every document carries
+	/// an explicit <c>"Field": null</c> for each one that happens not to apply.
+	/// </item>
+	/// </list>
 	/// </summary>
 	static void RegisterJsonIgnoreConvention()
 	{
-		var pack = new ConventionPack { new JsonIgnoreConvention() };
-		ConventionRegistry.Register("Synqra.JsonIgnore", pack, _ => true);
+		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true) };
+		ConventionRegistry.Register("Synqra.JsonIgnoreAndSkipNulls", pack, _ => true);
 	}
 
 	sealed class JsonIgnoreConvention : IClassMapConvention
