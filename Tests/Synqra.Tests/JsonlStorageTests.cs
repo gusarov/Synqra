@@ -613,17 +613,17 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
-		var targetId1 = Guid.Parse("00000010-0001-7000-8000-00000000aa01");
-		var targetType1 = Guid.Parse("00000010-0002-7000-8000-00000000aa02");
-		var collection1 = Guid.Parse("00000010-0003-7000-8000-00000000aa03");
-		var componentType1 = Guid.Parse("00000010-0004-7000-8000-00000000aa04");
-		var componentId1 = Guid.Parse("00000010-0005-7000-8000-00000000aa05");
+		var targetId1 = Guid.Parse("00000010-0001-8000-8000-00000000aa01");
+		var targetType1 = Guid.Parse("00000010-0002-8000-8000-00000000aa02");
+		var collection1 = Guid.Parse("00000010-0003-8000-8000-00000000aa03");
+		var componentType1 = Guid.Parse("00000010-0004-8000-8000-00000000aa04");
+		var componentId1 = Guid.Parse("00000010-0005-8000-8000-00000000aa05");
 
-		var targetId2 = Guid.Parse("00000010-0006-7000-8000-00000000aa06");
-		var targetType2 = Guid.Parse("00000010-0007-7000-8000-00000000aa07");
-		var collection2 = Guid.Parse("00000010-0008-7000-8000-00000000aa08");
-		var componentType2 = Guid.Parse("00000010-0009-7000-8000-00000000aa09");
-		var componentId2 = Guid.Parse("00000010-000a-7000-8000-00000000aa0a");
+		var targetId2 = Guid.Parse("00000010-0006-8000-8000-00000000aa06");
+		var targetType2 = Guid.Parse("00000010-0007-8000-8000-00000000aa07");
+		var collection2 = Guid.Parse("00000010-0008-8000-8000-00000000aa08");
+		var componentType2 = Guid.Parse("00000010-0009-8000-8000-00000000aa09");
+		var componentId2 = Guid.Parse("00000010-000a-8000-8000-00000000aa0a");
 
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{

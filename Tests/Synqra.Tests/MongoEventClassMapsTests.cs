@@ -34,11 +34,11 @@ public class MongoEventClassMapsTests
 	{
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.Parse("00000020-0002-7000-8000-0000000000b2"),
-			CommandId = Guid.Parse("00000020-0003-7000-8000-0000000000b3"),
-			TargetId = Guid.Parse("00000020-0004-7000-8000-0000000000b4"),
-			TargetTypeId = Guid.Parse("00000020-0005-7000-8000-0000000000b5"),
-			CollectionId = Guid.Parse("00000020-0006-7000-8000-0000000000b6"),
+			EventId = Guid.Parse("00000020-0002-8000-8000-0000000000b2"),
+			CommandId = Guid.Parse("00000020-0003-8000-8000-0000000000b3"),
+			TargetId = Guid.Parse("00000020-0004-8000-8000-0000000000b4"),
+			TargetTypeId = Guid.Parse("00000020-0005-8000-8000-0000000000b5"),
+			CollectionId = Guid.Parse("00000020-0006-8000-8000-0000000000b6"),
 			PropertyName = "Name",
 			NewValue = "Alice",
 		};
@@ -68,11 +68,11 @@ public class MongoEventClassMapsTests
 		// be written to the durable log (mirrors the JSON-lines log).
 		var ev = new ObjectCreatedEvent
 		{
-			EventId = Guid.Parse("00000020-0008-7000-8000-0000000000b8"),
-			CommandId = Guid.Parse("00000020-0009-7000-8000-0000000000b9"),
-			TargetId = Guid.Parse("00000020-000a-7000-8000-0000000000ba"),
-			TargetTypeId = Guid.Parse("00000020-000b-7000-8000-0000000000bb"),
-			CollectionId = Guid.Parse("00000020-000c-7000-8000-0000000000bc"),
+			EventId = Guid.Parse("00000020-0008-8000-8000-0000000000b8"),
+			CommandId = Guid.Parse("00000020-0009-8000-8000-0000000000b9"),
+			TargetId = Guid.Parse("00000020-000a-8000-8000-0000000000ba"),
+			TargetTypeId = Guid.Parse("00000020-000b-8000-8000-0000000000bb"),
+			CollectionId = Guid.Parse("00000020-000c-8000-8000-0000000000bc"),
 			DataObject = new { Anything = "should not be persisted" },
 		};
 
@@ -92,7 +92,7 @@ public class MongoEventClassMapsTests
 		// event id, so dedup / idempotent inserts and ordered replay work.
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.Parse("00000020-000d-7000-8000-0000000000bd"),
+			EventId = Guid.Parse("00000020-000d-8000-8000-0000000000bd"),
 			CommandId = Guid.Empty,
 			TargetId = Guid.Empty,
 			TargetTypeId = Guid.Empty,
