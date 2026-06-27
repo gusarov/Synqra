@@ -125,7 +125,7 @@ internal static class CodeGenHelpers
 	}
 
 	/// <summary>Returns nav info when the property carries a link-navigation attribute, otherwise null.</summary>
-	internal static LinkNavInfo? TryGetLinkNav(IPropertySymbol prop)
+	internal static LinkNavInfo? TryGetLinkNav(IPropertySymbol prop, LinkFrameworkSymbols linkSymbols)
 	{
 		AttributeData? navAttr = null;
 		string? end = null;
@@ -161,7 +161,7 @@ internal static class CodeGenHelpers
 			elementType = prop.Type;
 		}
 
-		info.IsLinkTyped = InheritsLink(elementType);
+		info.IsLinkTyped = linkSymbols.Inherits(elementType);
 		info.ElementTypeFqn = FQN(elementType);
 
 		INamedTypeSymbol? linkTypeSymbol = null;
@@ -182,7 +182,7 @@ internal static class CodeGenHelpers
 		{
 			info.LinkTypeResolved = true;
 			info.LinkTypeFqn = FQN(linkTypeSymbol);
-			info.IsPrimitiveLink = IsPrimitiveLink(linkTypeSymbol);
+			info.IsPrimitiveLink = linkSymbols.IsPrimitive(linkTypeSymbol);
 		}
 
 		return info;
@@ -198,11 +198,50 @@ internal static class CodeGenHelpers
 			|| def.StartsWith("System.Collections.Generic.IEnumerable<", StringComparison.Ordinal);
 	}
 
-	internal static bool InheritsLink(ITypeSymbol? t)
+}
+
+/// <summary>
+/// Resolves the <c>Synqra.Link</c> framework base types once per <see cref="Compilation"/>, so
+/// link-base checks compare actual symbols (<see cref="SymbolEqualityComparer"/>) instead of
+/// matching on a bare type name + namespace string — the latter would also match an unrelated
+/// user type that just happens to be named "Link" in a namespace named "Synqra". Callers resolve
+/// one instance per compilation (alongside the other well-known symbols, e.g.
+/// <c>Synqra.IBindableModel</c>) and thread it through, rather than re-resolving on every call.
+/// </summary>
+internal sealed class LinkFrameworkSymbols
+{
+	readonly INamedTypeSymbol? _link;
+	readonly INamedTypeSymbol? _linkGeneric;
+	readonly INamedTypeSymbol? _directedLink;
+	readonly INamedTypeSymbol? _undirectedLink;
+
+	public LinkFrameworkSymbols(Compilation compilation)
+	{
+		_link = compilation.GetTypeByMetadataName("Synqra.Link");
+		_linkGeneric = compilation.GetTypeByMetadataName("Synqra.Link`2");
+		_directedLink = compilation.GetTypeByMetadataName("Synqra.DirectedLink`2");
+		_undirectedLink = compilation.GetTypeByMetadataName("Synqra.UndirectedLink`2");
+	}
+
+	static INamedTypeSymbol Unwrap(INamedTypeSymbol t) => t.IsGenericType ? t.ConstructedFrom : t;
+
+	bool IsLinkBase(INamedTypeSymbol t)
+	{
+		var u = Unwrap(t);
+		return SymbolEqualityComparer.Default.Equals(u, _link) || SymbolEqualityComparer.Default.Equals(u, _linkGeneric);
+	}
+
+	bool IsDirectedOrUndirectedLinkBase(INamedTypeSymbol t)
+	{
+		var u = Unwrap(t);
+		return SymbolEqualityComparer.Default.Equals(u, _directedLink) || SymbolEqualityComparer.Default.Equals(u, _undirectedLink);
+	}
+
+	public bool Inherits(ITypeSymbol? t)
 	{
 		for (var b = t as INamedTypeSymbol; b is not null; b = b.BaseType)
 		{
-			if (b.Name == "Link" && b.ContainingNamespace?.ToDisplayString() == "Synqra")
+			if (IsLinkBase(b))
 			{
 				return true;
 			}
@@ -210,13 +249,13 @@ internal static class CodeGenHelpers
 		return false;
 	}
 
-	// A link is "primitive" when it adds no settable instance property of its own beyond the
-	// framework endpoints. Walk from the concrete type up, stopping at the Synqra framework bases.
-	static bool IsPrimitiveLink(INamedTypeSymbol linkType)
+	/// <summary>A link is "primitive" when it adds no settable instance property of its own beyond the
+	/// framework endpoints. Walk from the concrete type up, stopping at the Synqra framework bases.</summary>
+	public bool IsPrimitive(INamedTypeSymbol linkType)
 	{
 		for (var t = linkType; t is not null; t = t.BaseType)
 		{
-			if ((t.Name is "Link" or "DirectedLink" or "UndirectedLink") && t.ContainingNamespace?.ToDisplayString() == "Synqra")
+			if (IsLinkBase(t) || IsDirectedOrUndirectedLinkBase(t))
 			{
 				break;
 			}

@@ -28,6 +28,7 @@ using ClassesProviderT = (
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ipcg
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pceh
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Pcgeh
+	, Synqra.CodeGeneration.LinkFrameworkSymbols LinkSymbols
 	);
 
 namespace Synqra.CodeGeneration;
@@ -150,21 +151,22 @@ public class ModelBindingGenerator : IIncrementalGenerator
 						var ibm = comp.GetTypeByMetadataName("Synqra.IBindableModel");
 						if (ibm is null)
 						{
-							return (null, null, default!, default!, default!, default!, default!, default!, default!);
+							return (null, null, default!, default!, default!, default!, default!, default!, default!, default!);
 						}
 						var ipc = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanged") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanged");
 						var ipcg = comp.GetTypeByMetadataName("System.ComponentModel.INotifyPropertyChanging") ?? throw new Exception("System.ComponentModel.INotifyPropertyChanging");
 						var pceh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangedEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangedEventHandler");
 						var pcgeh = comp.GetTypeByMetadataName("System.ComponentModel.PropertyChangingEventHandler") ?? throw new Exception("System.ComponentModel.PropertyChangingEventHandler");
+						var linkSymbols = new LinkFrameworkSymbols(comp);
 
 						cancelToken.ThrowIfCancellationRequested();
 
-						return (null, null, classDeclaration, symbol, ibm, ipc, ipcg, pceh, pcgeh);
+						return (null, null, classDeclaration, symbol, ibm, ipc, ipcg, pceh, pcgeh, linkSymbols);
 					}
 					catch (Exception ex)
 					{
 						EmergencyLog.Default.Error($"transform", ex);
-						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!, default!);
+						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!, default!, default!);
 					}
 				});
 
@@ -297,7 +299,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var componentIface = isComponent ? ", global::Synqra.IBindableComponent" : "";
 			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}{componentIface}");
 			bool hasLinkNav = clazz.Members.OfType<PropertyDeclarationSyntax>()
-				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps) is not null);
+				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps, classData.LinkSymbols) is not null);
 			var linkAwareIface = hasLinkNav ? (isRootType ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}{linkAwareIface}");
 			body.AppendLine("{");
@@ -422,7 +424,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		switch (name)
 		{
 """);
-				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null && TryGetLinkNav(p) is null))
+				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null && TryGetLinkNav(p, classData.LinkSymbols) is null))
 				{
 					if (pro.Type.ToString() == "int")
 					{
@@ -469,7 +471,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					// Opt-in nav setters (e.g. Parent { get; set; }) have both accessors, so the
 					// get/set filter above doesn't exclude them — but they're a live query backed by
 					// SetSingle, not a stored field, so they must never be hydrated from a dictionary.
-					if (TryGetLinkNav(pro) is not null)
+					if (TryGetLinkNav(pro, classData.LinkSymbols) is not null)
 					{
 						continue;
 					}
@@ -525,7 +527,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				// Link navigation: [To]/[From]/[Related] partial properties are not stored columns —
 				// the generator emits a live, store-backed view instead of a backing field + setter.
 				var propSymbol = classData.Data.GetMembers(pro.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault();
-				var nav = propSymbol is not null ? TryGetLinkNav(propSymbol) : null;
+				var nav = propSymbol is not null ? TryGetLinkNav(propSymbol, classData.LinkSymbols) : null;
 				if (nav is not null)
 				{
 					if (nav.MissingLinkType)
