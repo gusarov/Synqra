@@ -806,6 +806,8 @@ public static class FileSynqraExtensions
 		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 
 		public async Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 		{
@@ -864,6 +866,8 @@ public static class FileSynqraExtensions
 		public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
 		public async Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 		{

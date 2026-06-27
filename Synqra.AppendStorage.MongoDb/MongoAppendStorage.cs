@@ -75,8 +75,6 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 
 	public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
-		// Typed filter so the key's serializer (e.g. the Standard GuidSerializer) renders
-		// the value the same way it is stored in _id — no representation mismatch.
 		var filter = Builders<T>.Filter.Eq("_id", key);
 		var found = await _collection.Find(filter).FirstOrDefaultAsync(cancellationToken);
 		if (found is null)

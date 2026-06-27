@@ -24,11 +24,13 @@ namespace Synqra.Tests.Cobra;
 
 /// <summary>
 /// The <b>same-session</b> contract shared by every Synqra store, on every backend: a property change
-/// on a tracked model becomes an <see cref="ObjectPropertyChangedEvent"/> in the event log. This holds
-/// for durable <i>and</i> non-durable storage alike, so all backends inherit it.
+/// on a tracked model becomes an <see cref="ObjectPropertyChangedEvent"/> in the event log, and a typed
+/// model graph built via the declarative link navigation (<c>node.Children.Add(...)</c> etc.) is
+/// navigable from either end. This holds for durable <i>and</i> non-durable storage alike, so all
+/// backends inherit it.
 /// <para>
 /// The stronger <b>durability</b> clause (state survives a restart via replay) lives separately in
-/// <see cref="DurableSynqraStoreContractTests"/> — only durable storage backends inherit that, so a
+/// <see cref="Cobra_DurableSynqraStoreContractTests"/> — only durable storage backends inherit that, so a
 /// non-durable in-memory log is never falsely marked red for failing to persist.
 /// </para>
 /// <para>
@@ -39,8 +41,11 @@ namespace Synqra.Tests.Cobra;
 ///   <item><b>Store/projection</b> (<see cref="RegisterStore"/>): in-memory projection / MongoDB projection.</item>
 /// </list>
 /// <para>
-/// Cells whose implementation does not exist yet (in-memory <c>IAppendStorage</c>, MongoDB
-/// projection) deliberately fail — they are the red end of TDD and name the API to build.
+/// Object-lifecycle and link coverage share this one matrix rather than each getting its own parallel
+/// copy of the same axis-permutation hierarchy: every backend combination here now fully supports both
+/// (<c>ILinkIndex</c> is no longer a capability only some stores have), so there's no reason to keep two
+/// structurally identical sets of <c>RegisterAppendStorage</c>/<c>RegisterStore</c> classes in lockstep
+/// across two files.
 /// </para>
 /// </summary>
 public abstract class Cobra_SynqraStoreContractTests : BaseTest
@@ -48,7 +53,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	/// <summary>Wire up the durable event log under test — registers <c>IAppendStorage&lt;Event, Guid&gt;</c>.</summary>
 	protected abstract void RegisterAppendStorage(IHostApplicationBuilder hostBuilder);
 
-	/// <summary>Wire up the store/projection under test — registers <c>IObjectStore</c> / <c>IProjection</c>.</summary>
+	/// <summary>Wire up the store/projection under test — registers <c>IObjectStore</c> / <c>IProjection</c> (+ <c>ILinkIndex</c>).</summary>
 	protected abstract void RegisterStore(IServiceCollection services);
 
 	protected override void Register(IHostApplicationBuilder hostBuilder)
@@ -63,10 +68,22 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			typeof(Command),
 			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
+			typeof(TestGraphNode),
+			typeof(HierarchyLink),
+			typeof(DependsOn),
+			typeof(RelatedTo),
+			typeof(WeightedLink),
 		]);
 		hostBuilder.Services.AddSbxSerializer(ser =>
 		{
 			ser.Map(102, 3000.0, typeof(DemoModel));
+			ser.Map(210, typeof(TestGraphNode));
+			ser.Map(211, typeof(HierarchyLink));
+			ser.Map(212, typeof(DependsOn));
+			ser.Map(213, typeof(RelatedTo));
+			ser.Map(214, typeof(WeightedLink));
+			ser.Map(215, typeof(LinkAddedEvent));
+			ser.Map(216, typeof(LinkRemovedEvent));
 			ser.Snapshot();
 		});
 
@@ -110,13 +127,86 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		await Assert.That(changes.Length).IsGreaterThanOrEqualTo(1);
 		await Assert.That((string?)changes[^1].NewValue).IsEqualTo("Alice");
 	}
+
+	// ---------------------------------------------------------------- Link navigation contract
+
+	protected static TestGraphNode AddNode(IObjectStore store, string name)
+	{
+		var node = new TestGraphNode { Name = name };
+		store.GetCollection<TestGraphNode>().Add(node);
+		return node;
+	}
+
+	/// <summary>Build the full-flavour graph and return the endpoint ids for later verification.</summary>
+	protected static (Guid parent, Guid child, Guid blocked, Guid related, Guid weighted) BuildGraph(IObjectStore store)
+	{
+		var parent = AddNode(store, "parent");
+		var child = AddNode(store, "child");
+		var blocked = AddNode(store, "blocked");
+		var related = AddNode(store, "related");
+		var weighted = AddNode(store, "weighted");
+
+		parent.Children.Add(child);            // directed primitive, node-typed
+		child.Blocks.Add(blocked);             // second parallel directed axis
+		parent.RelatedNodes.Add(related);      // undirected
+		parent.WeightedChildren.Add(new WeightedLink { Target = weighted, Order = 3.5 }); // payload, link-typed
+
+		return (store.GetId(parent), store.GetId(child), store.GetId(blocked), store.GetId(related), store.GetId(weighted));
+	}
+
+	protected static async Task AssertGraph(IObjectStore store, (Guid parent, Guid child, Guid blocked, Guid related, Guid weighted) ids)
+	{
+		// Warm every node into the store's tracking cache up front. The in-memory projection has
+		// already replayed the whole log by this point, so this is a no-op there — but the Mongo
+		// projection intentionally never pre-warms (see MongoProjection's type-level remarks):
+		// ResolveObject only resolves a tracked instance, so any node a nav property might resolve
+		// (not just the ones this method names directly) must be loaded at least once first.
+		var nodes = store.GetCollection<TestGraphNode>().ToList();
+		TestGraphNode Get(Guid id) => nodes.First(n => store.GetId(n) == id);
+		var parent = Get(ids.parent);
+		var child = Get(ids.child);
+		var related = Get(ids.related);
+
+		// Directed primitive — navigable from both ends.
+		await Assert.That(parent.Children.Count).IsEqualTo(1);
+		await Assert.That(store.GetId(parent.Children.First())).IsEqualTo(ids.child);
+		await Assert.That(child.Parent).IsNotNull();
+		await Assert.That(store.GetId(child.Parent!)).IsEqualTo(ids.parent);
+
+		// Second parallel directed axis does not bleed into the first.
+		await Assert.That(child.Blocks.Count).IsEqualTo(1);
+		await Assert.That(store.GetId(child.Blocks.First())).IsEqualTo(ids.blocked);
+		await Assert.That(child.Children.Count).IsEqualTo(0);
+
+		// Undirected — incident from either endpoint.
+		await Assert.That(parent.RelatedNodes.Count).IsEqualTo(1);
+		await Assert.That(store.GetId(parent.RelatedNodes.First())).IsEqualTo(ids.related);
+		await Assert.That(related.RelatedNodes.Count).IsEqualTo(1);
+		await Assert.That(store.GetId(related.RelatedNodes.First())).IsEqualTo(ids.parent);
+
+		// Payload link — Order and typed endpoints intact.
+		var weightedLink = parent.WeightedChildren.Single();
+		await Assert.That(weightedLink.Order).IsEqualTo(3.5);
+		await Assert.That(store.GetId(weightedLink.Target!)).IsEqualTo(ids.weighted);
+		await Assert.That(store.GetId(weightedLink.Source!)).IsEqualTo(ids.parent);
+	}
+
+	[Test]
+	public async Task Should_30_navigate_typed_graph_same_session()
+	{
+		var store = ResolveStore();
+		var ids = BuildGraph(store);
+		await AssertGraph(store, ids);
+	}
 }
 
 /// <summary>
 /// Adds the <b>durability</b> clause to <see cref="Cobra_SynqraStoreContractTests"/>: state must survive a
-/// full restart and come back by replaying the event log alone. This is a property of a <i>durable</i>
-/// event storage (MongoDB, SBX files) — a non-durable (in-memory) log can't satisfy it, so only
-/// durable storage backends inherit this contract. Pure derivation, no extra wiring.
+/// full restart and come back by replaying the event log alone (or, for a backend whose store
+/// materializes durably and never replays — e.g. <c>MongoProjection</c> — by reading straight back out of
+/// it). This is a property of a <i>durable</i> event storage (MongoDB, SBX files) — a non-durable
+/// (in-memory) log can't satisfy it, so only durable storage backends inherit this contract. Pure
+/// derivation, no extra wiring.
 /// </summary>
 public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreContractTests
 {
@@ -141,6 +231,24 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		var reloaded = store2.GetCollection<DemoModel>().FirstOrDefault(m => store2.GetId(m) == id);
 		await Assert.That(reloaded).IsNotNull();
 		await Assert.That(reloaded!.Name).IsEqualTo("Bob");
+	}
+
+	[Test]
+	public async Task Should_40_navigation_survives_restart_via_replay()
+	{
+		var store = ResolveStore();
+		var ids = BuildGraph(store);
+
+		// New host + new projection against the same durable log — the graph must come back by replay.
+		Restart();
+
+		var store2 = ResolveStore();
+		if (store2 is InMemoryProjection projection)
+		{
+			await projection.LoadStateAsync();
+		}
+
+		await AssertGraph(store2, ids);
 	}
 }
 
@@ -185,7 +293,6 @@ public abstract class Cobra_InMemoryEventStorageContract : Cobra_SynqraStoreCont
 
 [InheritsTests]
 [NotInParallel]
-[Property("CI", "false")]
 public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => services.AddInMemorySynqraStore();
@@ -193,7 +300,6 @@ public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventSt
 
 [InheritsTests]
 [NotInParallel]
-[Property("CI", "false")]
 public sealed class Cobra_Mongo_Storage_With_Mongo_Store : Cobra_MongoEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
@@ -206,6 +312,7 @@ public sealed class Cobra_SbxFile_Storage_With_InMemory_Store : Cobra_SbxFileEve
 }
 
 [InheritsTests]
+[NotInParallel]
 public sealed class Cobra_SbxFile_Storage_With_Mongo_Store : Cobra_SbxFileEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
@@ -218,7 +325,156 @@ public sealed class Cobra_InMemory_Storage_With_InMemory_Store : Cobra_InMemoryE
 }
 
 [InheritsTests]
+[NotInParallel]
 public sealed class Cobra_InMemory_Storage_With_Mongo_Store : Cobra_InMemoryEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => UseMongoProjectionStore(services);
+}
+
+// =====================================================================================
+// Components, materialized by the Mongo store: each component is persisted in its own shared
+// "Components" Mongo collection, addressed by (ContainerId, ComponentTypeId, ComponentId) — not
+// embedded in the container's own document (see MongoProjection.UpsertComponent's remarks on
+// why). CI provisions a real mongod (see Dockerfile's withmongo), so this runs there too — only
+// NotInParallel, since every Mongo-backed test in the suite shares that one mongod instance.
+// Kept as its own dedicated class rather than folded into the matrix above: components aren't
+// (yet) being tested across the full append-storage axis the way the object/link contract is,
+// just end-to-end against the real backend that materializes them.
+// =====================================================================================
+
+[NotInParallel]
+public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
+{
+	protected override void Register(IHostApplicationBuilder hostBuilder)
+	{
+		base.Register(hostBuilder);
+
+		hostBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default);
+		hostBuilder.Services.AddSingleton(SampleJsonSerializerContext.DefaultOptions);
+		hostBuilder.Services.AddTypeMetadataProvider(
+		[
+			typeof(Command),
+			typeof(CreateObjectCommand),
+			typeof(ChangeObjectPropertyCommand),
+			typeof(AddComponentCommand),
+			typeof(ChangeComponentPropertyCommand),
+			typeof(DeleteComponentCommand),
+			typeof(TestGeneratedContainerNode),
+			typeof(TestUniqueComponent),
+			typeof(TestTaggingComponent),
+			typeof(TestActivatableComponent),
+		]);
+		hostBuilder.Services.AddSbxSerializer(ser =>
+		{
+			ser.Map(220, typeof(TestGeneratedContainerNode));
+			ser.Map(221, typeof(TestUniqueComponent));
+			ser.Map(222, typeof(TestTaggingComponent));
+			ser.Map(223, typeof(TestActivatableComponent));
+			ser.Snapshot();
+		});
+		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		UseMongoProjectionStore(hostBuilder.Services);
+	}
+
+	void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
+
+	IObjectStore Store => ServiceProvider.GetRequiredService<IObjectStore>();
+
+	[Test]
+	public async Task Should_add_change_and_remove_a_component_via_the_generated_collection()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n1" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		var component = new TestUniqueComponent { Subject = "first" };
+		node.Components.Add(component); // generator-emitted path -> AddComponentCommand
+
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+		var attached = (TestUniqueComponent)node.Components.GetUniqueComponent(typeof(TestUniqueComponent))!;
+		await Assert.That(attached.Subject).IsEqualTo("first");
+
+		// AttachToContainer wiring lets the component's own generated setter route through
+		// ChangeComponentPropertyCommand without the test threading the container manually.
+		attached.Subject = "second";
+		await Assert.That(attached.Subject).IsEqualTo("second");
+
+		node.Components.Remove(attached);
+		await Assert.That(node.Components.Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_reject_a_second_unique_component_of_the_same_type()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n2" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		node.Components.Add(new TestUniqueComponent { Subject = "first" });
+
+		var ex = await Assert.ThrowsAsync(async () =>
+		{
+			await store.SubmitCommandAsync(new AddComponentCommand
+			{
+				CommandId = GuidExtensions.CreateVersion7(),
+				StreamId = SynqraGuids.SynqraRootStreamId,
+				TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).TypeId,
+				TargetId = store.GetId(node),
+				CollectionId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).GetCollectionId(""),
+				ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
+				ComponentId = Guid.Empty,
+				Data = new TestUniqueComponent { Subject = "second" },
+			});
+		});
+		await Assert.That(ex).IsTypeOf<InvalidOperationException>();
+	}
+
+	[Test]
+	public async Task Should_support_multiple_non_unique_components_addressed_by_id()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n3" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		var a = new TestTaggingComponent { Id = GuidExtensions.CreateVersion7(), Tag = "a" };
+		var b = new TestTaggingComponent { Id = GuidExtensions.CreateVersion7(), Tag = "b" };
+		node.Components.Add(a);
+		node.Components.Add(b);
+
+		await Assert.That(node.Components.Count).IsEqualTo(2);
+		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == a.Id).Tag).IsEqualTo("a");
+		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == b.Id).Tag).IsEqualTo("b");
+	}
+
+	[Test]
+	public async Task Should_activate_on_the_originating_add_but_not_on_a_later_reload()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n4" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+
+		var component = new TestActivatableComponent { Marker = "m" };
+		node.Components.Add(component);
+
+		await Assert.That(component.ActivationCount).IsEqualTo(1);
+		await Assert.That(component.LastActivationWasReplay).IsEqualTo(false);
+	}
+
+	[Test]
+	public async Task Should_persist_a_component_so_it_survives_a_restart()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n5" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+		var id = store.GetId(node);
+		node.Components.Add(new TestUniqueComponent { Subject = "durable" });
+
+		Restart();
+
+		var store2 = Store;
+		var reloaded = store2.GetCollection<TestGeneratedContainerNode>().First(n => store2.GetId(n) == id);
+		var component = (TestUniqueComponent)reloaded.Components.GetUniqueComponent(typeof(TestUniqueComponent))!;
+		await Assert.That(component).IsNotNull();
+		await Assert.That(component.Subject).IsEqualTo("durable");
+	}
 }

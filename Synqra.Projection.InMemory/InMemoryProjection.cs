@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -61,6 +61,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
 	private byte _attachedMaintain;
+
+	// Links: by-id (RemoveLinkCommand addressing), by structural key (dedup), and an incidence
+	// index keyed by node identity (navigation queries). Maintained from LinkAddedEvent/
+	// LinkRemovedEvent — links have their own dedicated command/event pair, not the generic
+	// object lifecycle. See plans/links.md.
+	private readonly ConcurrentDictionary<Guid, Link> _linksById = new();
+	private readonly ConcurrentDictionary<LinkKey, Link> _linksByKey = new();
+	private readonly ConcurrentDictionary<Guid, List<Link>> _linksByNode = new();
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
@@ -627,6 +635,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			var pros = cmd.Data.GetType().GetProperties().Where(x => x.CanWrite && x.CanRead);
 			foreach (var pro in pros)
 			{
+				// Skip computed/navigation accessors flagged as non-persisted (e.g. an edge's typed
+				// Source/Target, which merely project the scalar id columns). Persisting them would
+				// emit the whole referenced object as a property value and, on replay, set it before
+				// the scalar ids — corrupting reconstruction.
+				if (pro.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
+				{
+					continue;
+				}
 				var value = pro.GetValue(cmd.Data);
 				// SynqraTypeExtensions
 				if (Equals(value, pro.PropertyType.GetDefault()))
@@ -764,6 +780,36 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
+	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx)
+	{
+		// Structural dedup happens during event apply (where the live link index lives) —
+		// same pattern as AddComponentCommand's uniqueness check.
+		ctx.Events.Add(new LinkAddedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			EventId = GuidExtensions.CreateVersion7(),
+			LinkTypeId = cmd.LinkTypeId,
+			LinkId = cmd.LinkId,
+			SourceId = cmd.SourceId,
+			TargetId = cmd.TargetId,
+			Data = cmd.Data,
+		});
+		return Task.CompletedTask;
+	}
+
+	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
+	{
+		ctx.Events.Add(new LinkRemovedEvent
+		{
+			StreamId = cmd.StreamId,
+			CommandId = cmd.CommandId,
+			EventId = GuidExtensions.CreateVersion7(),
+			LinkId = cmd.LinkId,
+		});
+		return Task.CompletedTask;
+	}
+
 	#endregion
 
 	#region Event Handler
@@ -868,6 +914,152 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
+	/// <summary>
+	/// Materializes the link from <see cref="AddLinkCommand.Data"/> the same way
+	/// <see cref="MaterializeComponent"/> does for a component (live instance / json-shaped dict /
+	/// fall back to reflection), attaches it to the store, and indexes it — rejecting a structural
+	/// duplicate (same concrete type + endpoint pair) before it can be persisted. Both endpoints are
+	/// always already set by the time this runs (the command carries the whole link, unlike a plain
+	/// object's properties which trickle in across separate events), so there is no deferred-
+	/// indexing step the way the generic object lifecycle would need.
+	/// <see cref="LinkAddedEvent.SourceId"/>/<see cref="LinkAddedEvent.TargetId"/> are authoritative —
+	/// stamped onto the materialized link explicitly, not read off whatever <see cref="LinkAddedEvent.Data"/>
+	/// happened to carry.
+	/// </summary>
+	Task VisitLinkAddedCore(LinkAddedEvent ev)
+	{
+		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
+		var link = MaterializeLink(linkType, ev.Data);
+		link.LinkId = ev.LinkId;
+		link.SourceId = ev.SourceId;
+		link.TargetId = ev.TargetId;
+
+		var key = link.StructuralKey;
+		if (!_linksByKey.TryAdd(key, link))
+		{
+			throw new InvalidOperationException(
+				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link already exists between the same endpoints.");
+		}
+		_linksById[link.LinkId] = link;
+		_linksByNode.GetOrAdd(link.SourceId, _ => new List<Link>()).Add(link);
+		if (link.TargetId != link.SourceId)
+		{
+			_linksByNode.GetOrAdd(link.TargetId, _ => new List<Link>()).Add(link);
+		}
+
+		if (link is IBindableModel bindable && bindable.Store is null)
+		{
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+		}
+
+		NotifyLinkChanged(link, LinkEnd.Source);
+		NotifyLinkChanged(link, LinkEnd.Target);
+		return Task.CompletedTask;
+	}
+
+	Task VisitLinkRemovedCore(LinkRemovedEvent ev)
+	{
+		if (!_linksById.TryRemove(ev.LinkId, out var link))
+		{
+			return Task.CompletedTask; // already gone — idempotent
+		}
+		_linksByKey.TryRemove(link.StructuralKey, out _);
+		if (_linksByNode.TryGetValue(link.SourceId, out var fromList))
+		{
+			fromList.Remove(link);
+		}
+		if (link.TargetId != link.SourceId && _linksByNode.TryGetValue(link.TargetId, out var toList))
+		{
+			toList.Remove(link);
+		}
+
+		NotifyLinkChanged(link, LinkEnd.Source);
+		NotifyLinkChanged(link, LinkEnd.Target);
+		return Task.CompletedTask;
+	}
+
+	/// <summary>Resolves the endpoint object at <paramref name="selfEnd"/> and, if it implements <see cref="ILinkAware"/>, tells it this link's type changed.</summary>
+	void NotifyLinkChanged(Link link, LinkEnd selfEnd)
+	{
+		var endpointId = selfEnd == LinkEnd.Source ? link.SourceId : link.TargetId;
+		if (TryGetModel(endpointId).Model is ILinkAware aware)
+		{
+			aware.OnLinkChanged(link.GetType(), selfEnd);
+		}
+	}
+
+	/// <summary>Same three-case materialization <see cref="MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
+	Link MaterializeLink(Type linkType, object? data)
+	{
+		if (data is Link ready && linkType.IsInstanceOfType(ready))
+		{
+			return ready;
+		}
+
+		var instance = (Link)(Activator.CreateInstance(linkType)
+			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
+
+		if (data is IDictionary<string, object?> bag && instance is IBindableModel bindable)
+		{
+			foreach (var (key, value) in bag)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else if (data is IDictionary<string, object?> reflectBag)
+		{
+			foreach (var (key, value) in reflectBag)
+			{
+				var pi = linkType.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(instance, v);
+			}
+		}
+		return instance;
+	}
+
+	// ---------------------------------------------------------------- ILinkIndex
+
+	IReadOnlyCollection<Link> ILinkIndex.Links => (IReadOnlyCollection<Link>)_linksByKey.Values;
+
+	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
+	{
+		if (!_linksByNode.TryGetValue(nodeId, out var list))
+		{
+			return Array.Empty<Link>();
+		}
+		return list.Where(l => linkType.IsInstanceOfType(l) && IncidentAt(l, nodeId, end)).ToArray();
+	}
+
+	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
+	{
+		if (!_linksByNode.TryGetValue(a, out var list))
+		{
+			return Array.Empty<Link>();
+		}
+		return list
+			.Where(l => linkType.IsInstanceOfType(l)
+				&& ((l.SourceId == a && l.TargetId == b) || (l.SourceId == b && l.TargetId == a)))
+			.ToArray();
+	}
+
+	bool ILinkIndex.TryGetByKey(LinkKey key, out Link? link) => _linksByKey.TryGetValue(key, out link);
+
+	bool ILinkIndex.TryGetById(Guid linkId, out Link? link) => _linksById.TryGetValue(linkId, out link);
+
+	// An undirected link is incident from either side; a directed link matches the requested role.
+	static bool IncidentAt(Link link, Guid nodeId, LinkEnd end) => end switch
+	{
+		LinkEnd.Source => link.SourceId == nodeId,
+		LinkEnd.Target => link.TargetId == nodeId,
+		_ => link.SourceId == nodeId || link.TargetId == nodeId,
+	};
+
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		var tm = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId);
@@ -915,6 +1107,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		return Guid.Empty;
 	}
+
+	public object? ResolveObject(Guid id) => id == default ? null : TryGetModel(id).Model;
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx)
 	{
@@ -1043,6 +1237,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		return Task.CompletedTask;
 	}
+
+	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => VisitLinkAddedCore(ev);
+
+	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => VisitLinkRemovedCore(ev);
 
 	// ---- Component apply helpers ----
 

@@ -576,9 +576,15 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			var virtualKeyword = isSealed ? "" : " virtual";
 
 			// -- Schema detection / drift --
+			// Opt-in link nav setters (e.g. Parent { get; set; }) have both accessors but are a live
+			// query backed by SetSingle, not a stored field — they must never reach the binary schema.
 			string suggestedSchema = "1";
 			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
 			{
+				if (TryGetLinkNav(pro) is not null)
+				{
+					continue;
+				}
 				suggestedSchema += " " + pro.Name + " " + pro.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 			}
 
@@ -630,7 +636,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			}
 
 			// -- Build property lookup and schema field mapping for per-version serialization --
-			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).ToArray();
+			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => TryGetLinkNav(p) is null).ToArray();
 			var propertyLookup = new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal);
 			foreach (var p in allProperties)
 			{

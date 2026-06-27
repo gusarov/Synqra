@@ -13,6 +13,9 @@ public interface ICommandVisitor<T>
 	Task VisitAsync(ChangeComponentPropertyCommand cmd, T ctx);
 	Task VisitAsync(DeleteComponentCommand cmd, T ctx);
 
+	Task VisitAsync(AddLinkCommand cmd, T ctx);
+	Task VisitAsync(RemoveLinkCommand cmd, T ctx);
+
 	/*
 	Task VisitAsync(MoveNode cmd, T ctx);
 	Task VisitAsync(MarkAsDone cmd, T ctx);

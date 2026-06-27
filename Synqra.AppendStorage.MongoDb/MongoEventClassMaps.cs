@@ -1,6 +1,8 @@
+using System.Reflection;
 using System.Text.Json.Serialization;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Conventions;
 using MongoDB.Bson.Serialization.Serializers;
 
 namespace Synqra.AppendStorage.MongoDb;
@@ -48,12 +50,8 @@ public static class MongoEventClassMaps
 				return;
 			}
 
-			// MongoDB driver 3.x requires an explicit GUID representation. Standard
-			// (BSON binary subtype 4) is the portable, modern encoding — the right
-			// choice for a durable log that must read identically across drivers and
-			// languages. Without this, GuidSerializer throws "GuidRepresentation is
-			// Unspecified" on the first event written.
-			BsonSerializer.TryRegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
+			PatchObjectSerializerDefaults();
+			RegisterJsonIgnoreConvention();
 
 			if (!BsonClassMap.IsClassMapRegistered(typeof(Event)))
 			{
@@ -84,6 +82,40 @@ public static class MongoEventClassMaps
 			RegisterDerived<ComponentDeletedEvent>("ComponentDeletedEvent");
 
 			_registered = true;
+		}
+	}
+
+	/// <summary>
+	/// Registers a global convention that strips every <see cref="JsonIgnoreAttribute"/>-marked
+	/// member from <em>any</em> class map BSON builds — including ones never explicitly registered
+	/// here. Without this, a dynamic <c>object</c>-typed event member that carries a live model
+	/// instance (e.g. <see cref="LinkAddedEvent.Data"/> holding a concrete <c>Link</c> subclass)
+	/// gets auto-mapped <em>implicitly</em> the first time BSON encounters it, and that implicit
+	/// auto-map never runs <see cref="UnmapJsonIgnored"/> — only the types this class explicitly
+	/// calls <see cref="RegisterDerived{T}"/> for get that treatment. A consumer-defined Link
+	/// subclass is exactly such a type: the framework has no way to know about it ahead of time, so
+	/// per-type registration can't cover it, but a convention applies to every AutoMap call,
+	/// explicit or implicit, uniformly.
+	/// </summary>
+	static void RegisterJsonIgnoreConvention()
+	{
+		var pack = new ConventionPack { new JsonIgnoreConvention() };
+		ConventionRegistry.Register("Synqra.JsonIgnore", pack, _ => true);
+	}
+
+	sealed class JsonIgnoreConvention : IClassMapConvention
+	{
+		public string Name => "Synqra.JsonIgnore";
+
+		public void Apply(BsonClassMap classMap)
+		{
+			foreach (var memberMap in classMap.DeclaredMemberMaps.ToArray())
+			{
+				if (memberMap.MemberInfo.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
+				{
+					classMap.UnmapMember(memberMap.MemberInfo);
+				}
+			}
 		}
 	}
 
@@ -118,6 +150,114 @@ public static class MongoEventClassMaps
 			{
 				cm.UnmapMember(memberMap.MemberInfo);
 			}
+		}
+	}
+
+	/// <summary>
+	/// Forces two ambient MongoDB defaults that the public API cannot reliably change once the
+	/// process has started, by reaching into <see cref="BsonSerializer"/>/<see cref="ObjectSerializer"/>
+	/// internals and overwriting them directly rather than asking nicely. Both fixes are needed for
+	/// any <c>object</c>-typed event member that carries a live, concrete payload — e.g.
+	/// <see cref="LinkAddedEvent.Data"/> (the link instance itself, mirroring
+	/// <see cref="ComponentAddedEvent.Data"/>'s contract) or a boxed <see cref="Guid"/> like
+	/// <see cref="ObjectPropertyChangedEvent.NewValue"/>:
+	/// <list type="number">
+	/// <item>
+	/// <b>GUID representation.</b> MongoDB driver 3.x requires an explicit one; the obvious approach
+	/// — <c>BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard))</c> —
+	/// does not work reliably. The global registry lazily self-registers a default
+	/// <c>GuidSerializer(Unspecified)</c> the moment ANYTHING in the process first asks for one
+	/// (observed in practice: a driver-internal admin command from test infrastructure spinning up
+	/// a database, well before this method ever runs), and the public API refuses to register a
+	/// different one over an existing registration — first ask wins, permanently. Overwriting the
+	/// registry's backing dictionary entry directly sidesteps that race: it doesn't matter who got
+	/// there first, because this replaces whatever is there.
+	/// </item>
+	/// <item>
+	/// <b>Type allowlist.</b> The default <see cref="ObjectSerializer"/> refuses to (de)serialize any
+	/// type it doesn't recognize as "safe" — a deliberate anti-gadget-attack default aimed at
+	/// untrusted input, which an event-sourcing log's own application-defined payload types are not.
+	/// Constructing a replacement with both allowed-type predicates open and patching it in the same
+	/// way covers this.
+	/// </item>
+	/// </list>
+	/// <para>
+	/// Each <c>ObjectSerializer</c> instance carries its own copies of both — a private
+	/// <c>_guidSerializer</c> field and the allowed-type predicates — fixed at construction, never
+	/// re-read from the registry afterward. And there can be multiple instances already cached
+	/// (confirmed empirically: <c>ObjectSerializer.Instance</c> and whatever the registry separately
+	/// resolved for <c>typeof(object)</c> are NOT the same object), so a single freshly-constructed,
+	/// fully-open replacement is force-installed everywhere an instance could come from: the
+	/// registry's <c>typeof(object)</c> slot, the <c>ObjectSerializer.Instance</c> static field
+	/// itself, and any other <c>ObjectSerializer</c> already sitting in the registry cache.
+	/// </para>
+	/// <para>
+	/// Reflects into <see cref="BsonSerializer"/>/<see cref="BsonSerializerRegistry"/>/
+	/// <see cref="ObjectSerializer"/> internals — all private and unsupported, so a driver upgrade
+	/// could rename or restructure them. If that happens this degrades to a no-op (caught and
+	/// ignored) rather than a crash; the symptom would be the same "GuidRepresentation is
+	/// Unspecified" / "is not configured as a type that is allowed to be serialized" exceptions this
+	/// method exists to prevent, at which point the field names below need updating for the new
+	/// driver version.
+	/// </para>
+	/// </summary>
+	static void PatchObjectSerializerDefaults()
+	{
+		try
+		{
+			var standardGuid = new GuidSerializer(GuidRepresentation.Standard);
+			var openPredicate = (Func<Type, bool>)(static _ => true);
+
+			var guidSerializerField = typeof(ObjectSerializer).GetField("_guidSerializer", BindingFlags.NonPublic | BindingFlags.Instance);
+			var allowedSerializeField = typeof(ObjectSerializer).GetField("_allowedSerializationTypes", BindingFlags.NonPublic | BindingFlags.Instance);
+			var allowedDeserializeField = typeof(ObjectSerializer).GetField("_allowedDeserializationTypes", BindingFlags.NonPublic | BindingFlags.Instance);
+
+			// Mutate fields on the EXISTING instance(s) in place — instance fields stay mutable via
+			// reflection even when readonly, unlike a `static readonly` field (see below). This is
+			// the only thing that actually works: replacing ObjectSerializer's `static readonly
+			// __instance` field throws FieldAccessException ("Cannot set initonly static field
+			// ... after type is initialized") under this runtime, so swapping in a freshly
+			// constructed instance is not an option — every already-existing ObjectSerializer has
+			// to be patched where it stands.
+			void PatchInstance(ObjectSerializer instance)
+			{
+				guidSerializerField?.SetValue(instance, standardGuid);
+				allowedSerializeField?.SetValue(instance, openPredicate);
+				allowedDeserializeField?.SetValue(instance, openPredicate);
+			}
+
+			PatchInstance(ObjectSerializer.Instance);
+
+			var registry = typeof(BsonSerializer)
+				.GetField("__serializerRegistry", BindingFlags.NonPublic | BindingFlags.Static)?
+				.GetValue(null);
+			var cache = registry?.GetType()
+				.GetField("_cache", BindingFlags.NonPublic | BindingFlags.Instance)?
+				.GetValue(registry) as System.Collections.Concurrent.ConcurrentDictionary<Type, IBsonSerializer>;
+			if (cache is not null)
+			{
+				cache[typeof(Guid)] = standardGuid;
+				// Patch whatever ObjectSerializer instance(s) are already cached under some other
+				// type key (e.g. a closed-over instance from before this method ran), and make sure
+				// the registry's own typeof(object) slot holds a patched instance too — calling
+				// GetOrAdd-style LookupSerializer for the first time would otherwise construct (and
+				// cache) a fresh, restricted instance this method never gets to touch.
+				if (!cache.TryGetValue(typeof(object), out var existingObjectSerializer) || existingObjectSerializer is not ObjectSerializer)
+				{
+					cache[typeof(object)] = ObjectSerializer.Instance;
+				}
+				foreach (var cached in cache.Values)
+				{
+					if (cached is ObjectSerializer os)
+					{
+						PatchInstance(os);
+					}
+				}
+			}
+		}
+		catch
+		{
+			// Best-effort: see the "unsupported reflection" remarks above.
 		}
 	}
 }
