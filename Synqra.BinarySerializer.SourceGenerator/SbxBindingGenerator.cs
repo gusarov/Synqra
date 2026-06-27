@@ -29,6 +29,7 @@ using SbxClassesProviderT = (
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Data
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ibm
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ssa
+	, Synqra.CodeGeneration.LinkFrameworkSymbols LinkSymbols
 	);
 
 namespace Synqra.BinarySerializer.SourceGenerator;
@@ -135,15 +136,16 @@ public class SbxBindingGenerator : IIncrementalGenerator
 						var ssa = comp.GetTypeByMetadataName("Synqra.SchemaAttribute");
 						if (ibm is null || ssa is null)
 						{
-							return (null, null, default!, default!, default!, default!);
+							return (null, null, default!, default!, default!, default!, default!);
 						}
+						var linkSymbols = new LinkFrameworkSymbols(comp);
 						cancelToken.ThrowIfCancellationRequested();
-						return (null, null, classDeclaration, symbol, ibm, ssa);
+						return (null, null, classDeclaration, symbol, ibm, ssa, linkSymbols);
 					}
 					catch (Exception ex)
 					{
 						EmergencyLog.Default.Error($"transform", ex);
-						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!);
+						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!);
 					}
 				});
 
@@ -581,7 +583,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			string suggestedSchema = "1";
 			foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude))
 			{
-				if (TryGetLinkNav(pro) is not null)
+				if (TryGetLinkNav(pro, classData.LinkSymbols) is not null)
 				{
 					continue;
 				}
@@ -636,7 +638,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			}
 
 			// -- Build property lookup and schema field mapping for per-version serialization --
-			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => TryGetLinkNav(p) is null).ToArray();
+			var allProperties = GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => TryGetLinkNav(p, classData.LinkSymbols) is null).ToArray();
 			var propertyLookup = new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal);
 			foreach (var p in allProperties)
 			{
