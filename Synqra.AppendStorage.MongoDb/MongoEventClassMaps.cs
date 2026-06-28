@@ -53,7 +53,6 @@ public static class MongoEventClassMaps
 
 			PatchObjectSerializerDefaults();
 			RegisterJsonIgnoreConvention();
-			RegisterObjectDataSerializer();
 
 			if (!BsonClassMap.IsClassMapRegistered(typeof(Event)))
 			{
@@ -171,26 +170,17 @@ public static class MongoEventClassMaps
 	/// bypassing <see cref="ObjectData.From(object, ISet{string}?)"/>'s exclude list, still
 	/// can't leak a duplicate copy of fields the event already carries explicitly into Mongo.
 	/// </summary>
-	static void RegisterObjectDataSerializer()
+	sealed class LinkDataSerializer : SerializerBase<ObjectData>
 	{
-		try
-		{
-			BsonSerializer.RegisterSerializer(new ObjectDataSerializer());
-		}
-		catch (BsonSerializationException)
-		{
-		}
-	}
+		static readonly string[] WellKnown = [nameof(Link.LinkId), nameof(Link.SourceId), nameof(Link.TargetId)];
 
-	class ObjectDataSerializer : SerializerBase<ObjectData>
-	{
 		public override void Serialize(BsonSerializationContext context, BsonSerializationArgs args, ObjectData value)
 		{
 			var writer = context.Writer;
 			writer.WriteStartDocument();
 			foreach (var (key, val) in value)
 			{
-				if (!ShouldWrite(key))
+				if (Array.IndexOf(WellKnown, key) >= 0)
 				{
 					continue;
 				}
@@ -213,15 +203,6 @@ public static class MongoEventClassMaps
 			reader.ReadEndDocument();
 			return result;
 		}
-
-		protected virtual bool ShouldWrite(string key) => true;
-	}
-
-	sealed class LinkDataSerializer : ObjectDataSerializer
-	{
-		static readonly string[] WellKnown = [nameof(Link.LinkId), nameof(Link.SourceId), nameof(Link.TargetId)];
-
-		protected override bool ShouldWrite(string key) => Array.IndexOf(WellKnown, key) < 0;
 	}
 
 	static void RegisterDerived<T>(string discriminator, Action<BsonClassMap<T>>? configure = null)
