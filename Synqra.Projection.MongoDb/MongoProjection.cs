@@ -4,8 +4,10 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
+using Synqra.AppendStorage.MongoDb;
 using Synqra.BinarySerializer;
 
 namespace Synqra.Projection.MongoDb;
@@ -41,6 +43,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	static MongoProjection()
 	{
 		AppContext.SetSwitch("Synqra.GuidExtensions.ValidateNamespaceIdHashChain", false);
+		// Native BSON (de)serialization below needs the same global conventions the event log
+		// registers (drop [JsonIgnore] members, skip nulls) and the same patched Guid/object
+		// serializer defaults — register them here too, since a host that wires up MongoDb only for
+		// the projection (not the event log) would otherwise never call this. Idempotent/guarded.
+		MongoEventClassMaps.Register();
 	}
 
 	const string LinksMongoCollectionName = "Links";
@@ -245,38 +252,52 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		=> _database.GetCollection<BsonDocument>(MongoCollectionName(type, collectionName));
 
 	/// <summary>
-	/// Rehydrates a stored document into its concrete model. The concrete type is read from the
-	/// <c>_t</c> discriminator the document carries (written by <see cref="ToDocument"/> via the
-	/// polymorphic <see cref="ObjectConverter"/>) — the same discriminator convention Synqra's models
-	/// and the Mongo event log already use — so the caller never has to pre-resolve the type, and no
-	/// separate type-id side field is needed. <paramref name="addressingFields"/> names the projection's
-	/// own non-model bookkeeping columns (e.g. a component's <c>ContainerId</c>) to drop before
-	/// deserializing; <c>_id</c> is always dropped. Both are appended after <c>_t</c> on write, so
-	/// stripping them leaves <c>_t</c> first, where polymorphic deserialization requires it.
+	/// Rehydrates a stored document into its concrete model via the native MongoDB driver
+	/// serializer — no JSON round-trip. The concrete type is read from the document's own <c>_t</c>
+	/// discriminator (written by <see cref="ToDocument"/>) and resolved through
+	/// <see cref="SynqraJsonTypeInfoResolver.GetByDiscriminator"/> — the very same discriminator
+	/// registry <see cref="ObjectConverter"/> (the JSON side) uses, so both serializers agree on what
+	/// <c>_t</c> values mean without the driver's own (class-map-based) polymorphism machinery ever
+	/// getting involved. That sidesteps a real cold-start gap: BSON's built-in discriminator
+	/// resolution only knows about a type once the driver has auto-mapped it at least once in this
+	/// process, which a freshly-started process reading pre-existing documents can't guarantee —
+	/// whereas Synqra's own registry is populated by each model's generated static registration, at
+	/// type load, independent of Mongo ever having been touched.
+	/// <paramref name="addressingFields"/> names the projection's own non-model bookkeeping columns
+	/// (e.g. a component's <c>ContainerId</c>) to drop before deserializing, alongside the always-
+	/// dropped <c>_id</c> and <c>_t</c> (resolving the type is the only thing <c>_t</c> is for; the
+	/// concrete type's own class map has no member for it).
 	/// </summary>
 	internal object FromDocument(BsonDocument doc, params string[] addressingFields)
 	{
+		var discriminator = doc["_t"].AsString;
+		var type = SynqraJsonTypeInfoResolver.GetByDiscriminator(discriminator)
+			?? throw new InvalidOperationException($"Unknown discriminator '{discriminator}' — no model is registered under that name.");
+
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove("_id");
+		clone.Remove("_t");
 		foreach (var field in addressingFields)
 		{
 			clone.Remove(field);
 		}
-		return JsonSerializer.Deserialize(clone.ToJson(), typeof(object), _jsonSerializerOptions)
-			?? throw new InvalidOperationException("Failed to deserialize a stored document.");
+		return BsonSerializer.Deserialize(clone, type);
 	}
 
 	/// <summary>
-	/// Serializes a model to a stored document through the polymorphic <see cref="ObjectConverter"/>
-	/// (inputType <c>object</c>), so STJ stamps a <c>_t</c> discriminator and every concrete field —
-	/// even when the value is held behind an interface/base (a component behind <c>IComponent</c>, a
-	/// link behind <c>Link</c>). <c>_t</c> is written first; <c>_id</c> and any addressing columns are
-	/// appended after, so a read can strip them and still find <c>_t</c> in the leading position.
+	/// Serializes a model to a stored document via the native MongoDB driver serializer — no JSON
+	/// round-trip. Going through nominal type <c>object</c> (rather than <c>model.GetType()</c>) means
+	/// the driver always sees nominal != actual type, so it always writes the <c>_t</c> discriminator
+	/// — even when the value is held behind an interface/base (a component behind <c>IComponent</c>,
+	/// a link behind <c>Link</c>) where nominal and actual would otherwise coincide. Every concrete
+	/// field is included by construction (this serializes the *actual* type's own class map, not a
+	/// declared base/interface's). The globally-registered conventions (see
+	/// <see cref="MongoEventClassMaps.Register"/>, called from this class's static constructor) drop
+	/// any <c>[JsonIgnore]</c> member from that class map, matching the JSON side's persisted shape.
 	/// </summary>
 	BsonDocument ToDocument(object model, Guid id)
 	{
-		var json = JsonSerializer.Serialize(model, typeof(object), _jsonSerializerOptions);
-		var doc = BsonDocument.Parse(json);
+		var doc = model.ToBsonDocument(typeof(object));
 		doc["_id"] = id.ToString();
 		return doc;
 	}
@@ -627,16 +648,16 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	Guid? FindStructuralDuplicate(IMongoCollection<BsonDocument> linksMongo, Link link, Guid excludeId)
 	{
 		var typeIdFilter = LinkTypeFilter(link.GetType());
-		// SourceId/TargetId are stored as strings — ToDocument round-trips the model through
-		// JsonSerializer, which renders a Guid as a string, not the BSON Binary subtype the driver's
-		// own GuidSerializer would produce for a typed Guid filter value. Compare as strings to match.
+		// SourceId/TargetId are native Link fields, serialized through Link's own class map (the
+		// patched standard GuidSerializer) — filter with a raw Guid so the driver encodes it the same
+		// way (BSON Binary subtype), not a string.
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(
-				Builders<BsonDocument>.Filter.Eq("SourceId", link.SourceId.ToString()),
-				Builders<BsonDocument>.Filter.Eq("TargetId", link.TargetId.ToString())),
+				Builders<BsonDocument>.Filter.Eq("SourceId", link.SourceId),
+				Builders<BsonDocument>.Filter.Eq("TargetId", link.TargetId)),
 			Builders<BsonDocument>.Filter.And(
-				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId.ToString()),
-				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId.ToString())));
+				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId),
+				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId)));
 
 		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
 		{
@@ -669,12 +690,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// <summary>
 	/// Components are persisted in their own shared Mongo collection — NOT embedded in their
 	/// container's own document the way the container's plain properties are. <see cref="IComponentsCollection"/>'s
-	/// element type is the marker interface <see cref="IComponent"/>; serialized naively through that
-	/// declared element type, <c>System.Text.Json</c> would drop every concrete field. The fix is the
-	/// polymorphic <see cref="ObjectConverter"/> (see <see cref="ToDocument"/>): serializing through
-	/// <c>object</c> stamps a <c>_t</c> discriminator and all concrete fields, and reading back through
-	/// <c>object</c> resolves the concrete type from <c>_t</c> alone. So the stored document needs no
-	/// separate type-id column — the <c>_t</c> discriminator doubles as the type filter, mirroring how
+	/// element type is the marker interface <see cref="IComponent"/>; serialized through that
+	/// declared element type, the driver would build a class map for the interface itself (which has
+	/// no members) and drop every concrete field. Going through nominal type <c>object</c> (see
+	/// <see cref="ToDocument"/>) sidesteps that — the driver serializes the *actual* type's own class
+	/// map and always stamps a <c>_t</c> discriminator, and reading back resolves the concrete type
+	/// from <c>_t</c> alone via <see cref="FromDocument"/>. So the stored document needs no separate
+	/// type-id column — the <c>_t</c> discriminator doubles as the type filter, mirroring how
 	/// links are stored. The remaining (container, type, id) addressing matches how
 	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> addresses a component on the live, in-memory
 	/// side of this same apply path — with the type filtered via <c>_t</c> so a unique component
@@ -689,10 +711,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	void UpsertComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		// Through object -> ObjectConverter stamps "_t" first plus every concrete field; ContainerId /
-		// ComponentId are appended after, so a read strips them and still finds "_t" leading.
-		var json = JsonSerializer.Serialize(component, typeof(object), _jsonSerializerOptions);
-		var doc = BsonDocument.Parse(json);
+		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
+		var doc = component.ToBsonDocument(typeof(object));
 		doc["ContainerId"] = containerId.ToString();
 		doc["ComponentId"] = componentId.ToString();
 		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
@@ -763,16 +783,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		// Compared as strings — see FindStructuralDuplicate's remark on why.
-		var nodeIdString = nodeId.ToString();
+		// Native Guid filter — see FindStructuralDuplicate's remark on why.
 		var endpointFilter = end switch
 		{
 			LinkEnd.None => throw new ArgumentException("LinkEnd.None is not a valid link end.", nameof(end)),
-			LinkEnd.Source => Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
-			LinkEnd.Target => Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString),
+			LinkEnd.Source => Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
+			LinkEnd.Target => Builders<BsonDocument>.Filter.Eq("TargetId", nodeId),
 			_ => Builders<BsonDocument>.Filter.Or(
-				Builders<BsonDocument>.Filter.Eq("SourceId", nodeIdString),
-				Builders<BsonDocument>.Filter.Eq("TargetId", nodeIdString)),
+				Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
+				Builders<BsonDocument>.Filter.Eq("TargetId", nodeId)),
 		};
 		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
@@ -782,11 +801,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var aString = a.ToString();
-		var bString = b.ToString();
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
-			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", aString), Builders<BsonDocument>.Filter.Eq("TargetId", bString)),
-			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", bString), Builders<BsonDocument>.Filter.Eq("TargetId", aString)));
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", a), Builders<BsonDocument>.Filter.Eq("TargetId", b)),
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", b), Builders<BsonDocument>.Filter.Eq("TargetId", a)));
 		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
 			.ToArray();
@@ -796,11 +813,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linkType = key.LinkType;
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var xString = key.X.ToString();
-		var yString = key.Y.ToString();
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
-			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", xString), Builders<BsonDocument>.Filter.Eq("TargetId", yString)),
-			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", yString), Builders<BsonDocument>.Filter.Eq("TargetId", xString)));
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.X), Builders<BsonDocument>.Filter.Eq("TargetId", key.Y)),
+			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.Y), Builders<BsonDocument>.Filter.Eq("TargetId", key.X)));
 
 		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
