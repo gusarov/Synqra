@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 using MongoDB.Bson;
+using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Conventions;
 using MongoDB.Bson.Serialization.Serializers;
@@ -80,6 +81,14 @@ public static class MongoEventClassMaps
 			RegisterDerived<ComponentAddedEvent>("ComponentAddedEvent");
 			RegisterDerived<ComponentPropertyChangedEvent>("ComponentPropertyChangedEvent");
 			RegisterDerived<ComponentDeletedEvent>("ComponentDeletedEvent");
+			RegisterDerived<LinkRemovedEvent>("LinkRemovedEvent");
+
+			// LinkAddedEvent gets a member-scoped serializer on Data so the embedded link drops the
+			// three well-known fields it would otherwise duplicate (see LinkDataSerializer). This keeps
+			// the Link class map itself untouched — unlike a global convention, so MongoProjection's
+			// native link collection can still persist LinkId/SourceId/TargetId for querying.
+			RegisterDerived<LinkAddedEvent>("LinkAddedEvent", cm =>
+				cm.GetMemberMap(e => e.Data).SetSerializer(new LinkDataSerializer()));
 
 			_registered = true;
 		}
@@ -107,25 +116,18 @@ public static class MongoEventClassMaps
 	/// command-handling path) are nullable reference types, so without this every document carries
 	/// an explicit <c>"Field": null</c> for each one that happens not to apply.
 	/// </item>
-	/// <item>
-	/// Strips <see cref="Link.LinkId"/>/<see cref="Link.SourceId"/>/<see cref="Link.TargetId"/> from
-	/// the <see cref="Link"/> base's own class map — which is what every concrete link subtype's
-	/// auto-mapped chain shares (BSON builds one class map per level of the inheritance chain, and
-	/// caches/reuses <c>typeof(Link)</c>'s). Without this, <see cref="LinkAddedEvent.Data"/> (a
-	/// concrete <c>Link</c> instance, e.g. <c>HierarchyLink</c>) would duplicate the exact three
-	/// fields <see cref="LinkAddedEvent"/> itself already carries explicitly, persisted twice in the
-	/// same document. Safe to strip universally: nothing else round-trips a <c>Link</c> through this
-	/// native-BSON path — <c>MongoProjection</c>'s own "Links" collection storage goes through
-	/// <c>System.Text.Json</c> instead, an entirely separate serializer this convention never touches.
-	/// On replay, the materialized link's <c>LinkId</c>/<c>SourceId</c>/<c>TargetId</c> are always
-	/// re-stamped from the event's own explicit fields anyway (see <c>VisitLinkAddedCore</c>), so the
-	/// stripped fields were never read back even before this fix — purely dead weight on disk.
-	/// </item>
 	/// </list>
+	/// <para>
+	/// Note: the redundancy where <see cref="LinkAddedEvent.Data"/> (a concrete <c>Link</c>) would
+	/// duplicate the three well-known fields the event already carries explicitly is handled NOT here
+	/// (a global Link-class-map strip would also clobber <c>MongoProjection</c>'s native link storage,
+	/// which needs those fields to query) but by a member-scoped <see cref="LinkDataSerializer"/> on the
+	/// <c>Data</c> member alone — see its registration in <see cref="Register"/>.
+	/// </para>
 	/// </summary>
 	static void RegisterJsonIgnoreConvention()
 	{
-		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true), new LinkWellKnownFieldsConvention() };
+		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true) };
 		ConventionRegistry.Register("Synqra.JsonIgnoreAndSkipNulls", pack, _ => true);
 	}
 
@@ -145,24 +147,54 @@ public static class MongoEventClassMaps
 		}
 	}
 
-	sealed class LinkWellKnownFieldsConvention : IClassMapConvention
+	/// <summary>
+	/// Member-scoped BSON serializer for <see cref="LinkAddedEvent.Data"/> (the link instance).
+	/// Serializes the link natively through the normal <c>object</c> serializer — so a consumer's
+	/// concrete <c>Link</c> subtype keeps its own extra fields and its <c>_t</c> discriminator — then
+	/// drops the three well-known fields (<see cref="Link.LinkId"/>/<see cref="Link.SourceId"/>/
+	/// <see cref="Link.TargetId"/>) from the resulting sub-document, because the event already carries
+	/// them as explicit top-level fields. Because it's attached to this one member rather than the
+	/// <c>Link</c> class map, it never affects how a <c>Link</c> is serialized anywhere else — notably
+	/// <c>MongoProjection</c>'s native "Links" collection, which must keep those very fields to query by
+	/// endpoint. On replay the materialized link re-stamps LinkId/SourceId/TargetId from the event's own
+	/// explicit fields, so the stripped fields are never read back from Data.
+	/// </summary>
+	sealed class LinkDataSerializer : SerializerBase<object>
 	{
-		public string Name => "Synqra.LinkWellKnownFields";
+		static readonly string[] WellKnown = [nameof(Link.LinkId), nameof(Link.SourceId), nameof(Link.TargetId)];
 
-		public void Apply(BsonClassMap classMap)
+		// Looked up lazily so it resolves the patched, fully-open object serializer (see
+		// PatchObjectSerializerDefaults) rather than whatever might exist at type-init time.
+		IBsonSerializer? _objectSerializer;
+		IBsonSerializer ObjectSerializer => _objectSerializer ??= BsonSerializer.LookupSerializer(typeof(object));
+
+		public override void Serialize(BsonSerializationContext context, BsonSerializationArgs args, object value)
 		{
-			if (classMap.ClassType != typeof(Link))
+			if (value is null)
 			{
+				context.Writer.WriteNull();
 				return;
 			}
-			foreach (var memberMap in classMap.DeclaredMemberMaps.ToArray())
+
+			// Serialize the link to a throwaway document (carries _t + every mapped field), then strip
+			// the three the event already owns and write what's left to the real output.
+			var doc = new BsonDocument();
+			using (var docWriter = new BsonDocumentWriter(doc))
 			{
-				classMap.UnmapMember(memberMap.MemberInfo);
+				ObjectSerializer.Serialize(BsonSerializationContext.CreateRoot(docWriter), args, value);
 			}
+			foreach (var name in WellKnown)
+			{
+				doc.Remove(name);
+			}
+			BsonDocumentSerializer.Instance.Serialize(context, args, doc);
 		}
+
+		public override object Deserialize(BsonDeserializationContext context, BsonDeserializationArgs args)
+			=> ObjectSerializer.Deserialize(context, args);
 	}
 
-	static void RegisterDerived<T>(string discriminator)
+	static void RegisterDerived<T>(string discriminator, Action<BsonClassMap<T>>? configure = null)
 		where T : Event
 	{
 		if (BsonClassMap.IsClassMapRegistered(typeof(T)))
@@ -176,6 +208,7 @@ public static class MongoEventClassMaps
 			// e.g. ObjectCreatedEvent.DataObject is the in-memory materialized object,
 			// marked [JsonIgnore] — it must not be persisted into the durable log.
 			UnmapJsonIgnored(cm);
+			configure?.Invoke(cm);
 		});
 	}
 
