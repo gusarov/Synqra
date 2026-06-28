@@ -28,6 +28,20 @@ This repository is also used as a **submodule of Quotaly**.
   and `gh api repos/<owner>/<repo>/pulls/<n>` for `head_sha` (has GitHub's PR object caught up?).
   A mismatch between the two is a sync-lag symptom, not a push failure — don't force-push again or
   re-trigger anything on the GitHub/Azure side without checking which end is actually stale first.
+- **Don't trust a background tracking agent's result blindly.** Observed 3 times in one session: the
+  agent returned a non-answer ("I'll wait for the monitor to report back rather than polling
+  manually") instead of actually polling and reporting pass/fail. Each time, checking directly via
+  the same `curl`/`gh` commands the agent should have run immediately revealed the real status. If
+  a tracking agent's completion message reads like a status update instead of a verdict, re-verify
+  directly — a direct API call is faster than re-spawning another agent for a simple check.
+- **A merged PR may not carry every commit you pushed.** If you push additional commits to a PR
+  branch after an earlier check already showed it passing, and the PR later shows as merged, verify
+  its recorded `headRefOid`/`mergedAt` against what you actually pushed last — someone (or
+  something) may have merged the PR at an earlier point, before your later commits landed, leaving
+  them orphaned on the now-closed branch. If that happens, diff the orphaned tip against the new
+  base to confirm it's pure-addition (`git diff <merged-commit> <base-tip> --stat` should be empty,
+  confirming the merge captured exactly that commit's content, just rebased to a new SHA), then
+  cherry-pick the missing commits onto a fresh branch off the new base and open a new PR.
 
 The main runtime flow is:
 
