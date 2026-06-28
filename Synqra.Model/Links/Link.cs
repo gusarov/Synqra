@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Synqra;
 
 /// <summary>
@@ -56,4 +58,14 @@ public abstract partial class Link : IIdentifiable<Guid>
 		}
 		return ((IBindableModel)this).Store?.ResolveObject(id);
 	}
+
+	/// <summary>
+	/// Property names every concrete <see cref="Link"/> always carries that are already explicit,
+	/// top-level fields on <see cref="AddLinkCommand"/>/<see cref="LinkAddedEvent"/> — pass to
+	/// <see cref="ObjectData.From(object, ISet{string}?)"/> when normalizing a link instance
+	/// into <see cref="AddLinkCommand.Data"/> so the bag only ever carries a concrete subtype's own
+	/// extra properties (e.g. <c>WeightedLink.Order</c>), not a second copy of these three.
+	/// </summary>
+	public static readonly ISet<string> WellKnownDataFields =
+		new HashSet<string> { nameof(LinkId), nameof(SourceId), nameof(TargetId) };
 }

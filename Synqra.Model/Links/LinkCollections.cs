@@ -205,7 +205,7 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 			LinkId = link.LinkId,
 			SourceId = link.SourceId,
 			TargetId = link.TargetId,
-			Data = link,
+			Data = ObjectData.From(link, Link.WellKnownDataFields),
 		});
 		RunSync(task);
 	}

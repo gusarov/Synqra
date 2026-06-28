@@ -401,6 +401,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentTypeId = cmd.ComponentTypeId,
 			ComponentId = cmd.ComponentId,
 			Data = cmd.Data,
+			LiveComponent = cmd.LiveComponent,
 		});
 		return Task.CompletedTask;
 	}
@@ -532,7 +533,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var container = ResolveContainer(ev.TargetId);
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.LiveComponent, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{

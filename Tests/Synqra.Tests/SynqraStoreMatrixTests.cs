@@ -527,6 +527,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 
 		var ex = await Assert.ThrowsAsync(async () =>
 		{
+			var second = new TestUniqueComponent { Subject = "second" };
 			await store.SubmitCommandAsync(new AddComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
@@ -536,7 +537,8 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 				CollectionId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).GetCollectionId(""),
 				ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
 				ComponentId = Guid.Empty,
-				Data = new TestUniqueComponent { Subject = "second" },
+				Data = ObjectData.From(second),
+				LiveComponent = second,
 			});
 		});
 		await Assert.That(ex).IsTypeOf<InvalidOperationException>();

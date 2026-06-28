@@ -64,37 +64,38 @@ public class MongoEventClassMapsTests
 	[Test]
 	public async Task Should_not_write_a_null_field_at_all()
 	{
-		// Data is a plain (non-JsonIgnore'd) property, never populated by the current
-		// command-handling path for ObjectCreatedEvent — it's null on every real event of this
-		// kind. Without the global IgnoreIfNullConvention, the document would still carry an
-		// explicit "Data": null for every single event, just to record the absence of a value.
-		var ev = new ObjectCreatedEvent
+		// OldValue is genuinely nullable and commonly absent (e.g. on a property's first-ever
+		// write). Without the global IgnoreIfNullConvention, the document would still carry an
+		// explicit "OldValue": null for every single event, just to record the absence of a value.
+		var ev = new ObjectPropertyChangedEvent
 		{
 			EventId = Guid.Parse("00000020-000e-8000-8000-0000000000be"),
 			CommandId = Guid.Parse("00000020-000f-8000-8000-0000000000bf"),
 			TargetId = Guid.Parse("00000020-0010-8000-8000-0000000000c0"),
 			TargetTypeId = Guid.Parse("00000020-0011-8000-8000-0000000000c1"),
 			CollectionId = Guid.Parse("00000020-0012-8000-8000-0000000000c2"),
-			Data = null,
+			PropertyName = "Name",
+			OldValue = null,
+			NewValue = "first value",
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
-		await Assert.That(doc.Contains("Data")).IsFalse();
+		await Assert.That(doc.Contains("OldValue")).IsFalse();
 
-		var back = (ObjectCreatedEvent)BsonSerializer.Deserialize<Event>(doc);
-		await Assert.That(back.Data).IsNull();
+		var back = (ObjectPropertyChangedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.OldValue).IsNull();
 	}
 
 	[Test]
 	public async Task Should_not_duplicate_LinkId_SourceId_TargetId_inside_Data()
 	{
-		// LinkAddedEvent already carries LinkId/SourceId/TargetId as its own explicit fields (see
-		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
-		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
-		// essentially empty: just its own discriminator, nothing from the Link base).
+		// The normal path: AddLinkCommand/LinkAddedEvent.Data is built via ObjectData.From(link,
+		// Link.WellKnownDataFields), so LinkId/SourceId/TargetId never enter the bag — a primitive
+		// link like HierarchyLink has no other properties, so Data comes back empty.
 		var linkId = Guid.Parse("00000020-0013-8000-8000-0000000000c3");
 		var sourceId = Guid.Parse("00000020-0014-8000-8000-0000000000c4");
 		var targetId = Guid.Parse("00000020-0015-8000-8000-0000000000c5");
+		var link = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId };
 		var ev = new LinkAddedEvent
 		{
 			EventId = Guid.Parse("00000020-0016-8000-8000-0000000000c6"),
@@ -103,7 +104,7 @@ public class MongoEventClassMapsTests
 			LinkId = linkId,
 			SourceId = sourceId,
 			TargetId = targetId,
-			Data = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId },
+			Data = ObjectData.From(link, Link.WellKnownDataFields),
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
@@ -112,16 +113,51 @@ public class MongoEventClassMapsTests
 		await Assert.That(doc["LinkId"].AsGuid).IsEqualTo(linkId);
 		await Assert.That(doc["SourceId"].AsGuid).IsEqualTo(sourceId);
 		await Assert.That(doc["TargetId"].AsGuid).IsEqualTo(targetId);
-		// But the nested Data blob does not repeat them.
+		// And the nested Data blob is empty — nothing was ever duplicated into it.
 		var data = doc["Data"].AsBsonDocument;
-		await Assert.That(data.Contains("LinkId")).IsFalse();
-		await Assert.That(data.Contains("SourceId")).IsFalse();
-		await Assert.That(data.Contains("TargetId")).IsFalse();
+		await Assert.That(data.ElementCount).IsEqualTo(0);
 
 		var back = (LinkAddedEvent)BsonSerializer.Deserialize<Event>(doc);
 		await Assert.That(back.LinkId).IsEqualTo(linkId);
 		await Assert.That(back.SourceId).IsEqualTo(sourceId);
 		await Assert.That(back.TargetId).IsEqualTo(targetId);
+	}
+
+	[Test]
+	public async Task Should_strip_well_known_fields_from_Data_even_if_a_caller_bypasses_the_exclude_list()
+	{
+		// LinkDataSerializer is a defensive backstop for callers who build Data by hand instead of
+		// going through ObjectData.From's exclude list (see its remarks in MongoEventClassMaps) — it
+		// must still strip LinkId/SourceId/TargetId from the bag while leaving any other key alone.
+		var linkId = Guid.Parse("00000020-0019-8000-8000-0000000000c9");
+		var sourceId = Guid.Parse("00000020-001a-8000-8000-0000000000ca");
+		var targetId = Guid.Parse("00000020-001b-8000-8000-0000000000cb");
+		var ev = new LinkAddedEvent
+		{
+			EventId = Guid.Parse("00000020-001c-8000-8000-0000000000cc"),
+			CommandId = Guid.Parse("00000020-001d-8000-8000-0000000000cd"),
+			LinkTypeId = Guid.Parse("00000020-001e-8000-8000-0000000000ce"),
+			LinkId = linkId,
+			SourceId = sourceId,
+			TargetId = targetId,
+			Data = new ObjectData
+			{
+				["LinkId"] = linkId,
+				["SourceId"] = sourceId,
+				["TargetId"] = targetId,
+				["Order"] = 3,
+			},
+		};
+
+		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
+		var data = doc["Data"].AsBsonDocument;
+		await Assert.That(data.Contains("LinkId")).IsFalse();
+		await Assert.That(data.Contains("SourceId")).IsFalse();
+		await Assert.That(data.Contains("TargetId")).IsFalse();
+		await Assert.That(data["Order"].AsInt32).IsEqualTo(3);
+
+		var back = (LinkAddedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.Data["Order"]).IsEqualTo(3);
 	}
 
 	[Test]
