@@ -805,14 +805,14 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 						["number"] = 1,
 					},
 					*/
-					Data = new SampleTaskModel
+					Data = new ObjectData
 					{
-						Subject = "Task1",
-						Number = 1,
+						["Subject"] = "Task1",
+						["Number"] = 1,
 					},
 				},
 			},
-		}, "7B6D00007700000000001E5461736B310002"));
+		}, "7B6D0000770000000000035375626A65637400075461736B31004E756D626572000302"));
 
 		yield return () => SP(() => (71, new NewEvent1
 		{
@@ -844,14 +844,14 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 						["number"] = 1,
 					},
 					*/
-					Data = new SampleTaskModel
+					Data = new ObjectData
 					{
-						Subject = "Task1",
-						Number = 1,
+						["Subject"] = "Task1",
+						["Number"] = 1,
 					},
 				},
 			},
-		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B00027704DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D1E5461736B310002"));
+		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B00027704DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D035375626A65637400075461736B31004E756D626572000302"));
 
 		yield return () => SP(() => (72, new NewEvent1
 		{
@@ -1363,6 +1363,7 @@ public class BinarySerializationTests : SbxBaseTest
 				TargetId = default,
 				TargetTypeId = new Guid("00000000-0000-8000-8001-000000000000"),
 				CollectionId = default,
+				Data = new ObjectData(),
 			},
 		};
 		ser.Map(1, 2025.785, typeof(TransportOperation));

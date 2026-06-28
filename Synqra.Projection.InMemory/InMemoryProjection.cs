@@ -620,51 +620,32 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
-			// Data = cmd.Data,
+			Data = cmd.Data,
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
-			DataObject = cmd.TargetObject, // or may be entire object
 		};
 		ctx.Events.Add(created);
 
-		if (false && cmd.TargetObject is IBindableModel bm) // I just found it out while debugging, do not remember why originally, but it is likely because it is not implemented yet (and still not)
+		// cmd.Data is the canonical property bag (already normalized by ObjectData.From at the
+		// command boundary, with default-valued properties filtered out), so we just fan it out
+		// into one ObjectPropertyChangedEvent per non-null entry — no reflection, no type-sniffing.
+		foreach (var (propertyName, value) in cmd.Data)
 		{
-			
-		}
-		else
-		{
-			var pros = cmd.Data.GetType().GetProperties().Where(x => x.CanWrite && x.CanRead);
-			foreach (var pro in pros)
+			if (value is null)
 			{
-				// Skip computed/navigation accessors flagged as non-persisted (e.g. an edge's typed
-				// Source/Target, which merely project the scalar id columns). Persisting them would
-				// emit the whole referenced object as a property value and, on replay, set it before
-				// the scalar ids — corrupting reconstruction.
-				if (pro.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
-				{
-					continue;
-				}
-				var value = pro.GetValue(cmd.Data);
-				// SynqraTypeExtensions
-				if (Equals(value, pro.PropertyType.GetDefault()))
-				{
-					continue;
-				}
-				if (value != null)
-				{
-					ctx.Events.Add(new ObjectPropertyChangedEvent
-					{
-						StreamId = cmd.StreamId,
-						CommandId = cmd.CommandId,
-						CollectionId = cmd.CollectionId,
-						EventId = GuidExtensions.CreateVersion7(),
-						TargetTypeId = cmd.TargetTypeId,
-						TargetId = cmd.TargetId,
-						PropertyName = pro.Name,
-						OldValue = null,
-						NewValue = value,
-					});
-				}
+				continue;
 			}
+			ctx.Events.Add(new ObjectPropertyChangedEvent
+			{
+				StreamId = cmd.StreamId,
+				CommandId = cmd.CommandId,
+				CollectionId = cmd.CollectionId,
+				EventId = GuidExtensions.CreateVersion7(),
+				TargetTypeId = cmd.TargetTypeId,
+				TargetId = cmd.TargetId,
+				PropertyName = propertyName,
+				OldValue = null,
+				NewValue = value,
+			});
 		}
 
 		/*
@@ -739,6 +720,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			ComponentTypeId = cmd.ComponentTypeId,
 			ComponentId = cmd.ComponentId,
 			Data = cmd.Data,
+			LiveComponent = cmd.LiveComponent,
 		});
 		return Task.CompletedTask;
 	}
@@ -850,27 +832,21 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 
 		object newItem;
-		if (ev.DataObject != null)
+		if (TryGetModel(ev.TargetId, out var data))
 		{
-			newItem = ev.DataObject;
-		}
-		else if (TryGetModel(ev.TargetId, out var data))
-		{
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
 			newItem = data.Model;
-		}
-		/*
-		else if (ev.DataString != null)
-		{
-			newItem = JsonSerializer.Deserialize(ev.DataString, typeMetadata.Type, _jsonSerializerOptions);
-		}
-		*/
-		else if (ev.Data != null)
-		{
-			newItem = ev.Data; //JsonSerializer.Deserialize(JsonSerializer.Serialize<IDictionary<string, object?>?>(ev.Data, _jsonSerializerOptions), typeMetadata.Type, _jsonSerializerOptions);
 		}
 		else
 		{
-			newItem = Activator.CreateInstance(typeMetadata.Type);
+			// Replayed/deserialized event: rebuild the instance from the canonical property bag.
+			newItem = Activator.CreateInstance(typeMetadata.Type)
+				?? throw new InvalidOperationException($"Could not instantiate '{typeMetadata.Type.Name}'.");
+			if (ev.Data.Count > 0)
+			{
+				ObjectDataApplyHelpers.HydrateFromData(newItem, typeMetadata.Type, ev.Data);
+			}
 		}
 
 		/*
@@ -1098,7 +1074,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		// reuse the model-binding pathway so JSON payloads round-trip the same way
 		// as for normal SynqraModel objects.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.LiveComponent, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{

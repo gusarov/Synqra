@@ -339,15 +339,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			CommandId = cmd.CommandId,
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
-			DataObject = cmd.TargetObject,
+			Data = cmd.Data,
 		});
 
-		// Seed each non-default property as a change event so the materialized document carries the
-		// initial values (and a fresh projection can rebuild them by replay if the doc is ever dropped).
-		foreach (var pi in cmd.Data.GetType().GetProperties().Where(p => p.CanRead && p.CanWrite))
+		// Seed each property as a change event so the materialized document carries the initial
+		// values (and a fresh projection can rebuild them by replay if the doc is ever dropped).
+		// cmd.Data is the canonical bag, already normalized with default-valued properties dropped.
+		foreach (var (propertyName, value) in cmd.Data)
 		{
-			var value = pi.GetValue(cmd.Data);
-			if (value is null || Equals(value, pi.PropertyType.GetDefault()))
+			if (value is null)
 			{
 				continue;
 			}
@@ -359,7 +359,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				EventId = GuidExtensions.CreateVersion7(),
 				TargetTypeId = cmd.TargetTypeId,
 				TargetId = cmd.TargetId,
-				PropertyName = pi.Name,
+				PropertyName = propertyName,
 				OldValue = null,
 				NewValue = value,
 			});
@@ -401,6 +401,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentTypeId = cmd.ComponentTypeId,
 			ComponentId = cmd.ComponentId,
 			Data = cmd.Data,
+			LiveComponent = cmd.LiveComponent,
 		});
 		return Task.CompletedTask;
 	}
@@ -480,12 +481,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
 		object model;
-		if (ev.DataObject is not null)
+		if (TryGetTracked(ev.TargetId, out var tracked))
 		{
-			model = ev.DataObject;
-		}
-		else if (TryGetTracked(ev.TargetId, out var tracked))
-		{
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
 			model = tracked;
 		}
 		else
@@ -534,7 +533,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var container = ResolveContainer(ev.TargetId);
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.LiveComponent, ev.Data);
 
 		if (!container.Components.TryAdd(component))
 		{

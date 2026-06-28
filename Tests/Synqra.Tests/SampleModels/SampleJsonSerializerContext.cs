@@ -38,6 +38,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(SampleOnePropertyObject))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(IDictionary<string, object?>))]
+[JsonSerializable(typeof(ObjectData))]
 [JsonSerializable(typeof(ISynqraCommand))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(MyPocoTask))]

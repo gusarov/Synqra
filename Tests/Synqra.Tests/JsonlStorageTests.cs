@@ -154,6 +154,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = key,
 			TargetId = Guid.NewGuid(),
 			TargetTypeId = Guid.NewGuid(),
+			Data = new ObjectData(),
 		};
 		await storage.AppendAsync(item);
 
@@ -185,6 +186,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = key1,
 			TargetId = new Guid("00000001-0003-8000-8000-c0de11dae333"),
 			TargetTypeId = new Guid("00000001-0004-8000-8000-c0de11dae333"),
+			Data = new ObjectData(),
 		};
 		await storage.AppendAsync(item1);
 
@@ -196,6 +198,7 @@ public abstract class AppendStorageTests : BaseTest
 			EventId = key2,
 			TargetId = new Guid("00000002-0003-8000-8000-c0de11dae333"),
 			TargetTypeId = new Guid("00000002-0004-8000-8000-c0de11dae333"),
+			Data = new ObjectData(),
 		};
 		await storage.AppendAsync(item2);
 
@@ -253,9 +256,9 @@ public abstract class AppendStorageTests : BaseTest
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
-			Data = new StorableModel
+			Data = new ObjectData
 			{
-				Title = "Alice",
+				["Title"] = "Alice",
 			},
 		};
 		await storage.AppendAsync(ev);
@@ -286,9 +289,9 @@ public abstract class AppendStorageTests : BaseTest
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
-			Data = new StorableModel
+			Data = new ObjectData
 			{
-				Title = "Alice",
+				["Title"] = "Alice",
 			},
 		};
 		await storage.AppendAsync(ev);
@@ -301,9 +304,9 @@ public abstract class AppendStorageTests : BaseTest
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
-			Data = new StorableModel
+			Data = new ObjectData
 			{
-				Title = "Bob",
+				["Title"] = "Bob",
 			},
 		};
 		await storage.AppendAsync(ev2);
@@ -594,12 +597,13 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 			EventId = SynqraGuids.SynqraRootStreamId,
 			TargetId = default,
 			TargetTypeId = default,
+			Data = new ObjectData(),
 		});
 
 		(_storage as IDisposable)?.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo($$"""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{{SynqraGuids.SynqraRootStreamId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{SynqraGuids.SynqraRootStreamId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
+{{SynqraGuids.SynqraRootStreamId.ToString("N")}}§{"_t":"ObjectCreatedEvent","Data":{},"TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{SynqraGuids.SynqraRootStreamId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
 
 """.NormalizeNewLines());
 	}

@@ -25,36 +25,15 @@ namespace Synqra;
 [Schema(2026.167, "1 EventId Guid CommandId Guid ContainerId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object? DataObject object?")]
 [Schema(2026.168, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object?")]
 [Schema(2026.169, "1 EventId Guid CommandId Guid ContainerId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object? DataObject object?")]
-[Schema(2026.170, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data object?")]
+[Schema(2026.170, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid Data ObjectData")]
 public partial class ObjectCreatedEvent : SingleObjectEvent
 {
-	// public partial IDictionary<string, object?>? Data { get; set; }
-	public partial object? Data { get; set; }
-
-	[JsonIgnore]
-	public object? DataObject { get; set; } // InMemory materialized object
-
-	partial void OnDataChanging(object? oldValue, object? value)
-	{
-		if (value is IDictionary<string, object?> dict)
-		{
-			throw new NotImplementedException();
-		}
-		else if (value is string s)
-		{
-			throw new NotImplementedException();
-		}
-		else if (value is IBindableModel bm)
-		{
-			// This is allowed for now. Caution - it is not read only and might be changed after the event is created, which can lead to unexpected behavior.
-			// It is recommended to use immutable data structures for event data to ensure consistency and reliability.
-		}
-		else
-		{
-			// PoCo is also allowed for now, because there are already existing tests
-			// throw new NotImplementedException();
-		}
-	}
+	/// <summary>
+	/// Canonical property-bag payload for the created object — always present, though it may be
+	/// empty. Projections rebuild the live instance from this bag on replay; on the locally-emitted
+	/// create path they instead reuse the instance they already tracked via their own Attach call.
+	/// </summary>
+	public required partial ObjectData Data { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

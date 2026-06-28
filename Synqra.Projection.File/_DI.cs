@@ -484,7 +484,7 @@ public static class FileSynqraExtensions
 				TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 				CommandId = _store.GuidGenerator.CreateVersion7(), // This is a new object, so we generate a new command Id
 				TargetId = attachedData.Id,
-				Data = item,
+				Data = ObjectData.From(item),
 				TargetObject = item,
 			});
 			if (!OperatingSystem.IsBrowser())
@@ -716,41 +716,29 @@ public static class FileSynqraExtensions
 				TargetTypeId = cmd.TargetTypeId,
 				TargetId = cmd.TargetId,
 				Data = cmd.Data,
-				DataObject = cmd.TargetObject ?? throw new ArgumentException(nameof(cmd)), // or may be entire object
 			};
 			ctx.Events.Add(created);
 
-			if (false && cmd.Data is IBindableModel bm)
+			// cmd.Data is the canonical property bag (normalized by ObjectData.From at the command
+			// boundary, defaults already filtered) — fan it out into one change event per entry.
+			foreach (var (propertyName, value) in cmd.Data)
 			{
-
-			}
-			else
-			{
-				var pros = cmd.Data.GetType().GetProperties().Where(x => x.CanWrite && x.CanRead);
-				foreach (var pro in pros)
+				if (value is null)
 				{
-					var value = pro.GetValue(cmd.Data);
-					// SynqraTypeExtensions
-					if (Equals(value, pro.PropertyType.GetDefault()))
-					{
-						continue;
-					}
-					if (value != null)
-					{
-						ctx.Events.Add(new ObjectPropertyChangedEvent
-						{
-							StreamId = cmd.StreamId,
-							CommandId = cmd.CommandId,
-							CollectionId = cmd.CollectionId,
-							EventId = GuidExtensions.CreateVersion7(),
-							TargetTypeId = cmd.TargetTypeId,
-							TargetId = cmd.TargetId,
-							PropertyName = pro.Name,
-							OldValue = null,
-							NewValue = value,
-						});
-					}
+					continue;
 				}
+				ctx.Events.Add(new ObjectPropertyChangedEvent
+				{
+					StreamId = cmd.StreamId,
+					CommandId = cmd.CommandId,
+					CollectionId = cmd.CollectionId,
+					EventId = GuidExtensions.CreateVersion7(),
+					TargetTypeId = cmd.TargetTypeId,
+					TargetId = cmd.TargetId,
+					PropertyName = propertyName,
+					OldValue = null,
+					NewValue = value,
+				});
 			}
 
 			/*
@@ -811,16 +799,17 @@ public static class FileSynqraExtensions
 
 		public async Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 		{
-			if (ev.DataObject == null)
-			{
-				throw new NotImplementedException();
-			}
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
+			// Replay without a prior Attach isn't supported by this projection yet.
+			var model = _objectStore.GetAttachedObject(ev.TargetId)
+				?? throw new NotImplementedException("ObjectCreatedEvent replay without an attached instance is not yet supported by the File projection.");
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
 				StreamId = ev.StreamId,
 				CollectionId = ev.CollectionId,
-				Blob = ev.DataObject,
+				Blob = model,
 			});
 		}
 

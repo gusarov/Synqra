@@ -304,7 +304,7 @@ public class LinksTests
 				LinkId = GuidExtensions.CreateVersion7(),
 				SourceId = store.GetId(a),
 				TargetId = store.GetId(b),
-				Data = new HierarchyLink { SourceId = store.GetId(a), TargetId = store.GetId(b) },
+				Data = new ObjectData(),
 			});
 		});
 		await Assert.That(ex is InvalidOperationException).IsTrue();

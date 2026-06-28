@@ -190,7 +190,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = component,
+			Data = ObjectData.From(component),
+			LiveComponent = component,
 		});
 
 		var attached = node.Components.GetUniqueComponent(typeof(TestUniqueComponent));
@@ -205,12 +206,14 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var node = new TestComponentNode { Name = "n2" };
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
+		var first = new TestUniqueComponent { Subject = "first" };
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = new TestUniqueComponent { Subject = "first" },
+			Data = ObjectData.From(first),
+			LiveComponent = first,
 		});
 
 		// Adding a second [Component(IsUnique = true)] of the same type must fail
@@ -219,12 +222,14 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		InvalidOperationException? caught = null;
 		try
 		{
+			var second = new TestUniqueComponent { Subject = "second" };
 			await _sut.SubmitCommandAsync(new AddComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
 				TargetObject = node,
 				ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-				Data = new TestUniqueComponent { Subject = "second" },
+				Data = ObjectData.From(second),
+				LiveComponent = second,
 			});
 		}
 		catch (InvalidOperationException ex)
@@ -250,7 +255,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = c,
+			Data = ObjectData.From(c),
+			LiveComponent = c,
 		});
 
 		// Unique components are addressed by type alone; ComponentId stays empty.
@@ -276,22 +282,26 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var aId = GuidExtensions.CreateVersion7();
 		var bId = GuidExtensions.CreateVersion7();
 
+		var compA = new TestTaggingComponent { Id = aId, Tag = "alpha" };
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
 			ComponentId = aId,
-			Data = new TestTaggingComponent { Id = aId, Tag = "alpha" },
+			Data = ObjectData.From(compA),
+			LiveComponent = compA,
 		});
 
+		var compB = new TestTaggingComponent { Id = bId, Tag = "beta" };
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
 			ComponentId = bId,
-			Data = new TestTaggingComponent { Id = bId, Tag = "beta" },
+			Data = ObjectData.From(compB),
+			LiveComponent = compB,
 		});
 
 		await Assert.That(node.Components.Count).IsEqualTo(2);
@@ -320,12 +330,14 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var node = new TestComponentNode { Name = "n5" };
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
+		var doomed = new TestUniqueComponent { Subject = "doomed" };
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = new TestUniqueComponent { Subject = "doomed" },
+			Data = ObjectData.From(doomed),
+			LiveComponent = doomed,
 		});
 		await Assert.That(node.Components.Count).IsEqualTo(1);
 
@@ -348,12 +360,14 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var nodeId = _sut.GetId(node);
 
 		var beforeAdd = _sut.GetLastEventId(nodeId);
+		var compX = new TestUniqueComponent { Subject = "x" };
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = new TestUniqueComponent { Subject = "x" },
+			Data = ObjectData.From(compX),
+			LiveComponent = compX,
 		});
 		var afterAdd = _sut.GetLastEventId(nodeId);
 		await Assert.That(afterAdd).IsNotEqualTo(beforeAdd);
@@ -394,13 +408,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		ConcurrencyException? caught = null;
 		try
 		{
+			var ghost = new TestUniqueComponent { Subject = "ghost" };
 			await _sut.SubmitCommandAsync(
 				new AddComponentCommand
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
 					TargetObject = node,
 					ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-					Data = new TestUniqueComponent { Subject = "ghost" },
+					Data = ObjectData.From(ghost),
+					LiveComponent = ghost,
 				},
 				new CommandSubmissionOptions { ExpectedLastEventId = stale });
 		}
@@ -431,7 +447,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = c,
+			Data = ObjectData.From(c),
+			LiveComponent = c,
 		});
 		await Assert.That(c.Subject).IsEqualTo("v1");
 
@@ -467,7 +484,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
 			ComponentId = tagId,
-			Data = c,
+			Data = ObjectData.From(c),
+			LiveComponent = c,
 		});
 
 		c.Tag = "beta"; // generator-emitted path
@@ -497,7 +515,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = c,
+			Data = ObjectData.From(c),
+			LiveComponent = c,
 		});
 
 		node.Name = "concurrency-host-edited"; // unrelated container write
@@ -597,7 +616,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestActivatableComponent>(),
-			Data = c,
+			Data = ObjectData.From(c),
+			LiveComponent = c,
 		});
 
 		await Assert.That(c.ActivationCount).IsEqualTo(1);
@@ -763,7 +783,7 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 
 		var q0 = new DemoModel(); // must register polimorfic before serializaiton
 		var q1 = new Item(); // must register polimorfic before serializaiton
-		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
+		var q2 = new CreateObjectCommand { Data = new ObjectData() }; // must register polimorfic before serializaiton
 		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();

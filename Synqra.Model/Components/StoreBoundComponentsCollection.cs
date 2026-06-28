@@ -112,7 +112,8 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 				TargetTypeId = containerTypeId,
 				ComponentTypeId = componentTypeId,
 				ComponentId = componentId,
-				Data = component,
+				Data = ObjectData.From(component),
+				LiveComponent = component,
 			},
 			new CommandSubmissionOptions { ExpectedLastEventId = _store.GetLastEventId(containerId) });
 		if (!OperatingSystem.IsBrowser())

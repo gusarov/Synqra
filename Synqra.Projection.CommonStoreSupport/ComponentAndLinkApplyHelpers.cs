@@ -1,6 +1,41 @@
 namespace Synqra.Projection;
 
 /// <summary>
+/// Applies a canonical <see cref="ObjectData"/> property bag onto a freshly-created instance — the
+/// one hydration routine every "materialize from replay" path (object, component, link) shares.
+/// Uses the bindable-model <c>Set</c> path for SynqraModel types (no reflection); falls back to
+/// reflection for plain POCOs, converting <see cref="IConvertible"/> values to each target
+/// property's declared type.
+/// </summary>
+public static class ObjectDataApplyHelpers
+{
+	public static void HydrateFromData(object instance, Type type, ObjectData data)
+	{
+		if (instance is IBindableModel bindable)
+		{
+			foreach (var (key, value) in data)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else
+		{
+			foreach (var (key, value) in data)
+			{
+				var pi = type.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(instance, v);
+			}
+		}
+	}
+}
+
+/// <summary>
 /// Pure materialization/addressing logic shared by every projection's component event-apply path
 /// (<see cref="InMemory.InMemoryProjection"/>, <see cref="MongoDb.MongoProjection"/> — referenced by
 /// namespace in this doc comment only; this project doesn't depend on either). Each projection still
@@ -68,13 +103,16 @@ public static class ComponentApplyHelpers
 	};
 
 	/// <summary>
-	/// Three cases: <paramref name="data"/> is already an instance of <paramref name="componentType"/>
-	/// (typical when emitted locally); a json-shaped <see cref="IDictionary{TKey, TValue}"/>
-	/// (post-rehydrate from the event store); or null (component has no payload, e.g. a bare marker).
+	/// Two cases: <paramref name="liveInstance"/> is already an instance of <paramref name="componentType"/>
+	/// (the in-process create path — the caller's own component must come back, not a copy, since the
+	/// generated property setters on whatever <see cref="AttachToContainer"/>-equivalent wiring runs next
+	/// route subsequent writes through it; a fresh copy would leave the caller's reference permanently
+	/// detached from the store); or it's absent (replay/cross-process), so a fresh instance is constructed
+	/// and hydrated from <paramref name="data"/>, the canonical property bag.
 	/// </summary>
-	public static IComponent MaterializeComponent(Type componentType, object? data)
+	public static IComponent MaterializeComponent(Type componentType, object? liveInstance, ObjectData data)
 	{
-		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
+		if (liveInstance is IComponent ready && componentType.IsInstanceOfType(ready))
 		{
 			return ready;
 		}
@@ -83,29 +121,7 @@ public static class ComponentApplyHelpers
 			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
 		var component = (IComponent)instance;
 
-		// Hydrate from dictionary via the bindable-model set path when the component is a
-		// SynqraModel; fall back to reflection otherwise.
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
+		ObjectDataApplyHelpers.HydrateFromData(component, componentType, data);
 		return component;
 	}
 }
@@ -113,38 +129,21 @@ public static class ComponentApplyHelpers
 /// <summary>Pure materialization logic shared by every projection's link event-apply path.</summary>
 public static class LinkApplyHelpers
 {
-	/// <summary>Same three-case materialization <see cref="ComponentApplyHelpers.MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
-	public static Link MaterializeLink(Type linkType, object? data)
+	/// <summary>
+	/// Always constructs a fresh instance and hydrates it from <paramref name="data"/> — no "reuse the
+	/// live instance" fast path, unlike <see cref="ComponentApplyHelpers.MaterializeComponent"/>, because
+	/// nothing downstream of link creation relies on reference identity: every nav-collection read
+	/// re-queries the store's <c>ILinkIndex</c> rather than caching the caller's submitted instance, and
+	/// links have no post-creation property-change command. <c>LinkId</c>/<c>SourceId</c>/<c>TargetId</c>
+	/// are re-stamped from the event's own explicit fields by the caller regardless of what
+	/// <paramref name="data"/> carries (see <c>LinkAddedEvent</c>'s remarks).
+	/// </summary>
+	public static Link MaterializeLink(Type linkType, ObjectData data)
 	{
-		if (data is Link ready && linkType.IsInstanceOfType(ready))
-		{
-			return ready;
-		}
-
 		var instance = (Link)(Activator.CreateInstance(linkType)
 			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
 
-		if (data is IDictionary<string, object?> bag && instance is IBindableModel bindable)
-		{
-			foreach (var (key, value) in bag)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = linkType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(instance, v);
-			}
-		}
+		ObjectDataApplyHelpers.HydrateFromData(instance, linkType, data);
 		return instance;
 	}
 }
