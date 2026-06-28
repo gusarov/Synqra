@@ -1,0 +1,36 @@
+name: Dependency Graph
+
+# Overrides GitHub's dynamically-generated "Automatic Dependency Submission" workflow, which
+# fails repo-wide (every branch, including master) with NETSDK1147 because it never installs the
+# wasm-tools workload that Contoso.Wasm.csproj requires to restore. Defining a workflow here that
+# performs the submission ourselves makes GitHub stop auto-generating its own.
+
+on:
+  # GitHub's dynamic version ran on push to every branch, not just the default ones (observed
+  # failing on arbitrary feature branches) — match that breadth so it actually supersedes it
+  # everywhere, not just on master/master-quotaly.
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  submit-nuget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+          cache: false
+
+      - name: Install required workloads
+        run: dotnet workload install wasm-tools --skip-manifest-update
+
+      - name: Dependency Submission
+        # Pinned to the exact commit GitHub's own dynamic "Automatic Dependency Submission"
+        # workflow uses (no tags are published on this action).
+        uses: actions/component-detection-dependency-submission-action@98beaea5a1227f3db476e4c9ca959a0cacd7ac4f
