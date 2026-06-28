@@ -190,6 +190,12 @@ minimal, auto-merge-safe diffs.
 - Be careful with replay ordering. A number of tests assume event order is preserved across append storage and projection replay.
 - Generated files, schema attributes, migration scripts, and compiled EF artifacts should only be updated when the change actually requires them.
 
+## Deferred Work / TODO
+
+Known improvements and deferred items live in [`TODO.md`](TODO.md). Check it before working in an
+area (it may already describe the cleanup you're about to do), and add an entry there rather than
+leaving a silent `// TODO` in code.
+
 ## Good First Read Before Editing
 
 - `readme.md`
