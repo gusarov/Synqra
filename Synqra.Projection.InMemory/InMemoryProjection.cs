@@ -845,7 +845,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				?? throw new InvalidOperationException($"Could not instantiate '{typeMetadata.Type.Name}'.");
 			if (ev.Data.Count > 0)
 			{
-				HydrateFromData(newItem, typeMetadata.Type, ev.Data);
+				ObjectDataApplyHelpers.HydrateFromData(newItem, typeMetadata.Type, ev.Data);
 			}
 		}
 
@@ -1190,34 +1190,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		TryGetModel(targetId, out var data);
 		return ComponentApplyHelpers.ResolveContainer(data.Model, targetId);
-	}
-
-	// Apply a canonical property bag onto a freshly-created instance. Uses the bindable-model
-	// Set path for SynqraModel objects (no reflection) and falls back to reflection for plain
-	// POCOs, converting IConvertible values to each target property's type.
-	static void HydrateFromData(object instance, Type type, ObjectData data)
-	{
-		if (instance is IBindableModel bindable)
-		{
-			foreach (var (key, value) in data)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else
-		{
-			foreach (var (key, value) in data)
-			{
-				var pi = type.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(instance, v);
-			}
-		}
 	}
 
 	#endregion

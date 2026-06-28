@@ -1,6 +1,41 @@
 namespace Synqra.Projection;
 
 /// <summary>
+/// Applies a canonical <see cref="ObjectData"/> property bag onto a freshly-created instance — the
+/// one hydration routine every "materialize from replay" path (object, component, link) shares.
+/// Uses the bindable-model <c>Set</c> path for SynqraModel types (no reflection); falls back to
+/// reflection for plain POCOs, converting <see cref="IConvertible"/> values to each target
+/// property's declared type.
+/// </summary>
+public static class ObjectDataApplyHelpers
+{
+	public static void HydrateFromData(object instance, Type type, ObjectData data)
+	{
+		if (instance is IBindableModel bindable)
+		{
+			foreach (var (key, value) in data)
+			{
+				bindable.Set(key, value);
+			}
+		}
+		else
+		{
+			foreach (var (key, value) in data)
+			{
+				var pi = type.GetProperty(key);
+				if (pi is null) continue;
+				var v = value;
+				if (v is IConvertible c)
+				{
+					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				pi.SetValue(instance, v);
+			}
+		}
+	}
+}
+
+/// <summary>
 /// Pure materialization/addressing logic shared by every projection's component event-apply path
 /// (<see cref="InMemory.InMemoryProjection"/>, <see cref="MongoDb.MongoProjection"/> — referenced by
 /// namespace in this doc comment only; this project doesn't depend on either). Each projection still
@@ -86,29 +121,7 @@ public static class ComponentApplyHelpers
 			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
 		var component = (IComponent)instance;
 
-		// Hydrate via the bindable-model Set path when the component is a SynqraModel; fall back to
-		// reflection otherwise.
-		if (component is IBindableModel bindable)
-		{
-			foreach (var (key, value) in data)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else
-		{
-			foreach (var (key, value) in data)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(component, v);
-			}
-		}
+		ObjectDataApplyHelpers.HydrateFromData(component, componentType, data);
 		return component;
 	}
 }
@@ -130,27 +143,7 @@ public static class LinkApplyHelpers
 		var instance = (Link)(Activator.CreateInstance(linkType)
 			?? throw new InvalidOperationException($"Could not instantiate link '{linkType.Name}'."));
 
-		if (instance is IBindableModel bindable)
-		{
-			foreach (var (key, value) in data)
-			{
-				bindable.Set(key, value);
-			}
-		}
-		else
-		{
-			foreach (var (key, value) in data)
-			{
-				var pi = linkType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
-				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				}
-				pi.SetValue(instance, v);
-			}
-		}
+		ObjectDataApplyHelpers.HydrateFromData(instance, linkType, data);
 		return instance;
 	}
 }
