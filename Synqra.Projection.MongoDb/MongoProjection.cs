@@ -340,7 +340,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			Data = cmd.Data,
-			MaterializedObject = cmd.TargetObject,
 		});
 
 		// Seed each property as a change event so the materialized document carries the initial
@@ -481,12 +480,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
 		object model;
-		if (ev.MaterializedObject is not null)
+		if (TryGetTracked(ev.TargetId, out var tracked))
 		{
-			model = ev.MaterializedObject;
-		}
-		else if (TryGetTracked(ev.TargetId, out var tracked))
-		{
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
 			model = tracked;
 		}
 		else

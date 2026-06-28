@@ -622,7 +622,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			TargetId = cmd.TargetId,
 			Data = cmd.Data,
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
-			MaterializedObject = cmd.TargetObject, // or may be entire object
 		};
 		ctx.Events.Add(created);
 
@@ -832,13 +831,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 
 		object newItem;
-		if (ev.MaterializedObject != null)
+		if (TryGetModel(ev.TargetId, out var data))
 		{
-			// Locally-emitted create path: attach the very instance the caller created.
-			newItem = ev.MaterializedObject;
-		}
-		else if (TryGetModel(ev.TargetId, out var data))
-		{
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
 			newItem = data.Model;
 		}
 		else

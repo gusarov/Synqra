@@ -30,18 +30,10 @@ public partial class ObjectCreatedEvent : SingleObjectEvent
 {
 	/// <summary>
 	/// Canonical property-bag payload for the created object — always present, though it may be
-	/// empty. The locally-emitted create path additionally carries the live instance in
-	/// <see cref="MaterializedObject"/> so the projection can skip rebuilding from this bag.
+	/// empty. Projections rebuild the live instance from this bag on replay; on the locally-emitted
+	/// create path they instead reuse the instance they already tracked via their own Attach call.
 	/// </summary>
 	public required partial ObjectData Data { get; set; }
-
-	/// <summary>
-	/// In-memory materialized instance, set on the locally-emitted create path so the
-	/// projection can attach the very object the caller created instead of rebuilding it
-	/// from <see cref="Data"/>. Never serialized — it is a process-local optimization only.
-	/// </summary>
-	[JsonIgnore]
-	public object? MaterializedObject { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }

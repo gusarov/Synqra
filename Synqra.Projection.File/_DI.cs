@@ -716,7 +716,6 @@ public static class FileSynqraExtensions
 				TargetTypeId = cmd.TargetTypeId,
 				TargetId = cmd.TargetId,
 				Data = cmd.Data,
-				MaterializedObject = cmd.TargetObject ?? throw new ArgumentException(nameof(cmd)), // or may be entire object
 			};
 			ctx.Events.Add(created);
 
@@ -800,16 +799,17 @@ public static class FileSynqraExtensions
 
 		public async Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 		{
-			if (ev.MaterializedObject == null)
-			{
-				throw new NotImplementedException();
-			}
+			// Locally-emitted create path: the collection's Add() already attached this exact
+			// instance before submitting the command, so it's already tracked under this id.
+			// Replay without a prior Attach isn't supported by this projection yet.
+			var model = _objectStore.GetAttachedObject(ev.TargetId)
+				?? throw new NotImplementedException("ObjectCreatedEvent replay without an attached instance is not yet supported by the File projection.");
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
 				StreamId = ev.StreamId,
 				CollectionId = ev.CollectionId,
-				Blob = ev.MaterializedObject,
+				Blob = model,
 			});
 		}
 
