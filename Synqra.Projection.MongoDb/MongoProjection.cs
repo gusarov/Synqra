@@ -265,8 +265,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// type load, independent of Mongo ever having been touched.
 	/// <paramref name="addressingFields"/> names the projection's own non-model bookkeeping columns
 	/// (e.g. a component's <c>ContainerId</c>) to drop before deserializing, alongside the always-
-	/// dropped <c>_id</c> and <c>_t</c> (resolving the type is the only thing <c>_t</c> is for; the
-	/// concrete type's own class map has no member for it).
+	/// dropped <c>_t</c> (resolving the type is the only thing <c>_t</c> is for; the concrete type's
+	/// own class map has no member for it). <c>_id</c> is dropped too — UNLESS the resolved type is a
+	/// <see cref="Link"/>, whose own class map maps <c>_id</c> to the real <c>LinkId</c> member (see
+	/// <see cref="MongoEventClassMaps.Register"/>): stripping it there would leave <c>LinkId</c>
+	/// un-set on the deserialized instance.
 	/// </summary>
 	internal object FromDocument(BsonDocument doc, params string[] addressingFields)
 	{
@@ -275,7 +278,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			?? throw new InvalidOperationException($"Unknown discriminator '{discriminator}' — no model is registered under that name.");
 
 		var clone = (BsonDocument)doc.DeepClone();
-		clone.Remove("_id");
+		if (!typeof(Link).IsAssignableFrom(type))
+		{
+			clone.Remove("_id");
+		}
 		clone.Remove("_t");
 		foreach (var field in addressingFields)
 		{
@@ -294,11 +300,19 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// declared base/interface's). The globally-registered conventions (see
 	/// <see cref="MongoEventClassMaps.Register"/>, called from this class's static constructor) drop
 	/// any <c>[JsonIgnore]</c> member from that class map, matching the JSON side's persisted shape.
+	/// A type whose own class map already designates an id member (<see cref="Link"/>'s <c>LinkId</c>,
+	/// mapped onto <c>_id</c> — see <see cref="MongoEventClassMaps.Register"/>) gets <c>_id</c> written
+	/// natively as part of that serialization, so it's left alone here; a plain model with no such
+	/// member gets <paramref name="id"/> written as the document's <c>_id</c>, as a native Guid (not a
+	/// string) so every id is represented identically across the whole document.
 	/// </summary>
 	BsonDocument ToDocument(object model, Guid id)
 	{
 		var doc = model.ToBsonDocument(typeof(object));
-		doc["_id"] = id.ToString();
+		if (!doc.Contains("_id"))
+		{
+			doc["_id"] = new BsonBinaryData(id, GuidRepresentation.Standard);
+		}
 		return doc;
 	}
 
@@ -307,7 +321,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
 		var collection = _database.GetCollection<BsonDocument>(type.Name);
 		var doc = ToDocument(model, id);
-		collection.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", id.ToString()), doc, new ReplaceOptions { IsUpsert = true });
+		collection.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", id), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	// ---------------------------------------------------------------- ICommandVisitor
@@ -622,7 +636,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// ToDocument already stamps the "_t" discriminator (= link type name) the per-type queries
 		// filter on, so no separate type column is written here.
 		var doc = ToDocument(link, link.LinkId);
-		linksMongo.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId.ToString()), doc, new ReplaceOptions { IsUpsert = true });
+		linksMongo.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), doc, new ReplaceOptions { IsUpsert = true });
 
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
@@ -634,7 +648,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		linksMongo.DeleteOne(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId.ToString())); // no-op (idempotent) if already gone
+		linksMongo.DeleteOne(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId)); // no-op (idempotent) if already gone
 		return Task.CompletedTask;
 	}
 
@@ -661,7 +675,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
 		{
-			var candidateId = Guid.Parse(doc["_id"].AsString);
+			var candidateId = doc["_id"].AsGuid;
 			if (candidateId == excludeId)
 			{
 				continue;
@@ -704,17 +718,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
-			Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString()),
+			Builders<BsonDocument>.Filter.Eq("ContainerId", containerId),
 			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
-			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId.ToString()));
+			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId));
 
 	void UpsertComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
 		var doc = component.ToBsonDocument(typeof(object));
-		doc["ContainerId"] = containerId.ToString();
-		doc["ComponentId"] = componentId.ToString();
+		doc["ContainerId"] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
+		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
@@ -735,7 +749,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		foreach (var doc in componentsMongo.Find(Builders<BsonDocument>.Filter.Eq("ContainerId", containerId.ToString())).ToList())
+		foreach (var doc in componentsMongo.Find(Builders<BsonDocument>.Filter.Eq("ContainerId", containerId)).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
@@ -836,7 +850,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	bool ILinkIndex.TryGetById(Guid linkId, out Link? link)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var doc = linksMongo.Find(Builders<BsonDocument>.Filter.Eq("_id", linkId.ToString())).FirstOrDefault();
+		var doc = linksMongo.Find(Builders<BsonDocument>.Filter.Eq("_id", linkId)).FirstOrDefault();
 		if (doc is null)
 		{
 			link = null;

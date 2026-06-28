@@ -69,7 +69,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	{
 		foreach (var doc in _mongo.Find(FilterDefinition<BsonDocument>.Empty).ToList())
 		{
-			var id = Guid.Parse(doc["_id"].AsString);
+			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))
 			{
 				yield return (T)existing;
