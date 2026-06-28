@@ -74,6 +74,24 @@ public static class MongoEventClassMaps
 				});
 			}
 
+			// Link.LinkId IS the document's own identity wherever a Link is stored natively as its
+			// own document — MongoProjection's "Links" read-model collection. Mapping it to _id (here,
+			// once, on the shared base class map every concrete Link subtype's AutoMap extends) avoids
+			// a redundant duplicate field (_id and LinkId carrying the exact same value). Not done via
+			// a [BsonId] attribute on the model itself: Synqra.Model has no MongoDB dependency, and
+			// every other storage backend (in-memory, SBX files) addresses a link by this same LinkId
+			// property without needing it singled out as "the" id — that's a Mongo-only document
+			// convention. LinkDataSerializer's own well-known-field strip (LinkAddedEvent.Data) accounts
+			// for this rename too — see its WellKnown list.
+			if (!BsonClassMap.IsClassMapRegistered(typeof(Link)))
+			{
+				BsonClassMap.RegisterClassMap<Link>(cm =>
+				{
+					cm.AutoMap();
+					cm.MapIdProperty(x => x.LinkId);
+				});
+			}
+
 			RegisterDerived<ObjectCreatedEvent>("ObjectCreatedEvent");
 			RegisterDerived<ObjectPropertyChangedEvent>("ObjectPropertyChangedEvent");
 			RegisterDerived<ObjectDeletedEvent>("ObjectDeletedEvent");
@@ -84,9 +102,10 @@ public static class MongoEventClassMaps
 			RegisterDerived<LinkRemovedEvent>("LinkRemovedEvent");
 
 			// LinkAddedEvent gets a member-scoped serializer on Data so the embedded link drops the
-			// three well-known fields it would otherwise duplicate (see LinkDataSerializer). This keeps
-			// the Link class map itself untouched — unlike a global convention, so MongoProjection's
-			// native link collection can still persist LinkId/SourceId/TargetId for querying.
+			// three well-known fields (_id/LinkId, SourceId, TargetId) it would otherwise duplicate
+			// (see LinkDataSerializer). This keeps the Link class map's own field SET untouched —
+			// unlike a global convention, so MongoProjection's native link collection can still persist
+			// _id/SourceId/TargetId for querying.
 			RegisterDerived<LinkAddedEvent>("LinkAddedEvent", cm =>
 				cm.GetMemberMap(e => e.Data).SetSerializer(new LinkDataSerializer()));
 
@@ -151,17 +170,19 @@ public static class MongoEventClassMaps
 	/// Member-scoped BSON serializer for <see cref="LinkAddedEvent.Data"/> (the link instance).
 	/// Serializes the link natively through the normal <c>object</c> serializer — so a consumer's
 	/// concrete <c>Link</c> subtype keeps its own extra fields and its <c>_t</c> discriminator — then
-	/// drops the three well-known fields (<see cref="Link.LinkId"/>/<see cref="Link.SourceId"/>/
-	/// <see cref="Link.TargetId"/>) from the resulting sub-document, because the event already carries
-	/// them as explicit top-level fields. Because it's attached to this one member rather than the
-	/// <c>Link</c> class map, it never affects how a <c>Link</c> is serialized anywhere else — notably
-	/// <c>MongoProjection</c>'s native "Links" collection, which must keep those very fields to query by
-	/// endpoint. On replay the materialized link re-stamps LinkId/SourceId/TargetId from the event's own
-	/// explicit fields, so the stripped fields are never read back from Data.
+	/// drops the three well-known fields (<see cref="Link.LinkId"/> — written as <c>_id</c>, since the
+	/// shared <c>Link</c> class map maps it as the id member, see <see cref="Register"/> —
+	/// <see cref="Link.SourceId"/>/<see cref="Link.TargetId"/>) from the resulting sub-document,
+	/// because the event already carries them as explicit top-level fields. Because it's attached to
+	/// this one member rather than the <c>Link</c> class map, it never affects how a <c>Link</c> is
+	/// serialized anywhere else — notably <c>MongoProjection</c>'s native "Links" collection, which
+	/// must keep those very fields to query by endpoint. On replay the materialized link re-stamps
+	/// LinkId/SourceId/TargetId from the event's own explicit fields, so the stripped fields are never
+	/// read back from Data.
 	/// </summary>
 	sealed class LinkDataSerializer : SerializerBase<object>
 	{
-		static readonly string[] WellKnown = [nameof(Link.LinkId), nameof(Link.SourceId), nameof(Link.TargetId)];
+		static readonly string[] WellKnown = ["_id", nameof(Link.SourceId), nameof(Link.TargetId)];
 
 		// Looked up lazily so it resolves the patched, fully-open object serializer (see
 		// PatchObjectSerializerDefaults) rather than whatever might exist at type-init time.
