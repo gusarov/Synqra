@@ -146,6 +146,7 @@ public static class FileSynqraExtensions
 
 		internal FileObjectCollection GetCollection(Type type, string collectionName = "")
 		{
+			Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(type);
 			var metadata = TypeMetadataProvider.GetTypeMetadata(type);
 			var collectionId = metadata.GetCollectionId(collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 
@@ -159,6 +160,7 @@ public static class FileSynqraExtensions
 
 		internal FileObjectCollection<T> GetCollection<T>(string collectionName = "") where T : class
 		{
+			Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(typeof(T));
 			var metadata = TypeMetadataProvider.GetTypeMetadata(typeof(T));
 			var collectionId = metadata.GetCollectionId(collectionName);
 			return GetCollection<T>(collectionId);

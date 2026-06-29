@@ -376,6 +376,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	internal InMemoryStoreCollection GetCollection(Type type, string collectionName)
 	{
+		LinkApplyHelpers.GuardNotLinkType(type);
 		var collectionId = GetCollectionId(type, collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
@@ -405,6 +406,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	internal InMemoryStoreCollection<T> GetCollectionInternal<T>(string? collectionName = null) where T : class
 	{
+		LinkApplyHelpers.GuardNotLinkType(typeof(T));
 		var collectionId = GetCollectionId(typeof(T), collectionName ?? "");
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
