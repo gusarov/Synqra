@@ -237,6 +237,26 @@ public class SbxSerializer : ISbxSerializer
 		Map(-62, typeof(NewEvent1));
 		Map(-63, typeof(TransportOperation));
 		// Map(-64, typeof(RESERVED)); // THIS IS LOWEST 1 BYTE VARINT
+		// Component/Link command & event types — same "system type, every consumer needs
+		// it" category as everything above, just added to the model after this list was
+		// first written. Their absence here was silent until a consumer actually needed
+		// to (de)serialize one through SBX (replication, IndexedDB, …): "BindableModel
+		// <Type> type id is not registered", easy to mistake for a consumer-side mapping
+		// gap since nothing here pointed at the real cause.
+		// Explicit schema version 1 (not the no-version overload the rest of this list
+		// uses) because auto-detection needs a [Schema] attribute on the type, and these
+		// — added to the model after the others, never having had one stamped — don't
+		// have one: "Can not detect latest version, no schema defined for <Type>".
+		Map(-65, 1, typeof(AddComponentCommand));
+		Map(-66, 1, typeof(ComponentAddedEvent));
+		Map(-67, 1, typeof(ChangeComponentPropertyCommand));
+		Map(-68, 1, typeof(ComponentPropertyChangedEvent));
+		Map(-69, 1, typeof(DeleteComponentCommand));
+		Map(-70, 1, typeof(ComponentDeletedEvent));
+		Map(-71, 1, typeof(ObjectDeletedEvent));
+		Map(-72, 1, typeof(LinkRemovedEvent));
+		Map(-73, 1, typeof(LinkAddedEvent));
+		Map(-74, 1, typeof(Link));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
