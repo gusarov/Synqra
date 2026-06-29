@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Hosting;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -8,10 +9,23 @@ namespace Synqra;
 // Persistent state with metadata about replication, e.g. known version vectors, node ids
 public class EventReplicationState
 {
-	string _fileName;
+	readonly string? _fileName;
 
 	public EventReplicationState(IHostEnvironment hostEnvironment)
 	{
+		// No filesystem in a real browser WASM sandbox (unlike the "WASM-like" simulator
+		// nodes used in tests, which are real .NET processes) — File.WriteAllText there
+		// throws. Falls back to in-memory-only: a fresh node id and replication cursor
+		// each page load. Correctness is unaffected — the server already dedups by
+		// EventId — this only means a reload can't resume exactly where it left off and
+		// may briefly re-send already-known events, which the server's own dedup absorbs.
+		if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER")))
+		{
+			_fileName = null;
+			MyNodeId = Guid.NewGuid();
+			return;
+		}
+
 		_fileName = Path.Combine(hostEnvironment.ContentRootPath, "EventReplicationState.json");
 
 		if (File.Exists(_fileName))
@@ -27,6 +41,10 @@ public class EventReplicationState
 
 	public void Save()
 	{
+		if (_fileName is null)
+		{
+			return;
+		}
 		File.WriteAllText(_fileName, JsonSerializer.Serialize(this, EventReplicationStateJsonSerializerContext.Default.Options));
 	}
 
