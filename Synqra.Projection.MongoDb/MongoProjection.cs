@@ -120,6 +120,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	internal MongoStoreCollection GetCollection(Type type, string collectionName)
 	{
+		LinkApplyHelpers.GuardNotLinkType(type);
 		var collectionId = TypeMetadataProvider.GetTypeMetadata(type).GetCollectionId(collectionName ?? "");
 		lock (_collectionsGate)
 		{

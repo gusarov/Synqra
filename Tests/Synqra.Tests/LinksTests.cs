@@ -584,4 +584,44 @@ public class LinksTests
 		await Assert.That(aChanged).Contains(nameof(TestGraphNode.RelatedNodes));
 		await Assert.That(bChanged).Contains(nameof(TestGraphNode.RelatedNodes));
 	}
+
+	// ---- GetCollection<TLink>() footgun: links never ride the generic object collection, so
+	// calling GetCollection<T>() for a Link-derived type used to silently come back empty instead
+	// of surfacing the mistake — must throw a clear error pointing at ILinkIndex instead. ----
+
+	[Test]
+	public async Task Should_throw_a_clear_error_when_GetCollection_is_called_for_a_link_type()
+	{
+		var sp = BuildServices();
+		var store = sp.GetRequiredService<IObjectStore>();
+
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+		a.Children.Add(b); // a real HierarchyLink now exists — proves the throw isn't masking an empty-anyway case
+
+		var ex = await Assert.ThrowsAsync(async () =>
+		{
+			store.GetCollection<HierarchyLink>();
+			await Task.CompletedTask;
+		});
+
+		await Assert.That(ex is NotSupportedException).IsTrue();
+		await Assert.That(ex!.Message).Contains("ILinkIndex");
+	}
+
+	[Test]
+	public async Task Should_throw_a_clear_error_when_the_non_generic_GetCollection_is_called_for_a_link_type()
+	{
+		var sp = BuildServices();
+		var store = sp.GetRequiredService<IObjectStore>();
+
+		var ex = await Assert.ThrowsAsync(async () =>
+		{
+			store.GetCollection(typeof(HierarchyLink), null);
+			await Task.CompletedTask;
+		});
+
+		await Assert.That(ex is NotSupportedException).IsTrue();
+		await Assert.That(ex!.Message).Contains("ILinkIndex");
+	}
 }

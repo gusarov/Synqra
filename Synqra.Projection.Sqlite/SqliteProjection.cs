@@ -247,6 +247,7 @@ public class SqliteStore : IObjectStore
 
 	internal StoreCollection GetCollection(Type type, string collectionName)
 	{
+		Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(type);
 		var collectionId = GetCollectionId(type, collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);
@@ -272,6 +273,7 @@ public class SqliteStore : IObjectStore
 	internal SqliteStoreCollection<T> GetCollection<T>(string collectionName)
 		where T : class
 	{
+		Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(typeof(T));
 		var collectionId = GetCollectionId(typeof(T), collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
 #if NET7_0_OR_GREATER
 		ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_collections, collectionId, out var exists);

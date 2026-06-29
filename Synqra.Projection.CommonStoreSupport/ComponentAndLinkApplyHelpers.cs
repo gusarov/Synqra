@@ -113,6 +113,24 @@ public static class ComponentApplyHelpers
 /// <summary>Pure materialization logic shared by every projection's link event-apply path.</summary>
 public static class LinkApplyHelpers
 {
+	/// <summary>
+	/// Guards every projection's <c>GetCollection</c>/<c>GetCollection&lt;T&gt;</c> against
+	/// <see cref="Link"/>-derived types. Links never live in the generic per-type collection those
+	/// methods build — they have their own dedicated index (<see cref="ILinkIndex"/>) maintained from
+	/// <see cref="LinkAddedEvent"/>/<see cref="LinkRemovedEvent"/> (see plans/links.md). Without this
+	/// guard, <c>GetCollection&lt;TLink&gt;()</c> compiles fine and silently returns an always-empty
+	/// collection, since nothing ever populates it for a link type.
+	/// </summary>
+	public static void GuardNotLinkType(Type type)
+	{
+		if (typeof(Link).IsAssignableFrom(type))
+		{
+			throw new NotSupportedException(
+				$"GetCollection<{type.Name}>() cannot be used for '{type.Name}' — it derives from Link, and links are not stored in the generic object collection. " +
+				$"Use ILinkIndex instead (cast the store to ILinkIndex and read Links / LinksAt / LinksBetween), or the generated [To]/[From]/[Related] navigation properties.");
+		}
+	}
+
 	/// <summary>Same three-case materialization <see cref="ComponentApplyHelpers.MaterializeComponent"/> uses: live instance, json-shaped dict, or fresh instance with no payload.</summary>
 	public static Link MaterializeLink(Type linkType, object? data)
 	{
