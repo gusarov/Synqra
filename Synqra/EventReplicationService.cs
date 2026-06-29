@@ -130,6 +130,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			catch (Exception ex) when (i < 10)
 			{
+				_ = ex;
 				await Task.Delay(1000);
 			}
 		}

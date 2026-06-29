@@ -26,8 +26,14 @@ public static class SynqraReplicationEndpointExtensions
 	/// <see cref="IProjection"/>, and <see cref="IAppendStorage{Event, Guid}"/> from DI —
 	/// register those (e.g. AddSbxSerializer + AddMongoDbSynqraStore +
 	/// AddAppendStorageMongoDb&lt;Event, Guid&gt;) before calling this.
+	/// <para>
+	/// Pass <paramref name="serviceKey"/> when the process hosts more than one independent
+	/// Synqra-backed feature — the endpoint will resolve <see cref="IProjection"/> and
+	/// <see cref="IAppendStorage{Event, Guid}"/> from the keyed DI slot so each feature
+	/// operates against its own store rather than sharing one global singleton.
+	/// </para>
 	/// </summary>
-	public static WebApplication MapSynqraReplicationEndpoint(this WebApplication app, string path = "/api/synqra/ws")
+	public static WebApplication MapSynqraReplicationEndpoint(this WebApplication app, string path = "/api/synqra/ws", string? serviceKey = null)
 	{
 		app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 
@@ -101,9 +107,13 @@ public static class SynqraReplicationEndpointExtensions
 				try
 				{
 					var ev = newEvent1.Event;
-					var projection = ctx.RequestServices.GetRequiredService<IProjection>();
-					await ev.AcceptAsync(projection, null);
-					var storage = ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>();
+					var projection = serviceKey is null
+						? ctx.RequestServices.GetRequiredService<IProjection>()
+						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
+					await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!);
+					var storage = serviceKey is null
+						? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
+						: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
 					await storage.AppendAsync(ev);
 
 					var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
@@ -112,7 +122,7 @@ public static class SynqraReplicationEndpointExtensions
 						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
 						foreach (var other in sockets)
 						{
-							if (other == socket) { continue; }
+							if (other == socket || other.State != WebSocketState.Open) { continue; }
 							try
 							{
 								await other.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
@@ -127,6 +137,11 @@ public static class SynqraReplicationEndpointExtensions
 					{
 						ArrayPool<byte>.Shared.Return(buffer);
 					}
+				}
+				catch
+				{
+					// One bad event must not kill this whole connection (every other
+					// message on it, and the connection itself) — log and keep going.
 				}
 				finally
 				{

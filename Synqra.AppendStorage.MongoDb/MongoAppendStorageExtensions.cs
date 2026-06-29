@@ -87,6 +87,54 @@ public static class MongoAppendStorageExtensions
 	}
 
 	/// <summary>
+	/// Keyed variant — same reasoning as <see cref="Synqra.Projection.MongoDb.MongoSynqraStoreExtensions"/>'s
+	/// keyed AddMongoDbSynqraStore overload: IAppendStorage&lt;T,TKey&gt; (and the IMongoCollection&lt;T&gt;
+	/// it's built from) is otherwise a single, global, unkeyed slot per closed generic type — every
+	/// feature using the same T/TKey (overwhelmingly Event/Guid, since that's Synqra's own core event
+	/// type) silently collides on it, "last registration wins". Use this when a process hosts more
+	/// than one independent Synqra-backed feature.
+	/// </summary>
+	public static IServiceCollection AddAppendStorageMongoDb<T, TKey>(
+		  this IServiceCollection services
+		, string serviceKey
+		, string connectionString
+		, string? collectionName = null
+		)
+		where T : class
+		where TKey : notnull
+	{
+		if (typeof(Event).IsAssignableFrom(typeof(T)))
+		{
+			MongoEventClassMaps.Register();
+		}
+
+		services.AddKeyedSingleton<IMongoCollection<T>>(serviceKey, (sp, key) =>
+		{
+			var url = new MongoUrl(connectionString);
+			var client = new MongoClient(connectionString);
+			var db = client.GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
+			var resolvedCollectionName = (collectionName ?? MongoAppendStorageOptions.DefaultCollectionName)
+				.Replace("[TypeName]", typeof(T).Name)
+				.Replace("[Type]", typeof(T).Name)
+				;
+			return db.GetCollection<T>(resolvedCollectionName);
+		});
+
+		services.AddKeyedSingleton<IAppendStorage<T, TKey>>(serviceKey, (sp, key) =>
+			ActivatorUtilities.CreateInstance<MongoAppendStorage<T, TKey>>(sp, sp.GetRequiredKeyedService<IMongoCollection<T>>(key)));
+		return services;
+	}
+
+	public static IServiceCollection AddAppendStorageMongoDb<T>(
+		  this IServiceCollection services
+		, string serviceKey
+		, string connectionString
+		, string? collectionName = null
+		)
+		where T : class
+		=> AddAppendStorageMongoDb<T, Guid>(services, serviceKey, connectionString, collectionName);
+
+	/// <summary>
 	/// Universal entry point: register a MongoDB-backed append storage for <typeparamref name="T"/>
 	/// keyed by <typeparamref name="TKey"/> on an <see cref="IServiceCollection"/>, configured from
 	/// the <c>Storage:MongoDbAppendStorage</c> section of <paramref name="configuration"/>.
