@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
 using System.Collections;
@@ -19,9 +20,20 @@ namespace Synqra.BinarySerializer;
 
 public static class SBXSerializerExtensions
 {
+	/// <summary>
+	/// Callable once per independent feature in the same process (e.g. Quotaly's Scene,
+	/// SimpleV1, and Synqra-playground modules each call this with their own type
+	/// mappings) — every registered <paramref name="func"/> runs against every serializer
+	/// CreateSerializer() builds, composed, not "last registration wins". Each call used
+	/// to silently clobber every earlier one's mappings (confirmed: a real host with two
+	/// such features loaded together had one feature's types simply never registered,
+	/// throwing "BindableModel ... type id is not registered" the moment that feature's
+	/// objects needed serializing) since a non-collection [FromKeyedServices] injection
+	/// only ever resolves the most-recently-registered match for a given key.
+	/// </summary>
 	public static void AddSbxSerializer(this IServiceCollection services, Action<SbxSerializer>? func = null)
 	{
-		services.AddSingleton<ISbxSerializerFactory, SbxSerializerFactory>();
+		services.TryAddSingleton<ISbxSerializerFactory, SbxSerializerFactory>();
 		if (func != null)
 		{
 			services.AddKeyedSingleton<Action<SbxSerializer>>("configure", func);
@@ -30,18 +42,21 @@ public static class SBXSerializerExtensions
 	private class SbxSerializerFactory : ISbxSerializerFactory
 	{
 		private readonly ILogger<SbxSerializer> _SbxSerializerLogger;
-		private readonly Action<SbxSerializer>? _configure;
+		private readonly IReadOnlyList<Action<SbxSerializer>> _configures;
 
-		public SbxSerializerFactory(ILogger<SbxSerializer> logger, [FromKeyedServices("configure")] Action<SbxSerializer>? configure = null)
+		public SbxSerializerFactory(ILogger<SbxSerializer> logger, IServiceProvider serviceProvider)
 		{
 			_SbxSerializerLogger = logger;
-			_configure = configure;
+			_configures = [.. serviceProvider.GetKeyedServices<Action<SbxSerializer>>("configure")];
 		}
 
 		public ISbxSerializer CreateSerializer()
 		{
 			var ser = new SbxSerializer(_SbxSerializerLogger);
-			_configure?.Invoke(ser);
+			foreach (var configure in _configures)
+			{
+				configure(ser);
+			}
 			return ser;
 		}
 	}
@@ -228,11 +243,17 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Snapshot()
 	{
-		// Remember state if never remembered before, and make it usable for reset
-
+		// Remember state if never remembered before, and make it usable for reset.
+		// Idempotent: AddSbxSerializer now composes every registered feature's configure
+		// delegate onto one serializer instance, and each delegate typically ends with
+		// its own Snapshot() call (written when each feature assumed it owned the only
+		// configure callback) — only the first one needs to actually take effect, since
+		// this only captures string-interning state (_nextStringId/_streamBaseTime),
+		// never type Map() registrations, so it makes no difference which delegate's
+		// call is the one that "wins".
 		if (_spanshotPrimitives != null)
 		{
-			throw new Exception("Snapshot already exists");
+			return;
 		}
 		_spanshotPrimitives = (SbxSerializer)MemberwiseClone();
 		if (_stringById.Count > 0) throw new Exception("Strings must be empty");
