@@ -147,7 +147,23 @@ public static class MongoEventClassMaps
 	static void RegisterJsonIgnoreConvention()
 	{
 		var pack = new ConventionPack { new JsonIgnoreConvention(), new IgnoreIfNullConvention(true) };
-		ConventionRegistry.Register("Synqra.JsonIgnoreAndSkipNulls", pack, _ => true);
+		// Scoped to Synqra's own model ecosystem — NOT a blanket `_ => true`. That filter
+		// previously applied this pack to every class map in the process, including
+		// completely unrelated host application types that have nothing to do with Synqra
+		// (e.g. Quotaly's JobDefinition), and broke their own Mongo LINQ index/query
+		// translation in ways that had nothing to do with Synqra (confirmed: a plain Guid
+		// member throwing MongoDB.Driver.Linq.ExpressionNotSupportedException).
+		// IBindableModel is what every source-generated [SynqraModel] type implements
+		// (TestGraphNode included — narrowing to just Event/Link broke its own durability
+		// tests, confirming the convention is genuinely needed for bound models in general,
+		// not only the Event/Link hierarchy), so this still covers any consumer-defined
+		// model or Link subclass without needing per-type registration — the original
+		// reason `_ => true` was used — while excluding everything that isn't Synqra's.
+		ConventionRegistry.Register(
+			"Synqra.JsonIgnoreAndSkipNulls"
+			, pack
+			, t => typeof(Event).IsAssignableFrom(t) || typeof(Link).IsAssignableFrom(t) || typeof(IBindableModel).IsAssignableFrom(t)
+		);
 	}
 
 	sealed class JsonIgnoreConvention : IClassMapConvention
