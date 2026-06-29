@@ -260,6 +260,9 @@ public class SbxSerializer : ISbxSerializer
 		Map(-72, 2026.504, typeof(LinkRemovedEvent));
 		Map(-73, 2026.502, typeof(LinkAddedEvent));
 		Map(-74, 2026.500, typeof(Link));
+		Map(-75, 2026.501, typeof(AddLinkCommand));
+		Map(-76, 2026.503, typeof(RemoveLinkCommand));
+		Map(-77, 2025.1, typeof(DeleteObjectCommand));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
