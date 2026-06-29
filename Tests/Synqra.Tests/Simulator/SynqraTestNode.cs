@@ -154,7 +154,7 @@ internal class SynqraTestNode
 		builder.Services.AddSingleton<JsonSerializerContext>(TestJsonSerializerContext.Default);
 		builder.Services.AddSingleton(TestJsonSerializerContext.Default.Options);
 		// builder.Services.AddSignalR();
-		builder.Services.AddTransient(typeof(Lazy<>), typeof(Lazier<>));
+		builder.Services.AddLazyServiceResolution();
 		if (masterHost)
 		{
 		}
@@ -261,7 +261,7 @@ internal class SynqraTestNode
 			;
 		*/
 
-		builder.Services.AddTransient(typeof(Lazy<>), typeof(Lazier<>));
+		builder.Services.AddLazyServiceResolution();
 
 		if (masterHost)
 		{

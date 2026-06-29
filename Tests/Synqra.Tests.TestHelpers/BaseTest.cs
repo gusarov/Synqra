@@ -197,23 +197,10 @@ public class BaseTest : TestUtils
 	public IServiceProvider ServiceProvider => ApplicationHost.Services;
 }
 
+/// <summary>Kept as a thin alias — callers used AddLazier() before this moved to the
+/// production Synqra package as AddLazyServiceResolution() (genuinely needed by any real
+/// EventReplicationService consumer, not just tests).</summary>
 public static class LazierReg
 {
-	public static void AddLazier(this IServiceCollection services)
-	{
-		services.TryAddTransient(typeof(Lazy<>), typeof(Lazier<>));
-	}
-}
-
-public class Lazier<
-#if !NETFRAMEWORK
-	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-#endif
-T> : Lazy<T>
-	where T : class
-{
-	public Lazier(IServiceProvider serviceProvider)
-		: base(() => serviceProvider.GetRequiredService<T>())
-	{
-	}
+	public static void AddLazier(this IServiceCollection services) => services.AddLazyServiceResolution();
 }
