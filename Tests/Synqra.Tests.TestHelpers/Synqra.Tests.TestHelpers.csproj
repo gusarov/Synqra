@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\..\Synqra.Utils\Synqra.Utils.csproj" />
   </ItemGroup>
