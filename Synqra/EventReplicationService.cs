@@ -236,7 +236,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 
 				_eventReplicationState.LastEventIdFromMe = ev.EventId;
-				_eventReplicationState.Save();
 			}
 			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
 
