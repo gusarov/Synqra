@@ -243,20 +243,23 @@ public class SbxSerializer : ISbxSerializer
 		// to (de)serialize one through SBX (replication, IndexedDB, …): "BindableModel
 		// <Type> type id is not registered", easy to mistake for a consumer-side mapping
 		// gap since nothing here pointed at the real cause.
-		// Explicit schema version 1 (not the no-version overload the rest of this list
-		// uses) because auto-detection needs a [Schema] attribute on the type, and these
-		// — added to the model after the others, never having had one stamped — don't
-		// have one: "Can not detect latest version, no schema defined for <Type>".
-		Map(-65, 1, typeof(AddComponentCommand));
-		Map(-66, 1, typeof(ComponentAddedEvent));
-		Map(-67, 1, typeof(ChangeComponentPropertyCommand));
-		Map(-68, 1, typeof(ComponentPropertyChangedEvent));
-		Map(-69, 1, typeof(DeleteComponentCommand));
-		Map(-70, 1, typeof(ComponentDeletedEvent));
-		Map(-71, 1, typeof(ObjectDeletedEvent));
-		Map(-72, 1, typeof(LinkRemovedEvent));
-		Map(-73, 1, typeof(LinkAddedEvent));
-		Map(-74, 1, typeof(Link));
+		// Explicit schema version (not the no-version overload the rest of this list
+		// uses, which auto-detects the latest [Schema] on the type) — matches each
+		// type's own latest [Schema] attribute value, NOT an arbitrary "1": the
+		// generated (de)serialization code dispatches on this exact number and throws
+		// "Unknown schema version" for anything else. ObjectDeletedEvent has no [Schema]
+		// of its own at all (adds no members over its base) — uses SingleObjectEvent's
+		// latest instead, since that's the wire format it actually inherits.
+		Map(-65, 2026.405, typeof(AddComponentCommand));
+		Map(-66, 2026.405, typeof(ComponentAddedEvent));
+		Map(-67, 2026.405, typeof(ChangeComponentPropertyCommand));
+		Map(-68, 2026.405, typeof(ComponentPropertyChangedEvent));
+		Map(-69, 2026.405, typeof(DeleteComponentCommand));
+		Map(-70, 2026.405, typeof(ComponentDeletedEvent));
+		Map(-71, 2026.170, typeof(ObjectDeletedEvent));
+		Map(-72, 2026.504, typeof(LinkRemovedEvent));
+		Map(-73, 2026.502, typeof(LinkAddedEvent));
+		Map(-74, 2026.500, typeof(Link));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
