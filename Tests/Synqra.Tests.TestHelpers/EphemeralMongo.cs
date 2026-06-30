@@ -21,7 +21,7 @@ namespace Synqra.Tests.TestHelpers;
 /// starts; standalone is faster and more reliable.
 /// </para>
 /// </summary>
-static class EphemeralMongo
+public static class EphemeralMongo
 {
 	static readonly object _sync = new();
 	static string? _engineConnectionString;
@@ -48,19 +48,6 @@ static class EphemeralMongo
 						_engineConnectionString = app.Configuration.GetConnectionString("mongodb");
 						if (string.IsNullOrWhiteSpace(_engineConnectionString))
 						{
-							/*
-							try
-							{
-								SweepStaleMongodOnWindows();
-								_runner = MongoDbRunner.Start(singleNodeReplSet: false);
-								_engineConnectionString = _runner.ConnectionString;
-							}
-							catch (Exception ex)
-							{
-								EmergencyLog.Default.LogError(ex, $"MongoDbRunner");
-								throw;
-							}
-							*/
 							throw new Exception("ConnectionString 'mongodb' is required for test to run. Make sure spawning mongod and setting env var is part of test execution command");
 						}
 
@@ -88,35 +75,10 @@ static class EphemeralMongo
 
 			var builder = new MongoUrlBuilder(_engineConnectionString)
 			{
-				DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
+				// DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
+				DatabaseName = prefix + Guid.NewGuid().ToString("N"),
 			};
 			return builder.ToString();
-		}
-	}
-
-	[Conditional("DEBUG")]
-	static void SweepStaleMongodOnWindows()
-	{
-		if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-		{
-			return;
-		}
-		// A never-disposed shared runner can leave a mongod behind across runs on dev
-		// machines; sweep ones older than a minute (never elevated, so other users'
-		// processes are left alone).
-		foreach (var p in Process.GetProcessesByName("mongod").Concat(Process.GetProcessesByName("mongod.exe")))
-		{
-			try
-			{
-				if (DateTime.UtcNow - p.StartTime.ToUniversalTime() > TimeSpan.FromMinutes(1))
-				{
-					p.Kill();
-				}
-			}
-			catch (System.ComponentModel.Win32Exception)
-			{
-				// Owned by another user — skip, let Mongo2Go work around it.
-			}
 		}
 	}
 }
