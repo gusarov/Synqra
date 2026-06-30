@@ -131,3 +131,17 @@ public class TypeMetadata
 public interface IProjection : ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>
 {
 }
+
+/// <summary>
+/// Implemented by a projection that replays its own durable event log into itself on
+/// construction (e.g. InMemoryProjection, when wired with an IAppendStorage). A caller that
+/// ALSO has access to the same durable storage (e.g. EventReplicationService) must await
+/// this instead of replaying that storage a second time — applying the same event twice is
+/// rejected by any uniqueness check on the second application ("ComponentAddedEvent ...
+/// uniqueness ... rejected during replay"), since nothing here is naturally idempotent
+/// against being told "create this" twice.
+/// </summary>
+public interface ISelfLoadingProjection
+{
+	Task LoadStateAsync();
+}
