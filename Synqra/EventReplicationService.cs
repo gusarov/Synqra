@@ -137,7 +137,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			try
 			{
 				wsConnection = new ClientWebSocket();
-				await wsConnection.ConnectAsync(new Uri($"ws://localhost:{_config.Port}/api/synqra/ws"), _cts.Token);
+				await wsConnection.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
 				_networkSerializationService.Reinitialize();
 				// Not online yet — that is declared only after the HELLO handshake completes,
 				// when the master is guaranteed to have registered this node for broadcasts.
