@@ -309,7 +309,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	BsonDocument ToDocument(object model, Guid id)
 	{
-		var doc = model.ToBsonDocument(typeof(object));
+		// Explicit serializer, not ambient BsonSerializer.LookupSerializer(typeof(object)) — the
+		// driver's own default ObjectSerializer rejects any concrete type it doesn't recognize as
+		// "safe", and a consumer's model type (e.g. a Quotaly feature's Node) is never one ahead of
+		// time. See MongoEventClassMaps.ScopedOpenObjectSerializer's own remarks.
+		var doc = model.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
 		if (!doc.Contains("_id"))
 		{
 			doc["_id"] = new BsonBinaryData(id, GuidRepresentation.Standard);
@@ -727,7 +731,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
-		var doc = component.ToBsonDocument(typeof(object));
+		// Explicit serializer, not ambient lookup — see ToDocument's own remarks.
+		var doc = component.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
 		doc["ContainerId"] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
