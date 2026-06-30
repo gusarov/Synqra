@@ -57,6 +57,7 @@ public static class SBXSerializerExtensions
 			{
 				configure(ser);
 			}
+			ser.Snapshot();
 			return ser;
 		}
 	}
@@ -237,49 +238,30 @@ public class SbxSerializer : ISbxSerializer
 		Map(-62, typeof(NewEvent1));
 		Map(-63, typeof(TransportOperation));
 		// Map(-64, typeof(RESERVED)); // THIS IS LOWEST 1 BYTE VARINT
-		// Component/Link command & event types — same "system type, every consumer needs
-		// it" category as everything above, just added to the model after this list was
-		// first written. Their absence here was silent until a consumer actually needed
-		// to (de)serialize one through SBX (replication, IndexedDB, …): "BindableModel
-		// <Type> type id is not registered", easy to mistake for a consumer-side mapping
-		// gap since nothing here pointed at the real cause.
-		// Explicit schema version (not the no-version overload the rest of this list
-		// uses, which auto-detects the latest [Schema] on the type) — matches each
-		// type's own latest [Schema] attribute value, NOT an arbitrary "1": the
-		// generated (de)serialization code dispatches on this exact number and throws
-		// "Unknown schema version" for anything else. ObjectDeletedEvent has no [Schema]
-		// of its own at all (adds no members over its base) — uses SingleObjectEvent's
-		// latest instead, since that's the wire format it actually inherits.
-		Map(-65, 2026.405, typeof(AddComponentCommand));
-		Map(-66, 2026.405, typeof(ComponentAddedEvent));
-		Map(-67, 2026.405, typeof(ChangeComponentPropertyCommand));
-		Map(-68, 2026.405, typeof(ComponentPropertyChangedEvent));
-		Map(-69, 2026.405, typeof(DeleteComponentCommand));
-		Map(-70, 2026.405, typeof(ComponentDeletedEvent));
-		Map(-71, 2026.170, typeof(ObjectDeletedEvent));
-		Map(-72, 2026.504, typeof(LinkRemovedEvent));
-		Map(-73, 2026.502, typeof(LinkAddedEvent));
-		Map(-74, 2026.500, typeof(Link));
-		Map(-75, 2026.501, typeof(AddLinkCommand));
-		Map(-76, 2026.503, typeof(RemoveLinkCommand));
-		Map(-77, 2025.1, typeof(DeleteObjectCommand));
+		Map(-65, typeof(AddComponentCommand));
+		Map(-66, typeof(ComponentAddedEvent));
+		Map(-67, typeof(ChangeComponentPropertyCommand));
+		Map(-68, typeof(ComponentPropertyChangedEvent));
+		Map(-69, typeof(DeleteComponentCommand));
+		Map(-70, typeof(ComponentDeletedEvent));
+		Map(-71, 2026.170, typeof(ObjectDeletedEvent)); // inherits SingleObjectEvent's schema, has none of its own
+		Map(-72, typeof(LinkRemovedEvent));
+		Map(-73, typeof(LinkAddedEvent));
+		Map(-74, typeof(Link));
+		Map(-75, typeof(AddLinkCommand));
+		Map(-76, typeof(RemoveLinkCommand));
+		Map(-77, typeof(DeleteObjectCommand));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
 
 	public void Snapshot()
 	{
-		// Remember state if never remembered before, and make it usable for reset.
-		// Idempotent: AddSbxSerializer now composes every registered feature's configure
-		// delegate onto one serializer instance, and each delegate typically ends with
-		// its own Snapshot() call (written when each feature assumed it owned the only
-		// configure callback) — only the first one needs to actually take effect, since
-		// this only captures string-interning state (_nextStringId/_streamBaseTime),
-		// never type Map() registrations, so it makes no difference which delegate's
-		// call is the one that "wins".
+		// Remember state if never remembered before, and make it usable for reset
+
 		if (_spanshotPrimitives != null)
 		{
-			return;
+			throw new Exception("Snapshot already exists");
 		}
 		_spanshotPrimitives = (SbxSerializer)MemberwiseClone();
 		if (_stringById.Count > 0) throw new Exception("Strings must be empty");

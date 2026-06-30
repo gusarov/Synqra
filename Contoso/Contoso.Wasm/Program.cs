@@ -18,7 +18,6 @@ builder.Services.AddSbxSerializer(ser =>
 	ser.Map(100, typeof(ContosoItem));
 	ser.Map(101, typeof(FooContosoCommand));
 	ser.Map(102, typeof(FooContosoEvent));
-	ser.Snapshot();
 });
 
 // Projection

@@ -84,7 +84,6 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			ser.Map(214, typeof(WeightedLink));
 			ser.Map(215, typeof(LinkAddedEvent));
 			ser.Map(216, typeof(LinkRemovedEvent));
-			ser.Snapshot();
 		});
 
 		RegisterAppendStorage(hostBuilder);
@@ -483,7 +482,6 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			ser.Map(221, typeof(TestUniqueComponent));
 			ser.Map(222, typeof(TestTaggingComponent));
 			ser.Map(223, typeof(TestActivatableComponent));
-			ser.Snapshot();
 		});
 		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 		UseMongoProjectionStore(hostBuilder.Services);

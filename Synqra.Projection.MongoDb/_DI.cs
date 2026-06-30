@@ -37,17 +37,10 @@ public static class MongoSynqraStoreExtensions
 		return services.AddMongoDbSynqraStoreCore();
 	}
 
-	/// <summary>Register from an explicit connection string (caller already holds one).</summary>
-	public static IServiceCollection AddMongoDbSynqraStore(this IServiceCollection services, string connectionString, string? databaseName = null)
+	/// <summary>Register from an explicit connection string (caller already holds one). Database name is parsed from the connection string.</summary>
+	public static IServiceCollection AddMongoDbSynqraStore(this IServiceCollection services, string connectionString)
 	{
-		services.Configure<MongoProjectionOptions>(o =>
-		{
-			o.ConnectionString = connectionString;
-			if (!string.IsNullOrWhiteSpace(databaseName))
-			{
-				o.DatabaseName = databaseName;
-			}
-		});
+		services.Configure<MongoProjectionOptions>(o => o.ConnectionString = connectionString);
 		return services.AddMongoDbSynqraStoreCore();
 	}
 
@@ -57,29 +50,10 @@ public static class MongoSynqraStoreExtensions
 		return hostBuilder;
 	}
 
-	/// <summary>
-	/// Keyed variant — for a process hosting more than one independent Synqra-backed feature
-	/// (each with its own Mongo connection/database). The plain (unkeyed) overloads register
-	/// IObjectStore/IProjection/MongoProjection itself as the single, global, unkeyed singleton
-	/// slot — fine with exactly one consumer in the process, but every later caller silently
-	/// replaces the earlier one's registration ("last wins"), and every consumer ends up sharing
-	/// whichever store happened to register last, regardless of which one it actually asked for.
-	/// Confirmed in a real host: two independent features each calling the unkeyed overload, the
-	/// second silently winning, the first's own background service then crashing trying to cast
-	/// the WRONG feature's documents to its own model types. Give each feature its own
-	/// <paramref name="serviceKey"/> and this never happens — each gets a fully independent
-	/// MongoProjection instance under its own key.
-	/// </summary>
-	public static IServiceCollection AddMongoDbSynqraStore(this IServiceCollection services, string serviceKey, string connectionString, string? databaseName = null)
+	/// <summary>Keyed variant — use when multiple features in the same process each need their own independent Synqra Mongo store.</summary>
+	public static IServiceCollection AddMongoDbSynqraStore(this IServiceCollection services, string serviceKey, string connectionString)
 	{
-		services.Configure<MongoProjectionOptions>(serviceKey, o =>
-		{
-			o.ConnectionString = connectionString;
-			if (!string.IsNullOrWhiteSpace(databaseName))
-			{
-				o.DatabaseName = databaseName;
-			}
-		});
+		services.Configure<MongoProjectionOptions>(serviceKey, o => o.ConnectionString = connectionString);
 		return services.AddMongoDbSynqraStoreCore(serviceKey);
 	}
 

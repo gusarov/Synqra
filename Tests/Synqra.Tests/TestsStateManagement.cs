@@ -775,7 +775,6 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 			ser.Map(100, -1, typeof(MyPocoTask));
 			ser.Map(101, 3000.0, typeof(Item));
 			ser.Map(102, 3000.0, typeof(DemoModel));
-			ser.Snapshot();
 		});
 
 		// HostBuilder.AddJsonLinesStorage();
