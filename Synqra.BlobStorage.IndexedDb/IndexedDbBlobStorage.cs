@@ -12,6 +12,7 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 	private readonly Func<TKey, string> _getKeyFromItem;
 	private readonly Func<string, TKey> _getKeyFromText;
 	private readonly bool _wantsJsonMirror;
+	private readonly Task _initTask;
 
 	public bool WantsJsonMirror => _wantsJsonMirror;
 
@@ -28,11 +29,12 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 		_getKeyFromItem = getKeyFromItem;
 		_getKeyFromText = getKeyFromText;
 		_wantsJsonMirror = wantsJsonMirror;
-		AsyncInvoker.InvokeAsync(_indexedDbInterop.InitializeAsync());
+		_initTask = AsyncInvoker.InvokeAsync(_indexedDbInterop.InitializeAsync());
 	}
 
 	public async ValueTask<byte[]> ReadBlobAsync(TKey key, CancellationToken cancellationToken = default)
 	{
+		await _initTask;
 		var blob = await _indexedDbInterop.GetBlobAsync(_storeName, _getKeyFromItem(key));
 		if (blob is null)
 		{
@@ -44,21 +46,25 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 
 	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
 	{
+		await _initTask;
 		await _indexedDbInterop.AddBlobAsync(_storeName, _getKeyFromItem(key), blob, json: null);
 	}
 
 	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, string json, CancellationToken cancellationToken = default)
 	{
+		await _initTask;
 		await _indexedDbInterop.AddBlobAsync(_storeName, _getKeyFromItem(key), blob, json);
 	}
 
 	public async ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default)
 	{
+		await _initTask;
 		await _indexedDbInterop.DeleteAsync(_storeName, _getKeyFromItem(key));
 	}
 
 	public async IAsyncEnumerable<TKey> EnumerateKeysAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
+		await _initTask;
 		var currentFrom = from is null || Equals(from, default(TKey))
 			? null
 			: _getKeyFromItem(from);

@@ -2,7 +2,7 @@
 
 static class AsyncInvoker
 {
-	public static async void InvokeAsync(Task task)
+	public static async Task InvokeAsync(Task task)
 	{
 		try
 		{
@@ -10,10 +10,8 @@ static class AsyncInvoker
 		}
 		catch (Exception ex)
 		{
-			_ = Task.Run(async () =>
-			{
-				Console.Error.WriteLine($"AsyncInvoker: {ex}");
-			});
+			_ = Task.Run(() => Console.Error.WriteLine($"AsyncInvoker: {ex}"));
+			throw;
 		}
 	}
 }
