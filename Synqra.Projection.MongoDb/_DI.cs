@@ -85,7 +85,16 @@ public static class MongoSynqraStoreExtensions
 				? options.DatabaseName!
 				: string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName;
 			var database = new MongoClient(options.ConnectionString).GetDatabase(databaseName);
-			return ActivatorUtilities.CreateInstance<MongoProjection>(sp, database);
+			// MongoProjection's IAppendStorage<Event,Guid> constructor parameter is optional, so
+			// ActivatorUtilities would otherwise silently resolve it UNKEYED (or null if nothing
+			// unkeyed is registered) — confirmed losing every event silently in a keyed setup with
+			// no error anywhere. Pass the keyed instance explicitly, same as `database` already is.
+			// (Can't pass a null reference as an explicit ActivatorUtilities parameter — it matches
+			// explicit params by their runtime type, which throws on null — so branch instead.)
+			var eventStorage = sp.GetKeyedService<IAppendStorage<Event, Guid>>(key);
+			return eventStorage is null
+				? ActivatorUtilities.CreateInstance<MongoProjection>(sp, database)
+				: ActivatorUtilities.CreateInstance<MongoProjection>(sp, database, eventStorage);
 		});
 		services.AddKeyedSingleton<IObjectStore>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 		services.AddKeyedSingleton<IProjection>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
