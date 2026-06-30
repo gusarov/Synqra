@@ -12,15 +12,6 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 	private readonly string _folderPath;
 	private bool _created;
 
-	// Append-order manifest: one hex key per line, written in actual WriteBlob call order.
-	// File timestamps and the key itself are NOT reliable for replay ordering — see the
-	// remarks on EnumerateFilesRecursive. Lives at the store root (not inside the sharded
-	// tree) under a name EnumerateFilesRecursive explicitly skips so it's never mistaken
-	// for a blob.
-	private const string ManifestFileName = "_order.idx";
-	private readonly object _manifestLock = new();
-	private string ManifestPath => Path.Combine(_folderPath, ManifestFileName);
-
 	public FileBlobStorage(
 		  FileBlobStorageOptions options
 		, string storeName
@@ -75,17 +66,15 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 		return ValueTask.FromResult(System.IO.File.ReadAllBytes(fileName));
 	}
 
-	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
+	public ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
 	{
 		EnsureCreated();
-		var keyHex = _getPathFromKey(key);
-		var fileName = GetFileNameFor(keyHex, create: true);
+		var fileName = GetFileNameFor(_getPathFromKey(key), create: true);
 #if NET9_0_OR_GREATER
-		await System.IO.File.WriteAllBytesAsync(fileName, blob, cancellationToken);
+		return new ValueTask(System.IO.File.WriteAllBytesAsync(fileName, blob, cancellationToken));
 #else
-		await System.IO.File.WriteAllBytesAsync(fileName, blob.ToArray(), cancellationToken);
+		return new ValueTask(System.IO.File.WriteAllBytesAsync(fileName, blob.ToArray(), cancellationToken));
 #endif
-		AppendToManifest(keyHex);
 	}
 
 	public ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default)
@@ -117,45 +106,6 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 			}
 		}
 
-		bool Matches(string keyHex) => string.IsNullOrEmpty(fromKey) || keyHex.StartsWith(fromKey, StringComparison.Ordinal);
-
-		var seen = new HashSet<string>(StringComparer.Ordinal);
-		var manifestPath = ManifestPath;
-		if (System.IO.File.Exists(manifestPath))
-		{
-			// Authoritative order: actual WriteBlob call order, not filename/timestamp —
-			// see the manifest field's own remarks.
-			foreach (var line in System.IO.File.ReadLines(manifestPath))
-			{
-				if (cancellationToken.IsCancellationRequested)
-				{
-					yield break;
-				}
-
-				var keyHex = line.Trim();
-				if (keyHex.Length == 0 || !seen.Add(keyHex))
-				{
-					continue;
-				}
-
-				// The manifest is append-only and never compacted on delete — confirm the
-				// blob still exists before trusting an entry.
-				if (!System.IO.File.Exists(GetFileNameFor(keyHex, create: false)))
-				{
-					continue;
-				}
-
-				if (Matches(keyHex))
-				{
-					yield return _getKeyFromPath(keyHex);
-				}
-			}
-		}
-
-		// Fallback, legacy-order pass: any blob on disk the manifest doesn't mention —
-		// either written before this manifest existed, or (best-effort) a write whose
-		// manifest append failed/raced. Nothing silently disappears; it just sorts after
-		// every manifest-ordered entry, in the old alphabetical-by-key order.
 		foreach (var fileInfo in EnumerateFilesRecursive(rootInfo))
 		{
 			if (cancellationToken.IsCancellationRequested)
@@ -164,36 +114,20 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 			}
 
 			var keyHex = GetKeyHexFromPath(fileInfo.FullName);
-			if (!seen.Add(keyHex))
+			if (!string.IsNullOrEmpty(fromKey) && !keyHex.StartsWith(fromKey, StringComparison.Ordinal))
 			{
 				continue;
 			}
 
-			if (Matches(keyHex))
-			{
-				yield return _getKeyFromPath(keyHex);
-			}
+			yield return _getKeyFromPath(keyHex);
 		}
 
 		await Task.CompletedTask;
 	}
 
-	/// <summary>
-	/// Only used as a fallback for blobs the manifest (see <see cref="ManifestPath"/>)
-	/// doesn't mention. Filename/timestamp ordering is NOT reliable for replay order in
-	/// general — filename is (the rest of) a v7 GUID key, and Guid.CreateVersion7()'s
-	/// sub-millisecond bits are cryptographically random, not a monotonic counter, so two
-	/// blobs written milliseconds apart (e.g. during a bulk seed loop) can sort in the
-	/// WRONG order alphabetically; file timestamps were tried too and found imprecise for
-	/// the same tight-loop case on this filesystem. CreationTimeUtc here is still strictly
-	/// better than nothing for this best-effort fallback path.
-	/// </summary>
 	private IEnumerable<FileInfo> EnumerateFilesRecursive(DirectoryInfo directoryInfo)
 	{
-		foreach (var objectFileInfo in directoryInfo.EnumerateFiles()
-			.Where(x => x.Name != ManifestFileName)
-			.OrderBy(x => x.CreationTimeUtc)
-			.ThenBy(x => x.Name, StringComparer.Ordinal))
+		foreach (var objectFileInfo in directoryInfo.EnumerateFiles().OrderBy(x => x.Name, StringComparer.Ordinal))
 		{
 			yield return objectFileInfo;
 		}
@@ -269,23 +203,13 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 	public void WriteBlob(TKey key, ReadOnlySpan<byte> blob)
 	{
 		EnsureCreated();
-		var keyHex = _getPathFromKey(key);
-		var fileName = GetFileNameFor(keyHex, create: true);
+		var fileName = GetFileNameFor(_getPathFromKey(key), create: true);
 
 #if NET9_0_OR_GREATER
 		System.IO.File.WriteAllBytes(fileName, blob);
 #else
 		System.IO.File.WriteAllBytes(fileName, blob.ToArray());
 #endif
-		AppendToManifest(keyHex);
-	}
-
-	private void AppendToManifest(string keyHex)
-	{
-		lock (_manifestLock)
-		{
-			System.IO.File.AppendAllText(ManifestPath, keyHex + "\n");
-		}
 	}
 
 	public void DeleteBlob(TKey key)
