@@ -99,9 +99,9 @@ public static class EphemeralMongo
 
 			var builder = new MongoUrlBuilder(_engineConnectionString)
 			{
-				// DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
+				DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
 				// For testing purposes I'm randomizing it - maintenance still should work stateless
-				DatabaseName = prefix + Guid.NewGuid().ToString("N"),
+				// DatabaseName = prefix + Guid.NewGuid().ToString("N"),
 			};
 			return builder.ToString();
 		}
