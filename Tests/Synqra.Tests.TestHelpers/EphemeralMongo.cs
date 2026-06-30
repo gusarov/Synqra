@@ -71,7 +71,15 @@ public static class EphemeralMongo
 									var stamp = marker.Find(Builders<MongoDB.Bson.BsonDocument>.Filter.Eq("_id", "EphemeralMongoStamp")).FirstOrDefault();
 									if (stamp is null)
 									{
-										marker.InsertOne(new MongoDB.Bson.BsonDocument { ["_id"] = "EphemeralMongoStamp", ["seen"] = utcNow });
+										try
+										{
+											marker.InsertOne(new MongoDB.Bson.BsonDocument { ["_id"] = "EphemeralMongoStamp", ["seen"] = utcNow });
+										}
+										catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
+										{
+											// Another concurrent test process (net8/net9/net10 runs overlap) stamped it
+											// first — fine, the next sweep compares against whatever timestamp won.
+										}
 									}
 									else if ((utcNow - stamp["seen"].ToUniversalTime()).TotalMinutes > 1)
 									{
