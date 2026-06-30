@@ -53,14 +53,30 @@ public static class EphemeralMongo
 
 						// Maintenance - All databases named as a v7 guid
 						using var client = new MongoClient(_engineConnectionString);
-						var now = DateTime.UtcNow;
+						var utcNow = DateTime.UtcNow;
 						foreach (var databaseName in client.ListDatabaseNames().ToAsyncEnumerable().ToBlockingEnumerable().ToArray())
 						{
 							if (databaseName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 							{
-								if (Guid.TryParse(databaseName[prefix.Length..].Replace('_', '-'), out var guid) && guid.GetVersion() == 7 && (now - guid.GetTimestamp()).TotalMinutes > 1)
+								if (Guid.TryParse(databaseName[prefix.Length..].Replace('_', '-'), out var guid) && guid.GetVersion() == 7)
 								{
-									client.DropDatabase(databaseName);
+									if ((utcNow - guid.GetTimestamp()).TotalMinutes > 1)
+									{
+										client.DropDatabase(databaseName);
+									}
+								}
+								else
+								{
+									var marker = client.GetDatabase(databaseName).GetCollection<MongoDB.Bson.BsonDocument>("_xkit");
+									var stamp = marker.Find(Builders<MongoDB.Bson.BsonDocument>.Filter.Eq("_id", "EphemeralMongoStamp")).FirstOrDefault();
+									if (stamp is null)
+									{
+										marker.InsertOne(new MongoDB.Bson.BsonDocument { ["_id"] = "EphemeralMongoStamp", ["seen"] = utcNow });
+									}
+									else if ((utcNow - stamp["seen"].ToUniversalTime()).TotalMinutes > 1)
+									{
+										client.DropDatabase(databaseName);
+									}
 								}
 							}
 						}
@@ -76,6 +92,7 @@ public static class EphemeralMongo
 			var builder = new MongoUrlBuilder(_engineConnectionString)
 			{
 				// DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
+				// For testing purposes I'm randomizing it - maintenance still should work stateless
 				DatabaseName = prefix + Guid.NewGuid().ToString("N"),
 			};
 			return builder.ToString();
