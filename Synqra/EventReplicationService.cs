@@ -111,9 +111,24 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	protected async override Task ExecuteAsync(CancellationToken stoppingToken)
 	{
 		var ctx = _synqraStoreContext.Value ?? throw new ArgumentException();
-		await foreach (var ev in _storage.GetAllAsync(from: default))
+		if (ctx is ISelfLoadingProjection selfLoading)
 		{
-			await ev.AcceptAsync(ctx, null);
+			// This projection (e.g. InMemoryProjection, when constructed with the same
+			// IAppendStorage this service reads) already replayed its own durable log on
+			// construction — fire-and-forget, started before this method ever runs. Doing
+			// our own replay loop here too would apply every persisted event a second time;
+			// any unique component rejects that on the second application
+			// ("ComponentAddedEvent ... uniqueness ... rejected during replay"), which is
+			// exactly the crash users hit on every page reload. Await the SAME load instead
+			// of repeating it.
+			await selfLoading.LoadStateAsync();
+		}
+		else
+		{
+			await foreach (var ev in _storage.GetAllAsync(from: default))
+			{
+				await ev.AcceptAsync(ctx, null);
+			}
 		}
 
 		ClientWebSocket wsConnection;

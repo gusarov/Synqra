@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, ISelfLoadingProjection
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
