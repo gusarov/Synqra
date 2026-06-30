@@ -110,7 +110,6 @@ public abstract class AppendStorageTests : BaseTest
 			ser.Map(101, typeof(ObjectCreatedEvent));
 			ser.Map(102, typeof(StorableModel));
 			ser.Map(99, 3000.0, typeof(Item));
-			ser.Snapshot();
 		});
 
 		hostApplicationBuilder.Services.AddSingleton<JsonSerializerContext>(SampleJsonSerializerContext.Default); // im not sure yet, context or options

@@ -50,7 +50,6 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		hostApplicationBuilder.Services.AddSbxSerializer(ser =>
 		{
 			ser.Map(102, 3000.0, typeof(DemoModel));
-			ser.Snapshot();
 		});
 
 		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);

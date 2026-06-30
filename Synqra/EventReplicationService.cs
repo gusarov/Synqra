@@ -130,7 +130,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			catch (Exception ex) when (i < 10)
 			{
-				_ = ex;
+				EmergencyLog.Default.LogWarning(ex, $"EventReplicationService: connect attempt {i} failed: {ex.Message}");
 				await Task.Delay(1000);
 			}
 		}
