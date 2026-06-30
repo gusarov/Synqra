@@ -43,7 +43,7 @@ function initializeCore(resolve, reject) {
         }
     };
 }
-export async function addBlob(storeName, keyText, blob) {
+export async function addBlob(storeName, keyText, blob, json) {
     await initialize();
     const transaction = synqraDbResult.transaction(collectionName, "readwrite");
     const collection = transaction.objectStore(collectionName);
@@ -51,7 +51,11 @@ export async function addBlob(storeName, keyText, blob) {
         compoundKey: getCompoundKey(storeName, keyText),
         storeName,
         keyText,
-        bin: blob
+        bin: blob,
+        // Optional human-readable mirror of the same record, alongside `bin` — not a
+        // separate store/key. Only present when the caller asked for it (see
+        // IJsonMirrorBlobStorage/IndexedDbBlobStorageOptions.PopulateDebugJson).
+        json: json ?? undefined
     });
 }
 export async function getBlob(storeName, keyText) {

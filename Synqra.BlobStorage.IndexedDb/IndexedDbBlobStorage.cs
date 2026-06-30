@@ -4,25 +4,30 @@ using Synqra.BlobStorage;
 
 namespace Synqra.BlobStorage.IndexedDb;
 
-internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>
+internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
 	private readonly string _storeName;
 	private readonly Func<TKey, string> _getKeyFromItem;
 	private readonly Func<string, TKey> _getKeyFromText;
+	private readonly bool _wantsJsonMirror;
+
+	public bool WantsJsonMirror => _wantsJsonMirror;
 
 	public IndexedDbBlobStorage(
 		  IndexedDbJsInterop jsInterop
 		, string storeName
 		, Func<TKey, string> getKeyFromItem
 		, Func<string, TKey> getKeyFromText
+		, bool wantsJsonMirror
 		)
 	{
 		_indexedDbInterop = jsInterop;
 		_storeName = storeName;
 		_getKeyFromItem = getKeyFromItem;
 		_getKeyFromText = getKeyFromText;
+		_wantsJsonMirror = wantsJsonMirror;
 		AsyncInvoker.InvokeAsync(_indexedDbInterop.InitializeAsync());
 	}
 
@@ -39,7 +44,12 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
 	{
-		await _indexedDbInterop.AddBlobAsync(_storeName, _getKeyFromItem(key), blob);
+		await _indexedDbInterop.AddBlobAsync(_storeName, _getKeyFromItem(key), blob, json: null);
+	}
+
+	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, string json, CancellationToken cancellationToken = default)
+	{
+		await _indexedDbInterop.AddBlobAsync(_storeName, _getKeyFromItem(key), blob, json);
 	}
 
 	public async ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default)

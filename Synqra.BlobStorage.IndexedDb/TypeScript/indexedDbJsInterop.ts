@@ -52,7 +52,7 @@ function initializeCore(resolve: () => void, reject: (reason?: unknown) => void)
     };
 }
 
-export async function addBlob(storeName: string, keyText: string, blob: Uint8Array | number[]): Promise<void> {
+export async function addBlob(storeName: string, keyText: string, blob: Uint8Array | number[], json?: string | null): Promise<void> {
     await initialize();
     const transaction = synqraDbResult.transaction(collectionName, "readwrite");
     const collection = transaction.objectStore(collectionName);
@@ -61,7 +61,11 @@ export async function addBlob(storeName: string, keyText: string, blob: Uint8Arr
         compoundKey: getCompoundKey(storeName, keyText),
         storeName,
         keyText,
-        bin: blob
+        bin: blob,
+        // Optional human-readable mirror of the same record, alongside `bin` — not a
+        // separate store/key. Only present when the caller asked for it (see
+        // IJsonMirrorBlobStorage/IndexedDbBlobStorageOptions.PopulateDebugJson).
+        json: json ?? undefined
     });
 }
 

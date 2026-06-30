@@ -42,7 +42,8 @@ public static class IndexedDbBlobStorageExtensions
 				serviceProvider.GetRequiredService<IndexedDbJsInterop>(),
 				(string)key!,
 				getKeyText,
-				getKeyFromText));
+				getKeyFromText,
+				serviceProvider.GetRequiredService<IOptions<IndexedDbBlobStorageOptions>>().Value.PopulateDebugJson));
 		services.TryAddKeyedSingleton<IBlobStorage<TKey>>(storeName, (serviceProvider, key) =>
 			serviceProvider.GetRequiredKeyedService<IndexedDbBlobStorage<TKey>>((string)key!));
 		return services;
