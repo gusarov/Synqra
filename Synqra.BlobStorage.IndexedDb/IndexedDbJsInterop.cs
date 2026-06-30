@@ -28,10 +28,10 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		await module.InvokeVoidAsync("initialize", _options.DatabaseName, _options.ObjectStoreName);
 	}
 
-	public async Task AddBlobAsync(string storeName, string keyText, ReadOnlyMemory<byte> blob)
+	public async Task AddBlobAsync(string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json)
 	{
 		var module = await _moduleTask.Value;
-		await module.InvokeVoidAsync("addBlob", storeName, keyText, blob.ToArray());
+		await module.InvokeVoidAsync("addBlob", storeName, keyText, blob.ToArray(), json);
 	}
 
 	public async Task<byte[]?> GetBlobAsync(string storeName, string keyText)

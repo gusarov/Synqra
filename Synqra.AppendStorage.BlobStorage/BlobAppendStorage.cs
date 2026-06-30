@@ -16,33 +16,26 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	private const int InitialHeapBufferSize = 64 * 1024;
 
 	private readonly IBlobStorage<TKey> _blobStorage;
+	private readonly IJsonMirrorBlobStorage<TKey>? _jsonMirrorBlobStorage;
 	private readonly ISbxSerializer _serializer;
 	private readonly ISbxSerializer _deserializer;
 	private readonly Func<T, TKey> _getKeyFromItem;
+	private readonly JsonSerializerOptions? _jsonMirrorOptions;
 	private readonly ConcurrentDictionary<TKey, WeakReference> _attachedObjectsById = new();
-
-	// Optional, write-only mirror in JSON — SBX (above) stays the sole source of truth for
-	// reads. For a store where SBX itself isn't safe to read back yet (no schema-evolution
-	// story in place for that storage), this gives a human-inspectable, independently
-	// readable copy without changing what GetAsync/GetAllAsync actually return. Best-effort:
-	// a shadow-write failure never fails the real (SBX) append.
-	private readonly IBlobStorage<TKey>? _jsonShadowStorage;
-	private readonly JsonSerializerOptions? _jsonShadowOptions;
 
 	public BlobAppendStorage(
 		  IBlobStorage<TKey> blobStorage
 		, ISbxSerializerFactory serializerFactory
 		, Func<T, TKey> getKeyFromItem
-		, IBlobStorage<TKey>? jsonShadowStorage = null
-		, JsonSerializerOptions? jsonShadowOptions = null
+		, JsonSerializerOptions? jsonMirrorOptions = null
 		)
 	{
 		_blobStorage = blobStorage;
+		_jsonMirrorBlobStorage = blobStorage as IJsonMirrorBlobStorage<TKey>;
 		_serializer = serializerFactory.CreateSerializer();
 		_deserializer = serializerFactory.CreateSerializer();
 		_getKeyFromItem = getKeyFromItem;
-		_jsonShadowStorage = jsonShadowStorage;
-		_jsonShadowOptions = jsonShadowOptions;
+		_jsonMirrorOptions = jsonMirrorOptions;
 	}
 
 	public Task<string> TestAsync(string input) => Task.FromResult(input);
@@ -111,12 +104,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		return _blobStorage.DisposeAsync();
 	}
 
-	// No JSON shadow write here: AppendAsync only takes this path when the PRIMARY
-	// (_blobStorage) supports sync operations — the JSON shadow storage may not (e.g. an
-	// IndexedDb-backed mirror behind a File-backed primary), and there's no safe way to
-	// await an async write from inside a synchronous method without risking a deadlock. In
-	// practice the only sync-capable primary today is file-backed, used by tests — not the
-	// IndexedDb scenario this shadow exists for.
 	private void WriteSync(T item)
 	{
 		var key = _getKeyFromItem(item);
@@ -155,8 +142,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		if (TrySerialize(item, stackBuffer, out var bytesWritten))
 		{
 			byte[] data = stackBuffer[..bytesWritten].ToArray();
-			await _blobStorage.WriteBlobAsync(key, data, cancellationToken);
-			await WriteJsonShadowAsync(key, item, cancellationToken);
+			await WriteBlobAsync(key, data, item, cancellationToken);
 			Attach(item);
 			return;
 		}
@@ -168,8 +154,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 			{
 				if (TrySerialize(item, rented.AsSpan(), out bytesWritten))
 				{
-					await _blobStorage.WriteBlobAsync(key, rented.AsMemory(0, bytesWritten), cancellationToken);
-					await WriteJsonShadowAsync(key, item, cancellationToken);
+					await WriteBlobAsync(key, rented.AsMemory(0, bytesWritten), item, cancellationToken);
 					Attach(item);
 					return;
 				}
@@ -183,20 +168,24 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		}
 	}
 
-	private async Task WriteJsonShadowAsync(TKey key, T item, CancellationToken cancellationToken)
+	/// <summary>
+	/// SBX (<paramref name="sbxData"/>) is the value GetAsync/GetAllAsync read back — always
+	/// written. When the underlying blob storage also implements
+	/// <see cref="IJsonMirrorBlobStorage{TKey}"/> (currently only IndexedDb) and wants one,
+	/// a JSON rendering of the same item is written into the SAME record alongside it — not
+	/// a second store/key — purely for human inspection of a store where SBX has no
+	/// schema-evolution story yet.
+	/// </summary>
+	private async Task WriteBlobAsync(TKey key, ReadOnlyMemory<byte> sbxData, T item, CancellationToken cancellationToken)
 	{
-		if (_jsonShadowStorage is null)
+		if (_jsonMirrorBlobStorage is { WantsJsonMirror: true })
 		{
-			return;
+			var json = JsonSerializer.Serialize(item, item.GetType(), _jsonMirrorOptions);
+			await _jsonMirrorBlobStorage.WriteBlobAsync(key, sbxData, json, cancellationToken);
 		}
-		try
+		else
 		{
-			var json = JsonSerializer.SerializeToUtf8Bytes(item, item.GetType(), _jsonShadowOptions);
-			await _jsonShadowStorage.WriteBlobAsync(key, json, cancellationToken);
-		}
-		catch
-		{
-			// Best-effort mirror — never fail the real (SBX) append over this.
+			await _blobStorage.WriteBlobAsync(key, sbxData, cancellationToken);
 		}
 	}
 
