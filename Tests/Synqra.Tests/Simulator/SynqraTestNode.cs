@@ -296,49 +296,59 @@ internal class SynqraTestNode
 				if (!ctx.WebSockets.IsWebSocketRequest) { ctx.Response.StatusCode = 400; return; }
 				using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
 
-				// Simple command registry (no reflection)
-				/*
-				var handlers = new Dictionary<string, Func<JsonElement, ValueTask<JsonElement>>>
-				{
-					["sum"] = async args =>
-					{
-						// args is a JSON array: [a, b]
-						var a = args[0].GetInt32();
-						var b = args[1].GetInt32();
-						// SerializeToElement avoids intermediate strings and is AOT-friendly for primitives/known types
-						return JsonSerializer.SerializeToElement(a + b);
-					},
-				};
-				*/
+				// Hand-rolled duplicate of SynqraReplicationEndpointExtensions.cs's HELLO/
+				// broadcast protocol, kept in sync by hand — Synqra.Replication.AspNetCore
+				// (the real production endpoint) is net10.0-only, but this test project also
+				// builds for net8.0/net9.0, so it can't just call the real thing on every TFM.
 
 				#region HELLO - from client
+				// 8 bytes magic + 16 bytes the client's own "last event id it already
+				// received from a server" cursor — see EventReplicationService's HELLO send
+				// and EventReplicationState.LastEventIdFromServer's own remarks.
 				var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
 				if (helloBytes is null)
 				{
 					return;
 				}
-				if (helloBytes.Length != 8)
+				if (helloBytes.Length != 24)
 				{
-					throw new Exception($"Protocol Negotiation Failed! Received {helloBytes.Length} bytes instead of 8.");
+					throw new Exception($"Protocol Negotiation Failed! Received {helloBytes.Length} bytes instead of 24.");
 				}
-				var magic = BitConverter.ToUInt64(helloBytes);
+				var magic = BitConverter.ToUInt64(helloBytes, 0);
 				if (magic != networkSerializationService.Magic)
 				{
 					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 				}
+				var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
 				#endregion
-				#region HELLO - to client
-				// Register for broadcasts BEFORE answering HELLO, and do both under the
-				// broadcast semaphore: the moment a client observes the HELLO reply (and
-				// reports IsOnline), every subsequent broadcast is guaranteed to reach it,
-				// and the reply cannot interleave with a concurrent broadcast SendAsync on
-				// the same socket.
+				#region HELLO - to client, then replay this stream's backlog since clientCursor
+				// Register for broadcasts BEFORE answering HELLO, and do both — plus the
+				// backlog replay below — under the broadcast semaphore: the moment a client
+				// observes the HELLO reply (and reports IsOnline), every subsequent broadcast
+				// is guaranteed to reach it, and none of this can interleave with a concurrent
+				// broadcast SendAsync on the same socket.
 				var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
 				await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
 				try
 				{
 					_sockets.Add(socket);
 					await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+
+					var backlogStorage = app.Services.GetRequiredService<IAppendStorage<Event, Guid>>();
+					var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+					try
+					{
+						await foreach (var ev in backlogStorage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
+						{
+							knownEvents.TryAdd(ev.EventId, null);
+							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, backlogBuffer);
+							await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+						}
+					}
+					finally
+					{
+						ArrayPool<byte>.Shared.Return(backlogBuffer);
+					}
 				}
 				finally
 				{
@@ -355,8 +365,6 @@ internal class SynqraTestNode
 						{
 							break;
 						}
-						// var json = Encoding.UTF8.GetString(messageBytes);
-						// var operation = JsonSerializer.Deserialize<TransportOperation>(json, AppJsonContext.Default.Options);
 						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
 
 						var storeCtx = app.Services.GetRequiredService<IProjection>();
@@ -409,38 +417,6 @@ internal class SynqraTestNode
 						{
 							throw new NotSupportedException();
 						}
-						/*
-						try
-						{
-							var invoke = JsonSerializer.Deserialize(messageBytes.Value, AppJsonContext.Default);
-							if (invoke?.Kind != "invoke") continue;
-
-							JsonElement resultEl;
-							string? error = null;
-
-							if (handlers.TryGetValue(invoke.Data.Method, out var handler))
-							{
-								resultEl = await handler(invoke.Data.Args);
-							}
-							else
-							{
-								error = $"Unknown method '{invoke.Data.Method}'";
-								resultEl = default;
-							}
-						// var result = new Envelope<ResultMessage>("result", new ResultMessage(invoke.Data.Id, error is null ? resultEl : null, error));
-
-
-						var payload = JsonSerializer.SerializeToUtf8Bytes(result, AppJsonContext.Default);
-							await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
-						}
-						catch (Exception ex)
-						{
-							// best-effort error reply with id=-1 when deserialization fails
-							var err = new Envelope<ResultMessage>("result", new ResultMessage(-1, null, ex.GetType().Name));
-							var payload = JsonSerializer.SerializeToUtf8Bytes(err, WsJson.Default.EnvelopeResultMessage);
-							await socket.SendAsync(payload, WebSocketMessageType.Text, true, ctx.RequestAborted);
-						}
-						*/
 					}
 				}
 				catch (Exception ex)
