@@ -59,6 +59,8 @@ public static class MongoSynqraStoreExtensions
 
 	static IServiceCollection AddMongoDbSynqraStoreCore(this IServiceCollection services)
 	{
+		// The host is responsible for calling SynqraStreamContext.Enter(streamId) per request before
+		// touching the store — see that type's own remarks for why there is no fallback default here.
 		services.AddSingleton<MongoProjection>(sp =>
 		{
 			var options = sp.GetRequiredService<IOptions<MongoProjectionOptions>>().Value;
@@ -77,6 +79,7 @@ public static class MongoSynqraStoreExtensions
 
 	static IServiceCollection AddMongoDbSynqraStoreCore(this IServiceCollection services, string serviceKey)
 	{
+		// See the unkeyed overload's remark — same reasoning applies to a keyed store.
 		services.AddKeyedSingleton<MongoProjection>(serviceKey, (sp, key) =>
 		{
 			var options = sp.GetRequiredService<IOptionsMonitor<MongoProjectionOptions>>().Get((string)key!);

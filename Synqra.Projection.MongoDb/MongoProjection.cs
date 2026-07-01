@@ -57,8 +57,20 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// already stamps for polymorphic deserialization — no separate type-id column. The value is the
 	// link type's simple name (what ObjectConverter writes), so a per-type query filters on it directly.
 	const string DiscriminatorField = "_t";
+	// Short, underscore-prefixed system column — matches the "_id"/"_t" naming convention. NOT
+	// "_cid" ("ContainerId", the historical Synqra name for this concept — see
+	// SynqraGuids.SynqraRootStreamId's own remark): "container" is being phased out of the
+	// vocabulary entirely now that Components (see OwnerIdField below) also legitimately use that
+	// word for something unrelated (IComponentContainer — the object a component is attached to).
+	// Stream and node are the two concepts that actually exist; "container" isn't a third one.
+	const string StreamIdField = "_sid";
 	static FilterDefinition<BsonDocument> LinkTypeFilter(Type linkType)
 		=> Builders<BsonDocument>.Filter.Eq(DiscriminatorField, linkType.Name);
+
+	/// <summary>Every read/write below is scoped to this instance's <see cref="StreamId"/> — see
+	/// the property's own remarks for why.</summary>
+	FilterDefinition<BsonDocument> StreamFilter()
+		=> Builders<BsonDocument>.Filter.Eq(StreamIdField, StreamId);
 
 	readonly IMongoDatabase _database;
 	readonly ISbxSerializerFactory _serializerFactory;
@@ -76,7 +88,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public ITypeMetadataProvider TypeMetadataProvider { get; }
 
-	public Guid StreamId => SynqraGuids.SynqraRootStreamId;
+	/// <summary>
+	/// Every document this projection reads or writes belongs to exactly this stream — see
+	/// <see cref="StreamFilter"/>, applied to every Mongo query in this type, and the "_sid"
+	/// field <see cref="ToDocument"/>/<see cref="UpsertComponent"/> stamp on every write. A single
+	/// physical Mongo database can therefore hold more than one stream's worth of documents
+	/// (per-user, per-tenant, whatever the caller's stream boundary is) without them leaking into
+	/// each other's queries.
+	/// <para>
+	/// Reads <see cref="SynqraStreamContext.Current"/> on every access rather than capturing a value
+	/// at construction — this type is registered as a process-wide singleton (see
+	/// <see cref="MongoSynqraStoreExtensions"/>), precisely so a server can serve however many
+	/// concurrent streams it has without instantiating (or caching) one projection per stream. The
+	/// caller's ambient context, not this instance, decides which stream a given call sees.
+	/// </para>
+	/// </summary>
+	public Guid StreamId => SynqraStreamContext.Current;
 
 	public MongoProjection(
 		  IMongoDatabase database
@@ -284,6 +311,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			clone.Remove("_id");
 		}
 		clone.Remove("_t");
+		clone.Remove(StreamIdField);
 		foreach (var field in addressingFields)
 		{
 			clone.Remove(field);
@@ -318,6 +346,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			doc["_id"] = new BsonBinaryData(id, GuidRepresentation.Standard);
 		}
+		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
 		return doc;
 	}
 
@@ -326,7 +355,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
 		var collection = _database.GetCollection<BsonDocument>(type.Name);
 		var doc = ToDocument(model, id);
-		collection.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", id), doc, new ReplaceOptions { IsUpsert = true });
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+		collection.ReplaceOne(filter, doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	// ---------------------------------------------------------------- ICommandVisitor
@@ -641,7 +671,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// ToDocument already stamps the "_t" discriminator (= link type name) the per-type queries
 		// filter on, so no separate type column is written here.
 		var doc = ToDocument(link, link.LinkId);
-		linksMongo.ReplaceOne(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), doc, new ReplaceOptions { IsUpsert = true });
+		var replaceFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), StreamFilter());
+		linksMongo.ReplaceOne(replaceFilter, doc, new ReplaceOptions { IsUpsert = true });
 
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
@@ -653,7 +684,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		linksMongo.DeleteOne(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId)); // no-op (idempotent) if already gone
+		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter());
+		linksMongo.DeleteOne(deleteFilter); // no-op (idempotent) if already gone
 		return Task.CompletedTask;
 	}
 
@@ -678,7 +710,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(typeIdFilter, endpointFilter)).ToList())
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), typeIdFilter, endpointFilter)).ToList())
 		{
 			var candidateId = doc["_id"].AsGuid;
 			if (candidateId == excludeId)
@@ -706,9 +738,16 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
+	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid" — "owner object id": the
+	// id of the IComponentContainer this component is attached to. NOT "ContainerId"/"OwnerId" as a
+	// full word: see StreamIdField's remark on why "container" is being phased out of the vocabulary
+	// here entirely, and _oid keeps this addressing field in the same short-system-column family as
+	// _sid rather than reading like a fourth, differently-styled concept next to it.
+	const string OwnerIdField = "_oid";
+
 	/// <summary>
 	/// Components are persisted in their own shared Mongo collection — NOT embedded in their
-	/// container's own document the way the container's plain properties are. <see cref="IComponentsCollection"/>'s
+	/// owner's own document the way the owner's plain properties are. <see cref="IComponentsCollection"/>'s
 	/// element type is the marker interface <see cref="IComponent"/>; serialized through that
 	/// declared element type, the driver would build a class map for the interface itself (which has
 	/// no members) and drop every concrete field. Going through nominal type <c>object</c> (see
@@ -716,14 +755,19 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// map and always stamps a <c>_t</c> discriminator, and reading back resolves the concrete type
 	/// from <c>_t</c> alone via <see cref="FromDocument"/>. So the stored document needs no separate
 	/// type-id column — the <c>_t</c> discriminator doubles as the type filter, mirroring how
-	/// links are stored. The remaining (container, type, id) addressing matches how
+	/// links are stored. The remaining (owner, type, id) addressing matches how
 	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> addresses a component on the live, in-memory
 	/// side of this same apply path — with the type filtered via <c>_t</c> so a unique component
 	/// (<c>ComponentId == Guid.Empty</c>) is still distinguished from a peer of another type.
+	/// <paramref name="containerId"/> is the id of the <see cref="IComponentContainer"/> this component
+	/// is attached to (matching that concept's name everywhere else in Synqra) — stored under
+	/// <see cref="OwnerIdField"/>, not a literal "ContainerId"/"Container" column, per that field's
+	/// own remark.
 	/// </summary>
-	static FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
+	FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
-			Builders<BsonDocument>.Filter.Eq("ContainerId", containerId),
+			StreamFilter(),
+			Builders<BsonDocument>.Filter.Eq(OwnerIdField, containerId),
 			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
 			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId));
 
@@ -733,8 +777,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
 		// Explicit serializer, not ambient lookup — see ToDocument's own remarks.
 		var doc = component.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
-		doc["ContainerId"] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
+		doc[OwnerIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
+		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
 		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
@@ -755,11 +800,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		foreach (var doc in componentsMongo.Find(Builders<BsonDocument>.Filter.Eq("ContainerId", containerId)).ToList())
+		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(OwnerIdField, containerId));
+		foreach (var doc in componentsMongo.Find(loadFilter).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
-			var component = (IComponent)FromDocument(doc, "ContainerId", "ComponentId");
+			var component = (IComponent)FromDocument(doc, OwnerIdField, "ComponentId");
 
 			if (!container.Components.TryAdd(component))
 			{
@@ -794,7 +840,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		get
 		{
 			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-			return linksMongo.Find(FilterDefinition<BsonDocument>.Empty).ToList()
+			return linksMongo.Find(StreamFilter()).ToList()
 				.Select(LoadLink)
 				.ToArray();
 		}
@@ -813,7 +859,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", nodeId)),
 		};
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -824,7 +870,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", a), Builders<BsonDocument>.Filter.Eq("TargetId", b)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", b), Builders<BsonDocument>.Filter.Eq("TargetId", a)));
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList()
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -837,7 +883,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.X), Builders<BsonDocument>.Filter.Eq("TargetId", key.Y)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.Y), Builders<BsonDocument>.Filter.Eq("TargetId", key.X)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(LinkTypeFilter(linkType), endpointFilter)).ToList())
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
 			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
@@ -856,7 +902,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	bool ILinkIndex.TryGetById(Guid linkId, out Link? link)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var doc = linksMongo.Find(Builders<BsonDocument>.Filter.Eq("_id", linkId)).FirstOrDefault();
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), StreamFilter());
+		var doc = linksMongo.Find(filter).FirstOrDefault();
 		if (doc is null)
 		{
 			link = null;

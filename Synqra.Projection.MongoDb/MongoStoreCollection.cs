@@ -5,7 +5,14 @@ using Synqra.BinarySerializer;
 
 namespace Synqra.Projection.MongoDb;
 
-/// <summary>Non-generic base so the projection can cache collections by id and activate them reflectively.</summary>
+/// <summary>
+/// Non-generic base so the projection can cache collections by id and activate them reflectively.
+/// <paramref name="streamId"/> only satisfies <see cref="StoreCollection"/>'s non-default
+/// validation at construction time — it is <b>not</b> what any Mongo query below actually filters
+/// by (this instance is cached per collection id in <see cref="MongoProjection"/> and reused across
+/// every stream a request for this type happens to be scoped to; see <see cref="MongoStoreCollection{T}.StreamFilter"/>,
+/// which reads the ambient <see cref="SynqraStreamContext.Current"/> fresh on every query instead).
+/// </summary>
 internal abstract class MongoStoreCollection : StoreCollection
 {
 	protected MongoStoreCollection(
@@ -45,7 +52,14 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	public override Type Type => typeof(T);
 
-	public int Count => (int)_mongo.CountDocuments(FilterDefinition<BsonDocument>.Empty);
+	// _projection.StreamId (ambient, read live) — not the base StoreCollection.StreamId field,
+	// which is only whatever was in the ambient context the moment this collection was first
+	// constructed and cached (see MongoProjection.GetCollection's per-collectionId cache). This
+	// instance is reused across every stream, so every actual query must re-read the ambient
+	// value fresh rather than trust what got baked in at construction.
+	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
+
+	public int Count => (int)_mongo.CountDocuments(StreamFilter());
 
 	bool ICollection<T>.IsReadOnly => false;
 
@@ -54,7 +68,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 		var id = _projection.Attach(item, CollectionId);
 		var task = Store.SubmitCommandAsync(new CreateObjectCommand
 		{
-			StreamId = StreamId,
+			StreamId = _projection.StreamId,
 			CollectionId = CollectionId,
 			TargetTypeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
 			CommandId = GuidExtensions.CreateVersion7(),
@@ -67,7 +81,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _mongo.Find(FilterDefinition<BsonDocument>.Empty).ToList())
+		foreach (var doc in _mongo.Find(StreamFilter()).ToList())
 		{
 			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))

@@ -56,6 +56,15 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	/// <summary>Wire up the store/projection under test — registers <c>IObjectStore</c> / <c>IProjection</c> (+ <c>ILinkIndex</c>).</summary>
 	protected abstract void RegisterStore(IServiceCollection services);
 
+	// A Mongo-backed store variant here needs a stream scope active — SynqraStreamContext.Current
+	// throws otherwise (there is no fallback default; see that type's own remarks on why). The
+	// in-memory store variants don't read it, so entering unconditionally is harmless for those.
+	// Entered from ResolveStore() itself — not a [Before(Test)]/[After(Test)] hook pair — because
+	// TUnit runs each lifecycle phase on its own captured ExecutionContext, so an AsyncLocal set in
+	// a Before hook does not flow into the test body even on the same instance/thread. Entering
+	// inline, on the test method's own call stack, is what actually keeps it in scope for real.
+	IDisposable? _streamScope;
+
 	protected override void Register(IHostApplicationBuilder hostBuilder)
 	{
 		base.Register(hostBuilder);
@@ -96,6 +105,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	/// </summary>
 	protected IObjectStore ResolveStore()
 	{
+		_streamScope ??= SynqraStreamContext.Enter(SynqraGuids.SynqraRootStreamId);
 		var store = ServiceProvider.GetRequiredService<IObjectStore>();
 		if (store is InMemoryProjection projection)
 		{
@@ -457,6 +467,10 @@ public sealed class Cobra_InMemory_Storage_With_Mongo_Store : Cobra_InMemoryEven
 [NotInParallel]
 public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 {
+	// See Cobra_SynqraStoreContractTests.ResolveStore's remark — a [Before(Test)] hook's AsyncLocal
+	// does not flow into the test body under TUnit, so this is entered inline from Store instead.
+	IDisposable? _streamScope;
+
 	protected override void Register(IHostApplicationBuilder hostBuilder)
 	{
 		base.Register(hostBuilder);
@@ -489,7 +503,14 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 
 	void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
 
-	IObjectStore Store => ServiceProvider.GetRequiredService<IObjectStore>();
+	IObjectStore Store
+	{
+		get
+		{
+			_streamScope ??= SynqraStreamContext.Enter(SynqraGuids.SynqraRootStreamId);
+			return ServiceProvider.GetRequiredService<IObjectStore>();
+		}
+	}
 
 	[Test]
 	public async Task Should_add_change_and_remove_a_component_via_the_generated_collection()
