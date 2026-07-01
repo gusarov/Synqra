@@ -26,6 +26,14 @@ public static class EphemeralMongo
 	static readonly object _sync = new();
 	static string? _engineConnectionString;
 
+	// Every database name this process handed out, so we can drop them all on ProcessExit
+	// instead of leaving temp_minute_* dbs behind for a future run's sweep to (eventually)
+	// reap. This is the cheap, cross-platform equivalent of "schedule a remover for every
+	// new db": a normal test-host shutdown reaps this run's databases immediately, while the
+	// first-read stale sweep above still covers processes that were killed (Ctrl-C / Stop
+	// Debugging) before ProcessExit could fire.
+	static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _handedOutDatabases = new(StringComparer.OrdinalIgnoreCase);
+
 	/// <summary>
 	/// Every read of this property generates mongo url with new temporary database
 	/// </summary>
@@ -50,6 +58,8 @@ public static class EphemeralMongo
 						{
 							throw new Exception("ConnectionString 'mongodb' is required for test to run. Make sure spawning mongod and setting env var is part of test execution command");
 						}
+
+						AppDomain.CurrentDomain.ProcessExit += static (_, _) => DropHandedOutDatabases();
 
 						// Maintenance - All databases named as a v7 guid
 						using var client = new MongoClient(_engineConnectionString);
@@ -97,13 +107,58 @@ public static class EphemeralMongo
 			// Instead, every read of this field would give new random db name
 			// And first read will recycle the temp dbs
 
+			var newDatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant();
+			// For testing purposes I'm randomizing it - maintenance still should work stateless
+			// var newDatabaseName = prefix + Guid.NewGuid().ToString("N");
+
+			// Remember it so ProcessExit can drop it (see _handedOutDatabases).
+			_handedOutDatabases[newDatabaseName] = 0;
+
 			var builder = new MongoUrlBuilder(_engineConnectionString)
 			{
-				DatabaseName = prefix + GuidExtensions.CreateVersion7().ToString().Replace('-', '_').ToLowerInvariant(),
-				// For testing purposes I'm randomizing it - maintenance still should work stateless
-				// DatabaseName = prefix + Guid.NewGuid().ToString("N"),
+				DatabaseName = newDatabaseName,
 			};
 			return builder.ToString();
+		}
+	}
+
+	/// <summary>
+	/// Drops every database this process handed out. Best-effort and fast: it runs on
+	/// ProcessExit (a normal <c>dotnet test</c> shutdown), where only a couple of seconds of
+	/// budget is available, so connect/server-selection timeouts are kept short and every
+	/// failure is swallowed — anything that survives is reaped by the next run's stale sweep.
+	/// </summary>
+	static void DropHandedOutDatabases()
+	{
+		if (_engineConnectionString is null || _handedOutDatabases.IsEmpty)
+		{
+			return;
+		}
+
+		try
+		{
+			var settings = MongoClientSettings.FromConnectionString(_engineConnectionString);
+			settings.ConnectTimeout = TimeSpan.FromSeconds(2);
+			settings.ServerSelectionTimeout = TimeSpan.FromSeconds(2);
+			var client = new MongoClient(settings);
+
+			foreach (var databaseName in _handedOutDatabases.Keys)
+			{
+				try
+				{
+					client.DropDatabase(databaseName);
+					_handedOutDatabases.TryRemove(databaseName, out _);
+				}
+				catch
+				{
+					// mongod may already be gone (service stop) or unreachable — leave the
+					// name behind and let the next run's stale sweep reap it.
+				}
+			}
+		}
+		catch
+		{
+			// Couldn't even build a client (engine already torn down) — nothing to do.
 		}
 	}
 }
