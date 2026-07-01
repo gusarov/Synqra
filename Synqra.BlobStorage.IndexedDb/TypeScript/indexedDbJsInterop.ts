@@ -1,61 +1,88 @@
-let synqraDbRequest: IDBOpenDBRequest;
-let synqraDbResult: IDBDatabase;
-let synqraDbPromise: Promise<void> | undefined;
-let databaseName = "Synqra";
-let collectionName = "blobs";
+// One IndexedDB database per Synqra stream — the database name carries the stream id (see
+// IndexedDbBlobStorage.ComposeDatabaseName on the C# side). A stream is the honest, replicated
+// event copy every participant agrees on; a different user re-logging into the same browser gets
+// a different stream, hence a different database, and never sees the previous user's records.
+// Connections are therefore kept in a per-name map (not one module-global) so a graceful
+// re-login switch can open the new stream's database while closing the old one.
 const currentVersion = 1;
 const separator = "§";
+
+interface OpenDb {
+    readonly db: IDBDatabase;
+    readonly objectStoreName: string;
+}
+
+const openDatabases = new Map<string, Promise<OpenDb>>();
 
 function getCompoundKey(storeName: string, keyText: string): string {
     return `${storeName}${separator}${keyText}`;
 }
 
-export function initialize(dbName?: string, objectStoreName?: string): Promise<void> {
-    if (dbName) {
-        databaseName = dbName;
+export function initialize(databaseName: string, objectStoreName: string): Promise<OpenDb> {
+    let existing = openDatabases.get(databaseName);
+    if (!existing) {
+        existing = openCore(databaseName, objectStoreName);
+        openDatabases.set(databaseName, existing);
     }
-
-    if (objectStoreName) {
-        collectionName = objectStoreName;
-    }
-
-    if (!synqraDbPromise) {
-        synqraDbPromise = new Promise<void>((resolve, reject) => {
-            try {
-                initializeCore(resolve, reject);
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    return synqraDbPromise;
+    return existing;
 }
 
-function initializeCore(resolve: () => void, reject: (reason?: unknown) => void): void {
-    synqraDbRequest = indexedDB.open(databaseName, currentVersion);
+function openCore(databaseName: string, objectStoreName: string): Promise<OpenDb> {
+    return new Promise<OpenDb>((resolve, reject) => {
+        try {
+            const request = indexedDB.open(databaseName, currentVersion);
 
-    synqraDbRequest.onsuccess = function () {
-        synqraDbResult = synqraDbRequest.result;
-        resolve();
-    };
+            request.onsuccess = function () {
+                resolve({ db: request.result, objectStoreName });
+            };
 
-    synqraDbRequest.onerror = function () {
-        reject(synqraDbRequest.error);
-    };
+            request.onerror = function () {
+                openDatabases.delete(databaseName);
+                reject(request.error);
+            };
 
-    synqraDbRequest.onupgradeneeded = function () {
-        const db = synqraDbRequest.result;
-        if (!db.objectStoreNames.contains(collectionName)) {
-            db.createObjectStore(collectionName, { keyPath: "compoundKey" });
+            request.onupgradeneeded = function () {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(objectStoreName)) {
+                    db.createObjectStore(objectStoreName, { keyPath: "compoundKey" });
+                }
+            };
+        } catch (error) {
+            openDatabases.delete(databaseName);
+            reject(error);
         }
-    };
+    });
 }
 
-export async function addBlob(storeName: string, keyText: string, blob: Uint8Array | number[], json?: string | null): Promise<void> {
-    await initialize();
-    const transaction = synqraDbResult.transaction(collectionName, "readwrite");
-    const collection = transaction.objectStore(collectionName);
+// Gracefully stop using a stream's database — closes the connection and drops it from the map so
+// the next initialize() reopens it fresh. Used on re-login to release the previous stream before
+// switching to the next one.
+export async function closeDatabase(databaseName: string): Promise<void> {
+    const existing = openDatabases.get(databaseName);
+    if (!existing) {
+        return;
+    }
+
+    openDatabases.delete(databaseName);
+    try {
+        const opened = await existing;
+        opened.db.close();
+    } catch {
+        // A database that never finished opening has nothing to close.
+    }
+}
+
+export async function addBlob(
+    databaseName: string,
+    objectStoreName: string,
+    storeName: string,
+    keyText: string,
+    blob: Uint8Array | number[],
+    json?: string | null
+): Promise<void> {
+    const opened = await initialize(databaseName, objectStoreName);
+    const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
+    const collection = transaction.objectStore(opened.objectStoreName);
 
     collection.add({
         compoundKey: getCompoundKey(storeName, keyText),
@@ -69,12 +96,17 @@ export async function addBlob(storeName: string, keyText: string, blob: Uint8Arr
     });
 }
 
-export async function getBlob(storeName: string, keyText: string): Promise<Uint8Array | number[] | null> {
-    await initialize();
+export async function getBlob(
+    databaseName: string,
+    objectStoreName: string,
+    storeName: string,
+    keyText: string
+): Promise<Uint8Array | number[] | null> {
+    const opened = await initialize(databaseName, objectStoreName);
 
     return await new Promise<Uint8Array | number[] | null>((resolve, reject) => {
-        const transaction = synqraDbResult.transaction(collectionName, "readonly");
-        const collection = transaction.objectStore(collectionName);
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
         const request = collection.get(getCompoundKey(storeName, keyText));
 
         request.onsuccess = function () {
@@ -94,16 +126,18 @@ export async function getBlob(storeName: string, keyText: string): Promise<Uint8
 }
 
 export async function getKeys(
+    databaseName: string,
+    objectStoreName: string,
     storeName: string,
     fromKeyText?: string | null,
     fromExclusive = false,
     pageSize = 1024
 ): Promise<string[]> {
-    await initialize();
+    const opened = await initialize(databaseName, objectStoreName);
 
     return await new Promise<string[]>((resolve, reject) => {
-        const transaction = synqraDbResult.transaction(collectionName, "readonly");
-        const collection = transaction.objectStore(collectionName);
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
         const prefix = `${storeName}${separator}`;
         const startKey = fromKeyText !== undefined && fromKeyText !== null
             ? getCompoundKey(storeName, fromKeyText)
@@ -139,9 +173,53 @@ export async function getKeys(
     });
 }
 
-export async function deleteByKey(storeName: string, keyText: string): Promise<void> {
-    await initialize();
-    const transaction = synqraDbResult.transaction(collectionName, "readwrite");
-    const collection = transaction.objectStore(collectionName);
+export async function deleteByKey(
+    databaseName: string,
+    objectStoreName: string,
+    storeName: string,
+    keyText: string
+): Promise<void> {
+    const opened = await initialize(databaseName, objectStoreName);
+    const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
+    const collection = transaction.objectStore(opened.objectStoreName);
     collection.delete(getCompoundKey(storeName, keyText));
+}
+
+// Used by resync recovery — wipes every record for this storeName only, not the whole
+// database (one per-stream database can hold records for more than one storeName, see
+// getCompoundKey), by cursor-deleting every key under this storeName's prefix.
+export async function clearStore(
+    databaseName: string,
+    objectStoreName: string,
+    storeName: string
+): Promise<void> {
+    const opened = await initialize(databaseName, objectStoreName);
+
+    return await new Promise<void>((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const request = collection.openKeyCursor(IDBKeyRange.lowerBound(prefix));
+
+        request.onsuccess = function (event) {
+            const cursor = (event.target as IDBRequest<IDBCursorWithValue | IDBCursor | null>).result;
+            if (!cursor) {
+                resolve();
+                return;
+            }
+
+            const compoundKey = String(cursor.primaryKey);
+            if (!compoundKey.startsWith(prefix)) {
+                resolve();
+                return;
+            }
+
+            collection.delete(compoundKey);
+            cursor.continue();
+        };
+
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
 }
