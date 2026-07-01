@@ -52,6 +52,13 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		await module.InvokeVoidAsync("deleteByKey", storeName, keyText);
 	}
 
+	/// <summary>Wipes every record for this storeName only — used by resync recovery.</summary>
+	public async Task ClearStoreAsync(string storeName)
+	{
+		var module = await _moduleTask.Value;
+		await module.InvokeVoidAsync("clearStore", storeName);
+	}
+
 	public async ValueTask DisposeAsync()
 	{
 		if (_moduleTask.IsValueCreated)

@@ -111,24 +111,56 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	protected async override Task ExecuteAsync(CancellationToken stoppingToken)
 	{
 		var ctx = _synqraStoreContext.Value ?? throw new ArgumentException();
-		if (ctx is ISelfLoadingProjection selfLoading)
-		{
-			// This projection (e.g. InMemoryProjection, when constructed with the same
-			// IAppendStorage this service reads) already replayed its own durable log on
-			// construction — fire-and-forget, started before this method ever runs. Doing
-			// our own replay loop here too would apply every persisted event a second time;
-			// any unique component rejects that on the second application
-			// ("ComponentAddedEvent ... uniqueness ... rejected during replay"), which is
-			// exactly the crash users hit on every page reload. Await the SAME load instead
-			// of repeating it.
-			await selfLoading.LoadStateAsync();
-		}
-		else
+
+		// Seed the by-EventId dedup (_skipSet/_skipList, otherwise only populated by
+		// ProcessEvent for events received live) from whatever's already durably stored
+		// locally — a separate pass from the actual replay below, regardless of which
+		// replay path runs. Without this, the server's backlog replay (see
+		// SynqraReplicationEndpointExtensions.cs) would resend every event this client
+		// already has on every reconnect, and ProcessEvent would re-apply them since it had
+		// never seen their ids before — the exact "unique component rejected on second
+		// application" crash the comment below was written to avoid, just via a new path.
+		// Wrapped together with the actual replay in one try/catch: a corrupt/undeserializable
+		// local record here means this client's local durable log can no longer be trusted at
+		// all — clear it and continue with an empty skip-set and a cold LastEventIdFromServer,
+		// which is now a correct and safe "send me everything" signal (see #2/#3), not a bug.
+		try
 		{
 			await foreach (var ev in _storage.GetAllAsync(from: default))
 			{
-				await ev.AcceptAsync(ctx, null);
+				lock (_skipSet)
+				{
+					if (_skipSet.Add(ev.EventId))
+					{
+						_skipList.AddLast(ev.EventId);
+					}
+				}
 			}
+
+			if (ctx is ISelfLoadingProjection selfLoading)
+			{
+				// This projection (e.g. InMemoryProjection, when constructed with the same
+				// IAppendStorage this service reads) already replayed its own durable log on
+				// construction — fire-and-forget, started before this method ever runs. Doing
+				// our own replay loop here too would apply every persisted event a second time;
+				// any unique component rejects that on the second application
+				// ("ComponentAddedEvent ... uniqueness ... rejected during replay"), which is
+				// exactly the crash users hit on every page reload. Await the SAME load instead
+				// of repeating it.
+				await selfLoading.LoadStateAsync();
+			}
+			else
+			{
+				await foreach (var ev in _storage.GetAllAsync(from: default))
+				{
+					await ev.AcceptAsync(ctx, null);
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.LogWarning(ex, "EventReplicationService: local durable log failed to replay — clearing it and resyncing fresh from the server.");
+			await ClearLocalStorageAsync();
 		}
 
 		ClientWebSocket wsConnection;
@@ -187,6 +219,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						await _storage.AppendAsync(ne1.Event);
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ne1.Event}");
 						await ProcessEvent(ne1.Event);
+						// Tracks how far this client's backlog catch-up has progressed —
+						// applies to both a genuine live event and one the server resent as
+						// backlog (see the HELLO region above); mirrors LastEventIdFromMe's
+						// own bookkeeping for outgoing events.
+						_eventReplicationState.LastEventIdFromServer = ne1.Event.EventId;
 						break;
 					default:
 						throw new NotSupportedException();
@@ -197,11 +234,16 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 		#region HELLO
 		{
-			var buffer = ArrayPool<byte>.Shared.Rent(8);
+			// 8 bytes magic + 16 bytes LastEventIdFromServer — tells the server exactly
+			// where this client's backlog catch-up should resume from (Guid.Empty means
+			// "never synced, send me everything"). See SynqraReplicationEndpointExtensions.cs's
+			// own remarks on the server side of this handshake.
+			var buffer = ArrayPool<byte>.Shared.Rent(24);
 			try
 			{
 				BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
-				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, 8), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+				_eventReplicationState.LastEventIdFromServer.TryWriteBytes(buffer.AsSpan(8, 16));
+				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, 24), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 			}
 			finally
 			{
@@ -290,6 +332,21 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		catch (SemaphoreFullException)
 		{
 			// already signaled - concurrent triggers coalesce into one loop iteration
+		}
+	}
+
+	/// <inheritdoc />
+	public async Task ClearLocalStorageAsync()
+	{
+		lock (_skipSet)
+		{
+			_skipSet.Clear();
+			_skipList.Clear();
+		}
+		_eventReplicationState.LastEventIdFromServer = default;
+		if (_storage is IClearableAppendStorage clearable)
+		{
+			await clearable.ClearAllAsync();
 		}
 	}
 }

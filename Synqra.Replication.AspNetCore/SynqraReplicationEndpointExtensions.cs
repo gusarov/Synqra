@@ -52,33 +52,58 @@ public static class SynqraReplicationEndpointExtensions
 			using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
 
 			#region HELLO — from client
+			// 8 bytes magic + 16 bytes the client's own "last event id it already received
+			// from a server" cursor (Guid.Empty means "never synced, send me everything") —
+			// see EventReplicationState.LastEventIdFromServer's own remarks.
 			var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
 			if (helloBytes is null)
 			{
 				return;
 			}
-			if (helloBytes.Length != 8)
+			if (helloBytes.Length != 24)
 			{
-				throw new InvalidOperationException($"Protocol negotiation failed: received {helloBytes.Length} bytes instead of 8.");
+				throw new InvalidOperationException($"Protocol negotiation failed: received {helloBytes.Length} bytes instead of 24.");
 			}
-			var magic = BitConverter.ToUInt64(helloBytes);
+			var magic = BitConverter.ToUInt64(helloBytes, 0);
 			if (magic != networkSerializationService.Magic)
 			{
 				throw new InvalidOperationException($"Protocol negotiation failed: received magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 			}
+			var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
 			#endregion
 
-			#region HELLO — to client
-			// Register for broadcasts BEFORE answering HELLO, and do both under the same
-			// gate as every broadcast SendAsync on this socket: the moment the client
-			// observes this reply, every later broadcast is guaranteed to reach it, and
-			// this reply can never interleave with a concurrent broadcast write.
+			#region HELLO — to client, then replay this stream's backlog since clientCursor
+			// Register for broadcasts BEFORE answering HELLO, and do both — plus the backlog
+			// replay below — under the same gate as every broadcast SendAsync on this socket:
+			// the moment the client observes the HELLO reply, every later broadcast is
+			// guaranteed to reach it, and none of this can interleave with a concurrent
+			// broadcast write. Holding the gate for the whole backlog replay blocks other
+			// clients' broadcasts briefly — acceptable, this runs once per connection, and
+			// the file already accepts a single global semaphore over throughput elsewhere.
 			var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
 			await broadcastGate.WaitAsync(ctx.RequestAborted);
 			try
 			{
 				sockets.Add(socket);
 				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+
+				var storage = serviceKey is null
+					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
+					: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+				try
+				{
+					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
+					{
+						knownEvents.TryAdd(ev.EventId, null);
+						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, backlogBuffer);
+						await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+					}
+				}
+				finally
+				{
+					ArrayPool<byte>.Shared.Return(backlogBuffer);
+				}
 			}
 			finally
 			{

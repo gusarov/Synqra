@@ -117,4 +117,33 @@ export async function deleteByKey(storeName, keyText) {
     const collection = transaction.objectStore(collectionName);
     collection.delete(getCompoundKey(storeName, keyText));
 }
+// Used by resync recovery — wipes every record for this storeName only, not the whole
+// database (a single IndexedDB database can hold records for more than one storeName,
+// see getCompoundKey), by cursor-deleting every key under this storeName's prefix.
+export async function clearStore(storeName) {
+    await initialize();
+    return await new Promise((resolve, reject) => {
+        const transaction = synqraDbResult.transaction(collectionName, "readwrite");
+        const collection = transaction.objectStore(collectionName);
+        const prefix = `${storeName}${separator}`;
+        const request = collection.openKeyCursor(IDBKeyRange.lowerBound(prefix));
+        request.onsuccess = function (event) {
+            const cursor = event.target.result;
+            if (!cursor) {
+                resolve();
+                return;
+            }
+            const compoundKey = String(cursor.primaryKey);
+            if (!compoundKey.startsWith(prefix)) {
+                resolve();
+                return;
+            }
+            collection.delete(compoundKey);
+            cursor.continue();
+        };
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
 //# sourceMappingURL=indexedDbJsInterop.js.map
