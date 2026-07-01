@@ -43,7 +43,12 @@ public static class IndexedDbBlobStorageExtensions
 				(string)key!,
 				getKeyText,
 				getKeyFromText,
-				serviceProvider.GetRequiredService<IOptions<IndexedDbBlobStorageOptions>>().Value.PopulateDebugJson));
+				serviceProvider.GetRequiredService<IOptions<IndexedDbBlobStorageOptions>>().Value,
+				// Optional pin: a host that serves exactly one stream for its whole life (a browser —
+				// re-login is a full reload) registers a StreamPin, giving this instance a physically
+				// isolated per-stream database. No StreamPin registered => the multitenant bare database
+				// (records told apart by Event.StreamId one layer up), like the File/Mongo event stores.
+				serviceProvider.GetService<StreamPin>()));
 		services.TryAddKeyedSingleton<IBlobStorage<TKey>>(storeName, (serviceProvider, key) =>
 			serviceProvider.GetRequiredKeyedService<IndexedDbBlobStorage<TKey>>((string)key!));
 		return services;

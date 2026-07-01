@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.BlobStorage.Abstractions\Synqra.BlobStorage.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
   </ItemGroup>
 
 </Project>
