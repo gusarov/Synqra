@@ -30,7 +30,10 @@ public static class SynqraGuids
 	 *
 	 * Well-known classes:
 	 *   - 0x000: Object type namespace (generic object; no type-specific knowledge from the ID)
-	 *   - 0x00C: Stream / Container (historical: C for Container, the first class allocated in Synqra)
+	 *   - 0x00C: Stream (historical: the hex digit "C" comes from this class's original name,
+	 *     ContainerId — kept for the byte value only; "container" itself is retired vocabulary now
+	 *     that Components legitimately use that word for something unrelated, IComponentContainer.
+	 *     Stream and node are the two concepts that exist; the first class allocated in Synqra)
 	 *
 	 * Reserved UUIDs:
 	 *   - C0DE0000-0000-8000-8000-000000000000 is a reserved UUID to identify principles behind custom UUIDs (vendor-neutral)
@@ -42,7 +45,7 @@ public static class SynqraGuids
 	 */
 
 	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // NEVER CHANGE THAT! Object type namespace. It does not matter, what pattern it follows, it is just a random but fixed input to sha256 v8 guids it produces from type names.
-	public static Guid SynqraRootStreamId    = new("C0DEADD0-1032-8000-800C-000000000000"); // class 0x00C: root/default stream. StreamId used to be ContainerId, C stands for Container. The first class allocated in Synqra.
+	public static Guid SynqraRootStreamId    = new("C0DEADD0-1032-8000-800C-000000000000"); // class 0x00C: root/default stream (see the "Well-known classes" note above for why the byte is "C").
 
 	/*
 	 * Principles behind MasterId:
