@@ -200,7 +200,6 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 		var task = store.SubmitCommandAsync(new AddLinkCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
-			StreamId = SynqraGuids.SynqraRootStreamId,
 			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TLink)).TypeId,
 			LinkId = link.LinkId,
 			SourceId = link.SourceId,
@@ -215,7 +214,6 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 		var task = Store.SubmitCommandAsync(new RemoveLinkCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
-			StreamId = SynqraGuids.SynqraRootStreamId,
 			LinkId = link.LinkId,
 		});
 		RunSync(task);

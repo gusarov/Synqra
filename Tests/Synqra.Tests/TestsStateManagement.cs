@@ -40,6 +40,31 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 
+	// A fresh stream per test instance (stable across Reopen() — an instance field). The in-memory
+	// projection is non-multitenant (factory-only), so it is borrowed for this stream from the
+	// provider, which brings it up to head via the keeper on first hand-out (replacing the old
+	// LoadStateAsync).
+	readonly Guid _streamId = Guid.NewGuid();
+
+	// The projection is the live command target here: obtain it ONCE per host and reuse it, so
+	// local commands mutate that single instance. Re-borrowing (and thus re-running MaintainAsync)
+	// on every access would re-fold already-applied local events. Reopen() rebuilds the host — a new
+	// provider instance — so we re-borrow then, getting a fresh projection that cold-replays the
+	// carried-over durable log exactly once.
+	IProjectionProvider? _boundProvider;
+	IReplayProjection? _boundProjection;
+
+	protected override IObjectStore ResolveSut()
+	{
+		var provider = ServiceProvider.GetRequiredService<IProjectionProvider>();
+		if (!ReferenceEquals(provider, _boundProvider))
+		{
+			_boundProvider = provider;
+			_boundProjection = provider.GetAsync(_streamId).GetAwaiter().GetResult();
+		}
+		return (IObjectStore)_boundProjection!;
+	}
+
 	// ---- Optimistic concurrency tests (InMemoryProjection only) ----
 	//
 	// These verify the projection-side precondition check, which only the
@@ -614,10 +639,31 @@ public class TestsStateManageementFile : TestsStateManagement
 {
 	string _folder;
 
+	// A fresh stream per test instance (stable across Reopen()). The file store is the omnitenant root
+	// (never pinned at DI registration); this test enters a SynqraStreamContext scope for its stream,
+	// exactly as a production request handler would — see ResolveSut below.
+	readonly Guid _fileStreamId = Guid.NewGuid();
+	IDisposable? _streamScope;
+
 	[Before(Test)]
 	public void Setup()
 	{
 		_folder = CreateTestFolder();
+	}
+
+	[After(Test)]
+	public void ExitStreamScope()
+	{
+		_streamScope?.Dispose();
+		_streamScope = null;
+	}
+
+	// The omnitenant file store reads the ambient stream per call; enter the scope lazily on first
+	// resolve (mirrors SynqraStoreMatrixTests). Held for the whole test, so it survives Reopen().
+	protected override IObjectStore ResolveSut()
+	{
+		_streamScope ??= SynqraStreamContext.Enter(_fileStreamId);
+		return base.ResolveSut();
 	}
 
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
@@ -730,8 +776,14 @@ public class TestExtendedSqliteDatabaseContext : SqliteDatabaseContext
 
 #endif
 
-public abstract class TestsStateManagement : BaseTest<IObjectStore>
+public abstract class TestsStateManagement : BaseTest
 {
+	// The store under test. Default = the multitenant IObjectStore singleton (File/Mongo). The
+	// in-memory variant has no such singleton (a projection is non-multitenant, factory-only), so it
+	// overrides this to borrow its projection for a fresh stream from the provider.
+	protected virtual IObjectStore ResolveSut() => ServiceProvider.GetRequiredService<IObjectStore>();
+	protected IObjectStore _sut => ResolveSut();
+
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
 	FakeAppendStorage _fakeStorage => (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>(); // ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
@@ -899,10 +951,6 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 
 		// reopen
 		Reopen();
-		if (_sut is InMemoryProjection imp)
-		{
-			await imp.LoadStateAsync();
-		}
 
 		//var bt = (StateManagementTests)Activator.CreateInstance(GetType());
 		//bt.ServiceCollection.AddSingleton(_fakeStorage);
@@ -938,10 +986,6 @@ public abstract class TestsStateManagement : BaseTest<IObjectStore>
 
 		// reopen
 		Reopen();
-		if (_sut is InMemoryProjection imp)
-		{
-			await imp.LoadStateAsync();
-		}
 
 		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
 using Synqra.BinarySerializer;
+using Synqra.AppendStorage.InMemory;
 using Synqra.Projection.InMemory;
 
 namespace Synqra.Tests;
@@ -164,9 +165,19 @@ public class LinksTests
 			typeof(TaggedWith)
 		);
 		services.AddSbxSerializer();
+		// Event-store area (multitenant in-memory singleton, keyed by v7 EventId) + projection area.
+		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, Guid>(services, x => x.EventId);
 		services.AddInMemorySynqraStore();
 		return services.BuildServiceProvider();
 	}
+
+	// These are same-session in-memory tests; each builds its own ServiceProvider with its own empty
+	// in-memory store, so a single fixed stream is fully isolated per test. The in-memory projection
+	// is non-multitenant (factory-only, no DI singleton), so it is borrowed from the provider.
+	static readonly Guid StreamId = new Guid("11110000-0000-4000-8000-000000000001");
+
+	static IObjectStore ResolveStore(IServiceProvider sp)
+		=> (IObjectStore)sp.GetRequiredService<IProjectionProvider>().GetAsync(StreamId).GetAwaiter().GetResult();
 
 	static TestGraphNode AddNode(IObjectStore store, string name)
 	{
@@ -181,7 +192,7 @@ public class LinksTests
 	public async Task Should_navigate_single_parent_and_children()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -201,7 +212,7 @@ public class LinksTests
 	public async Task Should_support_multiple_parents_via_the_same_link_type()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parentA = AddNode(store, "parentA");
 		var parentB = AddNode(store, "parentB");
@@ -221,7 +232,7 @@ public class LinksTests
 	public async Task Should_carry_payload_on_the_link_itself()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -243,7 +254,7 @@ public class LinksTests
 	public async Task Should_differentiate_coexisting_link_types_between_the_same_endpoints()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 		var index = (ILinkIndex)store;
 
 		var a = AddNode(store, "a");
@@ -270,7 +281,7 @@ public class LinksTests
 	public async Task Should_treat_re_adding_an_existing_link_as_a_no_op()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -287,7 +298,7 @@ public class LinksTests
 	public async Task Should_reject_a_structurally_duplicate_directed_link_submitted_directly()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -314,7 +325,7 @@ public class LinksTests
 	public async Task Should_allow_the_reverse_direction_of_a_directed_link_as_distinct()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -332,7 +343,7 @@ public class LinksTests
 	public async Task Should_treat_undirected_link_as_incident_from_either_endpoint()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -349,7 +360,7 @@ public class LinksTests
 	public async Task Should_reject_the_reverse_direction_of_an_undirected_link_as_a_structural_duplicate()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -367,7 +378,7 @@ public class LinksTests
 	public async Task Should_resolve_typed_endpoints_across_different_node_types()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var doc = new TestDocNode { Title = "spec" };
 		var folder = new TestFolderNode { Name = "inbox" };
@@ -389,7 +400,7 @@ public class LinksTests
 	public async Task Should_carry_payload_on_a_cross_type_link()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var doc = new TestDocNode { Title = "spec" };
 		var tag = new TestTagNode { Label = "urgent" };
@@ -415,7 +426,7 @@ public class LinksTests
 	public async Task Should_remove_a_link_via_the_collection()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -433,7 +444,7 @@ public class LinksTests
 	public async Task Should_clear_all_links_of_a_type_via_the_collection()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var childA = AddNode(store, "childA");
@@ -455,7 +466,7 @@ public class LinksTests
 	public async Task Should_assign_parent_via_the_opt_in_setter()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -471,7 +482,7 @@ public class LinksTests
 	public async Task Should_replace_the_existing_parent_when_the_setter_is_assigned_again()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var oldParent = AddNode(store, "oldParent");
 		var newParent = AddNode(store, "newParent");
@@ -489,7 +500,7 @@ public class LinksTests
 	public async Task Should_clear_the_parent_when_the_setter_is_assigned_null()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -509,7 +520,7 @@ public class LinksTests
 	public async Task Should_raise_PropertyChanged_for_Children_and_Parent_on_both_endpoints_when_a_link_is_added()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -530,7 +541,7 @@ public class LinksTests
 	public async Task Should_raise_PropertyChanged_on_both_endpoints_when_a_link_is_removed()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
@@ -551,7 +562,7 @@ public class LinksTests
 	public async Task Should_not_raise_PropertyChanged_for_an_unrelated_nav_property_on_a_different_link_type()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -569,7 +580,7 @@ public class LinksTests
 	public async Task Should_raise_PropertyChanged_for_RelatedNodes_on_both_endpoints_of_an_undirected_link()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -593,7 +604,7 @@ public class LinksTests
 	public async Task Should_throw_a_clear_error_when_GetCollection_is_called_for_a_link_type()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var a = AddNode(store, "a");
 		var b = AddNode(store, "b");
@@ -613,7 +624,7 @@ public class LinksTests
 	public async Task Should_throw_a_clear_error_when_the_non_generic_GetCollection_is_called_for_a_link_type()
 	{
 		var sp = BuildServices();
-		var store = sp.GetRequiredService<IObjectStore>();
+		var store = ResolveStore(sp);
 
 		var ex = await Assert.ThrowsAsync(async () =>
 		{

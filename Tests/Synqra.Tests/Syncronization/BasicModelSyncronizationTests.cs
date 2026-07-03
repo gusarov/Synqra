@@ -25,10 +25,11 @@ internal class BasicModelSyncronizationTests : BaseTest
 	[Before(Test)]
 	public async Task SetUp()
 	{
-		_nodeMaster = new SynqraTestNode(builder => { }, masterHost: true);
+		var streamId = Guid.NewGuid();
+		_nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
 		await _nodeMaster.Started; // master Port is the OS-assigned one, known only after bind
-		_nodeA = new SynqraTestNode(builder => { }) { Port = _nodeMaster.Port, };
-		_nodeB = new SynqraTestNode(builder => { }) { Port = _nodeMaster.Port, };
+		_nodeA = new SynqraTestNode(streamId, builder => { }) { Port = _nodeMaster.Port, };
+		_nodeB = new SynqraTestNode(streamId, builder => { }) { Port = _nodeMaster.Port, };
 		await _nodeA.Started;
 		await _nodeB.Started;
 		// Console.WriteLine("Master: "+ _nodeMaster.Host.Environment.ContentRootPath);

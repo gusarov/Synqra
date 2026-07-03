@@ -78,6 +78,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	readonly JsonSerializerOptions _jsonSerializerOptions;
 	readonly IServiceProvider? _serviceProvider;
 
+	// null => multitenant (read the ambient scope per call); a value => pinned to that one stream.
+	readonly Guid? _pinnedStreamId;
+
 	// Tracking: model instance <-> id, so generated setters can route ChangeObjectPropertyCommands and
 	// GetId() resolves a live instance to its key. A strong id->model map keeps tracked instances alive
 	// for the projection's lifetime (acceptable for the v1 store; a weak/eviction policy comes later).
@@ -96,14 +99,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// (per-user, per-tenant, whatever the caller's stream boundary is) without them leaking into
 	/// each other's queries.
 	/// <para>
-	/// Reads <see cref="SynqraStreamContext.Current"/> on every access rather than capturing a value
-	/// at construction — this type is registered as a process-wide singleton (see
-	/// <see cref="MongoSynqraStoreExtensions"/>), precisely so a server can serve however many
-	/// concurrent streams it has without instantiating (or caching) one projection per stream. The
-	/// caller's ambient context, not this instance, decides which stream a given call sees.
+	/// This store is <b>omnitenant</b>: with no <see cref="StreamPin"/> it is <i>multitenant</i> — it
+	/// captures no stream at construction and reads the caller's ambient <see cref="SynqraStreamContext"/>
+	/// scope on every access, so one server serves however many concurrent streams it has from a single
+	/// instance. A factory that builds a single-tenant instance at the point of use passes an optional
+	/// <see cref="StreamPin"/> (deliberately never registered in DI) to pin it to that one stream. See
+	/// <see cref="SynqraStreamContext.Resolve"/>.
 	/// </para>
 	/// </summary>
-	public Guid StreamId => SynqraStreamContext.Current;
+	public Guid StreamId => SynqraStreamContext.Resolve(_pinnedStreamId);
 
 	public MongoProjection(
 		  IMongoDatabase database
@@ -113,6 +117,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		, IServiceProvider? serviceProvider = null
+		, StreamPin? pin = null
 		)
 	{
 		_database = database ?? throw new ArgumentNullException(nameof(database));
@@ -121,6 +126,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		_eventStorage = eventStorage;
 		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentException("MongoProjection requires JsonSerializerOptions to materialize documents.", nameof(jsonSerializerOptions));
 		_serviceProvider = serviceProvider;
+
+		// No pin => root/multitenant (resolve the ambient scope per call); a StreamPin (supplied only by
+		// a factory at the point of use, never by DI) => this instance is pinned to that single stream.
+		_pinnedStreamId = pin?.StreamId;
 
 		if (jsonSerializerContext is not null)
 		{
@@ -199,9 +208,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			cmd.CommandId = GuidExtensions.CreateVersion7();
 		}
+		// A command without a stream id inherits this store's stream; one carrying a different stream
+		// is a misroute and throws (mirrors File / InMemory).
+		var streamId = StreamId;
 		if (cmd.StreamId == default)
 		{
-			cmd.StreamId = StreamId;
+			cmd.StreamId = streamId;
+		}
+		else if (cmd.StreamId != streamId)
+		{
+			throw new InvalidOperationException(
+				$"Command stream {cmd.StreamId} does not match this store's stream {streamId} — refusing misrouted command {cmd.CommandId}.");
 		}
 		if (cmd is SingleObjectCommand soc && soc.TargetObject is not null)
 		{

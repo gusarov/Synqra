@@ -22,13 +22,14 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 	[Test]
 	public async Task Should_replay_existing_history_to_a_client_that_connects_after_the_data_already_exists()
 	{
-		var nodeMaster = new SynqraTestNode(builder => { }, masterHost: true);
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
 		await nodeMaster.Started;
 
 		// Node A writes data and syncs it to the master BEFORE node C ever exists — the
 		// scenario the old protocol silently failed: a client's history predates the
 		// connecting client by definition, since it never even existed yet.
-		var nodeA = new SynqraTestNode(builder => { }) { Port = nodeMaster.Port };
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
 		await nodeA.Started;
 		await WaitForOnlineAsync(nodeA);
 
@@ -48,7 +49,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 		// Node C has never connected before — a cold LastEventIdFromServer cursor, exactly
 		// like a brand-new device or a cleared browser.
-		var nodeC = new SynqraTestNode(builder => { }) { Port = nodeMaster.Port };
+		var nodeC = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
 		await nodeC.Started;
 		await WaitForOnlineAsync(nodeC);
 

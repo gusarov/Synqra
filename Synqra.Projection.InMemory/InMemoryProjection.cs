@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
 using Synqra.Projection;
@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, ISelfLoadingProjection
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -76,6 +76,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public InMemoryProjection(
 		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
+		, Guid streamId
 		, IAppendStorage<Event, Guid>? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
@@ -83,6 +84,24 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		, IServiceProvider? serviceProvider = null
 		)
 	{
+		// The stream id is a first-class construction value — an InMemoryProjection is inherently
+		// single-tenant: one instance materializes exactly one stream's state, so it is pinned to
+		// exactly one stream up front and never reads an ambient SynqraStreamContext scope. It is
+		// supplied at runtime by IProjectionFactory.Create(streamId) (the caller resolves the stream
+		// at the call site — a fresh random stream in tests, the session stream on a client), NOT
+		// baked into a DI registration. Unlike the omnitenant Mongo/File stores (which resolve the
+		// ambient scope per call when unpinned, via the shared SynqraStreamContext.Resolve), this store
+		// returns its pinned stream unconditionally. It does NOT replay itself here — a freshly created
+		// projection is cold (Cursor == Guid.Empty); IProjectionKeeper.MaintainAsync folds in the delta
+		// from the stream's IEventLog before first use.
+		StreamId = streamId;
+		if (StreamId == default)
+		{
+			throw new InvalidOperationException(
+				"InMemoryProjection requires an explicit StreamId. Create it via "
+				+ "IProjectionFactory.Create(streamId). "
+				+ "There is no default stream — a stream id is a security boundary.");
+		}
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
 		_eventStorage = eventStorage;
@@ -111,46 +130,22 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 
 		// since it is in-memory, we have to roll state in
-		_ = LoadStateAsync();
 	}
 
 	public string? ProjectionStatus { get; set; }
 
-	Task? _loading;
+	public Guid Cursor { get; private set; }
 
-	public Task LoadStateAsync()
+	/// <summary>
+	/// Apply one event, advancing <see cref="Cursor"/> (in <see cref="AfterVisitAsync(Event, EventVisitorContext)"/>).
+	/// The <see cref="IProjectionKeeper"/> is the only caller during catch-up; <paramref name="isReplay"/>
+	/// suppresses one-shot activator side effects for historical events.
+	/// </summary>
+	public async Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default)
 	{
-		return _loading ??= LoadStateCoreAsync();
+		await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
 	}
 
-	async Task LoadStateCoreAsync()
-	{
-		try
-		{
-			if (_eventStorage != null)
-			{
-				ProjectionStatus = "Loading...";
-				var sw = Stopwatch.StartNew();
-				// Replay mode: activators with one-shot side effects skip during this loop.
-				var ctx = new EventVisitorContext { IsReplay = true };
-				long cnt = 0;
-				await foreach (var item in _eventStorage.GetAllAsync())
-				{
-					await item.AcceptAsync(this, ctx);
-					cnt++;
-				}
-				ProjectionStatus = $"Loaded ({sw.Elapsed.TotalMilliseconds:F0} ms for {cnt} items)";
-				CommandProcessed?.Invoke(this, EventArgs.Empty);
-			}
-		}
-		catch (Exception ex)
-		{
-			ProjectionStatus = $"Error: {ex.Message}";
-			CommandProcessed?.Invoke(this, EventArgs.Empty);
-			Console.Error.WriteLine($"{ex}");
-			throw;
-		}
-	}
 
 	internal AttachedObjectData Attach(object model, StoreCollection collection)
 	{
@@ -367,7 +362,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(name);
 	}
 
-	public Guid StreamId { get; } = SynqraGuids.SynqraRootStreamId;
+	public Guid StreamId { get; }
 
 	ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)
 	{
@@ -445,6 +440,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			if (cmd.StreamId == default)
 			{
 				cmd.StreamId = StreamId;
+			}
+			else if (cmd.StreamId != StreamId)
+			{
+				throw new InvalidOperationException(
+					$"Command stream {cmd.StreamId} does not match this projection's stream {StreamId} — refusing misrouted command {cmd.CommandId}.");
 			}
 		}
 		if (newCommand is SingleObjectCommand soc)
@@ -838,6 +838,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx)
 	{
+		// Single apply choke point for every path (local command, keeper catch-up, live). A stream
+		// mismatch means a misrouted event — never silently fold it into the wrong projection. A
+		// default (unset) StreamId is tolerated as legacy/unrouted in a single-stream log.
+		if (ev.StreamId != default && ev.StreamId != StreamId)
+		{
+			throw new InvalidOperationException(
+				$"Event stream {ev.StreamId} does not match projection stream {StreamId} — misrouted event {ev.EventId}.");
+		}
+		Cursor = ev.EventId;
 		return Task.CompletedTask;
 	}
 

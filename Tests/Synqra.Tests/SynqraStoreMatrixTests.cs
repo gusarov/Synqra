@@ -16,9 +16,10 @@ using Synqra.Tests.SampleModels;
 using Synqra.Tests.TestHelpers;
 using TUnit.Assertions.Extensions;
 
-//// MEMO
-/// Why Cobra?
-/// Because I were adding 11 classes in 1 shot and LLM named them with service type prefixes, so very hard to find in tree. Cobra is a codename for this entire testing effort.
+// Store resolution here no longer pins the well-known SynqraGuids.SynqraRootStreamId: each test uses
+// a fresh per-instance stream id (the Mongo store variants enter it as the ambient scope; the
+// in-memory store variants borrow their projection for it from the provider). Nothing in this file
+// touches the obsolete root stream anymore.
 
 namespace Synqra.Tests.Cobra;
 
@@ -65,6 +66,11 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	// inline, on the test method's own call stack, is what actually keeps it in scope for real.
 	IDisposable? _streamScope;
 
+	// A fresh stream per test instance (stable across Restart() — an instance field), replacing the
+	// old shared SynqraGuids.SynqraRootStreamId. The Mongo store variant enters it as the ambient
+	// scope; the in-memory store variant borrows its projection for this stream from the provider.
+	readonly Guid _streamId = Guid.NewGuid();
+
 	protected override void Register(IHostApplicationBuilder hostBuilder)
 	{
 		base.Register(hostBuilder);
@@ -105,14 +111,27 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	/// </summary>
 	protected IObjectStore ResolveStore()
 	{
-		_streamScope ??= SynqraStreamContext.Enter(SynqraGuids.SynqraRootStreamId);
-		var store = ServiceProvider.GetRequiredService<IObjectStore>();
+		_streamScope ??= SynqraStreamContext.Enter(_streamId);
+		var store = ResolveStoreInstance();
 		if (store is InMemoryProjection projection)
 		{
 			projection.PersistCommandEvents = false;
 		}
 		return store;
 	}
+
+	/// <summary>
+	/// Obtain the store instance under test. Default = resolve the multitenant <see cref="IObjectStore"/>
+	/// singleton directly (the Mongo projection resolves the ambient stream scope entered above). The
+	/// in-memory store has no DI singleton — a projection is non-multitenant, factory-only — so its
+	/// variants override this to borrow the cached projection for this test's stream from the provider,
+	/// which also brings it up to head via the keeper (replacing the old explicit LoadStateAsync).
+	/// </summary>
+	protected virtual IObjectStore ResolveStoreInstance() => ServiceProvider.GetRequiredService<IObjectStore>();
+
+	/// <summary>In-memory store resolution: the provider's cached, keeper-maintained projection for this test's stream.</summary>
+	protected IObjectStore ResolveInMemoryStoreForStream()
+		=> (IObjectStore)ServiceProvider.GetRequiredService<IProjectionProvider>().GetAsync(_streamId).GetAwaiter().GetResult();
 
 	protected IAppendStorage<Event, Guid> Events() => ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
 
@@ -313,10 +332,6 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		Restart();
 
 		var store2 = ResolveStore();
-		if (store2 is InMemoryProjection projection)
-		{
-			await projection.LoadStateAsync();
-		}
 
 		var reloaded = store2.GetCollection<DemoModel>().FirstOrDefault(m => store2.GetId(m) == id);
 		await Assert.That(reloaded).IsNotNull();
@@ -333,10 +348,6 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		Restart();
 
 		var store2 = ResolveStore();
-		if (store2 is InMemoryProjection projection)
-		{
-			await projection.LoadStateAsync();
-		}
 
 		await AssertGraph(store2, ids);
 	}
@@ -358,10 +369,6 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		Restart();
 
 		var store2 = ResolveStore();
-		if (store2 is InMemoryProjection projection)
-		{
-			await projection.LoadStateAsync();
-		}
 
 		var nodes = store2.GetCollection<TestGraphNode>().ToList();
 		var a2 = nodes.First(n => store2.GetId(n) == idA);
@@ -418,6 +425,7 @@ public abstract class Cobra_InMemoryEventStorageContract : Cobra_SynqraStoreCont
 public sealed class Cobra_Mongo_Storage_With_InMemory_Store : Cobra_MongoEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => services.AddInMemorySynqraStore();
+	protected override IObjectStore ResolveStoreInstance() => ResolveInMemoryStoreForStream();
 }
 
 [InheritsTests]
@@ -431,6 +439,7 @@ public sealed class Cobra_Mongo_Storage_With_Mongo_Store : Cobra_MongoEventStora
 public sealed class Cobra_SbxFile_Storage_With_InMemory_Store : Cobra_SbxFileEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => services.AddInMemorySynqraStore();
+	protected override IObjectStore ResolveStoreInstance() => ResolveInMemoryStoreForStream();
 }
 
 [InheritsTests]
@@ -444,6 +453,7 @@ public sealed class Cobra_SbxFile_Storage_With_Mongo_Store : Cobra_SbxFileEventS
 public sealed class Cobra_InMemory_Storage_With_InMemory_Store : Cobra_InMemoryEventStorageContract
 {
 	protected override void RegisterStore(IServiceCollection services) => services.AddInMemorySynqraStore();
+	protected override IObjectStore ResolveStoreInstance() => ResolveInMemoryStoreForStream();
 }
 
 [InheritsTests]
@@ -470,6 +480,9 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	// See Cobra_SynqraStoreContractTests.ResolveStore's remark — a [Before(Test)] hook's AsyncLocal
 	// does not flow into the test body under TUnit, so this is entered inline from Store instead.
 	IDisposable? _streamScope;
+
+	// A fresh Mongo stream per test instance (replaces the old shared SynqraGuids.SynqraRootStreamId).
+	readonly Guid _streamId = Guid.NewGuid();
 
 	protected override void Register(IHostApplicationBuilder hostBuilder)
 	{
@@ -507,7 +520,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	{
 		get
 		{
-			_streamScope ??= SynqraStreamContext.Enter(SynqraGuids.SynqraRootStreamId);
+			_streamScope ??= SynqraStreamContext.Enter(_streamId);
 			return ServiceProvider.GetRequiredService<IObjectStore>();
 		}
 	}
@@ -549,7 +562,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			await store.SubmitCommandAsync(new AddComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
-				StreamId = SynqraGuids.SynqraRootStreamId,
+				StreamId = _streamId,
 				TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).TypeId,
 				TargetId = store.GetId(node),
 				CollectionId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).GetCollectionId(""),

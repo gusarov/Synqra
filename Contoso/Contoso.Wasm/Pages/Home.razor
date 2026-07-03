@@ -12,43 +12,58 @@
 
 <h1>This page tests Synqra on WASM</h1>
 
-<div>@projection.ProjectionStatus</div>
+@if (projection is null)
+{
+    <div>Loading projection…</div>
+}
+else
+{
+    <div>@projection.ProjectionStatus</div>
 
-<h2>Test 001 - Add element to collection</h2>
-<InputText @bind-Value="itemName" data-testid="itemName" />
-<button @onclick="AddElement" data-testid="btnAdd">Add element to collection</button>
-<button @onclick="TestBatch" data-testid="btnTest">Test Batch</button>
-<button @onclick="StressTest" data-testid="btnStress">Stress Test</button>
-<table>
-    <thead>
-        <tr>
-            <th>Id</th>
-            <th>Item Name</th>
-        </tr>
-    </thead>
-    <tbody>
-        @foreach (var item in projection.GetCollection<ContosoItem>())
-        {
+    <h2>Test 001 - Add element to collection</h2>
+    <InputText @bind-Value="itemName" data-testid="itemName" />
+    <button @onclick="AddElement" data-testid="btnAdd">Add element to collection</button>
+    <button @onclick="TestBatch" data-testid="btnTest">Test Batch</button>
+    <button @onclick="StressTest" data-testid="btnStress">Stress Test</button>
+    <table>
+        <thead>
             <tr>
-                <td><code>@projection.GetId(item)</code></td>
-                <td>@item.ItemName</td>
+                <th>Id</th>
+                <th>Item Name</th>
             </tr>
-        }
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @foreach (var item in projection.GetCollection<ContosoItem>())
+            {
+                <tr>
+                    <td><code>@projection.GetId(item)</code></td>
+                    <td>@item.ItemName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
 @code {
+    // The Contoso demo's single feature stream. A stream id is mandatory and first-class; it is
+    // supplied here at the call site (never baked into a DI registration) when resolving the
+    // projection from the provider.
+    private static readonly Guid ContosoStreamId = new Guid("c04705a0-0000-4000-8000-c04705a00001");
 
     private string stressLabel = "Stress Test";
-    private readonly ContosoInMemoryProjection projection;
-    private readonly IAppendStorage<Event, Guid> appendStorage;
+    private ContosoInMemoryProjection? projection;
 
-    public Home(ContosoInMemoryProjection projection, IAppendStorage<Event, Guid> appendStorage)
+    [Inject]
+    private IProjectionProvider ProjectionProvider { get; set; } = default!;
+
+    [Inject]
+    private IAppendStorage<Event, Guid> appendStorage { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
     {
-        this.projection = projection;
-        this.appendStorage = appendStorage;
+        projection = (ContosoInMemoryProjection)await ProjectionProvider.GetAsync(ContosoStreamId);
         projection.CommandProcessed += (sender, args) =>
         {
-            StateHasChanged();
+            _ = InvokeAsync(StateHasChanged);
         };
     }
 
@@ -56,7 +71,7 @@
 
     private void AddElement(MouseEventArgs args)
     {
-        projection.GetCollection<ContosoItem>().Add(new ContosoItem
+        projection!.GetCollection<ContosoItem>().Add(new ContosoItem
         {
             ItemName = itemName,
         });
@@ -93,7 +108,7 @@
             {
                 ItemName = itemName,
             };
-            projection.GetCollection<ContosoItem>().Add(item);
+            projection!.GetCollection<ContosoItem>().Add(item);
             for (int j = 0; j < batch; j++)
             {
                 item.ItemName2 = Guid.NewGuid().ToString("N");

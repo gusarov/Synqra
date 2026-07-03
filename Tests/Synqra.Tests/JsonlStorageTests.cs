@@ -586,11 +586,12 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_store_polimorfic_as_jsonl()
 	{
+		var eventId = new Guid("C0DEADD0-1032-8000-800C-000000000000");
 		await _storage.AppendAsync(new ObjectCreatedEvent
 		{
 			CollectionId = default,
 			CommandId = default,
-			EventId = SynqraGuids.SynqraRootStreamId,
+			EventId = eventId,
 			TargetId = default,
 			TargetTypeId = default,
 		});
@@ -598,7 +599,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		(_storage as IDisposable)?.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo($$"""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{{SynqraGuids.SynqraRootStreamId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{SynqraGuids.SynqraRootStreamId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
+{{eventId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{eventId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
 
 """.NormalizeNewLines());
 	}
