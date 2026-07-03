@@ -1,20 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
-using Microsoft.VisualBasic;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Globalization;
-using System.Net;
-using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Synqra.Projection.File;
@@ -29,6 +21,18 @@ public static class FileSynqraExtensions
 		_ = typeof(IAppendStorage<Event, Guid>);
 	}
 
+	/// <summary>
+	/// Register a file-backed Synqra store as the <b>multitenant root</b> — it captures no stream at
+	/// construction and reads the caller's ambient <see cref="SynqraStreamContext"/> scope on every
+	/// access, so one instance serves however many concurrent streams the process has.
+	/// <para>
+	/// There is deliberately no stream-id overload. A store is never pinned to a stream at DI
+	/// registration — that is the "singleton bound to a fixed stream" anti-pattern this whole design
+	/// removes. A caller that operates on one stream enters a <see cref="SynqraStreamContext.Enter"/>
+	/// scope (exactly as a production request handler does); a genuinely single-tenant instance is
+	/// built by a factory at the point of use, not registered here.
+	/// </para>
+	/// </summary>
 	public static IHostApplicationBuilder AddFileSynqraStore(this IHostApplicationBuilder builder)
 	{
 		builder.Services.AddSingleton<AppendStores>();
@@ -78,17 +82,6 @@ public static class FileSynqraExtensions
 		GetOrCreate, // 10 1
 	}
 
-	private class FileObjectStoreConfig
-	{
-		// in future container is sort of "database". For multitanent storage, every user has a set of his own containers, e.g. "settings", "nodes"
-		// - user1 // container (like sql database filtered by user)
-		// - user2 // container (like sql database filtered by user)
-		//   - collection type: "node" collectionName: "" // main collection
-		//   - collection type: "node" collectionName: "archive" // additional named collection
-		//   - collection "userSettings"
-		public Guid StreamId { get; set; } = SynqraGuids.SynqraRootStreamId; // for current phase this is global root container, no distinction yet, just to pass validations
-	}
-
 	private class FileObjectStore : IObjectStore
 	{
 		private readonly Dictionary<Guid, FileObjectCollection> _collections = new Dictionary<Guid, FileObjectCollection>();
@@ -98,11 +91,14 @@ public static class FileSynqraExtensions
 		private byte _attachedMaintain;
 		public ISbxSerializerFactory SerializerFactory { get; }
 		private readonly Lazy<IProjection> _lazyFileProjection;
-		private readonly IOptions<FileObjectStoreConfig> _options;
+		// null => multitenant root (resolve the ambient scope per call); a value => pinned to one stream.
+		private readonly Guid? _pinnedStreamId;
 
 		private FileProjection _fileProjection => (FileProjection)_lazyFileProjection.Value;
 
-		public Guid StreamId { get; } = SynqraGuids.SynqraRootStreamId; // for current phase this is global root container, no distinction yet, just to pass validations
+		// Omnitenant: pinned to a single stream when constructed with one, otherwise resolves the ambient
+		// SynqraStreamContext scope (multitenant). See SynqraStreamContext.Resolve.
+		public Guid StreamId => SynqraStreamContext.Resolve(_pinnedStreamId);
 
 		public ITypeMetadataProvider TypeMetadataProvider { get; }
 
@@ -114,17 +110,16 @@ public static class FileSynqraExtensions
 			  ITypeMetadataProvider typeMetadataProvider
 			, ISbxSerializerFactory serializerFactory
 			, Lazy<IProjection> fileProjection
-			, IOptions<FileObjectStoreConfig> options
 			, AppendStores appendStores
+			, StreamPin? pin = null
 			, GuidExtensions.Generator? generator = null
 			)
 		{
 			TypeMetadataProvider = typeMetadataProvider;
 			SerializerFactory = serializerFactory;
 			_lazyFileProjection = fileProjection;
-			_options = options;
 			AppendStores = appendStores;
-			StreamId = options.Value.StreamId;
+			_pinnedStreamId = pin?.StreamId;
 			GuidGenerator = generator ?? new GuidExtensions.Generator();
 		}
 
@@ -602,6 +597,19 @@ public static class FileSynqraExtensions
 			if (newCommand is not Command cmd)
 			{
 				throw new Exception("Only Syncra.Command can be an implementation of ICommand, please derive from Syncra.Command");
+			}
+			// Single normalization point (mirrors InMemoryProjection / MongoProjection): a command
+			// arriving without a stream id (e.g. from the generated setter / component / link visitors)
+			// inherits this store's stream; one carrying a different stream is a misroute and throws.
+			var streamId = _objectStore.StreamId;
+			if (cmd.StreamId == default)
+			{
+				cmd.StreamId = streamId;
+			}
+			else if (cmd.StreamId != streamId)
+			{
+				throw new InvalidOperationException(
+					$"Command stream {cmd.StreamId} does not match this store's stream {streamId} — refusing misrouted command {cmd.CommandId}.");
 			}
 			await cmd.AcceptAsync(this, commandHandlingContext);
 			var eventVisitorContext = new EventVisitorContext();

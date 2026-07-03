@@ -629,7 +629,6 @@ $$"""
 				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
 				{
 					CommandId = GuidExtensions.CreateVersion7(),
-					StreamId = SynqraGuids.SynqraRootStreamId,
 					CollectionId = {{collectionIdExpr}},
 
 					TargetObject = {{targetObjectExpr}},

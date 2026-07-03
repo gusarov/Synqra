@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Synqra;
 using Synqra.AppendStorage.BlobStorage.IndexedDb;
 using Synqra.BinarySerializer;
+using Synqra.Projection.InMemory;
 using System.Text.Json.Serialization;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -27,7 +28,10 @@ builder.Services.AddTypeMetadataProvider(
 	typeof(FooContosoEvent));
 builder.Services.AddSingleton<JsonSerializerContext>(ContosoJsonSerializerContext.Default);
 builder.Services.AddSingleton(ContosoJsonSerializerContext.DefaultOptions);
-builder.Services.AddSingleton<ContosoInMemoryProjection>();
+// Projection is non-multitenant in-memory: no DI-resolvable singleton — the factory/provider produce
+// a ContosoInMemoryProjection per stream at the call site (Home.razor resolves it for the Contoso
+// feature stream via IProjectionProvider). The IndexedDb event store above stays a singleton.
+builder.Services.AddInMemorySynqraStore<ContosoInMemoryProjection>();
 builder.Services.AddScoped<OpfsPocJsInterop>();
 
 await builder.Build().RunAsync();

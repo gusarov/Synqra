@@ -106,7 +106,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 			new AddComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
-				StreamId = SynqraGuids.SynqraRootStreamId,
 				CollectionId = _containerCollectionId,
 				TargetId = containerId,
 				TargetTypeId = containerTypeId,
@@ -131,7 +130,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 			new DeleteComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
-				StreamId = SynqraGuids.SynqraRootStreamId,
 				CollectionId = _containerCollectionId,
 				TargetId = containerId,
 				TargetTypeId = containerTypeId,

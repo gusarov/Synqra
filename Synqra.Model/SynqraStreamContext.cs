@@ -32,6 +32,11 @@ public static class SynqraStreamContext
 	public static Guid Current => _current.Value
 		?? throw new InvalidOperationException("No stream context is active. Establish one with SynqraStreamContext.Enter(streamId) before touching a stream-scoped store.");
 
+	/// <summary>The stream_id in effect for the calling async flow, or <c>null</c> if no <see cref="Enter"/>
+	/// scope is active. Unlike <see cref="Current"/> this never throws — it is the non-throwing peek a
+	/// store uses to <i>compare</i> the ambient scope against a stream it is pinned to.</summary>
+	public static Guid? CurrentOrNull => _current.Value;
+
 	/// <summary>
 	/// Scopes <see cref="Current"/> to <paramref name="streamId"/> for the calling async flow (and
 	/// anything it awaits) until the returned scope is disposed. Nests correctly — disposing restores
@@ -47,6 +52,41 @@ public static class SynqraStreamContext
 		var previous = _current.Value;
 		_current.Value = streamId;
 		return new Scope(previous);
+	}
+
+	/// <summary>
+	/// Resolve the stream id a store call is scoped to, for a store that can register <b>either</b> as
+	/// the process-wide multitenant root (no pinned stream — it reads the caller's ambient scope on
+	/// every access, so one instance serves however many concurrent streams the process has) <b>or</b>
+	/// pinned to a single stream. The policy is identical across every such store (currently the MongoDb
+	/// and File projections), so it lives here once rather than being copy-pasted into each — the ambient
+	/// scope is only the carrier; deciding what to do with it is this one method.
+	/// <para>
+	/// <paramref name="pinnedStreamId"/> is <c>null</c> => the store is the multitenant root: return the
+	/// ambient <see cref="Current"/> (which throws if no scope is active — there is no default stream, a
+	/// stream id is a security boundary).
+	/// </para>
+	/// <para>
+	/// A value => the store is pinned to that one stream: return it, but an ambient scope for a
+	/// <i>different</i> stream is a caller bug (entered stream B, then touched a store bound to stream A)
+	/// and throws. A matching scope, or no scope at all, passes — so a pinned store stays usable both
+	/// outside any scope and inside a correctly-matching one.
+	/// </para>
+	/// </summary>
+	public static Guid Resolve(Guid? pinnedStreamId)
+	{
+		if (pinnedStreamId is Guid pinned)
+		{
+			if (CurrentOrNull is Guid ambient && ambient != pinned)
+			{
+				throw new InvalidOperationException(
+					$"Stream-context conflict: this store is pinned to stream {pinned}, but an ambient "
+					+ $"SynqraStreamContext scope for a different stream {ambient} is active. A store pinned "
+					+ "to one stream must only be touched outside any scope, or inside a scope for its own stream.");
+			}
+			return pinned;
+		}
+		return Current;
 	}
 
 	sealed class Scope(Guid? previous) : IDisposable

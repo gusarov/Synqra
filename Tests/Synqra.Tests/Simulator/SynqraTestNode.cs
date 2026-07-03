@@ -95,15 +95,25 @@ internal class SynqraTestNode
 	public Microsoft.AspNetCore.Builder.WebApplication Host { get; private set; }
 #endif
 
-	public IObjectStore StoreContext
-	{
-		get =>
+	/// <summary>
+	/// The stream this node projects/replicates. All nodes in one test (master + clients) share the
+	/// same stream id — it is passed in at construction, never pinned into a DI registration. The
+	/// node OWNS its projection for this stream (obtained at startup from <see cref="IProjectionProvider"/>),
+	/// which is why there is no DI-resolvable projection singleton anymore.
+	/// </summary>
+	public Guid StreamId { get; }
+
+	// The node's own projection for StreamId, resolved once at startup via the provider (cached, so
+	// every consumer here — StoreContext, the master WS apply loop, the client EventsReceived
+	// catch-up — shares the one instance).
+	private IReplayProjection? _projection;
+
+	public IObjectStore StoreContext =>
 #if NETFRAMEWORK
-			throw new NotImplementedException();
+		throw new NotImplementedException();
 #else
-			field ??= Host.Services.GetRequiredService<IObjectStore>(); private set;
+		_projection ?? throw new InvalidOperationException("Projection not initialized yet — await node.Started first.");
 #endif
-	}
 
 	public IAppendStorage<Event, Guid> Events
 	{
@@ -127,8 +137,13 @@ internal class SynqraTestNode
 	SemaphoreSlim _semaphoreSlim = new(1, 1);
 	long _masterSeq = 0;
 
-	public SynqraTestNode(Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false)
+	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false)
 	{
+		if (streamId == default)
+		{
+			throw new ArgumentException("A non-default stream id is required — all nodes in a test share one explicit stream.", nameof(streamId));
+		}
+		StreamId = streamId;
 		#region Folder
 
 		var utils = new TestUtils();
@@ -367,7 +382,7 @@ internal class SynqraTestNode
 						}
 						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
 
-						var storeCtx = app.Services.GetRequiredService<IProjection>();
+						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is NewEvent1 newEvent1)
 						{
 							if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
@@ -439,6 +454,22 @@ internal class SynqraTestNode
 			// Kestrel bound to 127.0.0.1:0 — publish the OS-assigned port so clients can
 			// target it. Client nodes keep the master port assigned by the test instead.
 			Port = checked((ushort)new Uri(app.Urls.First()).Port);
+		}
+
+		// Own the projection for this node's stream. The provider caches per stream and brings it to
+		// head via the keeper, so this single instance is what StoreContext, the master apply loop,
+		// and the client catch-up below all share — no DI-registered projection singleton.
+		var provider = app.Services.GetRequiredService<IProjectionProvider>();
+		_projection = await provider.GetAsync(StreamId);
+
+		if (!masterHost)
+		{
+			// Transport-only replication service: when it appends incoming server events to local
+			// durable storage it raises EventsReceived; fold them into this node's projection via the
+			// keeper (cheap no-op if nothing new for this stream). Tests poll for the result, so a
+			// fire-and-forget catch-up is fine; the provider serializes concurrent catch-ups.
+			var ers = app.Services.GetRequiredService<IEventReplicationService>();
+			ers.EventsReceived += () => _ = provider.GetAsync(StreamId);
 		}
 	}
 #endif

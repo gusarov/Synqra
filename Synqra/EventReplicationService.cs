@@ -22,7 +22,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	private readonly IAppendStorage<Event, Guid> _storage;
 	private readonly EventReplicationState _eventReplicationState;
 	private readonly JsonSerializerContext? _jsonSerializerContext;
-	private readonly Lazy<IProjection> _synqraStoreContext;
 	private readonly EventReplicationConfig _config;
 
 	private readonly INetworkSerializationService _networkSerializationService;
@@ -35,11 +34,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	private Task? _readerTask;
 
+	/// <inheritdoc />
+	public event Action? EventsReceived;
+
 	public EventReplicationService(
 		  IOptions<EventReplicationConfig> options
 		, IAppendStorage<Event, Guid> storage
 		, EventReplicationState eventReplicationState
-		, Lazy<IProjection> synqraStoreContext
 		, INetworkSerializationService networkSerializationService
 		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
@@ -47,7 +48,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	{
 		_storage = storage;
 		_eventReplicationState = eventReplicationState;
-		_synqraStoreContext = synqraStoreContext;
 		_networkSerializationService = networkSerializationService;
 		_jsonSerializerContext = jsonSerializerContext;
 		_config = config ?? options.Value;
@@ -55,25 +55,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	HashSet<Guid> _skipSet = new HashSet<Guid>();
 	LinkedList<Guid> _skipList = new LinkedList<Guid>();
-
-	async Task ProcessEvent(Event @event)
-	{
-		lock (_skipSet)
-		{
-			if (_skipSet.Contains(@event.EventId))
-			{
-				return;
-			}
-		}
-		await @event.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)_synqraStoreContext.Value, null!);
-		lock (_skipSet)
-		{
-			if (_skipSet.Add(@event.EventId))
-			{
-				_skipList.AddLast(@event.EventId);
-			}
-		}
-	}
 
 	static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
 	{
@@ -110,20 +91,16 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	protected async override Task ExecuteAsync(CancellationToken stoppingToken)
 	{
-		var ctx = _synqraStoreContext.Value ?? throw new ArgumentException();
-
-		// Seed the by-EventId dedup (_skipSet/_skipList, otherwise only populated by
-		// ProcessEvent for events received live) from whatever's already durably stored
-		// locally — a separate pass from the actual replay below, regardless of which
-		// replay path runs. Without this, the server's backlog replay (see
-		// SynqraReplicationEndpointExtensions.cs) would resend every event this client
-		// already has on every reconnect, and ProcessEvent would re-apply them since it had
-		// never seen their ids before — the exact "unique component rejected on second
-		// application" crash the comment below was written to avoid, just via a new path.
-		// Wrapped together with the actual replay in one try/catch: a corrupt/undeserializable
-		// local record here means this client's local durable log can no longer be trusted at
-		// all — clear it and continue with an empty skip-set and a cold LastEventIdFromServer,
-		// which is now a correct and safe "send me everything" signal (see #2/#3), not a bug.
+		// Seed the by-EventId dedup (_skipSet/_skipList, otherwise only populated as events are
+		// received live) from whatever's already durably stored locally. Without this, the server's
+		// backlog replay on reconnect (see SynqraReplicationEndpointExtensions.cs) would be echoed
+		// straight back to it by the outgoing loop below. This service is transport-only: it never
+		// touches a projection — the projection owner brings its stream up to date via the keeper on
+		// the EventsReceived signal (and on first use through IProjectionProvider.GetAsync).
+		//
+		// A corrupt/undeserializable local record here means this client's local durable log can no
+		// longer be trusted at all — clear it and continue with an empty skip-set and a cold
+		// LastEventIdFromServer, which is a correct and safe "send me everything" signal, not a bug.
 		try
 		{
 			await foreach (var ev in _storage.GetAllAsync(from: default))
@@ -134,26 +111,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					{
 						_skipList.AddLast(ev.EventId);
 					}
-				}
-			}
-
-			if (ctx is ISelfLoadingProjection selfLoading)
-			{
-				// This projection (e.g. InMemoryProjection, when constructed with the same
-				// IAppendStorage this service reads) already replayed its own durable log on
-				// construction — fire-and-forget, started before this method ever runs. Doing
-				// our own replay loop here too would apply every persisted event a second time;
-				// any unique component rejects that on the second application
-				// ("ComponentAddedEvent ... uniqueness ... rejected during replay"), which is
-				// exactly the crash users hit on every page reload. Await the SAME load instead
-				// of repeating it.
-				await selfLoading.LoadStateAsync();
-			}
-			else
-			{
-				await foreach (var ev in _storage.GetAllAsync(from: default))
-				{
-					await ev.AcceptAsync(ctx, null);
 				}
 			}
 		}
@@ -218,12 +175,23 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					case NewEvent1 ne1:
 						await _storage.AppendAsync(ne1.Event);
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ne1.Event}");
-						await ProcessEvent(ne1.Event);
+						// Transport-only: dedup so the outgoing loop never echoes a server event back,
+						// then notify the projection owner to fold in the delta via the keeper. The
+						// event is already durably stored, so a missed/awaited-late notification is
+						// harmless — the owner also catches up on next use through the provider.
+						lock (_skipSet)
+						{
+							if (_skipSet.Add(ne1.Event.EventId))
+							{
+								_skipList.AddLast(ne1.Event.EventId);
+							}
+						}
 						// Tracks how far this client's backlog catch-up has progressed —
 						// applies to both a genuine live event and one the server resent as
 						// backlog (see the HELLO region above); mirrors LastEventIdFromMe's
 						// own bookkeeping for outgoing events.
 						_eventReplicationState.LastEventIdFromServer = ne1.Event.EventId;
+						EventsReceived?.Invoke();
 						break;
 					default:
 						throw new NotSupportedException();

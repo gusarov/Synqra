@@ -45,7 +45,12 @@ public static class SynqraGuids
 	 */
 
 	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // NEVER CHANGE THAT! Object type namespace. It does not matter, what pattern it follows, it is just a random but fixed input to sha256 v8 guids it produces from type names.
-	public static Guid SynqraRootStreamId    = new("C0DEADD0-1032-8000-800C-000000000000"); // class 0x00C: root/default stream (see the "Well-known classes" note above for why the byte is "C").
+
+	// (removed) SynqraRootStreamId — there is no default/root stream. A stream id is a first-class,
+	// mandatory value (a security boundary). Multitenant stores read the ambient
+	// SynqraStreamContext.Current (entered per request); single-tenant stores take an explicit stream
+	// id at registration / borrow a projection for an explicit stream from the provider. The reserved
+	// value C0DEADD0-1032-8000-800C-* documented above is retired.
 
 	/*
 	 * Principles behind MasterId:

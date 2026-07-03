@@ -56,6 +56,11 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 
+	// A fresh stream per test instance (stable across Restart() — an instance field). The in-memory
+	// projection is non-multitenant (factory-only, no DI singleton), so it is borrowed for this
+	// stream from the provider, which brings it up to head via the keeper (replacing LoadStateAsync).
+	readonly Guid _streamId = Guid.NewGuid();
+
 	/// <summary>
 	/// The store, with command-event persistence turned off (durable log = domain events only).
 	/// </summary>
@@ -65,7 +70,7 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		{
 			throw new Exception("Mongo is not configured 4");
 		}
-		var projection = ServiceProvider.GetRequiredService<InMemoryProjection>();
+		var projection = (InMemoryProjection)ServiceProvider.GetRequiredService<IProjectionProvider>().GetAsync(_streamId).GetAwaiter().GetResult();
 		projection.PersistCommandEvents = false;
 		return projection;
 	}
@@ -112,7 +117,6 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		// replaying the event log.
 		Restart();
 		var projection = Projection();
-		await projection.LoadStateAsync();
 
 		var store2 = (IObjectStore)projection;
 		var reloaded = store2.GetCollection<DemoModel>().FirstOrDefault(m => store2.GetId(m) == id);
