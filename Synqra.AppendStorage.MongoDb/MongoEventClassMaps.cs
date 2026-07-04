@@ -22,13 +22,23 @@ namespace Synqra.AppendStorage.MongoDb;
 /// </para>
 /// <para>
 /// <see cref="Event.EventId"/> maps to <c>_id</c> (the natural document key).
-/// <see cref="Event.StreamId"/> is intentionally unmapped: like the JSON log, the
-/// stream/container id is an out-of-band routing concern, not part of the persisted
-/// event body.
+/// <see cref="Event.StreamId"/> maps to <c>_sid</c> — the same stream column
+/// <c>MongoProjection</c> stamps on its read-model documents. Unlike the JSON-lines log
+/// (one file per stream, so the stream is out-of-band file routing and the field is
+/// <c>[JsonIgnore]</c>d out), the Mongo log is one shared multitenant collection: every
+/// event MUST carry its own stream, or the per-stream <c>AppendStorageEventLog</c> — which
+/// isolates streams by filtering on <see cref="Event.StreamId"/> after reading them back —
+/// has nothing to filter on and every stream sees every stream's events. Mapping it here is
+/// a Mongo-only document convention (like <c>Link.LinkId → _id</c> below); the model itself
+/// stays MongoDB-free.
 /// </para>
 /// </summary>
 public static class MongoEventClassMaps
 {
+	/// <summary>The per-event stream column — same name and Guid representation MongoProjection
+	/// uses for its own read-model documents, so an event and its materialized state read alike.</summary>
+	const string StreamIdField = "_sid";
+
 	static readonly object _gate = new();
 	static bool _registered;
 
@@ -75,9 +85,15 @@ public static class MongoEventClassMaps
 					// always present even if an event is ever serialized as its concrete type.
 					cm.SetDiscriminatorIsRequired(true);
 					cm.MapIdProperty(e => e.EventId);
-					// StreamId (out-of-band routing) and any other [JsonIgnore] field are not
-					// part of the persisted event body — drop them, matching the JSON log.
+					// Drop every [JsonIgnore] member (materialized/in-memory-only state) so the durable
+					// Mongo log persists the same surface as the JSON log — then re-map StreamId as _sid
+					// below, the one [JsonIgnore] field the shared Mongo log DOES need (see type remarks).
 					UnmapJsonIgnored(cm);
+					// Persist the stream on every event as _sid. Must come after UnmapJsonIgnored and
+					// after AutoMap's JsonIgnoreConvention (both strip [JsonIgnore] members, and StreamId
+					// is one) — this explicit map is the final word. Mapped on the base Event class map,
+					// so every concrete event subtype serializes _sid, exactly like the inherited _id.
+					cm.MapProperty(e => e.StreamId).SetElementName(StreamIdField).SetSerializer(ScopedStandardGuidSerializer);
 				});
 			}
 
