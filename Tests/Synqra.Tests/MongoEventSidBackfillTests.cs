@@ -142,6 +142,21 @@ public class MongoEventSidBackfillTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_not_fail_startup_when_a_configured_database_is_unreachable()
+	{
+		// A host may configure a store it never touches in that process (integration-test
+		// hosts do exactly this) — before upgrades existed it booted fine because Mongo
+		// connects lazily. The runner must probe-and-skip, not take the whole host down;
+		// the unreachable store fails on first actual use instead.
+		var dead = new MongoClient("mongodb://localhost:1/?serverSelectionTimeoutMS=500&connectTimeoutMS=500").GetDatabase("nope");
+		var runner = new SynqraMongoUpgradeService(
+		[
+			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => dead, "Event"),
+		], null!);
+		await runner.StartAsync(CancellationToken.None); // must not throw
+	}
+
+	[Test]
 	public async Task Should_no_op_on_clean_log()
 	{
 		var db = Db();
