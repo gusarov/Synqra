@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
+using Synqra.AppendStorage.MongoDb;
 
 namespace Synqra.Projection.MongoDb;
 
@@ -74,7 +75,28 @@ public static class MongoSynqraStoreExtensions
 		});
 		services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<MongoProjection>());
 		services.AddSingleton<IProjection>(sp => sp.GetRequiredService<MongoProjection>());
+		services.AnnounceProjectionForUpgrades(serviceKey: null, sp => sp.GetRequiredService<IOptions<MongoProjectionOptions>>().Value);
 		return services;
+	}
+
+	/// <summary>
+	/// Announce the opened projection database to <see cref="SynqraMongoUpgradeService"/> — the
+	/// upgrade runner (registered by the event-storage side; opening a projection alone never
+	/// triggers upgrades) uses it as a derivation source (e.g. resolving a legacy event's stream
+	/// from its target's materialized document). Consumers wire nothing — see the runner's remarks.
+	/// </summary>
+	static void AnnounceProjectionForUpgrades(this IServiceCollection services, string? serviceKey, Func<IServiceProvider, MongoProjectionOptions> getOptions)
+	{
+		services.AddSingleton(sp =>
+		{
+			var options = getOptions(sp);
+			var url = new MongoUrl(options.ConnectionString);
+			var databaseName = !string.IsNullOrWhiteSpace(options.DatabaseName)
+				? options.DatabaseName!
+				: string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName;
+			var database = new MongoClient(options.ConnectionString).GetDatabase(databaseName);
+			return new SynqraMongoUpgradeParticipant(serviceKey, SynqraMongoDatabaseRole.Projection, _ => database);
+		});
 	}
 
 	static IServiceCollection AddMongoDbSynqraStoreCore(this IServiceCollection services, string serviceKey)
@@ -101,6 +123,7 @@ public static class MongoSynqraStoreExtensions
 		});
 		services.AddKeyedSingleton<IObjectStore>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 		services.AddKeyedSingleton<IProjection>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
+		services.AnnounceProjectionForUpgrades(serviceKey, sp => sp.GetRequiredService<IOptionsMonitor<MongoProjectionOptions>>().Get(serviceKey));
 		return services;
 	}
 }

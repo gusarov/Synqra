@@ -7,12 +7,12 @@ using TUnit.Assertions.Extensions;
 namespace Synqra.Tests;
 
 /// <summary>
-/// <see cref="MongoEventSidBackfill"/> upgrades event logs written before StreamId was persisted
-/// as _sid. The legacy documents here are inserted raw (BsonDocument, no _sid) to reproduce the
-/// exact production shape: a CommandCreatedEvent whose embedded command names its stream (pass 1
-/// join source), sibling events sharing its CommandId, a command-less event resolvable only via
-/// its target's materialized projection document (pass 2), and one genuinely unresolvable event
-/// that must be left alone and reported rather than guessed at.
+/// <see cref="SynqraMongoUpgradeService"/> auto-upgrades whatever Mongo storage Synqra opens —
+/// exercised here exactly the way a host runs it (the hosted service with announced
+/// participants), never by calling an upgrade directly. Covers the first real upgrade
+/// (event-sid-backfill: CommandCreatedEvent join + projection fallback, unresolvable left
+/// alone), the <c>_synqra_upgrades</c> claim bookkeeping, idempotent re-runs, and the
+/// single-winner guarantee under concurrent nodes.
 /// </summary>
 public class MongoEventSidBackfillTests : BaseTest
 {
@@ -23,6 +23,12 @@ public class MongoEventSidBackfillTests : BaseTest
 	}
 
 	static BsonBinaryData Bin(Guid g) => new(g, GuidRepresentation.Standard);
+
+	static SynqraMongoUpgradeService Runner(IMongoDatabase db) => new(
+	[
+		new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => db, "Event"),
+		new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Projection, _ => db),
+	], null!);
 
 	[Test]
 	public async Task Should_backfill_sid_from_command_join_and_projection_fallback()
@@ -85,9 +91,7 @@ public class MongoEventSidBackfillTests : BaseTest
 			["_sid"] = Bin(streamB),
 		});
 
-		var (backfilled, unresolved) = await MongoEventSidBackfill.BackfillAsync(db, db);
-		await Assert.That(backfilled).IsEqualTo(3);
-		await Assert.That(unresolved).IsEqualTo(1);
+		await Runner(db).StartAsync(CancellationToken.None);
 
 		async Task<BsonDocument> Doc(Guid id) => await events.Find(Builders<BsonDocument>.Filter.Eq("_id", Bin(id))).SingleAsync();
 		await Assert.That((await Doc(cceEventId))["_sid"].AsGuid).IsEqualTo(streamA);
@@ -95,10 +99,46 @@ public class MongoEventSidBackfillTests : BaseTest
 		await Assert.That((await Doc(seededEventId))["_sid"].AsGuid).IsEqualTo(streamB);
 		await Assert.That((await Doc(orphanEventId)).Contains("_sid")).IsFalse();
 
-		// Idempotent: a second run touches nothing new (the orphan stays reported, not guessed).
-		var (again, stillUnresolved) = await MongoEventSidBackfill.BackfillAsync(db, db);
-		await Assert.That(again).IsEqualTo(0);
-		await Assert.That(stillUnresolved).IsEqualTo(1);
+		// The claim is recorded and completed in _synqra_upgrades — that's both the audit trail
+		// and what makes the next boot skip without racing.
+		var claim = await db.GetCollection<BsonDocument>("_synqra_upgrades")
+			.Find(Builders<BsonDocument>.Filter.Eq("_id", "event-sid-backfill/1")).SingleAsync();
+		await Assert.That(claim.Contains("completedAt")).IsTrue();
+
+		// Second boot: completed claim short-circuits; the orphan stays untouched, not guessed.
+		await Runner(db).StartAsync(CancellationToken.None);
+		await Assert.That((await Doc(orphanEventId)).Contains("_sid")).IsFalse();
+	}
+
+	[Test]
+	public async Task Should_let_exactly_one_concurrent_node_win_the_claim()
+	{
+		var db = Db();
+		var events = db.GetCollection<BsonDocument>("Event");
+		var stream = Guid.NewGuid();
+		var commandId = Guid.NewGuid();
+		await events.InsertManyAsync(
+		[
+			new BsonDocument
+			{
+				["_id"] = Bin(Guid.NewGuid()),
+				["_t"] = "CommandCreatedEvent",
+				["CommandId"] = Bin(commandId),
+				["Data"] = new BsonDocument { ["_t"] = "CreateObjectCommand", ["StreamId"] = Bin(stream) },
+			},
+		]);
+
+		// Several "nodes" (independent runner instances) boot at once against the same
+		// database. The unique _id insert into _synqra_upgrades lets exactly one win; the rest
+		// wait for its completion marker. Everyone returns, nothing throws, one claim doc.
+		await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => Task.Run(() => Runner(db).StartAsync(CancellationToken.None))));
+
+		var claims = await db.GetCollection<BsonDocument>("_synqra_upgrades")
+			.Find(Builders<BsonDocument>.Filter.Eq("_id", "event-sid-backfill/1")).ToListAsync();
+		await Assert.That(claims.Count).IsEqualTo(1);
+		await Assert.That(claims[0].Contains("completedAt")).IsTrue();
+		var cce = await events.Find(Builders<BsonDocument>.Filter.Eq("_t", "CommandCreatedEvent")).SingleAsync();
+		await Assert.That(cce["_sid"].AsGuid).IsEqualTo(stream);
 	}
 
 	[Test]
@@ -112,8 +152,9 @@ public class MongoEventSidBackfillTests : BaseTest
 			["CommandId"] = Bin(Guid.NewGuid()),
 			["_sid"] = Bin(Guid.NewGuid()),
 		});
-		var (backfilled, unresolved) = await MongoEventSidBackfill.BackfillAsync(db, db);
-		await Assert.That(backfilled).IsEqualTo(0);
-		await Assert.That(unresolved).IsEqualTo(0);
+		await Runner(db).StartAsync(CancellationToken.None);
+		var claim = await db.GetCollection<BsonDocument>("_synqra_upgrades")
+			.Find(Builders<BsonDocument>.Filter.Eq("_id", "event-sid-backfill/1")).SingleAsync();
+		await Assert.That(claim.Contains("completedAt")).IsTrue();
 	}
 }

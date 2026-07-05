@@ -83,8 +83,45 @@ public static class MongoAppendStorageExtensions
 		});
 
 		services.TryAddSingleton<IAppendStorage<T, TKey>, MongoAppendStorage<T, TKey>>();
+		services.AnnounceForUpgrades<T>(serviceKey: null, sp =>
+		{
+			var options = sp.GetRequiredService<IOptions<MongoAppendStorageOptions>>().Value;
+			return (OpenDatabase(options.ConnectionString), ResolveCollectionName<T>(options.CollectionName));
+		});
 		return services;
 	}
+
+	/// <summary>
+	/// Announce an opened event-log database to <see cref="SynqraMongoUpgradeService"/> and make
+	/// sure the runner itself is registered (TryAddEnumerable — once per host no matter how many
+	/// stores announce). This is what makes storage upgrades automatic: opening a store IS opting
+	/// into its upgrades; a consumer never wires anything. Only <see cref="Event"/> stores
+	/// announce — the known upgrades are event-log upgrades.
+	/// </summary>
+	static void AnnounceForUpgrades<T>(this IServiceCollection services, string? serviceKey, Func<IServiceProvider, (IMongoDatabase Database, string CollectionName)> open)
+	{
+		if (!typeof(Event).IsAssignableFrom(typeof(T)))
+		{
+			return;
+		}
+		services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SynqraMongoUpgradeService>());
+		services.AddSingleton(sp =>
+		{
+			var (database, collectionName) = open(sp);
+			return new SynqraMongoUpgradeParticipant(serviceKey, SynqraMongoDatabaseRole.Events, _ => database, collectionName);
+		});
+	}
+
+	static IMongoDatabase OpenDatabase(string connectionString)
+	{
+		var url = new MongoUrl(connectionString);
+		return new MongoClient(connectionString).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
+	}
+
+	static string ResolveCollectionName<T>(string? template)
+		=> (template ?? MongoAppendStorageOptions.DefaultCollectionName)
+			.Replace("[TypeName]", typeof(T).Name)
+			.Replace("[Type]", typeof(T).Name);
 
 	/// <summary>
 	/// Keyed variant — same reasoning as <see cref="Synqra.Projection.MongoDb.MongoSynqraStoreExtensions"/>'s
@@ -122,6 +159,7 @@ public static class MongoAppendStorageExtensions
 
 		services.AddKeyedSingleton<IAppendStorage<T, TKey>>(serviceKey, (sp, key) =>
 			ActivatorUtilities.CreateInstance<MongoAppendStorage<T, TKey>>(sp, sp.GetRequiredKeyedService<IMongoCollection<T>>(key)));
+		services.AnnounceForUpgrades<T>(serviceKey, _ => (OpenDatabase(connectionString), ResolveCollectionName<T>(collectionName)));
 		return services;
 	}
 
