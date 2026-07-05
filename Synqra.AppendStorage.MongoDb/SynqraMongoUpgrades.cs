@@ -86,11 +86,42 @@ public sealed class SynqraMongoUpgradeService(
 			var projection = group.FirstOrDefault(p => p.Role == SynqraMongoDatabaseRole.Projection);
 
 			var eventsDb = events.Database(serviceProvider);
+			// Probe before claiming, with a short timeout. An UNREACHABLE database (server gone,
+			// wrong credentials — e.g. a test host that configures a store it never touches) must
+			// not fail startup: nothing can read an unreachable store, so there is nothing the
+			// upgrade needs to protect, and before upgrades existed such a host booted fine
+			// because Mongo connects lazily. Only a REACHABLE store with a FAILING upgrade is
+			// fatal (see RunOnceAsync) — that one would otherwise serve misinterpretable data.
+			if (!await IsReachableAsync(eventsDb, cancellationToken))
+			{
+				_logger.LogError("Storage upgrades skipped for '{Database}' (service key '{Key}'): events database unreachable — the store will fail on first use instead.", eventsDb.DatabaseNamespace.DatabaseName, group.Key);
+				continue;
+			}
 			var projectionDb = projection?.Database(serviceProvider);
+			if (projectionDb is not null && !await IsReachableAsync(projectionDb, cancellationToken))
+			{
+				_logger.LogWarning("Projection database '{Database}' unreachable — upgrades run without the projection-derived fallback.", projectionDb.DatabaseNamespace.DatabaseName);
+				projectionDb = null;
+			}
 			foreach (var upgrade in Upgrades)
 			{
 				await RunOnceAsync(upgrade, eventsDb, events.EventsCollectionName ?? "Event", projectionDb, cancellationToken);
 			}
+		}
+	}
+
+	static async Task<bool> IsReachableAsync(IMongoDatabase database, CancellationToken cancellationToken)
+	{
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(5));
+		try
+		{
+			await database.RunCommandAsync<BsonDocument>(new BsonDocument("ping", 1), readPreference: null, timeout.Token);
+			return true;
+		}
+		catch (Exception) when (!cancellationToken.IsCancellationRequested)
+		{
+			return false;
 		}
 	}
 
