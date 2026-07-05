@@ -360,6 +360,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	// reaches the inner data via TryAdd / BypassRemove and stays command-free.
 	private global::Synqra.StoreBoundComponentsCollection? __components;
 
+	[global::System.Text.Json.Serialization.JsonIgnore]
 	public global::Synqra.IComponentsCollection Components => EnsureComponentsWrapper();
 
 	global::Synqra.StoreBoundComponentsCollection EnsureComponentsWrapper()
