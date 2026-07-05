@@ -5,11 +5,11 @@ using MongoDB.Driver;
 namespace Synqra.AppendStorage.MongoDb;
 
 /// <summary>
-/// One-time, idempotent upgrade for event logs written before <see cref="Event.StreamId"/> was
-/// persisted as <c>_sid</c> (see <see cref="MongoEventClassMaps"/>): those documents carry no
-/// stream column at all, so the per-stream <c>AppendStorageEventLog</c> cannot isolate them and
-/// every stream sees them. This backfills <c>_sid</c> onto every legacy event from the data the
-/// log (and its projection) already contains — no operator input, safe to run on every startup:
+/// Upgrade for event logs written before <see cref="Event.StreamId"/> was persisted as
+/// <c>_sid</c> (see <see cref="MongoEventClassMaps"/>): those documents carry no stream column
+/// at all, so the per-stream <c>AppendStorageEventLog</c> cannot isolate them and every stream
+/// sees them. Backfills <c>_sid</c> onto every legacy event from data the log (and its
+/// projection) already contain:
 /// <list type="number">
 /// <item><b>CommandCreatedEvent join:</b> a <c>CommandCreatedEvent</c>'s embedded command
 /// (<c>Data.StreamId</c>) names its stream outright — that resolves the CommandCreatedEvent
@@ -20,29 +20,17 @@ namespace Synqra.AppendStorage.MongoDb;
 /// (MongoProjection has stamped it since stream scoping landed).</item>
 /// </list>
 /// Anything still unresolved after both passes is left untouched and reported — an event whose
-/// stream genuinely cannot be derived should be looked at by a human, not guessed at.
+/// stream genuinely cannot be derived should be looked at by a human, not guessed at. Idempotent
+/// (a single count when there is nothing to do); invoked only by
+/// <see cref="SynqraMongoUpgradeService"/> under its single-node claim.
 /// </summary>
-public static class MongoEventSidBackfill
+internal sealed class EventSidBackfillUpgrade : ISynqraMongoUpgrade
 {
 	const string StreamIdField = "_sid";
 
-	/// <summary>
-	/// Backfills <c>_sid</c> on every event document that lacks one. Idempotent and cheap when
-	/// there is nothing to do (a single indexed-by-nothing count on a small collection; the
-	/// full scan work only happens when legacy documents actually exist).
-	/// </summary>
-	/// <param name="eventsDatabase">Database holding the event log collection.</param>
-	/// <param name="projectionDatabase">Database holding the materialized projection collections
-	/// (may be the same database). Used only for the fallback pass.</param>
-	/// <param name="eventsCollectionName">Event log collection name (default "Event").</param>
-	/// <returns>(backfilled, unresolved) counts.</returns>
-	public static async Task<(long Backfilled, long Unresolved)> BackfillAsync(
-		  IMongoDatabase eventsDatabase
-		, IMongoDatabase projectionDatabase
-		, string eventsCollectionName = "Event"
-		, ILogger? logger = null
-		, CancellationToken cancellationToken = default
-		)
+	public string Id => "event-sid-backfill/1";
+
+	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
 	{
 		var events = eventsDatabase.GetCollection<BsonDocument>(eventsCollectionName);
 		var missingFilter = Builders<BsonDocument>.Filter.Exists(StreamIdField, false);
@@ -50,9 +38,9 @@ public static class MongoEventSidBackfill
 		var missingCount = await events.CountDocumentsAsync(missingFilter, cancellationToken: cancellationToken);
 		if (missingCount == 0)
 		{
-			return (0, 0);
+			return;
 		}
-		logger?.LogWarning("Event log upgrade: {Count} event document(s) lack {Field} — backfilling from CommandCreatedEvent joins and the projection.", missingCount, StreamIdField);
+		logger.LogWarning("Event log upgrade: {Count} event document(s) lack {Field} — backfilling from CommandCreatedEvent joins and the projection.", missingCount, StreamIdField);
 
 		// Pass 1 source: CommandId -> StreamId from every CommandCreatedEvent whose embedded
 		// command names its stream. Read once up front — the log is append-only, so this map
@@ -81,11 +69,12 @@ public static class MongoEventSidBackfill
 		// _sid on every materialized document since stream scoping landed, so any object a legacy
 		// event created/updated resolves here even when its command was never logged.
 		var projectionCollections = new List<IMongoCollection<BsonDocument>>();
-		using (var names = await projectionDatabase.ListCollectionNamesAsync(cancellationToken: cancellationToken))
+		if (projectionDatabase is not null)
 		{
+			using var names = await projectionDatabase.ListCollectionNamesAsync(cancellationToken: cancellationToken);
 			foreach (var name in await names.ToListAsync(cancellationToken))
 			{
-				if (!name.StartsWith("system.", StringComparison.Ordinal))
+				if (!name.StartsWith("system.", StringComparison.Ordinal) && name != "_synqra_upgrades")
 				{
 					projectionCollections.Add(projectionDatabase.GetCollection<BsonDocument>(name));
 				}
@@ -103,7 +92,7 @@ public static class MongoEventSidBackfill
 			{
 				// Explicit BsonBinaryData, not a raw Guid: a raw Guid in a filter resolves the
 				// driver's ambient GuidSerializer, which throws when no process-wide
-				// representation was ever configured — this helper must not depend on any
+				// representation was ever configured — this upgrade must not depend on any
 				// class-map/serializer registration having happened first.
 				var doc = await collection
 					.Find(Builders<BsonDocument>.Filter.Eq("_id", new BsonBinaryData(targetId, GuidRepresentation.Standard)))
@@ -148,7 +137,7 @@ public static class MongoEventSidBackfill
 					else
 					{
 						unresolved++;
-						logger?.LogWarning("Event log upgrade: cannot derive a stream for event {EventId} ({Type}) — leaving it without {Field}.", doc.GetValue("_id", BsonNull.Value), doc.GetValue("_t", BsonNull.Value), StreamIdField);
+						logger.LogWarning("Event log upgrade: cannot derive a stream for event {EventId} ({Type}) — leaving it without {Field}.", doc.GetValue("_id", BsonNull.Value), doc.GetValue("_t", BsonNull.Value), StreamIdField);
 					}
 				}
 			}
@@ -157,7 +146,6 @@ public static class MongoEventSidBackfill
 		{
 			await events.BulkWriteAsync(updates, new BulkWriteOptions { IsOrdered = false }, cancellationToken);
 		}
-		logger?.LogWarning("Event log upgrade: backfilled {Backfilled} event(s); {Unresolved} left unresolved.", backfilled, unresolved);
-		return (backfilled, unresolved);
+		logger.LogWarning("Event log upgrade: backfilled {Backfilled} event(s); {Unresolved} left unresolved.", backfilled, unresolved);
 	}
 }
