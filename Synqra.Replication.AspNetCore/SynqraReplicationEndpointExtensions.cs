@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Synqra;
 using Synqra.AppendStorage;
 
@@ -50,6 +51,7 @@ public static class SynqraReplicationEndpointExtensions
 		app.Map(path, async ctx =>
 		{
 			var networkSerializationService = ctx.RequestServices.GetRequiredService<INetworkSerializationService>();
+			var logger = ctx.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Endpoint");
 			if (!ctx.WebSockets.IsWebSocketRequest)
 			{
 				ctx.Response.StatusCode = 400;
@@ -195,9 +197,10 @@ public static class SynqraReplicationEndpointExtensions
 							{
 								await other.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 							}
-							catch
+							catch (Exception broadcastEx)
 							{
 								// best-effort broadcast — a dead peer socket shouldn't fail this client's request
+								logger?.LogDebug(broadcastEx, "Synqra replication: dropping event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
 							}
 						}
 					}
@@ -206,10 +209,11 @@ public static class SynqraReplicationEndpointExtensions
 						ArrayPool<byte>.Shared.Return(buffer);
 					}
 				}
-				catch
+				catch (Exception eventEx)
 				{
 					// One bad event must not kill this whole connection (every other
 					// message on it, and the connection itself) — log and keep going.
+					logger?.LogWarning(eventEx, "Synqra replication: failed to apply/broadcast an inbound event on stream {Stream}; connection continues.", connectionStream);
 				}
 				finally
 				{
