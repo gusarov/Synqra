@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 
   <ItemGroup>
