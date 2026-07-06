@@ -315,6 +315,12 @@ internal class SynqraTestNode
 				// broadcast protocol, kept in sync by hand — Synqra.Replication.AspNetCore
 				// (the real production endpoint) is net10.0-only, but this test project also
 				// builds for net8.0/net9.0, so it can't just call the real thing on every TFM.
+				//
+				// One intentional difference: the production endpoint additionally scopes backlog
+				// replay and broadcast to each connection's own stream (ReplicationStreamScope).
+				// This simulator is single-stream by construction (every node in a test shares one
+				// StreamId, and there is no per-connection stream scope here), so that filter would
+				// be a no-op — it is deliberately omitted rather than duplicated as dead code.
 
 				#region HELLO - from client
 				// 8 bytes magic + 16 bytes the client's own "last event id it already

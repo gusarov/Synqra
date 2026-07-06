@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Synqra;
 using Synqra.AppendStorage;
 
 namespace Synqra.Replication.AspNetCore;
@@ -37,7 +38,12 @@ public static class SynqraReplicationEndpointExtensions
 	{
 		app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 
-		var sockets = new ConcurrentBag<WebSocket>();
+		// Each connected socket is tagged with the stream it is authorized for, so a broadcast
+		// only reaches peers on the same stream (see the broadcast loop below). Was a
+		// ConcurrentBag<WebSocket> — a set with no per-socket stream and, worse, no removal, so
+		// dead sockets accumulated forever. A dictionary gives both the stream tag and O(1)
+		// removal on disconnect.
+		var sockets = new ConcurrentDictionary<WebSocket, Guid?>();
 		var broadcastGate = new SemaphoreSlim(1, 1);
 		var knownEvents = new ConcurrentDictionary<Guid, object?>();
 
@@ -50,6 +56,14 @@ public static class SynqraReplicationEndpointExtensions
 				return;
 			}
 			using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
+
+			// The stream this connection is authorized for, taken from the ambient
+			// SynqraStreamContext the host established for the request (for Quotaly that is the
+			// authenticated user's own stream, set by the auth middleware that wraps this whole
+			// connection's read loop). It is NEVER taken from anything the client sends — a client
+			// must not be able to name another user's stream. null means the host set no scope at
+			// all (a single-tenant deployment): everything below then behaves as before, unscoped.
+			var connectionStream = SynqraStreamContext.CurrentOrNull;
 
 			#region HELLO — from client
 			// 8 bytes magic + 16 bytes the client's own "last event id it already received
@@ -84,7 +98,7 @@ public static class SynqraReplicationEndpointExtensions
 			await broadcastGate.WaitAsync(ctx.RequestAborted);
 			try
 			{
-				sockets.Add(socket);
+				sockets[socket] = connectionStream;
 				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
 
 				var storage = serviceKey is null
@@ -95,6 +109,14 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 					{
+						// Replay only THIS connection's stream. The log is one shared multitenant
+						// collection; ev.StreamId (persisted as _sid) says which stream each event
+						// belongs to. Without this filter the backlog leaked every stream's events
+						// to any connecting client. Unscoped host (connectionStream null) → send all.
+						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream))
+						{
+							continue;
+						}
 						knownEvents.TryAdd(ev.EventId, null);
 						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, backlogBuffer);
 						await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
@@ -110,6 +132,9 @@ public static class SynqraReplicationEndpointExtensions
 				broadcastGate.Release();
 			}
 			#endregion
+
+			try
+			{
 
 			while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
 			{
@@ -132,6 +157,15 @@ public static class SynqraReplicationEndpointExtensions
 				try
 				{
 					var ev = newEvent1.Event;
+					// The event's stream is set authoritatively from THIS connection's authorized
+					// stream — never trusted from the wire (Event.StreamId is not even on the SBX
+					// wire format; it arrives default). This both stamps _sid correctly on the
+					// durable append and forbids a client from injecting an event into any other
+					// stream: whatever it claims, the event is filed under the stream it connected as.
+					if (connectionStream is Guid stream)
+					{
+						ev.StreamId = stream;
+					}
 					var projection = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IProjection>()
 						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
@@ -145,9 +179,18 @@ public static class SynqraReplicationEndpointExtensions
 					try
 					{
 						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
-						foreach (var other in sockets)
+						foreach (var (other, otherStream) in sockets)
 						{
 							if (other == socket || other.State != WebSocketState.Open) { continue; }
+							// Only fan out to peers on the same stream as the event. Without this a
+							// client's event was broadcast to every connected socket regardless of
+							// stream — a live cross-tenant leak. Unscoped host (connectionStream null)
+							// → broadcast to all, as before. (connectionStream == ev.StreamId here,
+							// since inbound events were stamped with it above.)
+							if (!ReplicationStreamScope.Admits(otherStream, connectionStream))
+							{
+								continue;
+							}
 							try
 							{
 								await other.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
@@ -172,6 +215,13 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					broadcastGate.Release();
 				}
+			}
+			}
+			finally
+			{
+				// Stop tracking a closed socket — otherwise the registry (and the broadcast loop
+				// that walks it) grew without bound across the server's lifetime.
+				sockets.TryRemove(socket, out _);
 			}
 		});
 
