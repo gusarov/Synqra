@@ -33,8 +33,10 @@ using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Projection.InMemory;
 using Synqra.AppendStorage.JsonLines;
 using Synqra.AppendStorage;
+using Synqra.AppendStorage.InMemory;
 #if NET10_0_OR_GREATER
 using Synqra.Projection.Sqlite;
+using Synqra.Replication.AspNetCore;
 #endif
 
 namespace Synqra.Tests.Simulator;
@@ -137,7 +139,16 @@ internal class SynqraTestNode
 	SemaphoreSlim _semaphoreSlim = new(1, 1);
 	long _masterSeq = 0;
 
-	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false)
+	/// <param name="useRealEndpoint">
+	/// Master only (net10). When true the host wires the real production endpoint
+	/// (<see cref="SynqraReplicationEndpointExtensions.MapSynqraReplicationEndpoint"/>) behind
+	/// middleware that scopes each connection to the <c>?stream=</c> it connected with — the
+	/// test's stand-in for Quotaly's auth middleware — instead of the hand-rolled single-stream
+	/// simulator below. This is what the stream-isolation e2e exercises. The event log is then
+	/// InMemory (it keeps <see cref="Event.StreamId"/> on the in-memory object; the JSON-lines log
+	/// drops it, since StreamId is [JsonIgnore] and only the Mongo log re-maps it to _sid).
+	/// </param>
+	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false, bool useRealEndpoint = false)
 	{
 		if (streamId == default)
 		{
@@ -204,7 +215,19 @@ internal class SynqraTestNode
 		});
 
 		builder.Services.AddInMemorySynqraStore();
-		builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
+#if NET10_0_OR_GREATER
+		if (masterHost && useRealEndpoint)
+		{
+			// The real endpoint reads events back from its own log to replay a stream's backlog and
+			// filters by Event.StreamId — so the log must preserve it. InMemory does (it holds the
+			// object); JSON-lines does not ([JsonIgnore]). See the useRealEndpoint remarks above.
+			builder.Services.AddAppendStorageInMemory<Event, Guid>(x => x.EventId);
+		}
+		else
+#endif
+		{
+			builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
+		}
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
 		builder.Services.AddSingleton<INetworkSerializationService, SbxNetworkSerializationService>();
@@ -281,6 +304,14 @@ internal class SynqraTestNode
 		if (masterHost)
 		{
 			builder.Services.AddControllers();
+#if NET10_0_OR_GREATER
+			if (useRealEndpoint)
+			{
+				// The real endpoint resolves IProjection from DI and Accepts every inbound event.
+				// This test only asserts socket-level routing, so a no-op projection suffices.
+				builder.Services.AddSingleton<IProjection, NoOpProjection>();
+			}
+#endif
 		}
 		else
 		{
@@ -290,7 +321,11 @@ internal class SynqraTestNode
 
 			builder.Services.AddSingleton<EventReplicationState>();
 			// builder.Services.Configure<EventReplicationConfig>(builder.Configuration.GetSection(nameof(EventReplicationConfig)));
-			builder.Services.AddSingleton<EventReplicationConfig>(new DelegatedEventReplicationConfig(() => Port));
+			// The client tells the master which stream it is on via the ?stream= query — the real
+			// endpoint's scoping middleware reads it (the hand-rolled single-stream master below just
+			// ignores it, matching on path only). Port is assigned after construction, so resolve both
+			// lazily at connect time.
+			builder.Services.AddSingleton<EventReplicationConfig>(new TestNodeReplicationConfig(this));
 
 		}
 
@@ -298,6 +333,31 @@ internal class SynqraTestNode
 		var app = builder.Build();
 		Host = app;
 
+#if NET10_0_OR_GREATER
+		if (masterHost && useRealEndpoint)
+		{
+			app.MapControllers();
+			// Stand-in for Quotaly's auth middleware: scope each connection to the stream it
+			// connected with (?stream=<guid>). The real endpoint reads this ambient scope via
+			// SynqraStreamContext.CurrentOrNull and never trusts anything the client sends on the wire.
+			app.Use(next => async ctx =>
+			{
+				if (Guid.TryParse(ctx.Request.Query["stream"], out var connStream) && connStream != default)
+				{
+					using (SynqraStreamContext.Enter(connStream))
+					{
+						await next(ctx);
+					}
+				}
+				else
+				{
+					await next(ctx);
+				}
+			});
+			app.MapSynqraReplicationEndpoint();
+		}
+		else
+#endif
 		if (masterHost)
 		{
 			var knownEvents = new ConcurrentDictionary<Guid, object?>();
@@ -510,6 +570,21 @@ internal class SynqraTestNode
 		var port = checked((ushort)((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
 		listener.Stop();
 		return port;
+	}
+
+	/// <summary>
+	/// Replication config for a client test node. The master's port is only known after this node is
+	/// constructed (the test assigns <see cref="Port"/> via an object initializer), so both the port
+	/// and the full endpoint are resolved lazily at connect time. The endpoint carries this node's
+	/// own <see cref="StreamId"/> as <c>?stream=</c> so a real-endpoint master can scope the
+	/// connection; the hand-rolled single-stream master ignores it (it matches on path only).
+	/// </summary>
+	private sealed class TestNodeReplicationConfig : EventReplicationConfig
+	{
+		private readonly SynqraTestNode _node;
+		public TestNodeReplicationConfig(SynqraTestNode node) => _node = node;
+		public override ushort Port => _node.Port;
+		public override string? Endpoint => $"ws://localhost:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}
 
 }
