@@ -21,15 +21,17 @@
  -->
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+	<PackageReference Include="System.Text.Json" />
+	<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+	<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <InternalsVisibleTo Include="Synqra.Tests.MiniModel" /><!-- THIS IS SERIOUS LIMITATION THAT NEEDS TO BE LIFTED -->
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
-    <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
+	<ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
+	<ProjectReference Include="..\Synqra.BlobStorage.Abstractions\Synqra.BlobStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\Synqra.Projection.Abstractions\Synqra.Projection.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.Utils\Synqra.Utils.csproj" />

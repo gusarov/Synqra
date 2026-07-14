@@ -4,7 +4,7 @@ using Synqra.BlobStorage;
 
 namespace Synqra.BlobStorage.IndexedDb;
 
-internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage
+internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -92,12 +92,6 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 			currentFrom = page[^1];
 			fromExclusive = true;
 		}
-	}
-
-	public async Task ClearAllAsync(CancellationToken cancellationToken = default)
-	{
-		await _initTask;
-		await _indexedDbInterop.ClearStoreAsync(_storeName);
 	}
 
 	public void Dispose()

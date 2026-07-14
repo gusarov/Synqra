@@ -103,4 +103,10 @@ public interface IProjectionFactory
 public interface IProjectionProvider
 {
     Task<IReplayProjection> GetAsync(Guid streamId, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Builds a fresh projection layer from the current logical event sequence and atomically makes
+	/// it the provider's active layer for this stream.
+	/// </summary>
+	Task<IReplayProjection> RebuildAsync(Guid streamId, CancellationToken cancellationToken = default);
 }

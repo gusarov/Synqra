@@ -31,15 +31,3 @@ public interface IBlobStorage<TKey> : IDisposable, IAsyncDisposable
 #endif
 		;
 }
-
-/// <summary>
-/// Optional capability — implemented only by backends where "wipe everything and resync
-/// fresh from the server" is a meaningful, safe recovery action (currently just IndexedDb,
-/// a disposable client-local cache). File/Sqlite/Mongo backends are the durable source of
-/// truth themselves, so they don't implement this; check with an `is` pattern match rather
-/// than adding it to <see cref="IBlobStorage{TKey}"/> itself.
-/// </summary>
-public interface IClearableBlobStorage
-{
-	Task ClearAllAsync(CancellationToken cancellationToken = default);
-}

@@ -105,6 +105,28 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 			entry.Gate.Release();
 		}
 	}
+
+	public async Task<IReplayProjection> RebuildAsync(Guid streamId, CancellationToken cancellationToken = default)
+	{
+		if (streamId == default)
+		{
+			throw new ArgumentException("A non-default stream id is required.", nameof(streamId));
+		}
+		var entry = _byStream.GetOrAdd(streamId, _ => new Entry());
+		await entry.Gate.WaitAsync(cancellationToken);
+		try
+		{
+			var projection = _factory.Create(streamId);
+			await _keeper.MaintainAsync(projection, isReplay: true, cancellationToken: cancellationToken);
+			entry.Projection = projection;
+			entry.ColdLoaded = true;
+			return projection;
+		}
+		finally
+		{
+			entry.Gate.Release();
+		}
+	}
 }
 
 /// <summary>

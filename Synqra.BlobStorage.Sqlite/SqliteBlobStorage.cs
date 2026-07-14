@@ -8,16 +8,17 @@ namespace Synqra.BlobStorage.Sqlite;
 public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 	where TKey : notnull, IComparable<TKey>
 {
-	private readonly SqliteConnection _connection;
+	private readonly string _connectionString;
 	private readonly string _storeName;
 
 	public SqliteBlobStorage(SqliteBlobStorageOptions options, string storeName)
 	{
 		_storeName = storeName;
-		_connection = new SqliteConnection(options.ConnectionString);
-		_connection.Open();
+		_connectionString = options.ConnectionString;
+		EnsureDataSourceDirectory();
+		using var connection = OpenConnection();
 
-		using var cmd = _connection.CreateCommand();
+		using var cmd = connection.CreateCommand();
 		cmd.CommandText = """
 			CREATE TABLE IF NOT EXISTS blobs (
 				store_name TEXT NOT NULL,
@@ -28,7 +29,7 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 			""";
 		cmd.ExecuteNonQuery();
 
-		using var pragma = _connection.CreateCommand();
+		using var pragma = connection.CreateCommand();
 		pragma.CommandText = """
 			PRAGMA journal_mode = WAL;
 			PRAGMA synchronous = NORMAL;
@@ -40,7 +41,8 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public ValueTask<byte[]> ReadBlobAsync(TKey key, CancellationToken cancellationToken = default)
 	{
-		using var cmd = _connection.CreateCommand();
+		using var connection = OpenConnection();
+		using var cmd = connection.CreateCommand();
 		cmd.CommandText = "SELECT data FROM blobs WHERE store_name = @store_name AND id = @id";
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 		cmd.Parameters.AddWithValue("@id", EncodeKey(key));
@@ -55,8 +57,13 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
 	{
-		using var cmd = _connection.CreateCommand();
-		cmd.CommandText = "INSERT INTO blobs (store_name, id, data) VALUES (@store_name, @id, @data)";
+		using var connection = OpenConnection();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = """
+			INSERT INTO blobs (store_name, id, data)
+			VALUES (@store_name, @id, @data)
+			ON CONFLICT(store_name, id) DO UPDATE SET data = excluded.data
+			""";
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 		cmd.Parameters.AddWithValue("@id", EncodeKey(key));
 		cmd.Parameters.AddWithValue("@data", blob.ToArray());
@@ -66,7 +73,8 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default)
 	{
-		using var cmd = _connection.CreateCommand();
+		using var connection = OpenConnection();
+		using var cmd = connection.CreateCommand();
 		cmd.CommandText = "DELETE FROM blobs WHERE store_name = @store_name AND id = @id";
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 		cmd.Parameters.AddWithValue("@id", EncodeKey(key));
@@ -76,7 +84,8 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public async IAsyncEnumerable<TKey> EnumerateKeysAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
-		using var cmd = _connection.CreateCommand();
+		await using var connection = await OpenConnectionAsync(cancellationToken);
+		await using var cmd = connection.CreateCommand();
 
 		if (from is not null && !Equals(from, default(TKey)))
 		{
@@ -90,18 +99,29 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 
-		using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
+		await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
+		var keys = new List<TKey>();
 		while (await reader.ReadAsync(cancellationToken))
 		{
 			var blob = (byte[])reader.GetValue(0);
-			yield return DecodeKey(blob);
+			keys.Add(DecodeKey(blob));
+		}
+
+		foreach (var key in keys)
+		{
+			yield return key;
 		}
 	}
 
 	public void WriteBlob(TKey key, ReadOnlySpan<byte> blob)
 	{
-		using var cmd = _connection.CreateCommand();
-		cmd.CommandText = "INSERT INTO blobs (store_name, id, data) VALUES (@store_name, @id, @data)";
+		using var connection = OpenConnection();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = """
+			INSERT INTO blobs (store_name, id, data)
+			VALUES (@store_name, @id, @data)
+			ON CONFLICT(store_name, id) DO UPDATE SET data = excluded.data
+			""";
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 		cmd.Parameters.AddWithValue("@id", EncodeKey(key));
 		cmd.Parameters.AddWithValue("@data", blob.ToArray());
@@ -110,7 +130,8 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public void DeleteBlob(TKey key)
 	{
-		using var cmd = _connection.CreateCommand();
+		using var connection = OpenConnection();
+		using var cmd = connection.CreateCommand();
 		cmd.CommandText = "DELETE FROM blobs WHERE store_name = @store_name AND id = @id";
 		cmd.Parameters.AddWithValue("@store_name", _storeName);
 		cmd.Parameters.AddWithValue("@id", EncodeKey(key));
@@ -157,13 +178,42 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 		(bytes[6], bytes[7]) = (bytes[7], bytes[6]);
 	}
 
-	public void Dispose()
+	private SqliteConnection OpenConnection()
 	{
-		_connection.Dispose();
+		var connection = new SqliteConnection(_connectionString);
+		connection.Open();
+		return connection;
 	}
 
-	public ValueTask DisposeAsync()
+	private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
 	{
-		return _connection.DisposeAsync();
+		var connection = new SqliteConnection(_connectionString);
+		await connection.OpenAsync(cancellationToken);
+		return connection;
 	}
+
+	private void EnsureDataSourceDirectory()
+	{
+		var connectionOptions = new SqliteConnectionStringBuilder(_connectionString);
+		var dataSource = connectionOptions.DataSource;
+		if (connectionOptions.Mode == SqliteOpenMode.Memory
+			|| string.Equals(dataSource, ":memory:", StringComparison.OrdinalIgnoreCase)
+			|| dataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+		)
+		{
+			return;
+		}
+
+		var directory = Path.GetDirectoryName(Path.GetFullPath(dataSource));
+		if (directory is not null)
+		{
+			Directory.CreateDirectory(directory);
+		}
+	}
+
+	public void Dispose()
+	{
+	}
+
+	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

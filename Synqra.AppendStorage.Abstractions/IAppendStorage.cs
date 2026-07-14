@@ -37,17 +37,3 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 #endif
 		;
 }
-
-/// <summary>
-/// Optional capability — implemented only where "wipe everything and resync fresh from the
-/// server" is a meaningful, safe recovery action (currently just a client's local IndexedDb
-/// cache; see <see cref="Synqra.BlobStorage.IClearableBlobStorage"/>). Not part of
-/// <see cref="IAppendStorage{T, TKey}"/> itself — File/Sqlite/Mongo-backed storage is the
-/// durable source of truth, not a disposable cache, so most implementations shouldn't have to
-/// implement this at all; check with an `is` pattern match instead (see
-/// EventReplicationService's own use of this).
-/// </summary>
-public interface IClearableAppendStorage
-{
-	Task ClearAllAsync(CancellationToken cancellationToken = default);
-}
