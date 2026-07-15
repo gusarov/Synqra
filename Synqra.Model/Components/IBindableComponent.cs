@@ -11,7 +11,7 @@ namespace Synqra;
 /// so the component's property setters can resolve their container's identity at
 /// write time.
 /// </summary>
-public interface IBindableComponent : IBindableModel, IComponent
+public interface IBindableComponent : IBindableModel, IComponent, IIdentifiable<Guid>
 {
 	/// <summary>
 	/// Records the component's container linkage. Called once by the projection
@@ -26,4 +26,15 @@ public interface IBindableComponent : IBindableModel, IComponent
 		Guid containerId,
 		Guid containerTypeId,
 		Guid containerCollectionId);
+
+	/// <summary>
+	/// Stamp the persisted component id on the instance. Every component carries a
+	/// first-class <see cref="IIdentifiable{T}.Id"/> (auto-assigned a v7 GUID at
+	/// construction); identity is independent of uniqueness — a
+	/// <c>[Component(IsUnique = true)]</c> component still has its own id. The
+	/// projection calls this after materializing a component from a
+	/// <see cref="ComponentAddedEvent"/> so a replayed/rehydrated instance keeps the
+	/// event's authoritative id rather than the fresh one its constructor assigned.
+	/// </summary>
+	void SetComponentId(Guid id);
 }

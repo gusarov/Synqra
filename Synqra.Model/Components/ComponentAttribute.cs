@@ -18,9 +18,10 @@ namespace Synqra;
 public sealed class ComponentAttribute : Attribute
 {
 	/// <summary>
-	/// At most one component satisfying this declaration per container. A unique
-	/// component type therefore has no individual identity (no <c>ComponentId</c>);
-	/// the (container, unique-type) pair addresses it.
+	/// At most one component satisfying this declaration per container — a
+	/// max-cardinality constraint only. It does NOT affect identity: a unique
+	/// component still carries its own first-class <c>ComponentId</c> (every
+	/// component does) and is addressed by it like any other.
 	/// </summary>
 	public bool IsUnique { get; set; }
 }

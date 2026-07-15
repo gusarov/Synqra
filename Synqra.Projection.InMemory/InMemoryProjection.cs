@@ -1109,7 +1109,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		// reuse the model-binding pathway so JSON payloads round-trip the same way
 		// as for normal SynqraModel objects.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data);
+		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
 
 		if (!container.Components.TryAdd(component))
 		{

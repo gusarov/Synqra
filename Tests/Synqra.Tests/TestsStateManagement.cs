@@ -307,7 +307,7 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
 			ComponentId = aId,
-			Data = new TestTaggingComponent { Id = aId, Tag = "alpha" },
+			Data = new TestTaggingComponent { Tag = "alpha" },
 		});
 
 		await _sut.SubmitCommandAsync(new AddComponentCommand
@@ -316,7 +316,7 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
 			ComponentId = bId,
-			Data = new TestTaggingComponent { Id = bId, Tag = "beta" },
+			Data = new TestTaggingComponent { Tag = "beta" },
 		});
 
 		await Assert.That(node.Components.Count).IsEqualTo(2);
@@ -333,8 +333,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			NewValue = "beta-updated",
 		});
 
-		var aComp = node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == aId);
-		var bComp = node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == bId);
+		var aComp = node.Components.OfType<TestTaggingComponent>().Single(x => ((IIdentifiable<Guid>)x).Id == aId);
+		var bComp = node.Components.OfType<TestTaggingComponent>().Single(x => ((IIdentifiable<Guid>)x).Id == bId);
 		await Assert.That(aComp.Tag).IsEqualTo("alpha");
 		await Assert.That(bComp.Tag).IsEqualTo("beta-updated");
 	}
@@ -484,8 +484,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var node = new TestComponentNode { Name = "host2" };
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
-		var tagId = GuidExtensions.CreateVersion7();
-		var c = new TestTaggingComponent { Id = tagId, Tag = "alpha" };
+		var c = new TestTaggingComponent { Tag = "alpha" };
+		var tagId = ((IIdentifiable<Guid>)c).Id; // framework-assigned component id
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
@@ -1128,15 +1128,13 @@ public partial class TestUniqueComponent : IComponent
 	public partial string? Subject { get; set; }
 }
 
-/// <summary>Non-unique component: requires its own Id so multiple instances are addressable.</summary>
+/// <summary>Non-unique component: multiple instances per container, each addressable by its
+/// framework-assigned id (via <see cref="IIdentifiable{T}"/>) — no hand-rolled Id needed.</summary>
 [SynqraModel]
-[Schema(2026.405, "1 Id Guid Tag string?")]
-public partial class TestTaggingComponent : IComponent, IIdentifiable<Guid>
+[Schema(2026.405, "1 Tag string?")]
+public partial class TestTaggingComponent : IComponent
 {
-	public partial Guid Id { get; set; }
 	public partial string? Tag { get; set; }
-
-	Guid IIdentifiable<Guid>.Id => Id;
 }
 
 /// <summary>

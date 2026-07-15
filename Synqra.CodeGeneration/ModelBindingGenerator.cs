@@ -401,6 +401,13 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		__containerTypeId = containerTypeId;
 		__containerCollectionId = containerCollectionId;
 	}
+
+	// First-class component identity, independent of [Component(IsUnique)] cardinality.
+	// Auto-assigned at construction; the projection re-stamps it from the event's ComponentId
+	// on materialize/replay so a rehydrated instance keeps its persisted id.
+	protected global::System.Guid __id = global::Synqra.GuidExtensions.CreateVersion7();
+	global::System.Guid global::Synqra.IIdentifiable<global::System.Guid>.Id => __id;
+	void global::Synqra.IBindableComponent.SetComponentId(global::System.Guid id) => __id = id;
 """);
 				}
 				body.AppendLine($$"""
