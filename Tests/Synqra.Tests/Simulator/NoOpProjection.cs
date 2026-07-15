@@ -4,13 +4,13 @@ using System.Threading.Tasks;
 namespace Synqra.Tests.Simulator;
 
 /// <summary>
-/// A projection that does nothing, in the style of <see cref="FakeAppendStorage"/>. The real WS
-/// replication endpoint resolves an <see cref="IProjection"/> from DI and calls Accept on every
-/// inbound event before it appends and broadcasts; the stream-isolation e2e test only cares about
-/// who receives which event over the socket, not about projected state, so the master host registers
-/// this instead of a real stream-aware projection. Every method is a completed no-op.
+/// A projection that does nothing. The real WS replication endpoint resolves an
+/// <see cref="IProjection"/> from DI and calls Accept on every inbound event before it appends and
+/// broadcasts; the stream-isolation e2e test only cares about who receives which event over the
+/// socket, not about projected state, so the master host registers this no-op instead of a real
+/// stream-aware projection. Every method is a completed no-op.
 /// </summary>
-internal sealed class FakeProjection : IProjection
+internal sealed class NoOpProjection : IProjection
 {
 	// IEventVisitor<EventVisitorContext>
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;

@@ -308,8 +308,8 @@ internal class SynqraTestNode
 			if (useRealEndpoint)
 			{
 				// The real endpoint resolves IProjection from DI and Accepts every inbound event.
-				// This test only asserts socket-level routing, so a do-nothing projection suffices.
-				builder.Services.AddSingleton<IProjection, FakeProjection>();
+				// This test only asserts socket-level routing, so a no-op projection suffices.
+				builder.Services.AddSingleton<IProjection, NoOpProjection>();
 			}
 #endif
 		}
