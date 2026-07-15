@@ -581,14 +581,16 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		var node = new TestGeneratedContainerNode { Name = "n3" };
 		store.GetCollection<TestGeneratedContainerNode>().Add(node);
 
-		var a = new TestTaggingComponent { Id = GuidExtensions.CreateVersion7(), Tag = "a" };
-		var b = new TestTaggingComponent { Id = GuidExtensions.CreateVersion7(), Tag = "b" };
+		var a = new TestTaggingComponent { Tag = "a" };
+		var b = new TestTaggingComponent { Tag = "b" };
 		node.Components.Add(a);
 		node.Components.Add(b);
+		var aId = ((IIdentifiable<Guid>)a).Id;
+		var bId = ((IIdentifiable<Guid>)b).Id;
 
 		await Assert.That(node.Components.Count).IsEqualTo(2);
-		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == a.Id).Tag).IsEqualTo("a");
-		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => x.Id == b.Id).Tag).IsEqualTo("b");
+		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => ((IIdentifiable<Guid>)x).Id == aId).Tag).IsEqualTo("a");
+		await Assert.That(node.Components.OfType<TestTaggingComponent>().Single(x => ((IIdentifiable<Guid>)x).Id == bId).Tag).IsEqualTo("b");
 	}
 
 	[Test]

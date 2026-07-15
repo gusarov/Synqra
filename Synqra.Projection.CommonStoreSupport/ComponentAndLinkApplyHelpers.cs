@@ -25,32 +25,23 @@ public static class ComponentApplyHelpers
 
 	/// <summary>
 	/// Both <see cref="ComponentPropertyChangedEvent"/> and <see cref="ComponentDeletedEvent"/> carry
-	/// (ComponentTypeId, ComponentId). Addresses by ComponentId when set (non-unique components, walk
-	/// the list to find by identity), or by ComponentTypeId alone (unique components, look up the slot).
+	/// (ComponentTypeId, ComponentId). Every component has a first-class id — unique ones too, since
+	/// uniqueness is a max-cardinality constraint, not identity suppression — so a component is always
+	/// addressed strictly by <see cref="ComponentId"/> (walk the list, match by identity).
 	/// </summary>
 	public static IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev, ITypeMetadataProvider typeMetadataProvider)
 	{
 		var componentType = typeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
 		var componentId = GetComponentId(ev);
 
-		if (componentId != Guid.Empty)
+		foreach (var c in container.Components)
 		{
-			foreach (var c in container.Components)
+			if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
 			{
-				if (c is IIdentifiable<Guid> identifiable && identifiable.Id == componentId)
-				{
-					return c;
-				}
+				return c;
 			}
-			throw new InvalidOperationException($"Component {componentId} of type '{componentType.Name}' not found on container.");
 		}
-
-		var unique = container.Components.GetUniqueComponent(componentType);
-		if (unique is null)
-		{
-			throw new InvalidOperationException($"No unique-component slot for '{componentType.Name}' is filled on this container.");
-		}
-		return unique;
+		throw new InvalidOperationException($"Component {componentId} of type '{componentType.Name}' not found on container.");
 	}
 
 	public static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
@@ -71,8 +62,23 @@ public static class ComponentApplyHelpers
 	/// Three cases: <paramref name="data"/> is already an instance of <paramref name="componentType"/>
 	/// (typical when emitted locally); a json-shaped <see cref="IDictionary{TKey, TValue}"/>
 	/// (post-rehydrate from the event store); or null (component has no payload, e.g. a bare marker).
+	/// <para>
+	/// <paramref name="componentId"/> is the event's authoritative id, stamped onto the materialized
+	/// instance so a replayed/rehydrated component keeps its persisted id (not the fresh v7 its
+	/// constructor auto-assigns). Every component has a first-class id — unique ones too.
+	/// </para>
 	/// </summary>
-	public static IComponent MaterializeComponent(Type componentType, object? data)
+	public static IComponent MaterializeComponent(Type componentType, object? data, Guid componentId)
+	{
+		var component = MaterializeComponentCore(componentType, data);
+		if (component is IBindableComponent bindable && componentId != Guid.Empty)
+		{
+			bindable.SetComponentId(componentId);
+		}
+		return component;
+	}
+
+	static IComponent MaterializeComponentCore(Type componentType, object? data)
 	{
 		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
 		{
