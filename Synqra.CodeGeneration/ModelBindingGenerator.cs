@@ -239,11 +239,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					.Any(s => s is IPropertySymbol or IFieldSymbol);
 			bool emitComponentsCollection = isContainer && !userDeclaredComponents;
 
-			// Phase 2 (ECS): a plain top-level domain model collapses to a ROOT COMPONENT — its data is
-			// the entity's own component where _id == _eid == entityId. It uses the component-command
-			// vocabulary but is SELF-owned (target/component id = its own store id), so the existing
-			// "object" (!isComponent) branch already gives the right self-targeting. Framework [SynqraModel]
-			// infra (Commands/Events) and facet components/links are excluded — they are not entities.
+			// ECS: a plain top-level model is its own self-owned root component. Infra + facets/links excluded.
 			bool isCommand = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.ISynqraCommand");
 			bool isEventType = classData.Data.AllInterfaces.Any(i =>

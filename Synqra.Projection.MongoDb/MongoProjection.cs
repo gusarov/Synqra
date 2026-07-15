@@ -376,6 +376,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		collection.ReplaceOne(filter, doc, new ReplaceOptions { IsUpsert = true });
 	}
 
+	void DeleteRoot(Guid targetTypeId, Guid id)
+	{
+		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
+		var collection = _database.GetCollection<BsonDocument>(type.Name);
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+		collection.DeleteOne(filter);
+	}
+
 	// ---------------------------------------------------------------- ICommandVisitor
 
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
@@ -635,52 +643,20 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
+		TryGetTracked(ev.TargetId, out var trackedModel);
+		var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
+		ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
+
+		// Durable persistence still forks: a root component is its entity's own document, a facet
+		// lives in the shared Components collection.
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root component property change = the entity's own property change.
-			if (!TryGetTracked(ev.TargetId, out var rootModel))
-			{
-				throw new InvalidOperationException($"Cannot apply a root property change to unknown entity {ev.TargetId}.");
-			}
-			if (rootModel is IBindableModel rbind)
-			{
-				rbind.Set(ev.PropertyName, ev.NewValue);
-			}
-			else
-			{
-				var rpi = rootModel.GetType().GetProperty(ev.PropertyName)
-					?? throw new InvalidOperationException($"Root entity '{rootModel.GetType().Name}' has no property '{ev.PropertyName}'.");
-				var rv = ev.NewValue;
-				if (rv is IConvertible rc) rv = rc.ToType(rpi.PropertyType, CultureInfo.InvariantCulture);
-				rpi.SetValue(rootModel, rv);
-			}
-			Upsert(ev.ComponentTypeId, ev.TargetId, rootModel);
-			MarkApplied(ev.TargetId, ev.EventId);
-			return Task.CompletedTask;
-		}
-
-		var container = ResolveContainer(ev.TargetId);
-		var component = container.ResolveComponent(ev, TypeMetadataProvider);
-
-		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.) fire
-		// naturally. Components that don't implement IBindableModel fall back to reflection.
-		if (component is IBindableModel bindable)
-		{
-			bindable.Set(ev.PropertyName, ev.NewValue);
+			Upsert(ev.ComponentTypeId, ev.TargetId, target);
 		}
 		else
 		{
-			var pi = component.GetType().GetProperty(ev.PropertyName)
-				?? throw new InvalidOperationException($"Component '{component.GetType().Name}' has no property '{ev.PropertyName}'.");
-			var value = ev.NewValue;
-			if (value is IConvertible c)
-			{
-				value = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
-			}
-			pi.SetValue(component, value);
+			UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, (IComponent)target);
 		}
-
-		UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
@@ -689,7 +665,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root entity delete — Phase 4; ObjectDeleted is a no-op today, keep parity.
+			// Root entity single-delete: drop its document + tracking. Cascade of facet components /
+			// incident links is Phase 4.
+			DeleteRoot(ev.ComponentTypeId, ev.TargetId);
+			if (_byId.TryRemove(ev.TargetId, out var rootModel))
+			{
+				_byModel.Remove(rootModel);
+			}
+			MarkApplied(ev.TargetId, ev.EventId);
 			return Task.CompletedTask;
 		}
 

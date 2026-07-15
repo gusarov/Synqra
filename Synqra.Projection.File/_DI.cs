@@ -952,25 +952,9 @@ public static class FileSynqraExtensions
 			}
 			var tm = _typeMetadataProvider.GetTypeMetadata(ev.TargetTypeId);
 			var col = _objectStore.GetCollection(tm.Type, ev.CollectionId);
-			var model = col[ev.TargetId];
-			if (model is IBindableModel bm)
-			{
-				bm.Set(ev.PropertyName, ev.NewValue);
-			}
-			else if (model is not null)
-			{
-				var pi = model.GetType().GetProperty(ev.PropertyName) ?? throw new Exception("Property not found");
-				var value = ev.NewValue;
-				if (ev.NewValue is IConvertible c)
-				{
-					value = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
-				}
-				pi?.SetValue(model, Convert.ChangeType(value, pi.PropertyType));
-			}
-			else
-			{
-				throw new Exception($"Cannot change property of unknown root entity {ev.TargetId}");
-			}
+			var model = col[ev.TargetId]
+				?? throw new Exception($"Cannot change property of unknown root entity {ev.TargetId}");
+			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				ObjectId = ev.TargetId,
@@ -979,7 +963,17 @@ public static class FileSynqraExtensions
 				Blob = model,
 			});
 		}
-		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
+		{
+			if (ev.ComponentId != ev.TargetId)
+			{
+				return Task.CompletedTask; // facet components not implemented by the File projection
+			}
+			// Root single-delete on an append-only store needs tombstone support the Item log doesn't
+			// have yet — fail loud rather than silently drop the delete. (Tracked with Phase 4.)
+			throw new NotSupportedException(
+				$"File projection cannot delete root entity {ev.TargetId}: the append-only Item store has no tombstone mechanism.");
+		}
 		public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 

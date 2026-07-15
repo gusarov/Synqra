@@ -25,6 +25,7 @@ internal abstract class InMemoryStoreCollection : StoreCollection, ISynqraCollec
 	}
 
 	internal abstract void AddByEvent(object item);
+	internal abstract void RemoveByEvent(object item);
 }
 
 internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : InMemoryStoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
@@ -170,6 +171,15 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		}
 		// Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
 		_list.Add(typedItem);
+	}
+
+	internal override void RemoveByEvent(object item)
+	{
+		if (item is not T typedItem)
+		{
+			throw new ArgumentException($"Item must be of type {typeof(T).Name}", nameof(item));
+		}
+		_list.Remove(typedItem);
 	}
 
 	#endregion
