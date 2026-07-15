@@ -5,7 +5,12 @@ ARG BUILD_BUILDNUMBER="0"
 #USER $APP_UID
 #WORKDIR /app
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# Pinned to a specific SDK patch. The floating :10.0 tag moved from 10.0.301 to 10.0.302, and on
+# 10.0.302 `dotnet test` (Microsoft.Testing.Platform) returns exit code 1 *even when every test
+# passes* ("Tests succeeded" then exit 1), failing the `test` stage below for no real reason.
+# 10.0.301 is the last-known-good (green build 12795). Bump deliberately, re-verifying `dotnet test`
+# still exits 0 on success, rather than tracking :10.0 silently.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.301 AS build
 # wasm-tools/emscripten glue scripts expects python3 in PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
