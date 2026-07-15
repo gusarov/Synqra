@@ -46,37 +46,11 @@ public static class SynqraGuids
 
 	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // NEVER CHANGE THAT! Object type namespace. It does not matter, what pattern it follows, it is just a random but fixed input to sha256 v8 guids it produces from type names.
 
-	// (removed) SynqraRootStreamId — there is no default/root stream. A stream id is a first-class,
-	// mandatory value (a security boundary). Multitenant stores read the ambient
-	// SynqraStreamContext.Current (entered per request); single-tenant stores take an explicit stream
-	// id at registration / borrow a projection for an explicit stream from the provider. The reserved
-	// value C0DEADD0-1032-8000-800C-* documented above is retired.
-
-	/*
-	 * Principles behind MasterId:
-	 * - The MasterId is a special identifier that represents the order of entries as was decided by master.
-	 * - It is designed to be unique and immutable, ensuring that the identity and sequence it represents remains constant over time.
-	 * - The MasterId is typically the same LocalId assigned at the creation of the entity and is used throughout its lifecycle, but if master rejects original LocalId due to monotonic violations, the MasterId will be granted by master at the time of acceptance.
-	 * - It is important to avoid reusing or repurposing MasterIds to maintain the integrity of the identity they represent.
-	 * 
-	 * - Internally Master Id brings typical distributed clock information:
-	 * - Term: 32 bits - allows for 4,294,967,296 terms, which is usually sufficient for most applications. Each term represents a period during which a particular master is active.
-	 * - Sequence: 32 bits - allows for 4,294,967,296 sequences within each term. This provides a large range for ordering events or entries within the same term.
-	 * - CollectionId: 64 bits - allows for random assignment of unique collection id and is a game changer in this structure, because MasterId becomes globally unique across all collections in the world.
-	 * This means that entries from different collections can be compared and ordered without any risk of collision.
-	 *
-	 * - TTTTTTTT-SSSS-8SSS-827D-CCCCCCCCCCCC
-	 * - T - Term
-	 * - S - Sequence
-	 * - 8   - variant bits (0b10) + nibble 0x2
-	 * - 27D   - class 0x27D in the CCC scheme — distinguishes MasterIds from C0DE-prefixed custom UUIDs in v8 space.
-	 *          Yes the C0DEyyyy-yyyy prefix is still the preferable approach, but MasterId needs all leading bits for Term/Sequence,
-	 *          so the class bytes 0x27D is how they are recognized instead.
-	 * - C - CollectionId
-	 * 
-	 * 
-	 * - 00000000-0000-8000-827d-xxxxxxxxxxxx is a MasterID that points at zero event. It is reserved and should never be used as a real MasterId. Instead, it is used to identify the Collection, as CollectionId. Same bytes are set in every collection.
-	 * - 00000000-0000-8000
-	 */
-
+	// There is no default/root stream. A stream id is a first-class, mandatory value (a security
+	// boundary): multitenant stores read the ambient SynqraStreamContext.Current (entered per
+	// request); single-tenant stores take an explicit stream id at registration / borrow a
+	// projection for an explicit stream from the provider.
+	//
+	// (Legacy, removed: the reserved root/default-stream UUID and the MasterId term/sequence
+	// ordering scheme — Synqra has no master election or monotonic cluster clock. See docs/model.md.)
 }

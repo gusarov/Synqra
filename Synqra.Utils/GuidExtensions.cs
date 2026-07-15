@@ -19,21 +19,6 @@ using System.Threading.Tasks;
 
 namespace Synqra;
 
-public static class SynqraGuidExtensions
-{
-	public static State Default { get; } = new State();
-
-	public class State
-	{
-		public Guid CreateVersion8_MasterId()
-		{
-			return default;
-		}
-	}
-
-	public static Guid CreateVersion8_MasterId() => Default.CreateVersion8_MasterId();
-}
-
 public static class GuidExtensions
 {
 	/// <summary>
