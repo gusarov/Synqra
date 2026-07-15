@@ -66,16 +66,33 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	void ICollection<T>.Add(T item)
 	{
 		var id = _projection.Attach(item, CollectionId);
-		var task = Store.SubmitCommandAsync(new CreateObjectCommand
-		{
-			StreamId = _projection.StreamId,
-			CollectionId = CollectionId,
-			TargetTypeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
-			CommandId = GuidExtensions.CreateVersion7(),
-			TargetId = id,
-			Data = item,
-			TargetObject = item,
-		});
+		var typeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
+		// Phase 2 (ECS): a plain domain model is created as a self-owned ROOT COMPONENT
+		// (_id == _eid == entityId) via AddComponentCommand, not the retired object lifecycle.
+		global::Synqra.Command create = global::Synqra.Projection.ComponentApplyHelpers.IsRootComponentType(typeof(T))
+			? new global::Synqra.AddComponentCommand
+			{
+				StreamId = _projection.StreamId,
+				CollectionId = CollectionId,
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetTypeId = typeId,
+				TargetId = id,
+				TargetObject = item,
+				ComponentTypeId = typeId,
+				ComponentId = id, // self-owned: component id == entity id
+				Data = item,
+			}
+			: new global::Synqra.CreateObjectCommand
+			{
+				StreamId = _projection.StreamId,
+				CollectionId = CollectionId,
+				TargetTypeId = typeId,
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetId = id,
+				Data = item,
+				TargetObject = item,
+			};
+		var task = Store.SubmitCommandAsync(create);
 		task.GetAwaiter().GetResult();
 	}
 
