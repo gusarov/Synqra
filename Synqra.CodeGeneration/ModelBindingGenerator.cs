@@ -239,7 +239,19 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					.Any(s => s is IPropertySymbol or IFieldSymbol);
 			bool emitComponentsCollection = isContainer && !userDeclaredComponents;
 
-			string commandTypeName        = isComponent ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
+			// Phase 2 (ECS): a plain top-level domain model collapses to a ROOT COMPONENT — its data is
+			// the entity's own component where _id == _eid == entityId. It uses the component-command
+			// vocabulary but is SELF-owned (target/component id = its own store id), so the existing
+			// "object" (!isComponent) branch already gives the right self-targeting. Framework [SynqraModel]
+			// infra (Commands/Events) and facet components/links are excluded — they are not entities.
+			bool isCommand = classData.Data.AllInterfaces.Any(i =>
+				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.ISynqraCommand");
+			bool isEventType = classData.Data.AllInterfaces.Any(i =>
+				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IEvent");
+			bool isRootTypeForComponent = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
+			bool isRootComponent = isRootTypeForComponent && !isComponent && !isCommand && !isEventType;
+
+			string commandTypeName        = (isComponent || isRootComponent) ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
 			string preAttachGuardExtra    = isComponent ? " || __containerId == default" : "";
 			string targetObjectExpr       = isComponent ? "null" : "this";
 			string targetIdExpr           = isComponent ? "__containerId" : "__store.GetId(this)";
@@ -249,6 +261,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				? @",
 					ComponentTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId,
 					ComponentId = (this is global::Synqra.IIdentifiable<global::System.Guid> __idable ? __idable.Id : global::System.Guid.Empty)"
+				: isRootComponent
+				? @",
+					ComponentTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId,
+					ComponentId = __store.GetId(this)"
 				: "";
 			string submissionOptionsArg = isComponent
 				? ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__containerId) }"
