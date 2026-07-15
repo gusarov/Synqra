@@ -474,16 +474,33 @@ public static class FileSynqraExtensions
 			// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
 			var attachedData = _store.Attach(item, this);
-			var task = _store.SubmitCommandAsync(new CreateObjectCommand
-			{
-				StreamId = _store.StreamId,
-				CollectionId = CollectionId,
-				TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
-				CommandId = _store.GuidGenerator.CreateVersion7(), // This is a new object, so we generate a new command Id
-				TargetId = attachedData.Id,
-				Data = item,
-				TargetObject = item,
-			});
+			var typeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
+			// Phase 2 (ECS): a plain domain model is created as a self-owned ROOT COMPONENT
+			// (_id == _eid == entityId) via AddComponentCommand, not the retired object lifecycle.
+			global::Synqra.Command create = global::Synqra.Projection.ComponentApplyHelpers.IsRootComponentType(typeof(T))
+				? new global::Synqra.AddComponentCommand
+				{
+					StreamId = _store.StreamId,
+					CollectionId = CollectionId,
+					CommandId = _store.GuidGenerator.CreateVersion7(),
+					TargetTypeId = typeId,
+					TargetId = attachedData.Id,
+					TargetObject = item,
+					ComponentTypeId = typeId,
+					ComponentId = attachedData.Id, // self-owned: component id == entity id
+					Data = item,
+				}
+				: new global::Synqra.CreateObjectCommand
+				{
+					StreamId = _store.StreamId,
+					CollectionId = CollectionId,
+					TargetTypeId = typeId,
+					CommandId = _store.GuidGenerator.CreateVersion7(),
+					TargetId = attachedData.Id,
+					Data = item,
+					TargetObject = item,
+				};
+			var task = _store.SubmitCommandAsync(create);
 			if (!OperatingSystem.IsBrowser())
 			{
 				task.GetAwaiter().GetResult();
@@ -810,12 +827,59 @@ public static class FileSynqraExtensions
 			return Task.CompletedTask;
 		}
 
-		// Component commands/events — File projection accepts but doesn't yet
-		// implement component state. InMemoryProjection is the reference impl
-		// for components. These stubs satisfy the visitor contract.
-		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		// Component commands. Facet-component state isn't implemented by the File projection
+		// (InMemory is the reference), but a SELF-OWNED ROOT COMPONENT (ComponentId == TargetId)
+		// is the entity's own data (the ECS-collapsed object) and IS handled — see the event
+		// visitors below. Each command still emits its component event so the log is backend-independent.
+		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx)
+		{
+			ctx.Events.Add(new ComponentAddedEvent
+			{
+				StreamId = cmd.StreamId,
+				EventId = GuidExtensions.CreateVersion7(),
+				CollectionId = cmd.CollectionId,
+				CommandId = cmd.CommandId,
+				TargetTypeId = cmd.TargetTypeId,
+				TargetId = cmd.TargetId,
+				ComponentTypeId = cmd.ComponentTypeId,
+				ComponentId = cmd.ComponentId,
+				Data = cmd.Data,
+			});
+			return Task.CompletedTask;
+		}
+		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx)
+		{
+			ctx.Events.Add(new ComponentPropertyChangedEvent
+			{
+				StreamId = cmd.StreamId,
+				EventId = GuidExtensions.CreateVersion7(),
+				CollectionId = cmd.CollectionId,
+				CommandId = cmd.CommandId,
+				TargetTypeId = cmd.TargetTypeId,
+				TargetId = cmd.TargetId,
+				ComponentTypeId = cmd.ComponentTypeId,
+				ComponentId = cmd.ComponentId,
+				PropertyName = cmd.PropertyName,
+				OldValue = cmd.OldValue,
+				NewValue = cmd.NewValue,
+			});
+			return Task.CompletedTask;
+		}
+		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx)
+		{
+			ctx.Events.Add(new ComponentDeletedEvent
+			{
+				StreamId = cmd.StreamId,
+				EventId = GuidExtensions.CreateVersion7(),
+				CollectionId = cmd.CollectionId,
+				CommandId = cmd.CommandId,
+				TargetTypeId = cmd.TargetTypeId,
+				TargetId = cmd.TargetId,
+				ComponentTypeId = cmd.ComponentTypeId,
+				ComponentId = cmd.ComponentId,
+			});
+			return Task.CompletedTask;
+		}
 		public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 
@@ -873,8 +937,60 @@ public static class FileSynqraExtensions
 			throw new NotImplementedException();
 		}
 
-		public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public async Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
+		{
+			if (ev.ComponentId != ev.TargetId)
+			{
+				return; // facet components not implemented by the File projection
+			}
+			// Self-owned ROOT COMPONENT = the ECS-collapsed object; persist its data blob.
+			if (ev.Data == null)
+			{
+				throw new NotImplementedException();
+			}
+			await _appendStores.ItemAppendStorage.AppendAsync(new Item
+			{
+				ObjectId = ev.TargetId,
+				StreamId = ev.StreamId,
+				CollectionId = ev.CollectionId,
+				Blob = ev.Data,
+			});
+		}
+		public async Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
+		{
+			if (ev.ComponentId != ev.TargetId)
+			{
+				return; // facet components not implemented by the File projection
+			}
+			var tm = _typeMetadataProvider.GetTypeMetadata(ev.TargetTypeId);
+			var col = _objectStore.GetCollection(tm.Type, ev.CollectionId);
+			var model = col[ev.TargetId];
+			if (model is IBindableModel bm)
+			{
+				bm.Set(ev.PropertyName, ev.NewValue);
+			}
+			else if (model is not null)
+			{
+				var pi = model.GetType().GetProperty(ev.PropertyName) ?? throw new Exception("Property not found");
+				var value = ev.NewValue;
+				if (ev.NewValue is IConvertible c)
+				{
+					value = c.ToType(pi.PropertyType, CultureInfo.InvariantCulture);
+				}
+				pi?.SetValue(model, Convert.ChangeType(value, pi.PropertyType));
+			}
+			else
+			{
+				throw new Exception($"Cannot change property of unknown root entity {ev.TargetId}");
+			}
+			await _appendStores.ItemAppendStorage.AppendAsync(new Item
+			{
+				ObjectId = ev.TargetId,
+				StreamId = ev.StreamId,
+				CollectionId = ev.CollectionId,
+				Blob = model,
+			});
+		}
 		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;

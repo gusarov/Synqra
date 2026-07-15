@@ -145,10 +145,10 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 
-		model.Name = "Alice"; // generated setter -> ChangeObjectPropertyCommand -> ObjectPropertyChangedEvent -> storage
+		model.Name = "Alice"; // ECS: DemoModel is a root component -> ChangeComponentPropertyCommand -> ComponentPropertyChangedEvent -> storage
 
 		var changes = Events().GetAllAsync().ToBlockingEnumerable()
-			.OfType<ObjectPropertyChangedEvent>()
+			.OfType<ComponentPropertyChangedEvent>()
 			.Where(e => e.TargetId == id && e.PropertyName == nameof(DemoModel.Name))
 			.ToArray();
 

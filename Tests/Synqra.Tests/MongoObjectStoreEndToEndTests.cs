@@ -88,11 +88,11 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 
-		model.Name = "Alice"; // generated setter -> ChangeObjectPropertyCommand -> ObjectPropertyChangedEvent -> Mongo
+		model.Name = "Alice"; // ECS: DemoModel is a root component -> ChangeComponentPropertyCommand -> ComponentPropertyChangedEvent -> Mongo
 
 		// The change really landed in Mongo: read the raw event log back and find it.
 		var changes = Events().GetAllAsync().ToBlockingEnumerable()
-			.OfType<ObjectPropertyChangedEvent>()
+			.OfType<ComponentPropertyChangedEvent>()
 			.Where(e => e.TargetId == id && e.PropertyName == nameof(DemoModel.Name))
 			.ToArray();
 
