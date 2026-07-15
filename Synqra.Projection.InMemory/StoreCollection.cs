@@ -132,32 +132,20 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 
 		var attachedData = Store.Attach(item, this);
 		var typeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
-		// Phase 2 (ECS): a plain domain model is created as a self-owned ROOT COMPONENT
-		// (_id == _eid == entityId) via AddComponentCommand, not the retired object lifecycle.
-		global::Synqra.Command create = global::Synqra.Projection.ComponentApplyHelpers.IsRootComponentType(typeof(T))
-			? new global::Synqra.AddComponentCommand
-			{
-				StreamId = StreamId,
-				CollectionId = CollectionId,
-				CommandId = GuidExtensions.CreateVersion7(),
-				TargetTypeId = typeId,
-				TargetId = attachedData.Id,
-				TargetObject = item,
-				ComponentTypeId = typeId,
-				ComponentId = attachedData.Id, // self-owned: component id == entity id
-				Data = item,
-			}
-			: new global::Synqra.CreateObjectCommand
-			{
-				StreamId = StreamId,
-				CollectionId = CollectionId,
-				TargetTypeId = typeId,
-				CommandId = GuidExtensions.CreateVersion7(),
-				TargetId = attachedData.Id,
-				Data = item,
-				TargetObject = item,
-			};
-		var task = Store.SubmitCommandAsync(create);
+		// Phase 2 (ECS): GetCollection<T>().Add always creates an ENTITY — a self-owned root component
+		// (ComponentId == TargetId == entity id, _id == _eid == entityId). No object-vs-component branch.
+		var task = Store.SubmitCommandAsync(new global::Synqra.AddComponentCommand
+		{
+			StreamId = StreamId,
+			CollectionId = CollectionId,
+			CommandId = GuidExtensions.CreateVersion7(),
+			TargetTypeId = typeId,
+			TargetId = attachedData.Id,
+			TargetObject = item,
+			ComponentTypeId = typeId,
+			ComponentId = attachedData.Id,
+			Data = item,
+		});
 		if (OperatingSystem.IsBrowser())
 		{
 			AsyncInvoker.InvokeAsync(task);
