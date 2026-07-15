@@ -1164,7 +1164,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
+		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
 		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.)
 		// fire naturally. Components that don't implement IBindableModel fall back to
@@ -1196,7 +1196,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
+		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
 		// BypassRemove rather than Remove: when the container is wrapped in
 		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a

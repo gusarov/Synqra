@@ -29,7 +29,7 @@ public static class ComponentApplyHelpers
 	/// uniqueness is a max-cardinality constraint, not identity suppression — so a component is always
 	/// addressed strictly by <see cref="ComponentId"/> (walk the list, match by identity).
 	/// </summary>
-	public static IComponent ResolveComponent(IComponentContainer container, SingleObjectEvent ev, ITypeMetadataProvider typeMetadataProvider)
+	public static IComponent ResolveComponent(this IComponentContainer container, SingleObjectEvent ev, ITypeMetadataProvider typeMetadataProvider)
 	{
 		var componentType = typeMetadataProvider.GetTypeMetadata(GetComponentTypeId(ev)).Type;
 		var componentId = GetComponentId(ev);
