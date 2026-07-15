@@ -48,12 +48,12 @@ namespace Synqra.Tests.SampleModels;
 
 [JsonSerializable(typeof(Synqra.Event))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
-[JsonSerializable(typeof(Synqra.ObjectCreatedEvent))]
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
+[JsonSerializable(typeof(Synqra.ComponentAddedEvent))]
 
 [JsonSerializable(typeof(Synqra.Command))]
-[JsonSerializable(typeof(Synqra.CreateObjectCommand))]
 [JsonSerializable(typeof(Synqra.ChangeObjectPropertyCommand))]
+[JsonSerializable(typeof(Synqra.AddComponentCommand))]
 
 [JsonSerializable(typeof(Guid))]
 [JsonSerializable(typeof((Guid, Guid)))]

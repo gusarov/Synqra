@@ -151,7 +151,6 @@ public class LinksTests
 		services.AddLogging();
 		services.AddTypeMetadataProvider(
 			typeof(Command),
-			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
 			typeof(TestGraphNode),
 			typeof(HierarchyLink),

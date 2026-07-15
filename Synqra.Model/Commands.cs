@@ -10,7 +10,6 @@ namespace Synqra;
 [JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = "_t", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
 [JsonDerivedType(typeof(ChangeObjectPropertyCommand), "ChangeObjectPropertyCommand")]
 [JsonDerivedType(typeof(DeleteObjectCommand), "DeleteObjectCommand")]
-[JsonDerivedType(typeof(CreateObjectCommand), "CreateObjectCommand")]
 [JsonDerivedType(typeof(AddComponentCommand), "AddComponentCommand")]
 [JsonDerivedType(typeof(ChangeComponentPropertyCommand), "ChangeComponentPropertyCommand")]
 [JsonDerivedType(typeof(DeleteComponentCommand), "DeleteComponentCommand")]
@@ -74,25 +73,6 @@ public abstract partial class SingleObjectCommand : Command
 
 	[JsonIgnore]
 	public object? TargetObject { get; set; }
-}
-
-[SynqraModel]
-[Schema(2025.791, "1 Data IDictionary<string, object?>? DataJson string? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]
-[Schema(2025.792, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
-[Schema(2025.793, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
-[Schema(2025.794, "1 Data IDictionary<string, object?>? DataJson string? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
-[Schema(2025.795, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
-[Schema(2025.796, "1 Data IDictionary<string, object?>? DataJson string? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
-[Schema(2025.797, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IDictionary<string, object?>?")]
-[Schema(2025.798, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
-[Schema(2025.799, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data IBindableModel")]
-[Schema(2025.800, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
-[Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid Data object")]
-public partial class CreateObjectCommand : SingleObjectCommand
-{
-	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
-
-	public partial object Data { get; set; }
 }
 
 [SynqraModel]

@@ -5,7 +5,6 @@ public interface IEventVisitor<in T>
 	Task BeforeVisitAsync(Event ev, T ctx);
 	Task AfterVisitAsync(Event ev, T ctx);
 
-	Task VisitAsync(ObjectCreatedEvent ev, T ctx);
 	Task VisitAsync(ObjectPropertyChangedEvent ev, T ctx);
 	Task VisitAsync(ObjectDeletedEvent ev, T ctx);
 	Task VisitAsync(CommandCreatedEvent ev, T ctx);

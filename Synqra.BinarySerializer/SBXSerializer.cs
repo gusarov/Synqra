@@ -233,8 +233,7 @@ public class SbxSerializer : ISbxSerializer
 		Map(-57, typeof(Event));
 		Map(-58, typeof(ObjectPropertyChangedEvent));
 		Map(-59, typeof(ChangeObjectPropertyCommand));
-		Map(-60, typeof(CreateObjectCommand));
-		Map(-61, typeof(ObjectCreatedEvent));
+		// -60 (CreateObjectCommand) / -61 (ObjectCreatedEvent) retired — objects collapsed into root components.
 		Map(-62, typeof(NewEvent1));
 		Map(-63, typeof(TransportOperation));
 		// Map(-64, typeof(RESERVED)); // THIS IS LOWEST 1 BYTE VARINT

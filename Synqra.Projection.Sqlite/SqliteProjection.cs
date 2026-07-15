@@ -328,10 +328,6 @@ public class SqliteProjection : IProjection
 	{
 	}
 
-	public async Task VisitAsync(CreateObjectCommand cmd, CommandHandlerContext ctx)
-	{
-	}
-
 	public async Task VisitAsync(DeleteObjectCommand cmd, CommandHandlerContext ctx)
 	{
 	}
@@ -371,10 +367,6 @@ public class SqliteProjection : IProjection
 	}
 
 	public async Task AfterVisitAsync(Event ev, EventVisitorContext ctx)
-	{
-	}
-
-	public async Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
 	{
 	}
 

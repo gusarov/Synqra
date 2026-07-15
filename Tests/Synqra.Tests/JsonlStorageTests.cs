@@ -107,7 +107,7 @@ public abstract class AppendStorageTests : BaseTest
 		hostApplicationBuilder.Services.AddSbxSerializer(ser =>
 		{
 			ser.Map(100, typeof(Event));
-			ser.Map(101, typeof(ObjectCreatedEvent));
+			ser.Map(101, typeof(ComponentAddedEvent));
 			ser.Map(102, typeof(StorableModel));
 			ser.Map(99, 3000.0, typeof(Item));
 		});
@@ -146,7 +146,7 @@ public abstract class AppendStorageTests : BaseTest
 	{
 		var storage = Get<Event>();
 		var key = Guid.NewGuid();
-		var item = new ObjectCreatedEvent
+		var item = new ComponentAddedEvent
 		{
 			CollectionId = Guid.NewGuid(),
 			CommandId = Guid.NewGuid(),
@@ -177,7 +177,7 @@ public abstract class AppendStorageTests : BaseTest
 		var guidSpace = new GuidExtensions.Generator();
 
 		var key1 = guidSpace.CreateVersion7();
-		var item1 = new ObjectCreatedEvent
+		var item1 = new ComponentAddedEvent
 		{
 			CollectionId = new Guid("00000001-0001-8000-8000-c0de11dae333"),
 			CommandId = new Guid("00000001-0002-8000-8000-c0de11dae333"),
@@ -188,7 +188,7 @@ public abstract class AppendStorageTests : BaseTest
 		await storage.AppendAsync(item1);
 
 		var key2 = guidSpace.CreateVersion7();
-		var item2 = new ObjectCreatedEvent
+		var item2 = new ComponentAddedEvent
 		{
 			CollectionId = new Guid("00000002-0001-8000-8000-c0de11dae333"),
 			CommandId = new Guid("00000002-0002-8000-8000-c0de11dae333"),
@@ -244,7 +244,7 @@ public abstract class AppendStorageTests : BaseTest
 	{
 		var storage = Get<Event, Guid>();
 
-		var ev = new ObjectCreatedEvent
+		var ev = new ComponentAddedEvent
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
@@ -277,7 +277,7 @@ public abstract class AppendStorageTests : BaseTest
 	{
 		var storage = Get<Event>();
 
-		var ev = new ObjectCreatedEvent
+		var ev = new ComponentAddedEvent
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
@@ -292,7 +292,7 @@ public abstract class AppendStorageTests : BaseTest
 		};
 		await storage.AppendAsync(ev);
 
-		var ev2 = new ObjectCreatedEvent
+		var ev2 = new ComponentAddedEvent
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
@@ -587,7 +587,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	public async Task Should_store_polimorfic_as_jsonl()
 	{
 		var eventId = new Guid("C0DEADD0-1032-8000-800C-000000000000");
-		await _storage.AppendAsync(new ObjectCreatedEvent
+		await _storage.AppendAsync(new ComponentAddedEvent
 		{
 			CollectionId = default,
 			CommandId = default,
@@ -599,7 +599,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		(_storage as IDisposable)?.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo($$"""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{{eventId.ToString("N")}}§{"_t":"ObjectCreatedEvent","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{eventId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
+{{eventId.ToString("N")}}§{"_t":"ComponentAddedEvent","ComponentTypeId":"00000000-0000-0000-0000-000000000000","ComponentId":"00000000-0000-0000-0000-000000000000","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{eventId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
 
 """.NormalizeNewLines());
 	}

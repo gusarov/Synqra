@@ -790,7 +790,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 			{
 				CommandId = default,
 				EventId = default,
-				Data = new CreateObjectCommand
+				Data = new AddComponentCommand
 				{
 					CommandId = default,
 					StreamId = default,
@@ -812,7 +812,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 					},
 				},
 			},
-		}, "7B6D00007700000000001E5461736B310002"));
+		}, "7B6D00008101000000000000001E5461736B310002"));
 
 		yield return () => SP(() => (71, new NewEvent1
 		{
@@ -829,7 +829,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 				//  CollectionId Guid
 				//  TargetId Guid
 				//  Data object
-				Data = new CreateObjectCommand
+				Data = new AddComponentCommand
 				{
 					CommandId = new Guid("0199eeb4-33dc-78b2-b1c5-ab90b83b0002"),
 					StreamId = default,
@@ -851,7 +851,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 					},
 				},
 			},
-		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B00027704DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D1E5461736B310002"));
+		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B0002810104DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D00001E5461736B310002"));
 
 		yield return () => SP(() => (72, new NewEvent1
 		{
@@ -1356,7 +1356,7 @@ public class BinarySerializationTests : SbxBaseTest
 		var ser = new SbxSerializer();
 		var data = new NewEvent1
 		{
-			Event = new ObjectCreatedEvent
+			Event = new ComponentAddedEvent
 			{
 				EventId = default,
 				CommandId = default,
@@ -1367,7 +1367,7 @@ public class BinarySerializationTests : SbxBaseTest
 		};
 		ser.Map(1, 2025.785, typeof(TransportOperation));
 		ser.Map(2, 2025.785, typeof(NewEvent1));
-		ser.Map(3, 2025.805, typeof(ObjectCreatedEvent));
+		ser.Map(3, 2026.405, typeof(ComponentAddedEvent));
 
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
@@ -1380,8 +1380,8 @@ public class BinarySerializationTests : SbxBaseTest
 		HexDump(buffer);
 		pos = 0;
 		var de = (NewEvent1)ser.Deserialize<TransportOperation>(in rbuffer, ref pos);
-		var te = (ObjectCreatedEvent)de.Event;
-		var te2 = (ObjectCreatedEvent)data.Event;
+		var te = (ComponentAddedEvent)de.Event;
+		var te2 = (ComponentAddedEvent)data.Event;
 		Assert.That(te.EventId).IsEqualTo(te2.EventId).GetAwaiter().GetResult();
 		Assert.That(te.CommandId).IsEqualTo(te2.CommandId).GetAwaiter().GetResult();
 		Assert.That(te.TargetId).IsEqualTo(te2.TargetId).GetAwaiter().GetResult();

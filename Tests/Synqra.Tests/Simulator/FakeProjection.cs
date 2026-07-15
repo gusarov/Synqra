@@ -15,7 +15,6 @@ internal sealed class FakeProjection : IProjection
 	// IEventVisitor<EventVisitorContext>
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
@@ -28,7 +27,6 @@ internal sealed class FakeProjection : IProjection
 	// ICommandVisitor<CommandHandlerContext>
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(CreateObjectCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(DeleteObjectCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;

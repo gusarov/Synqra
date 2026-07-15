@@ -81,7 +81,6 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		[
 			typeof(DemoModel),
 			typeof(Command),
-			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
 			typeof(TestGraphNode),
 			typeof(HierarchyLink),
@@ -493,7 +492,6 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		hostBuilder.Services.AddTypeMetadataProvider(
 		[
 			typeof(Command),
-			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
 			typeof(AddComponentCommand),
 			typeof(ChangeComponentPropertyCommand),

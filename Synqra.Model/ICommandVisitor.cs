@@ -5,7 +5,6 @@ public interface ICommandVisitor<T>
 	Task BeforeVisitAsync(Command cmd, T ctx);
 	Task AfterVisitAsync(Command cmd, T ctx);
 
-	Task VisitAsync(CreateObjectCommand cmd, T ctx);
 	Task VisitAsync(DeleteObjectCommand cmd, T ctx);
 	Task VisitAsync(ChangeObjectPropertyCommand cmd, T ctx);
 

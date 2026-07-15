@@ -115,7 +115,6 @@ public static class MongoEventClassMaps
 				});
 			}
 
-			RegisterDerived<ObjectCreatedEvent>("ObjectCreatedEvent");
 			RegisterDerived<ObjectPropertyChangedEvent>("ObjectPropertyChangedEvent");
 			RegisterDerived<ObjectDeletedEvent>("ObjectDeletedEvent");
 			RegisterDerived<CommandCreatedEvent>("CommandCreatedEvent");
