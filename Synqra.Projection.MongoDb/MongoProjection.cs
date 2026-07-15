@@ -623,7 +623,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
+		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
 		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.) fire
 		// naturally. Components that don't implement IBindableModel fall back to reflection.
@@ -651,7 +651,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
 		var container = ResolveContainer(ev.TargetId);
-		var component = ComponentApplyHelpers.ResolveComponent(container, ev, TypeMetadataProvider);
+		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
 		// BypassRemove rather than Remove: when the container is wrapped in
 		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
