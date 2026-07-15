@@ -3,11 +3,6 @@ using System.Text.Json.Serialization;
 namespace Synqra;
 
 [JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = "_t", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
-// [KnownType(typeof(ObjectCreatedEvent))]
-// [KnownType(typeof(ObjectPropertyChangedEvent))]
-// [JsonSerializable(typeof(ObjectCreatedEvent))]
-// [JsonSerializable(typeof(ObjectPropertyChangedEvent))]
-[JsonDerivedType(typeof(ObjectCreatedEvent), "ObjectCreatedEvent")]
 [JsonDerivedType(typeof(ObjectPropertyChangedEvent), "ObjectPropertyChangedEvent")]
 [JsonDerivedType(typeof(ObjectDeletedEvent), "ObjectDeletedEvent")]
 [JsonDerivedType(typeof(CommandCreatedEvent), "CommandCreatedEvent")]

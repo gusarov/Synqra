@@ -815,7 +815,6 @@ public abstract class TestsStateManagement : BaseTest
 			typeof(SampleTaskModel),
 			typeof(MyPocoTask),
 			typeof(Command),
-			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
 			typeof(AddComponentCommand),
 			typeof(ChangeComponentPropertyCommand),
@@ -830,7 +829,6 @@ public abstract class TestsStateManagement : BaseTest
 
 		var q0 = new DemoModel(); // must register polimorfic before serializaiton
 		var q1 = new Item(); // must register polimorfic before serializaiton
-		var q2 = new CreateObjectCommand(); // must register polimorfic before serializaiton
 		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();

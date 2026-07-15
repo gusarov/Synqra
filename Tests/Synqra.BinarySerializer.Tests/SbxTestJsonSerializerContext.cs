@@ -47,9 +47,9 @@ namespace Synqra.BinarySerializer.Tests;
 [JsonSerializable(typeof(Synqra.TransportOperation))]
 [JsonSerializable(typeof(Synqra.NewEvent1))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
-[JsonSerializable(typeof(Synqra.ObjectCreatedEvent))]
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
-[JsonSerializable(typeof(Synqra.CreateObjectCommand))]
+[JsonSerializable(typeof(Synqra.ComponentAddedEvent))]
+[JsonSerializable(typeof(Synqra.AddComponentCommand))]
 [JsonSerializable(typeof(Synqra.Command))]
 [JsonSerializable(typeof(Synqra.Event))]
 

@@ -76,14 +76,8 @@ public class JsonSerializationTests
 			CommandId = Guid.NewGuid(),
 			StreamId = Guid.NewGuid(),
 			EventId = Guid.NewGuid(),
-			Data = new CreateObjectCommand
+			Data = new AddComponentCommand
 			{
-				/*
-				Data = new Dictionary<string, object>
-				{
-					["subject"] = "Test1",
-				},
-				*/
 				Data = new SampleTaskModel
 				{
 					Subject = subject,
@@ -99,7 +93,9 @@ public class JsonSerializationTests
 			{
 				"_t": "CommandCreatedEvent",
 				"Data": {
-					"_t": "CreateObjectCommand",
+					"_t": "AddComponentCommand",
+					"ComponentTypeId": "00000000-0000-0000-0000-000000000000",
+					"ComponentId": "00000000-0000-0000-0000-000000000000",
 					"Data": {
 						"_t": "SampleTaskModel",
 						"Subject": "{{subject}}",
@@ -120,7 +116,7 @@ public class JsonSerializationTests
 			await Assert.That(deserializedObj.CommandId).IsEqualTo(obj.CommandId);
 			var createdEvent = (CommandCreatedEvent)deserializedObj;
 			await Assert.That(createdEvent.Data).IsNotNull();
-			var createCommand = (CreateObjectCommand)createdEvent.Data;
+			var createCommand = (AddComponentCommand)createdEvent.Data;
 			await Assert.That(createCommand.Data).IsNotNull();
 			var taskModel = (SampleTaskModel)createCommand.Data;
 			await Assert.That(taskModel.Subject).IsEqualTo(subject);
@@ -152,14 +148,8 @@ public class JsonSerializationTests
 			CommandId = Guid.NewGuid(),
 			StreamId = Guid.NewGuid(),
 			EventId = Guid.NewGuid(),
-			Data = new CreateObjectCommand
+			Data = new AddComponentCommand
 			{
-				/*
-				Data = new Dictionary<string, object>
-				{
-					["subject"] = "Test1",
-				},
-				*/
 				Data = new SampleTaskModel
 				{
 					Subject = "Test1",
@@ -189,7 +179,9 @@ public class JsonSerializationTests
 		"Event": {
 			"_t": "CommandCreatedEvent",
 			"Data": {
-				"_t": "CreateObjectCommand",
+				"_t": "AddComponentCommand",
+				"ComponentTypeId": "00000000-0000-0000-0000-000000000000",
+				"ComponentId": "00000000-0000-0000-0000-000000000000",
 				"Data": {
 					"_t": "SampleTaskModel",
 					"Subject": "Test1",

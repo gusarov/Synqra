@@ -62,37 +62,12 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
-	public async Task Should_not_persist_JsonIgnored_DataObject_of_ObjectCreatedEvent()
-	{
-		// DataObject is the in-memory materialized object, marked [JsonIgnore]; it must not
-		// be written to the durable log (mirrors the JSON-lines log).
-		var ev = new ObjectCreatedEvent
-		{
-			EventId = Guid.Parse("00000020-0008-8000-8000-0000000000b8"),
-			CommandId = Guid.Parse("00000020-0009-8000-8000-0000000000b9"),
-			TargetId = Guid.Parse("00000020-000a-8000-8000-0000000000ba"),
-			TargetTypeId = Guid.Parse("00000020-000b-8000-8000-0000000000bb"),
-			CollectionId = Guid.Parse("00000020-000c-8000-8000-0000000000bc"),
-			DataObject = new { Anything = "should not be persisted" },
-		};
-
-		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
-		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("ObjectCreatedEvent");
-		await Assert.That(doc.Contains("DataObject")).IsFalse();
-
-		var back = (ObjectCreatedEvent)BsonSerializer.Deserialize<Event>(doc);
-		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
-		await Assert.That(back.TargetId).IsEqualTo(ev.TargetId);
-	}
-
-	[Test]
 	public async Task Should_not_write_a_null_field_at_all()
 	{
-		// Data is a plain (non-JsonIgnore'd) property, never populated by the current
-		// command-handling path for ObjectCreatedEvent — it's null on every real event of this
-		// kind. Without the global IgnoreIfNullConvention, the document would still carry an
-		// explicit "Data": null for every single event, just to record the absence of a value.
-		var ev = new ObjectCreatedEvent
+		// Data is a plain (non-JsonIgnore'd) property; when null it must not be written as an
+		// explicit "Data": null. Without the global IgnoreIfNullConvention, the document would
+		// still carry it for every single event, just to record the absence of a value.
+		var ev = new ComponentAddedEvent
 		{
 			EventId = Guid.Parse("00000020-000e-8000-8000-0000000000be"),
 			CommandId = Guid.Parse("00000020-000f-8000-8000-0000000000bf"),
@@ -105,7 +80,7 @@ public class MongoEventClassMapsTests
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
 		await Assert.That(doc.Contains("Data")).IsFalse();
 
-		var back = (ObjectCreatedEvent)BsonSerializer.Deserialize<Event>(doc);
+		var back = (ComponentAddedEvent)BsonSerializer.Deserialize<Event>(doc);
 		await Assert.That(back.Data).IsNull();
 	}
 

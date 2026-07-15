@@ -11,7 +11,7 @@ namespace Synqra.Tests.CompiledModels
     public partial class TestExtendedSqliteDatabaseContextModel
     {
         private TestExtendedSqliteDatabaseContextModel()
-            : base(skipDetectChanges: false, modelId: new Guid("1a960508-37a3-4972-ae7b-8699e9ad90ec"), entityTypeCount: 3)
+            : base(skipDetectChanges: false, modelId: new Guid("1a960508-37a3-4972-ae7b-8699e9ad90ec"), entityTypeCount: 2)
         {
         }
 
@@ -19,11 +19,9 @@ namespace Synqra.Tests.CompiledModels
         {
             var command = CommandEntityType.Create(this);
             var myPocoTask = MyPocoTaskEntityType.Create(this);
-            var createObjectCommand = CreateObjectCommandEntityType.Create(this, command);
 
             CommandEntityType.CreateAnnotations(command);
             MyPocoTaskEntityType.CreateAnnotations(myPocoTask);
-            CreateObjectCommandEntityType.CreateAnnotations(createObjectCommand);
 
             AddAnnotation("ProductVersion", "10.0.3");
         }

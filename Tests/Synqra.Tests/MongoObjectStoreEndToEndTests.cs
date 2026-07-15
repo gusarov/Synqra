@@ -44,7 +44,6 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		[
 			typeof(DemoModel),
 			typeof(Command),
-			typeof(CreateObjectCommand),
 			typeof(ChangeObjectPropertyCommand),
 		]);
 		hostApplicationBuilder.Services.AddSbxSerializer(ser =>

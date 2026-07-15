@@ -389,44 +389,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 
-	public Task VisitAsync(CreateObjectCommand cmd, CommandHandlerContext ctx)
-	{
-		ctx.Events.Add(new ObjectCreatedEvent
-		{
-			StreamId = cmd.StreamId,
-			EventId = GuidExtensions.CreateVersion7(),
-			CollectionId = cmd.CollectionId,
-			CommandId = cmd.CommandId,
-			TargetTypeId = cmd.TargetTypeId,
-			TargetId = cmd.TargetId,
-			DataObject = cmd.TargetObject,
-		});
-
-		// Seed each non-default property as a change event so the materialized document carries the
-		// initial values (and a fresh projection can rebuild them by replay if the doc is ever dropped).
-		foreach (var pi in cmd.Data.GetType().GetProperties().Where(p => p.CanRead && p.CanWrite))
-		{
-			var value = pi.GetValue(cmd.Data);
-			if (value is null || Equals(value, pi.PropertyType.GetDefault()))
-			{
-				continue;
-			}
-			ctx.Events.Add(new ObjectPropertyChangedEvent
-			{
-				StreamId = cmd.StreamId,
-				CommandId = cmd.CommandId,
-				CollectionId = cmd.CollectionId,
-				EventId = GuidExtensions.CreateVersion7(),
-				TargetTypeId = cmd.TargetTypeId,
-				TargetId = cmd.TargetId,
-				PropertyName = pi.Name,
-				OldValue = null,
-				NewValue = value,
-			});
-		}
-		return Task.CompletedTask;
-	}
-
 	public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx)
 	{
 		ctx.Events.Add(new ObjectPropertyChangedEvent
@@ -535,29 +497,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
-
-	public Task VisitAsync(ObjectCreatedEvent ev, EventVisitorContext ctx)
-	{
-		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		object model;
-		if (ev.DataObject is not null)
-		{
-			model = ev.DataObject;
-		}
-		else if (TryGetTracked(ev.TargetId, out var tracked))
-		{
-			model = tracked;
-		}
-		else
-		{
-			model = Activator.CreateInstance(type)!;
-		}
-
-		AttachWithId(model, ev.TargetId, ev.CollectionId);
-		Upsert(ev.TargetTypeId, ev.TargetId, model);
-		MarkApplied(ev.TargetId, ev.EventId);
-		return Task.CompletedTask;
-	}
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
