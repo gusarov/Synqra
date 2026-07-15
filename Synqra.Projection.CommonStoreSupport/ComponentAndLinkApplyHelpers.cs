@@ -70,47 +70,49 @@ public static class ComponentApplyHelpers
 	/// </summary>
 	public static IComponent MaterializeComponent(Type componentType, object? data, Guid componentId)
 	{
-		var component = MaterializeComponentCore(componentType, data);
-		if (component is IBindableComponent bindable && componentId != Guid.Empty)
-		{
-			bindable.SetComponentId(componentId);
-		}
-		return component;
-	}
-
-	static IComponent MaterializeComponentCore(Type componentType, object? data)
-	{
+		IComponent component;
 		if (data is IComponent ready && componentType.IsInstanceOfType(ready))
 		{
-			return ready;
+			// Live instance emitted locally — already carries the right id.
+			component = ready;
 		}
-
-		var instance = Activator.CreateInstance(componentType)
-			?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
-		var component = (IComponent)instance;
-
-		// Hydrate from dictionary via the bindable-model set path when the component is a
-		// SynqraModel; fall back to reflection otherwise.
-		if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
+		else
 		{
-			foreach (var (key, value) in bag)
+			var instance = Activator.CreateInstance(componentType)
+				?? throw new InvalidOperationException($"Could not instantiate component '{componentType.Name}'.");
+			component = (IComponent)instance;
+
+			// Hydrate from dictionary via the bindable-model set path when the component is a
+			// SynqraModel; fall back to reflection otherwise.
+			if (data is IDictionary<string, object?> bag && component is IBindableModel bindable)
 			{
-				bindable.Set(key, value);
-			}
-		}
-		else if (data is IDictionary<string, object?> reflectBag)
-		{
-			foreach (var (key, value) in reflectBag)
-			{
-				var pi = componentType.GetProperty(key);
-				if (pi is null) continue;
-				var v = value;
-				if (v is IConvertible c)
+				foreach (var (key, value) in bag)
 				{
-					v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+					bindable.Set(key, value);
 				}
-				pi.SetValue(component, v);
 			}
+			else if (data is IDictionary<string, object?> reflectBag)
+			{
+				foreach (var (key, value) in reflectBag)
+				{
+					var pi = componentType.GetProperty(key);
+					if (pi is null) continue;
+					var v = value;
+					if (v is IConvertible c)
+					{
+						v = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+					}
+					pi.SetValue(component, v);
+				}
+			}
+		}
+
+		// Single exit: every construction path funnels through this one id-stamp, so a rehydrated
+		// instance always keeps its persisted id (over the fresh v7 its constructor auto-assigns) —
+		// there is no way to materialize a component here and skip it.
+		if (component is IBindableComponent bindableComponent && componentId != Guid.Empty)
+		{
+			bindableComponent.SetComponentId(componentId);
 		}
 		return component;
 	}
