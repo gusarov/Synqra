@@ -270,20 +270,23 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var c = new TestUniqueComponent { Subject = "before" };
+		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = cId,
 			Data = c,
 		});
 
-		// Unique components are addressed by type alone; ComponentId stays empty.
+		// Every component — unique ones too — is addressed by its own ComponentId.
 		await _sut.SubmitCommandAsync(new ChangeComponentPropertyCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = cId,
 			PropertyName = nameof(c.Subject),
 			OldValue = "before",
 			NewValue = "after",
@@ -345,12 +348,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var node = new TestComponentNode { Name = "n5" };
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
+		var doomed = new TestUniqueComponent { Subject = "doomed" };
+		var doomedId = ((IIdentifiable<Guid>)doomed).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = new TestUniqueComponent { Subject = "doomed" },
+			ComponentId = doomedId,
+			Data = doomed,
 		});
 		await Assert.That(node.Components.Count).IsEqualTo(1);
 
@@ -359,6 +365,7 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = doomedId,
 		});
 
 		await Assert.That(node.Components.Count).IsEqualTo(0);
@@ -373,12 +380,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var nodeId = _sut.GetId(node);
 
 		var beforeAdd = _sut.GetLastEventId(nodeId);
+		var c = new TestUniqueComponent { Subject = "x" };
+		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			Data = new TestUniqueComponent { Subject = "x" },
+			ComponentId = cId,
+			Data = c,
 		});
 		var afterAdd = _sut.GetLastEventId(nodeId);
 		await Assert.That(afterAdd).IsNotEqualTo(beforeAdd);
@@ -389,6 +399,7 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = cId,
 			PropertyName = nameof(TestUniqueComponent.Subject),
 			OldValue = "x",
 			NewValue = "y",
@@ -401,6 +412,7 @@ public class TestsStateManageementInMemory : TestsStateManagement
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = cId,
 		});
 		var afterDelete = _sut.GetLastEventId(nodeId);
 		await Assert.That(afterDelete).IsNotEqualTo(afterChange);
@@ -451,11 +463,13 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var c = new TestUniqueComponent { Subject = "v1" };
+		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
+			ComponentId = cId,
 			Data = c,
 		});
 		await Assert.That(c.Subject).IsEqualTo("v1");
@@ -473,8 +487,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		await Assert.That(emitted.OldValue).IsEqualTo("v1");
 		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
 		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestUniqueComponent>());
-		// Unique component: ComponentId stays Guid.Empty; resolver uses ComponentTypeId only.
-		await Assert.That(emitted.ComponentId).IsEqualTo(Guid.Empty);
+		// Unique component still has its own first-class id; the setter fills ComponentId from IIdentifiable<Guid>.Id.
+		await Assert.That(emitted.ComponentId).IsEqualTo(cId);
 		await Assert.That(c.Subject).IsEqualTo("v2");
 	}
 
@@ -560,7 +574,8 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		var emitted = acs.Last();
 		await Assert.That(emitted.TargetId).IsEqualTo(_sut.GetId(node));
 		await Assert.That(emitted.ComponentTypeId).IsEqualTo(TypeIdOf<TestUniqueComponent>());
-		await Assert.That(emitted.ComponentId).IsEqualTo(Guid.Empty);
+		// Unique component still carries its own first-class id (uniqueness is not identity suppression).
+		await Assert.That(emitted.ComponentId).IsEqualTo(((IIdentifiable<Guid>)c).Id);
 
 		var attached = node.Components.GetUniqueComponent(typeof(TestUniqueComponent));
 		await Assert.That(attached).IsSameReferenceAs(c);
