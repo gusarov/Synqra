@@ -583,6 +583,19 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Phase 2 (ECS): self-owned ROOT COMPONENT = the entity's own data (_id == _eid == entityId).
+			// Track + persist it via the object path (kept in its per-type Mongo collection for now — the
+			// physical collection-merge into Components is a later step).
+			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
+			AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
+			Upsert(ev.ComponentTypeId, ev.TargetId, rootModel);
+			MarkApplied(ev.TargetId, ev.EventId);
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
@@ -622,6 +635,30 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Root component property change = the entity's own property change.
+			if (!TryGetTracked(ev.TargetId, out var rootModel))
+			{
+				throw new InvalidOperationException($"Cannot apply a root property change to unknown entity {ev.TargetId}.");
+			}
+			if (rootModel is IBindableModel rbind)
+			{
+				rbind.Set(ev.PropertyName, ev.NewValue);
+			}
+			else
+			{
+				var rpi = rootModel.GetType().GetProperty(ev.PropertyName)
+					?? throw new InvalidOperationException($"Root entity '{rootModel.GetType().Name}' has no property '{ev.PropertyName}'.");
+				var rv = ev.NewValue;
+				if (rv is IConvertible rc) rv = rc.ToType(rpi.PropertyType, CultureInfo.InvariantCulture);
+				rpi.SetValue(rootModel, rv);
+			}
+			Upsert(ev.ComponentTypeId, ev.TargetId, rootModel);
+			MarkApplied(ev.TargetId, ev.EventId);
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
@@ -650,6 +687,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Root entity delete — Phase 4; ObjectDeleted is a no-op today, keep parity.
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
