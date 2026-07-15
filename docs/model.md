@@ -35,7 +35,9 @@ mutation, replication, and navigation.
 - **Unified id space.** Entities and components share one `Guid` id space (v7 for data). A
   reference is *just a `Guid`*; it can address an entity or a component without a discriminator.
 - **Root / existence component.** Each entity's primary data lives in a **root component** with
-  the invariant **`_id == _oid == entityId`** (`_oid` = owner-entity id). The root component *is*
+  the invariant **`_id == _eid == entityId`** (`_eid` = the owning entity id; named `_eid` — not
+  `_oid` — because "OID" collides with the object identifier of the security/X.509 RFCs, and
+  "entity" is the ECS term). The root component *is*
   the entity's existence: an entity exists iff its root component is present.
 - **Component id.** Every component has a first-class `_id` — including unique ones. **Uniqueness
   is a max-cardinality constraint, not an identity-suppressor** (a component can be "at most one
@@ -49,7 +51,7 @@ mutation, replication, and navigation.
   `TargetKind`: "target an entity" means "target its root component"; targeting a non-root
   component or another link works for free (link-to-component, link-to-link).
 
-Persisted component document shape (single collection): `{ _id, _t, _sid, _oid, ...data, Target? }`.
+Persisted component document shape (single collection): `{ _id, _t, _sid, _eid, ...data, Target? }`.
 
 ## 3. Components
 
@@ -68,10 +70,10 @@ Persisted component document shape (single collection): `{ _id, _t, _sid, _oid, 
 ## 4. Links (components with a `Target`)
 
 - A link is a component whose type derives from a `Link` base and carries a `Target`. Its owner
-  `_oid` is the **source**; for undirected links the owner is the **canonical `min(A, B)`**
+  `_eid` is the **source**; for undirected links the owner is the **canonical `min(A, B)`**
   endpoint (deterministic, so concurrent create-from-both-ends converges — conflict-free dedup).
 - **Store-once + reverse-view.** A link is stored exactly once (on the owner). The reverse
-  direction is a **query**, never a stored reciprocal: outbound = `_oid == me`, inbound =
+  direction is a **query**, never a stored reciprocal: outbound = `_eid == me`, inbound =
   `Target == me`. This is the adjacency index (`ILinkIndex`), and it removes the dual-write /
   drift class of bugs entirely.
 - **Entity identity vs structural key.** A link has its own `_id` (used to address it for
@@ -137,8 +139,8 @@ that is the only form that marries with real-time world-hashing (see Historical 
 
 ## 9. Storage & projections
 
-- **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _oid, …,
-  Target? }`. Root components (`_id == _oid`) are the entities; other components hang off `_oid`;
+- **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _eid, …,
+  Target? }`. Root components (`_id == _eid`) are the entities; other components hang off `_eid`;
   links carry `Target`. No per-type object collections; no separate `Links` collection.
 - **Projections are derived and rebuildable** (core.md §4). Different backends may differ in
   physical layout; the event log is the invariant.
@@ -168,7 +170,7 @@ current** — they describe earlier states or roads not taken.
 - **`TargetKind` discriminator.** Considered for entity-vs-component targets. Unnecessary once the
   root-component invariant (`_id == entityId`) makes a single `Guid` address anything.
 - **Stored `_primary` flag / dedicated `ExistComponent` type.** The primary/root component is
-  simply the one where `_id == _oid`; no stored flag and no privileged type are needed.
+  simply the one where `_id == _eid`; no stored flag and no privileged type are needed.
 - **Root *stream*.** A reserved default/root stream id was removed; streams are mandatory and have
   no default. The current **root *entity*** is a different concept (§6).
 - **`LinkReparented` / per-edge cascade events / auto-maintained reciprocal component.** Rejected:
