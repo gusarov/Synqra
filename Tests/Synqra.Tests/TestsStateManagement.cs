@@ -908,9 +908,11 @@ public abstract class TestsStateManagement : BaseTest
 
 
 		await Assert.That(commands.Count()).IsEqualTo(2);
-		var co = (CreateObjectCommand)commands[0];
+		// ECS: a plain model is created as a self-owned root component, and its setter emits the
+		// component-property command (both self-owned: ComponentId == TargetId == entity id).
+		var co = (AddComponentCommand)commands[0];
 
-		var cop = (ChangeObjectPropertyCommand)commands[1];
+		var cop = (ChangeComponentPropertyCommand)commands[1];
 		await Assert.That(cop.PropertyName).IsEqualTo(nameof(model.Name));
 		await Assert.That(cop.OldValue).IsEqualTo(null);
 		await Assert.That(cop.NewValue).IsEqualTo("TestName");
@@ -952,13 +954,13 @@ public abstract class TestsStateManagement : BaseTest
 		await Assert.That(ReferenceEquals(_tasks.First(), t)).IsTrue();
 
 		// events
-		await Assert.That(events).HasCount(3);
+		// ECS: a root object is created as a self-owned root component in ONE event (its data rides in
+		// ComponentAddedEvent.Data), so there is no separate seeded property event on create.
+		await Assert.That(events).HasCount(2);
 		var commandCreated = events[0];
 		await Assert.That(commandCreated).IsTypeOf<CommandCreatedEvent>();
 		var objectCreated = events[1];
-		await Assert.That(objectCreated).IsTypeOf<ObjectCreatedEvent>();
-		var propertyChanged = events[2];
-		await Assert.That(propertyChanged).IsTypeOf<ObjectPropertyChangedEvent>();
+		await Assert.That(objectCreated).IsTypeOf<ComponentAddedEvent>();
 
 		var tasks = _sut.GetCollection<MyPocoTask>();
 		await Assert.That(tasks).HasCount(1);
@@ -993,8 +995,9 @@ public abstract class TestsStateManagement : BaseTest
 		{
 			Console.WriteLine($"{item.GetType().Name} {item}");
 		}
-		await Assert.That(events).HasCount(5);
-		await Assert.That(events[4]).IsTypeOf<ObjectPropertyChangedEvent>();
+		// ECS: create is one ComponentAddedEvent (no seeded property event), so the count drops by one.
+		await Assert.That(events).HasCount(4);
+		await Assert.That(events[3]).IsTypeOf<ObjectPropertyChangedEvent>();
 
 		await Assert.That(_tasks).HasCount(1);
 		await Assert.That(_tasks.First().Subject).IsEqualTo("123");

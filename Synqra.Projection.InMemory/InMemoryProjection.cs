@@ -1103,6 +1103,27 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Phase 2 (ECS): a self-owned ROOT COMPONENT is the entity's own data (the collapsed
+			// "object", _id == _eid == entityId). Materialize + track it as the entity and add it to
+			// its collection — the object-lifecycle path, reached through the component vocabulary.
+			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+			var rootCollection = GetCollection(rootType, "");
+			object rootItem = ev.Data ?? Activator.CreateInstance(rootType)!;
+			var rootAttached = GetAttachedData(rootItem, ev.TargetId, rootCollection, GetMode.GetOrCreate);
+			if (rootItem is IBindableModel ribm && ribm.Store == null)
+			{
+				ribm.Attach(this, rootCollection.CollectionId);
+			}
+			rootCollection.AddByEvent(rootItem);
+			if (rootAttached is not null)
+			{
+				rootAttached.LastEventId = ev.EventId;
+			}
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 
 		// Instantiate the component. Lookup the concrete type via the type registry,
@@ -1163,6 +1184,30 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Root component property change = the entity's own property change (applies to the
+			// tracked entity directly; it has no container).
+			if (!TryGetModel(ev.TargetId, out var rd) || rd.Model is null)
+			{
+				throw new InvalidOperationException($"Cannot apply a root property change to unknown entity {ev.TargetId}.");
+			}
+			if (rd.Model is IBindableModel rbind)
+			{
+				rbind.Set(ev.PropertyName, ev.NewValue);
+			}
+			else
+			{
+				var rpi = rd.Model.GetType().GetProperty(ev.PropertyName)
+					?? throw new InvalidOperationException($"Root entity '{rd.Model.GetType().Name}' has no property '{ev.PropertyName}'.");
+				var rv = ev.NewValue;
+				if (rv is IConvertible rc) rv = rc.ToType(rpi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+				rpi.SetValue(rd.Model, rv);
+			}
+			if (rd.Attached is not null) rd.Attached.LastEventId = ev.EventId;
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
@@ -1195,6 +1240,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
 	{
+		if (ev.ComponentId == ev.TargetId)
+		{
+			// Root entity delete — full delete/cascade is Phase 4; keep parity with the current
+			// ObjectDeleted no-op so replaying such an event doesn't fault.
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 

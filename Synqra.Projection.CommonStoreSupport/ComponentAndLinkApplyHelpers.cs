@@ -10,6 +10,18 @@ namespace Synqra.Projection;
 /// </summary>
 public static class ComponentApplyHelpers
 {
+	/// <summary>
+	/// Phase 2 (ECS): a plain top-level domain model collapses to a ROOT COMPONENT — its data is the
+	/// entity's own component (<c>_id == _eid == entityId</c>), created/mutated through the component
+	/// command/event vocabulary but self-owned (<c>ComponentId == TargetId</c>). This predicate marks
+	/// those types: everything that is NOT a facet component, a framework command/event, or a link.
+	/// </summary>
+	public static bool IsRootComponentType(Type t) =>
+		!typeof(IComponent).IsAssignableFrom(t)
+		&& !typeof(ISynqraCommand).IsAssignableFrom(t)
+		&& !typeof(IEvent).IsAssignableFrom(t)
+		&& !typeof(Link).IsAssignableFrom(t);
+
 	public static IComponentContainer ResolveContainer(object? model, Guid targetId)
 	{
 		if (model is null)
