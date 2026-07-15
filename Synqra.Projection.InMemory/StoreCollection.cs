@@ -131,17 +131,33 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
 
 		var attachedData = Store.Attach(item, this);
-		var task = Store.SubmitCommandAsync(new CreateObjectCommand
-		{
-			StreamId = StreamId,
-			CollectionId = CollectionId,
-			TargetTypeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId,
-			CommandId = GuidExtensions.CreateVersion7(), // This is a new object, so we generate a new command Id
-			TargetId = attachedData.Id,
-			Data = item, // data?.Count > 0 ? data : null,
-						 // DataJson = dataJson,
-			TargetObject = item,
-		});
+		var typeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
+		// Phase 2 (ECS): a plain domain model is created as a self-owned ROOT COMPONENT
+		// (_id == _eid == entityId) via AddComponentCommand, not the retired object lifecycle.
+		global::Synqra.Command create = global::Synqra.Projection.ComponentApplyHelpers.IsRootComponentType(typeof(T))
+			? new global::Synqra.AddComponentCommand
+			{
+				StreamId = StreamId,
+				CollectionId = CollectionId,
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetTypeId = typeId,
+				TargetId = attachedData.Id,
+				TargetObject = item,
+				ComponentTypeId = typeId,
+				ComponentId = attachedData.Id, // self-owned: component id == entity id
+				Data = item,
+			}
+			: new global::Synqra.CreateObjectCommand
+			{
+				StreamId = StreamId,
+				CollectionId = CollectionId,
+				TargetTypeId = typeId,
+				CommandId = GuidExtensions.CreateVersion7(),
+				TargetId = attachedData.Id,
+				Data = item,
+				TargetObject = item,
+			};
+		var task = Store.SubmitCommandAsync(create);
 		if (OperatingSystem.IsBrowser())
 		{
 			AsyncInvoker.InvokeAsync(task);
