@@ -60,7 +60,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// Short, underscore-prefixed system column — matches the "_id"/"_t" naming convention. NOT
 	// "_cid" ("ContainerId", the historical Synqra name for this concept — see
 	// SynqraGuids.SynqraRootStreamId's own remark): "container" is being phased out of the
-	// vocabulary entirely now that Components (see OwnerIdField below) also legitimately use that
+	// vocabulary entirely now that Components (see EntityIdField below) also legitimately use that
 	// word for something unrelated (IComponentContainer — the object a component is attached to).
 	// Stream and node are the two concepts that actually exist; "container" isn't a third one.
 	const string StreamIdField = "_sid";
@@ -755,12 +755,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
-	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid" — "owner object id": the
-	// id of the IComponentContainer this component is attached to. NOT "ContainerId"/"OwnerId" as a
-	// full word: see StreamIdField's remark on why "container" is being phased out of the vocabulary
-	// here entirely, and _oid keeps this addressing field in the same short-system-column family as
-	// _sid rather than reading like a fourth, differently-styled concept next to it.
-	const string OwnerIdField = "_oid";
+	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid": the **entity id** — the
+	// id of the thing this component belongs to (its IComponentContainer today; the ECS entity under
+	// the model substrate). Named "_eid" (entity id), not "_oid" — "OID" collides with the object
+	// identifier of the security/X.509 RFCs — and stays in the short-system-column family next to _sid.
+	// For a root component the invariant is _id == _eid == entityId.
+	const string EntityIdField = "_eid";
 
 	/// <summary>
 	/// Components are persisted in their own shared Mongo collection — NOT embedded in their
@@ -778,13 +778,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// (<c>ComponentId == Guid.Empty</c>) is still distinguished from a peer of another type.
 	/// <paramref name="containerId"/> is the id of the <see cref="IComponentContainer"/> this component
 	/// is attached to (matching that concept's name everywhere else in Synqra) — stored under
-	/// <see cref="OwnerIdField"/>, not a literal "ContainerId"/"Container" column, per that field's
+	/// <see cref="EntityIdField"/>, not a literal "ContainerId"/"Container" column, per that field's
 	/// own remark.
 	/// </summary>
 	FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
 			StreamFilter(),
-			Builders<BsonDocument>.Filter.Eq(OwnerIdField, containerId),
+			Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId),
 			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
 			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId));
 
@@ -794,7 +794,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
 		// Explicit serializer, not ambient lookup — see ToDocument's own remarks.
 		var doc = component.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
-		doc[OwnerIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
+		doc[EntityIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
 		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
@@ -817,12 +817,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(OwnerIdField, containerId));
+		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId));
 		foreach (var doc in componentsMongo.Find(loadFilter).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
-			var component = (IComponent)FromDocument(doc, OwnerIdField, "ComponentId");
+			var component = (IComponent)FromDocument(doc, EntityIdField, "ComponentId");
 
 			if (!container.Components.TryAdd(component))
 			{
