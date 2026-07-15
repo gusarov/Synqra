@@ -1184,54 +1184,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		if (ev.ComponentId == ev.TargetId)
-		{
-			// Root component property change = the entity's own property change (applies to the
-			// tracked entity directly; it has no container).
-			if (!TryGetModel(ev.TargetId, out var rd) || rd.Model is null)
-			{
-				throw new InvalidOperationException($"Cannot apply a root property change to unknown entity {ev.TargetId}.");
-			}
-			if (rd.Model is IBindableModel rbind)
-			{
-				rbind.Set(ev.PropertyName, ev.NewValue);
-			}
-			else
-			{
-				var rpi = rd.Model.GetType().GetProperty(ev.PropertyName)
-					?? throw new InvalidOperationException($"Root entity '{rd.Model.GetType().Name}' has no property '{ev.PropertyName}'.");
-				var rv = ev.NewValue;
-				if (rv is IConvertible rc) rv = rc.ToType(rpi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-				rpi.SetValue(rd.Model, rv);
-			}
-			if (rd.Attached is not null) rd.Attached.LastEventId = ev.EventId;
-			return Task.CompletedTask;
-		}
+		TryGetModel(ev.TargetId, out var data);
+		var target = ComponentApplyHelpers.ResolveTarget(data.Model, ev, TypeMetadataProvider);
+		ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
 
-		var container = ResolveContainer(ev.TargetId);
-		var component = container.ResolveComponent(ev, TypeMetadataProvider);
-
-		// Reuse the bindable-model set path so listeners (INotifyPropertyChanged etc.)
-		// fire naturally. Components that don't implement IBindableModel fall back to
-		// reflection.
-		if (component is IBindableModel bindable)
-		{
-			bindable.Set(ev.PropertyName, ev.NewValue);
-		}
-		else
-		{
-			var pi = component.GetType().GetProperty(ev.PropertyName)
-				?? throw new InvalidOperationException(
-					$"Component '{component.GetType().Name}' has no property '{ev.PropertyName}'.");
-			var value = ev.NewValue;
-			if (value is IConvertible c)
-			{
-				value = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
-			}
-			pi.SetValue(component, value);
-		}
-
-		if (TryGetModel(ev.TargetId, out var data) && data.Attached is not null)
+		if (data.Attached is not null)
 		{
 			data.Attached.LastEventId = ev.EventId;
 		}
@@ -1242,8 +1199,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root entity delete — full delete/cascade is Phase 4; keep parity with the current
-			// ObjectDeleted no-op so replaying such an event doesn't fault.
+			// Root entity single-delete: drop it from its collection + tracking. Cascade of its
+			// facet components / incident links is Phase 4.
+			if (TryGetModel(ev.TargetId, out var rd) && rd.Model is not null)
+			{
+				var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+				GetCollection(rootType, "").RemoveByEvent(rd.Model);
+				Untrack(ev.TargetId, rd.Model);
+			}
 			return Task.CompletedTask;
 		}
 
@@ -1277,6 +1240,12 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		TryGetModel(targetId, out var data);
 		return ComponentApplyHelpers.ResolveContainer(data.Model, targetId);
+	}
+
+	void Untrack(Guid id, object model)
+	{
+		_attachedObjects.Remove(model);
+		_attachedObjectsById.TryRemove(id, out _);
 	}
 
 	#endregion

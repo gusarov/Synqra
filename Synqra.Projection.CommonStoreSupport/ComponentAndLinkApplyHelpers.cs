@@ -56,6 +56,45 @@ public static class ComponentApplyHelpers
 		throw new InvalidOperationException($"Component {componentId} of type '{componentType.Name}' not found on container.");
 	}
 
+	/// <summary>
+	/// The live target a component change/delete event mutates. A self-owned ROOT COMPONENT
+	/// (ComponentId == TargetId) IS the tracked entity itself (which need not be an
+	/// <see cref="IComponentContainer"/>); any other component is addressed by
+	/// <see cref="ResolveComponent"/> on its container. Folds the root/facet fork every projection
+	/// used to repeat inline. <paramref name="trackedModel"/> is the entity the event's TargetId
+	/// resolves to — the target for a root event, the container for a facet event.
+	/// </summary>
+	public static object ResolveTarget(object? trackedModel, SingleObjectEvent ev, ITypeMetadataProvider typeMetadataProvider)
+	{
+		if (GetComponentId(ev) == ev.TargetId)
+		{
+			return trackedModel
+				?? throw new InvalidOperationException($"Cannot apply a root change to unknown entity {ev.TargetId}.");
+		}
+		return ResolveContainer(trackedModel, ev.TargetId).ResolveComponent(ev, typeMetadataProvider);
+	}
+
+	/// <summary>
+	/// Applies a property change to a live target — the bindable set path (so change-notification
+	/// fires) or a reflection fallback. Shared by root-component and facet-component apply.
+	/// </summary>
+	public static void ApplyPropertyChange(object target, string propertyName, object? newValue)
+	{
+		if (target is IBindableModel bindable)
+		{
+			bindable.Set(propertyName, newValue);
+			return;
+		}
+		var pi = target.GetType().GetProperty(propertyName)
+			?? throw new InvalidOperationException($"'{target.GetType().Name}' has no property '{propertyName}'.");
+		var value = newValue;
+		if (value is IConvertible c)
+		{
+			value = c.ToType(pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+		}
+		pi.SetValue(target, value);
+	}
+
 	public static Guid GetComponentTypeId(SingleObjectEvent ev) => ev switch
 	{
 		ComponentPropertyChangedEvent p => p.ComponentTypeId,
