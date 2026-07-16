@@ -7,9 +7,10 @@ and values — how they are identified, mutated, stored, and navigated.
 
 > **Status:** this is the **target design** for the ECS refactor (collapsing the historical
 > Objects / Components / Links split into one substrate). The codebase is converging on it; some
-> areas may still show the older three-subsystem shape until their phase lands. There is **no
-> upgrade from previous persisted state** — stores are rebuilt fresh, so this describes the end
-> state directly, not a migration.
+> areas may still show the older three-subsystem shape until their phase lands. **While this refactor
+> is in flight**, persisted state is rebuilt fresh rather than migrated — a temporary convenience, not
+> a policy — so this document can describe the end state directly. **Seamless upgrade of persisted
+> state is a core Synqra goal**, switched on once the substrate settles; the design does not forgo it.
 
 ---
 
