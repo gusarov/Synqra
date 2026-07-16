@@ -69,7 +69,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 		var typeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
 		// Phase 2 (ECS): GetCollection<T>().Add always creates an ENTITY — a self-owned root component
 		// (ComponentId == TargetId == entity id, _id == _eid == entityId). No object-vs-component branch.
-		var task = Store.SubmitCommandAsync(new global::Synqra.AddComponentCommand
+		var task = Store.SubmitCommandAsync(new AddComponentCommand
 		{
 			StreamId = _projection.StreamId,
 			CollectionId = CollectionId,
