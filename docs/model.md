@@ -139,17 +139,19 @@ that is the only form that marries with real-time world-hashing (see Historical 
   increment.)
 - **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
   source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
-  v7 data. Layout `C0DE yyyy-yyyy 8pss 8CCC iiii…`:
+  v7 data. Layout `C0DE yyyy-yyyy 8pxx 8CCC iiii…`:
   - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
   - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
     (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
     company); a non-zero hash = an external company.
-  - **`8p`** version + **project** — the RFC 9562 version field is v8, but only its top 2 bits are
-    fixed (`10`), so this nibble legally ranges `8`/`9`/`a`/`b` and its low 2 bits join the `p` nibble
-    to address a company's **projects** (4 × 16 = **64** per company). `p = 0` = the company's main
-    affairs / core project (e.g. Synqra itself is the company-project, so `0`).
-  - **`ss`** — **space** (environment): `00` = prod, `01` = test, … (space `1` is the test space).
-    Orthogonal to the company/project field, so internal/external × prod/test all coexist.
+  - **`8`** version / **prod-test** / **project-high** — RFC 9562 v8, but only the top 2 bits are
+    fixed (`10`), so this nibble legally ranges `8`/`9`/`a`/`b`. Its **low bit is the prod/test flag**
+    — `8`,`a` = **prod**, `9`,`b` = **test** — and its **second-low bit** is the high bit of the
+    project number.
+  - **`p`** — the **project** low nibble; with the project-high bit above, a company addresses
+    **32 projects** (`p = 0` = the company's main affairs / core project, e.g. Synqra itself). A
+    company that outgrows 32 simply gets a new company hash to extend.
+  - **`xx`** — reserved (instance/counter space).
   - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
     classes (by definitional precedence — the schema layer takes the lower number): `000` **Type**
     (the object-type/schema layer), `001` **Component** (entity/component instances), `005`
@@ -159,10 +161,10 @@ that is the only form that marries with real-time world-hashing (see Historical 
     fixtures.
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
-  a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8001-8CCC-…` (`C0DE` magic
-  prefix, zero company-hash `0000-0000` = internal, `8001` = v8 / project 0 / space `01` = test):
-  `…-800C-…` commands, `…-8005-…` containers/stream ids, `…-8000-…` generic object namespace (types +
-  instances).
+  a legal UUID). Use the internal-test well-known form `C0DE0000-0000-9000-8CCC-…` (`C0DE` magic
+  prefix, zero company-hash `0000-0000` = internal, `9000` = v8 / **test** (version nibble `9`) /
+  project 0): `…-8000-…` = class `000` **Type**, `…-8001-…` = class `001` **Component**,
+  `…-800C-…` commands, `…-8005-…` containers/stream ids. (Prod would be `8000` in group 3.)
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures
