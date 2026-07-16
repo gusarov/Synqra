@@ -139,24 +139,25 @@ that is the only form that marries with real-time world-hashing (see Historical 
   increment.)
 - **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
   source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
-  v7 data. Layout `C0DE yyyy-yyyy 8Sxx 8CCC iiii…`:
+  v7 data. Layout `C0DE yyyy-yyyy 8pss 8CCC iiii…`:
   - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
-  - **`yyyy-yyyy`** — project hash: first 4 bytes of SHA-256 of the lowercase project name
+  - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
     (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
-    company); a non-zero hash = an external company/project.
-  - **`8S`** version + sub-version — RFC 9562 v8 (`8`), then a sub-version nibble that is the
-    **prod/test** flag: `0` ⇒ **prod**, `1` ⇒ **test**. Orthogonal to the company field, so all four
-    combinations exist (internal-prod, internal-test, external-prod, external-test). Higher
-    sub-versions reserved.
+    company); a non-zero hash = an external company.
+  - **`8p`** version + **project** — the RFC 9562 version field is v8, but only its top 2 bits are
+    fixed (`10`), so this nibble legally ranges `8`/`9`/`a`/`b` and its low 2 bits join the `p` nibble
+    to address a company's **projects** (4 × 16 = **64** per company). `p = 0` is the default project.
+  - **`ss`** — **space** (environment): `00` = prod, `01` = test, … (space `1` is the test space).
+    Orthogonal to the company/project field, so internal/external × prod/test all coexist.
   - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
     classes: `000` object-type namespace, `005` container/stream, `00C` command, `00E` event; the root
     entity is a new class here.
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8001-8CCC-…` (`C0DE` magic
-  prefix, zero project-hash `0000-0000` = internal, sub-version `1` = test): `…-800C-…` commands,
-  `…-8005-…` containers/stream ids,
-  `…-8000-…` generic object namespace (types + instances).
+  prefix, zero company-hash `0000-0000` = internal, `8001` = v8 / project 0 / space `01` = test):
+  `…-800C-…` commands, `…-8005-…` containers/stream ids, `…-8000-…` generic object namespace (types +
+  instances).
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures
