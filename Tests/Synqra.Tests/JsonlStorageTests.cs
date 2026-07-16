@@ -77,7 +77,7 @@ public class TestsAppendStorageFile : AppendStorageTests
 	[Test]
 	public async Task Should_F00_stringify_guid_in_portable_way()
 	{
-		var guid = Guid.Parse("019ca6ce-d93b-7802-86bf-60d00e8ec15b");
+		var guid = new Guid("019ca6ce-d93b-7802-86bf-60d00e8ec15b");
 		await Assert.That(guid.ToString()).IsEqualTo("019ca6ce-d93b-7802-86bf-60d00e8ec15b");
 	}
 
@@ -174,27 +174,25 @@ public abstract class AppendStorageTests : BaseTest
 	{
 		var storage = Get<Event>();
 
-		var guidSpace = new GuidExtensions.Generator();
-
-		var key1 = guidSpace.CreateVersion7();
+		// Only the command id uses the 0x100 spacing (its derived events fill the low byte); the
+		// wrapper/domain EventId is command+1 (same 900C sub-range). Other fields get small tails.
 		var item1 = new ComponentAddedEvent
 		{
-			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000101"),
-			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			EventId = key1,
-			TargetId = new Guid("c0de0000-0000-8000-9001-000000000103"),
-			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000104"),
+			CollectionId = new Guid("C0DE0000-0000-8000-9000-000000000011"),
+			CommandId    = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			EventId      = new Guid("C0DE0000-0000-8000-900C-000000000101"),
+			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000001"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-000000000001"),
 		};
 		await storage.AppendAsync(item1);
 
-		var key2 = guidSpace.CreateVersion7();
 		var item2 = new ComponentAddedEvent
 		{
-			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000201"),
-			CommandId = new Guid("c0de0000-0000-8000-900c-000000000200"),
-			EventId = key2,
-			TargetId = new Guid("c0de0000-0000-8000-9001-000000000203"),
-			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000204"),
+			CollectionId = new Guid("C0DE0000-0000-8000-9000-000000000021"),
+			CommandId    = new Guid("C0DE0000-0000-8000-900C-000000000200"),
+			EventId      = new Guid("C0DE0000-0000-8000-900C-000000000201"),
+			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000002"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-000000000002"),
 		};
 		await storage.AppendAsync(item2);
 
@@ -246,12 +244,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev = new ComponentAddedEvent
 		{
-			CollectionId = GuidExtensions.CreateVersion7(),
-			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000100"),
-			TargetId = GuidExtensions.CreateVersion7(),
-			TargetTypeId = GuidExtensions.CreateVersion7(),
-			StreamId = GuidExtensions.CreateVersion7(),
+			CollectionId = TestGuids.NewAuto(),
+			CommandId = TestGuids.NewAuto(),
+			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			TargetId = TestGuids.NewAuto(),
+			TargetTypeId = TestGuids.NewAuto(),
+			StreamId = TestGuids.NewAuto(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -279,12 +277,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev = new ComponentAddedEvent
 		{
-			CollectionId = GuidExtensions.CreateVersion7(),
-			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000100"),
-			TargetId = GuidExtensions.CreateVersion7(),
-			TargetTypeId = GuidExtensions.CreateVersion7(),
-			StreamId = GuidExtensions.CreateVersion7(),
+			CollectionId = TestGuids.NewAuto(),
+			CommandId = TestGuids.NewAuto(),
+			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			TargetId = TestGuids.NewAuto(),
+			TargetTypeId = TestGuids.NewAuto(),
+			StreamId = TestGuids.NewAuto(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -294,12 +292,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev2 = new ComponentAddedEvent
 		{
-			CollectionId = GuidExtensions.CreateVersion7(),
-			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000200"),
-			TargetId = GuidExtensions.CreateVersion7(),
-			TargetTypeId = GuidExtensions.CreateVersion7(),
-			StreamId = GuidExtensions.CreateVersion7(),
+			CollectionId = TestGuids.NewAuto(),
+			CommandId = TestGuids.NewAuto(),
+			EventId = new Guid("C0DE0000-0000-8000-900C-000000000200"),
+			TargetId = TestGuids.NewAuto(),
+			TargetTypeId = TestGuids.NewAuto(),
+			StreamId = TestGuids.NewAuto(),
 			Data = new StorableModel
 			{
 				Title = "Bob",
@@ -342,23 +340,23 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item0 = new Item
 		{
-			CollectionId = GuidExtensions.CreateVersion7(), // different collection
-			ObjectId = GuidExtensions.CreateVersion7(),
+			CollectionId = TestGuids.NewAuto(), // different collection
+			ObjectId = TestGuids.NewAuto(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + GuidExtensions.CreateVersion7(),
+				Subject = "test" + TestGuids.NewAuto(),
 			},
 		};
 		await storage.AppendAsync(item0);
 
-		var collectionId1 = GuidExtensions.CreateVersion7();
+		var collectionId1 = TestGuids.NewAuto();
 		var item1 = new Item
 		{
 			CollectionId = collectionId1,
-			ObjectId = GuidExtensions.CreateVersion7(),
+			ObjectId = TestGuids.NewAuto(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + GuidExtensions.CreateVersion7(),
+				Subject = "test" + TestGuids.NewAuto(),
 			},
 		};
 		await storage.AppendAsync(item1);
@@ -366,21 +364,21 @@ public abstract class AppendStorageTests : BaseTest
 		var item2 = new Item
 		{
 			CollectionId = collectionId1,
-			ObjectId = GuidExtensions.CreateVersion7(),
+			ObjectId = TestGuids.NewAuto(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + GuidExtensions.CreateVersion7(),
+				Subject = "test" + TestGuids.NewAuto(),
 			},
 		};
 		await storage.AppendAsync(item2);
 
 		var item3 = new Item
 		{
-			CollectionId = GuidExtensions.CreateVersion7(), // different collection
-			ObjectId = GuidExtensions.CreateVersion7(),
+			CollectionId = TestGuids.NewAuto(), // different collection
+			ObjectId = TestGuids.NewAuto(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test"+ GuidExtensions.CreateVersion7(),
+				Subject = "test"+ TestGuids.NewAuto(),
 			},
 		};
 		await storage.AppendAsync(item3);
@@ -590,13 +588,13 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		// 900C+1, root component Type 9000 / Component 9001.
 		var ev = new ComponentAddedEvent
 		{
-			CollectionId    = new Guid("c0de0000-0000-8000-9000-000000000101"),
-			CommandId       = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			EventId         = new Guid("c0de0000-0000-8000-900c-000000000101"),
-			TargetId        = new Guid("c0de0000-0000-8000-9001-000000000103"),
-			TargetTypeId    = new Guid("c0de0000-0000-8000-9000-000000000104"),
-			ComponentTypeId = new Guid("c0de0000-0000-8000-9000-000000000104"),
-			ComponentId     = new Guid("c0de0000-0000-8000-9001-000000000103"),
+			CollectionId    = new Guid("C0DE0000-0000-8000-9000-000000000101"),
+			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			EventId         = new Guid("C0DE0000-0000-8000-900C-000000000101"),
+			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000103"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9000-000000000104"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9000-000000000104"),
+			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000103"),
 		};
 		await _storage.AppendAsync(ev);
 
@@ -617,22 +615,22 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
-		var targetId1 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a1");
-		var targetType1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a2");
-		var collection1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a3");
-		var componentType1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a4");
-		var componentId1 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a5");
+		var targetId1 = new Guid("C0DE0000-0000-8000-9001-0000000000A1");
+		var targetType1 = new Guid("C0DE0000-0000-8000-9000-0000000000A2");
+		var collection1 = new Guid("C0DE0000-0000-8000-9000-0000000000A3");
+		var componentType1 = new Guid("C0DE0000-0000-8000-9000-0000000000A4");
+		var componentId1 = new Guid("C0DE0000-0000-8000-9001-0000000000A5");
 
-		var targetId2 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a6");
-		var targetType2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a7");
-		var collection2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a8");
-		var componentType2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a9");
-		var componentId2 = Guid.Parse("c0de0000-0000-8000-9001-0000000000aa");
+		var targetId2 = new Guid("C0DE0000-0000-8000-9001-0000000000A6");
+		var targetType2 = new Guid("C0DE0000-0000-8000-9000-0000000000A7");
+		var collection2 = new Guid("C0DE0000-0000-8000-9000-0000000000A8");
+		var componentType2 = new Guid("C0DE0000-0000-8000-9000-0000000000A9");
+		var componentId2 = new Guid("C0DE0000-0000-8000-9001-0000000000AA");
 
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
-			EventId = GuidExtensions.CreateVersion7(),
-			CommandId = GuidExtensions.CreateVersion7(),
+			EventId = TestGuids.NewAuto(),
+			CommandId = TestGuids.NewAuto(),
 			TargetId = targetId1,
 			TargetTypeId = targetType1,
 			CollectionId = collection1,
@@ -641,8 +639,8 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		});
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
-			EventId = GuidExtensions.CreateVersion7(),
-			CommandId = GuidExtensions.CreateVersion7(),
+			EventId = TestGuids.NewAuto(),
+			CommandId = TestGuids.NewAuto(),
 			TargetId = targetId2,
 			TargetTypeId = targetType2,
 			CollectionId = collection2,

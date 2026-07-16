@@ -147,14 +147,16 @@ that is the only form that marries with real-time world-hashing (see Historical 
     company); a non-zero hash = an external company.
   - **`8`** — RFC 9562 **version**, fixed at `8` (v8 = `1000`). This nibble is *not* free; it is the
     version field and must stay `8`.
-  - **`ppp`** — **project** (with the project-high bit from the variant nibble below). `p = 0` = the
-    company's main affairs / core project (e.g. Synqra itself). Company outgrows its projects → gets a
-    new company hash.
-  - **`v` (variant nibble)** — RFC **variant**, whose top 2 bits are fixed at `10`, so it legally
-    ranges `8`/`9`/`a`/`b`. Those **2 free low bits** carry the flags: **low bit = prod (`0`) / test
-    (`1`)** → `8`,`a` = prod, `9`,`b` = test; **second-low bit** = the project high bit (so
-    project = that bit × the `ppp` field). This is where the `10xx` freedom lives — the *variant*, not
-    the version.
+  - **`ppp`** — **project** (`p = 0` = the company's main affairs / core project, e.g. Synqra itself;
+    a company that outgrows its project space simply gets a new company hash).
+  - **`v` (variant nibble)** — RFC **variant**: its top 2 bits are fixed at `10`, so it ranges
+    `8`/`9`/`a`/`b`. Its **2 free low bits are the id-origin mode** (this is where the `10xx` freedom
+    lives — the *variant*, never the version):
+    - **`8`** = **prod / manual** — a real production id, or a manually-authored well-known id.
+    - **`9`** = **test / unittest** — a **hardcoded** test guid, hand-written and pinned (predictable).
+    - **`A`** = **test auto-incremented** — minted by the test guid generator during a run
+      (`TestGuids.NewAuto()` → `C0DE0000-0000-8000-A000-{n}`, a process-wide monotonic counter).
+    - **`B`** = reserved.
   - **`CCC`** — 12-bit **class** (up to 4096). By definitional precedence (schema layer takes the lower
     number): `000` **Type** (object-type/schema layer), `001` **Component** (entity/component
     instances), `005` container/stream, `00C` command, `00E` event; the root entity is a new class
