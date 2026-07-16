@@ -1,4 +1,5 @@
 using System;
+using TUnit.Assertions.AssertConditions.Throws;
 
 namespace Synqra.Utils.Tests;
 
@@ -10,6 +11,14 @@ internal class DeterministicEventIds
 		var cmd = GuidExtensions.CreateVersion7();
 		await Assert.That(GuidExtensions.Derive(cmd, 1)).IsEqualTo(GuidExtensions.Derive(cmd, 1));
 		await Assert.That(GuidExtensions.Derive(cmd, 2)).IsEqualTo(GuidExtensions.Derive(cmd, 2));
+	}
+
+	[Test]
+	public async Task Should_print()
+	{
+		var cmd = GuidExtensions.CreateVersion7();
+		Console.WriteLine(cmd);
+		Console.WriteLine(GuidExtensions.Derive(cmd, 1));
 	}
 
 	[Test]
