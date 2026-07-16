@@ -683,6 +683,39 @@ public static class GuidExtensions
 #endif
 	}
 
+	/// <summary>
+	/// Deterministically derives the id of the <paramref name="ordinal"/>-th event a command expands
+	/// to, from the command's own client-generated v7 id. This makes the whole command→event
+	/// expansion reproducible across nodes and replays (core.md §8: same command ⇒ same events) with
+	/// no clock or shared counter. Modelled on the Todo predecessor's id layout (a reserved low-bytes
+	/// counter region + increment): here the low 56 random bits are incremented by <paramref name="ordinal"/>
+	/// while the timestamp, version and variant bytes are preserved, so the result stays a valid,
+	/// time-ordered v7 that sorts adjacent to its command (model.md §8: v7 monotonic for all data).
+	/// </summary>
+	public static unsafe Guid Derive(Guid commandId, int ordinal)
+	{
+		if (ordinal < 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(ordinal));
+		}
+		byte* b = (byte*)&commandId;
+		// Increment the trailing 56 random bits (bytes 9..15, big-endian). Bytes 0..8 (timestamp +
+		// version nibble + variant) are untouched, so the derived id is still a valid v7 sharing the
+		// command's time position; ordinals stay far below the 56-bit space for any real command.
+		ulong low = 0;
+		for (int i = 9; i < 16; i++)
+		{
+			low = (low << 8) | b[i];
+		}
+		low += (ulong)ordinal;
+		for (int i = 15; i >= 9; i--)
+		{
+			b[i] = (byte)low;
+			low >>= 8;
+		}
+		return commandId;
+	}
+
 	public static Guid Create(int version)
 	{
 		switch (version)

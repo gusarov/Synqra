@@ -130,6 +130,13 @@ that is the only form that marries with real-time world-hashing (see Historical 
 
 - **v7 GUIDs** for all data (entities, components, links) — monotonic, totally ordered (undirected
   `min` folding relies on this order).
+- **Event ids are derived, not random.** Each event a command expands to gets `Derive(CommandId,
+  ordinal)` — the command's client-generated v7 id with its low random bits incremented by a small
+  per-command ordinal (the wrapper `CommandCreatedEvent` = ordinal 0, domain events start at 1).
+  This makes the command→event expansion reproducible across nodes and replays (core.md §8) with no
+  clock or shared counter, and the derived id stays a time-ordered v7 that sorts adjacent to its
+  command. (Modelled on the Todo predecessor's id layout: a reserved low-bytes counter region +
+  increment.)
 - **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout). The
   version nibble structurally marks "system/well-known" vs v7 data. Well-known classes carry a
   `CCC` class field; the root entity is a new class here.
