@@ -154,9 +154,15 @@ that is the only form that marries with real-time world-hashing (see Historical 
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `00000000-C0DE-8001-8CCC-…` (company `00…` =
-  internal, sub-version `1` = test): `…-800E-…` events, `…-800C-…` commands, `…-8005-…`
-  containers/stream ids. The all-zero **instance** tail (`…-000000000000`) is reserved for unit-test
-  fixtures.
+  internal, sub-version `1` = test): `…-800C-…` commands, `…-8005-…` containers/stream ids,
+  `…-8000-…` generic object namespace (types + instances).
+- **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
+  same class as the command — see the event-id bullet above), a command's derived events live in the
+  command's own id space. So **space command ids by `0x100`** in fixtures
+  (`…-800C-…000100`, `…-800C-…000200`) to reserve the low byte for their events: the wrapper
+  `CommandCreatedEvent` is ordinal 0 (`…000100`), domain events are `…000101`, `…000102`, … There is
+  no separate `800E` event class for these instance ids — a derived event inherits its command's class.
+  The all-zero **instance** tail (`…-000000000000`) is reserved.
 - **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
   The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
   election or monotonic cluster clock.

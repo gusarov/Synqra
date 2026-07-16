@@ -71,11 +71,14 @@ public class JsonSerializationTests
 	public async Task Should_20_serialize_event(int ctxId)
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
-		// Internal-test well-known guids (00=internal, 8001=test sub-version; see docs/model.md §8):
-		// class 800E=event, 800C=command, 8005=container/stream, 8000=generic object namespace.
+		// Internal-test well-known guids (00=internal, 8001=test; see docs/model.md §8): 800C=command,
+		// 8005=container/stream, 8000=generic object namespace. Commands are spaced by 0x100 so their
+		// derived events (Derive(CommandId, ordinal) = CommandId + ordinal) fit in the low byte without
+		// colliding with the next command; the CommandCreatedEvent wrapper is ordinal 0, so its EventId
+		// == the command id (same 800C space, not a separate event class).
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("00000000-c0de-8001-800c-000000000002"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
 			TargetTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
 			CollectionId = new Guid("00000000-c0de-8001-8000-000000000002"),
@@ -89,9 +92,9 @@ public class JsonSerializationTests
 		};
 		var obj = new CommandCreatedEvent
 		{
-			CommandId = new Guid("00000000-c0de-8001-800c-000000000001"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
-			EventId = new Guid("00000000-c0de-8001-800e-000000000001"),
+			EventId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			Data = cmd,
 		};
 		async Task Check(JsonSerializerOptions ctx)
@@ -156,7 +159,7 @@ public class JsonSerializationTests
 		// Internal-test well-known guids (00=internal, 8001=test sub-version; see docs/model.md §8).
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("00000000-c0de-8001-800c-000000000002"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
 			TargetTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
 			CollectionId = new Guid("00000000-c0de-8001-8000-000000000002"),
@@ -171,9 +174,9 @@ public class JsonSerializationTests
 		};
 		var @event = new CommandCreatedEvent
 		{
-			CommandId = new Guid("00000000-c0de-8001-800c-000000000001"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
-			EventId = new Guid("00000000-c0de-8001-800e-000000000001"),
+			EventId = new Guid("00000000-c0de-8001-800c-000000000100"),
 			Data = cmd,
 		};
 		var operation = new NewEvent1
