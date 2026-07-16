@@ -477,7 +477,7 @@ public static class FileSynqraExtensions
 			var typeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
 			// Phase 2 (ECS): GetCollection<T>().Add always creates an ENTITY — a self-owned root component
 			// (ComponentId == TargetId == entity id, _id == _eid == entityId). No object-vs-component branch.
-			var task = _store.SubmitCommandAsync(new global::Synqra.AddComponentCommand
+			var task = _store.SubmitCommandAsync(new AddComponentCommand
 			{
 				StreamId = _store.StreamId,
 				CollectionId = CollectionId,
