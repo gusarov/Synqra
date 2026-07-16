@@ -34,11 +34,11 @@ public class MongoEventClassMapsTests
 	{
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.Parse("00000020-0002-8000-8000-0000000000b2"),
-			CommandId = Guid.Parse("00000020-0003-8000-8000-0000000000b3"),
-			TargetId = Guid.Parse("00000020-0004-8000-8000-0000000000b4"),
-			TargetTypeId = Guid.Parse("00000020-0005-8000-8000-0000000000b5"),
-			CollectionId = Guid.Parse("00000020-0006-8000-8000-0000000000b6"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-0000000000b2"),
+			CommandId = Guid.Parse("c0de0000-0000-8000-900c-0000000000b3"),
+			TargetId = Guid.Parse("c0de0000-0000-8000-9001-0000000000b4"),
+			TargetTypeId = Guid.Parse("c0de0000-0000-8000-9000-0000000000b5"),
+			CollectionId = Guid.Parse("c0de0000-0000-8000-9000-0000000000b6"),
 			PropertyName = "Name",
 			NewValue = "Alice",
 		};
@@ -69,11 +69,11 @@ public class MongoEventClassMapsTests
 		// is dropped by the native BSON serializer.
 		var ev = new ComponentAddedEvent
 		{
-			EventId = Guid.Parse("00000020-0008-8000-8000-0000000000b8"),
-			CommandId = Guid.Parse("00000020-0009-8000-8000-0000000000b9"),
-			TargetId = Guid.Parse("00000020-000a-8000-8000-0000000000ba"),
-			TargetTypeId = Guid.Parse("00000020-000b-8000-8000-0000000000bb"),
-			CollectionId = Guid.Parse("00000020-000c-8000-8000-0000000000bc"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-0000000000b8"),
+			CommandId = Guid.Parse("c0de0000-0000-8000-900c-0000000000b9"),
+			TargetId = Guid.Parse("c0de0000-0000-8000-9001-0000000000ba"),
+			TargetTypeId = Guid.Parse("c0de0000-0000-8000-9000-0000000000bb"),
+			CollectionId = Guid.Parse("c0de0000-0000-8000-9000-0000000000bc"),
 			DataObject = new { Anything = "should not be persisted" },
 		};
 
@@ -94,11 +94,11 @@ public class MongoEventClassMapsTests
 		// still carry it for every single event, just to record the absence of a value.
 		var ev = new ComponentAddedEvent
 		{
-			EventId = Guid.Parse("00000020-000e-8000-8000-0000000000be"),
-			CommandId = Guid.Parse("00000020-000f-8000-8000-0000000000bf"),
-			TargetId = Guid.Parse("00000020-0010-8000-8000-0000000000c0"),
-			TargetTypeId = Guid.Parse("00000020-0011-8000-8000-0000000000c1"),
-			CollectionId = Guid.Parse("00000020-0012-8000-8000-0000000000c2"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-0000000000be"),
+			CommandId = Guid.Parse("c0de0000-0000-8000-900c-0000000000bf"),
+			TargetId = Guid.Parse("c0de0000-0000-8000-9001-0000000000c0"),
+			TargetTypeId = Guid.Parse("c0de0000-0000-8000-9000-0000000000c1"),
+			CollectionId = Guid.Parse("c0de0000-0000-8000-9000-0000000000c2"),
 			Data = null,
 		};
 
@@ -116,14 +116,14 @@ public class MongoEventClassMapsTests
 		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
 		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
 		// essentially empty: just its own discriminator, nothing from the Link base).
-		var linkId = Guid.Parse("00000020-0013-8000-8000-0000000000c3");
-		var sourceId = Guid.Parse("00000020-0014-8000-8000-0000000000c4");
-		var targetId = Guid.Parse("00000020-0015-8000-8000-0000000000c5");
+		var linkId = Guid.Parse("c0de0000-0000-8000-9001-0000000000c3");
+		var sourceId = Guid.Parse("c0de0000-0000-8000-9001-0000000000c4");
+		var targetId = Guid.Parse("c0de0000-0000-8000-9001-0000000000c5");
 		var ev = new LinkAddedEvent
 		{
-			EventId = Guid.Parse("00000020-0016-8000-8000-0000000000c6"),
-			CommandId = Guid.Parse("00000020-0017-8000-8000-0000000000c7"),
-			LinkTypeId = Guid.Parse("00000020-0018-8000-8000-0000000000c8"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-0000000000c6"),
+			CommandId = Guid.Parse("c0de0000-0000-8000-900c-0000000000c7"),
+			LinkTypeId = Guid.Parse("c0de0000-0000-8000-9000-0000000000c8"),
 			LinkId = linkId,
 			SourceId = sourceId,
 			TargetId = targetId,
@@ -155,7 +155,7 @@ public class MongoEventClassMapsTests
 		// event id, so dedup / idempotent inserts and ordered replay work.
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = Guid.Parse("00000020-000d-8000-8000-0000000000bd"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-0000000000bd"),
 			CommandId = Guid.Empty,
 			TargetId = Guid.Empty,
 			TargetTypeId = Guid.Empty,
