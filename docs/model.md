@@ -151,10 +151,12 @@ that is the only form that marries with real-time world-hashing (see Historical 
   - **`ss`** — **space** (environment): `00` = prod, `01` = test, … (space `1` is the test space).
     Orthogonal to the company/project field, so internal/external × prod/test all coexist.
   - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
-    classes: `000` object-type namespace (generic object/component — *no* type-specific knowledge; a
-    concrete **type** id is a v8 hash under `SynqraTypeNamespaceId`, and an entity/component **instance**
-    id is v7 data — neither is a well-known `C0DE` value, so `000` only appears as a readable stand-in
-    in fixtures), `005` container/stream, `00C` command, `00E` event; the root entity is a new class here.
+    classes (by definitional precedence — the schema layer takes the lower number): `000` **Type**
+    (the object-type/schema layer), `001` **Component** (entity/component instances), `005`
+    container/stream, `00C` command, `00E` event; the root entity is a new class here. Note: in
+    production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId` and an **instance** id
+    is v7 data — neither is a well-known `C0DE` value, so `000`/`001` appear as readable stand-ins in
+    fixtures.
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8001-8CCC-…` (`C0DE` magic
