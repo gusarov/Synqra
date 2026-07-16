@@ -71,17 +71,17 @@ public class JsonSerializationTests
 	public async Task Should_20_serialize_event(int ctxId)
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
-		// Zero-company well-known test guids (see docs/model.md §8): 800E=event, 800C=command,
-		// 8005=container/stream, 8000=generic object namespace (types + instances).
+		// Internal-test well-known guids (00=internal, 8001=test sub-version; see docs/model.md §8):
+		// class 800E=event, 800C=command, 8005=container/stream, 8000=generic object namespace.
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("00000000-c0de-8000-800c-000000000002"),
-			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
-			TargetTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
-			CollectionId = new Guid("00000000-c0de-8000-8000-000000000002"),
-			TargetId = new Guid("00000000-c0de-8000-8000-000000000003"),
-			ComponentTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
-			ComponentId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000002"),
+			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
+			TargetTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
+			CollectionId = new Guid("00000000-c0de-8001-8000-000000000002"),
+			TargetId = new Guid("00000000-c0de-8001-8000-000000000003"),
+			ComponentTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
+			ComponentId = new Guid("00000000-c0de-8001-8000-000000000003"),
 			Data = new SampleTaskModel
 			{
 				Subject = subject,
@@ -89,9 +89,9 @@ public class JsonSerializationTests
 		};
 		var obj = new CommandCreatedEvent
 		{
-			CommandId = new Guid("00000000-c0de-8000-800c-000000000001"),
-			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
-			EventId = new Guid("00000000-c0de-8000-800e-000000000001"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000001"),
+			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
+			EventId = new Guid("00000000-c0de-8001-800e-000000000001"),
 			Data = cmd,
 		};
 		async Task Check(JsonSerializerOptions ctx)
@@ -153,16 +153,16 @@ public class JsonSerializationTests
 	[Test]
 	public async Task Should_30_serialize_network_operation()
 	{
-		// Zero-company well-known test guids (see docs/model.md §8).
+		// Internal-test well-known guids (00=internal, 8001=test sub-version; see docs/model.md §8).
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("00000000-c0de-8000-800c-000000000002"),
-			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
-			TargetTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
-			CollectionId = new Guid("00000000-c0de-8000-8000-000000000002"),
-			TargetId = new Guid("00000000-c0de-8000-8000-000000000003"),
-			ComponentTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
-			ComponentId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000002"),
+			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
+			TargetTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
+			CollectionId = new Guid("00000000-c0de-8001-8000-000000000002"),
+			TargetId = new Guid("00000000-c0de-8001-8000-000000000003"),
+			ComponentTypeId = new Guid("00000000-c0de-8001-8000-000000000001"),
+			ComponentId = new Guid("00000000-c0de-8001-8000-000000000003"),
 			Data = new SampleTaskModel
 			{
 				Subject = "Test1",
@@ -171,9 +171,9 @@ public class JsonSerializationTests
 		};
 		var @event = new CommandCreatedEvent
 		{
-			CommandId = new Guid("00000000-c0de-8000-800c-000000000001"),
-			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
-			EventId = new Guid("00000000-c0de-8000-800e-000000000001"),
+			CommandId = new Guid("00000000-c0de-8001-800c-000000000001"),
+			StreamId = new Guid("00000000-c0de-8001-8005-000000000001"),
+			EventId = new Guid("00000000-c0de-8001-800e-000000000001"),
 			Data = cmd,
 		};
 		var operation = new NewEvent1
