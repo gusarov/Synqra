@@ -396,7 +396,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			PropertyName = cmd.PropertyName,
@@ -417,7 +417,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -434,7 +434,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -453,7 +453,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -471,7 +471,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -487,7 +487,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;

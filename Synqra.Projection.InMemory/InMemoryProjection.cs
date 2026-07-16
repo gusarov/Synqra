@@ -567,7 +567,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var created = new CommandCreatedEvent
 		{
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 0),
 			Data = cmd,
 			CommandId = cmd.CommandId,
 			StreamId = cmd.StreamId,
@@ -605,7 +605,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
 
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -632,7 +632,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -650,7 +650,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -670,7 +670,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -688,7 +688,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -704,7 +704,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.CreateVersion7(),
+			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;
