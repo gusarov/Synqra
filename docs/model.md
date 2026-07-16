@@ -139,32 +139,34 @@ that is the only form that marries with real-time world-hashing (see Historical 
   increment.)
 - **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
   source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
-  v7 data. Layout `C0DE yyyy-yyyy 8pxx 8CCC iiii…`:
+  v7 data. Layout `C0DE yyyy-yyyy 8ppp vCCC iiii…` (`8ppp` = version+project, `vCCC` = variant+class):
   - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
   - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
     (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
     company); a non-zero hash = an external company.
-  - **`8`** version / **prod-test** / **project-high** — RFC 9562 v8, but only the top 2 bits are
-    fixed (`10`), so this nibble legally ranges `8`/`9`/`a`/`b`. Its **low bit is the prod/test flag**
-    — `8`,`a` = **prod**, `9`,`b` = **test** — and its **second-low bit** is the high bit of the
-    project number.
-  - **`p`** — the **project** low nibble; with the project-high bit above, a company addresses
-    **32 projects** (`p = 0` = the company's main affairs / core project, e.g. Synqra itself). A
-    company that outgrows 32 simply gets a new company hash to extend.
-  - **`xx`** — reserved (instance/counter space).
-  - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
-    classes (by definitional precedence — the schema layer takes the lower number): `000` **Type**
-    (the object-type/schema layer), `001` **Component** (entity/component instances), `005`
-    container/stream, `00C` command, `00E` event; the root entity is a new class here. Note: in
-    production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId` and an **instance** id
-    is v7 data — neither is a well-known `C0DE` value, so `000`/`001` appear as readable stand-ins in
-    fixtures.
+  - **`8`** — RFC 9562 **version**, fixed at `8` (v8 = `1000`). This nibble is *not* free; it is the
+    version field and must stay `8`.
+  - **`ppp`** — **project** (with the project-high bit from the variant nibble below). `p = 0` = the
+    company's main affairs / core project (e.g. Synqra itself). Company outgrows its projects → gets a
+    new company hash.
+  - **`v` (variant nibble)** — RFC **variant**, whose top 2 bits are fixed at `10`, so it legally
+    ranges `8`/`9`/`a`/`b`. Those **2 free low bits** carry the flags: **low bit = prod (`0`) / test
+    (`1`)** → `8`,`a` = prod, `9`,`b` = test; **second-low bit** = the project high bit (so
+    project = that bit × the `ppp` field). This is where the `10xx` freedom lives — the *variant*, not
+    the version.
+  - **`CCC`** — 12-bit **class** (up to 4096). By definitional precedence (schema layer takes the lower
+    number): `000` **Type** (object-type/schema layer), `001` **Component** (entity/component
+    instances), `005` container/stream, `00C` command, `00E` event; the root entity is a new class
+    here. In production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId` and an
+    **instance** id is v7 data — neither is a well-known `C0DE` value, so `000`/`001` appear as readable
+    stand-ins in fixtures.
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
-  a legal UUID). Use the internal-test well-known form `C0DE0000-0000-9000-8CCC-…` (`C0DE` magic
-  prefix, zero company-hash `0000-0000` = internal, `9000` = v8 / **test** (version nibble `9`) /
-  project 0): `…-8000-…` = class `000` **Type**, `…-8001-…` = class `001` **Component**,
-  `…-800C-…` commands, `…-8005-…` containers/stream ids. (Prod would be `8000` in group 3.)
+  a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8000-9CCC-…` (`C0DE` magic
+  prefix, zero company-hash `0000-0000` = internal, group-3 `8000` = **version 8 / project 0**,
+  variant nibble `9` = **test**): `…-9000-…` = class `000` **Type**, `…-9001-…` = class `001`
+  **Component**, `…-900C-…` commands, `…-9005-…` containers/stream ids. (Prod flips the variant nibble
+  to `8`: `…-8000-…` etc.)
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures
