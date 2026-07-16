@@ -137,12 +137,27 @@ that is the only form that marries with real-time world-hashing (see Historical 
   clock or shared counter, and the derived id stays a time-ordered v7 that sorts adjacent to its
   command. (Modelled on the Todo predecessor's id layout: a reserved low-bytes counter region +
   increment.)
-- **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout). The
-  version nibble structurally marks "system/well-known" vs v7 data. Well-known classes carry a
-  `CCC` class field; the root entity is a new class here.
-- **Retired:** the default/root **stream** reservation (`C0DE…-800C-…`) — a stream id is mandatory
-  and has no default. The **MasterId** scheme (term/sequence/collection ordering) is not used —
-  there is no master election or monotonic cluster clock.
+- **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
+  source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
+  v7 data. Layout `C0DE yyyy-yyyy 8Sxx 8CCC iiii…`:
+  - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
+  - **`yyyy-yyyy`** — project hash: first 4 bytes of SHA-256 of the lowercase project name
+    (`synqra` → `ADD0 1032`). All-zero here = **"zero company"** = a test / internal-infrastructure
+    value. The leading nibble acts as an `S` flag: `S=0` ⇒ test/infra, `S=1` ⇒ prod — for real
+    *hashed* company ids the sense is reversed (a hashed prefix is inherently non-zero).
+  - **`8`** version nibble — RFC 9562 v8; sub-version `xx=0` = a constant, dynamic-part-free guid;
+    other sub-versions reserved.
+  - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
+    classes: `000` object-type namespace, `005` container/stream, `00C` command, `00E` event; the root
+    entity is a new class here.
+  - trailing bytes — instance / counter.
+- **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
+  a legal UUID). Use the zero-company well-known form `00000000-C0DE-8000-8CCC-…`:
+  `…-800E-…` events, `…-800C-…` commands, `…-8005-…` containers/stream ids. The all-zero **instance**
+  tail (`…-000000000000`) is reserved for unit-test fixtures.
+- **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
+  The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
+  election or monotonic cluster clock.
 
 ## 9. Storage & projections
 
