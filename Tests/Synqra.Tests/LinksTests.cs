@@ -173,7 +173,7 @@ public class LinksTests
 	// These are same-session in-memory tests; each builds its own ServiceProvider with its own empty
 	// in-memory store, so a single fixed stream is fully isolated per test. The in-memory projection
 	// is non-multitenant (factory-only, no DI singleton), so it is borrowed from the provider.
-	static readonly Guid StreamId = new Guid("11110000-0000-4000-8000-000000000001");
+	static readonly Guid StreamId = new Guid("c0de0000-0000-8000-9005-000000000001");
 
 	static IObjectStore ResolveStore(IServiceProvider sp)
 		=> (IObjectStore)sp.GetRequiredService<IProjectionProvider>().GetAsync(StreamId).GetAwaiter().GetResult();

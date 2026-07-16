@@ -179,22 +179,22 @@ public abstract class AppendStorageTests : BaseTest
 		var key1 = guidSpace.CreateVersion7();
 		var item1 = new ComponentAddedEvent
 		{
-			CollectionId = new Guid("00000001-0001-8000-8000-c0de11dae333"),
-			CommandId = new Guid("00000001-0002-8000-8000-c0de11dae333"),
+			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000101"),
+			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
 			EventId = key1,
-			TargetId = new Guid("00000001-0003-8000-8000-c0de11dae333"),
-			TargetTypeId = new Guid("00000001-0004-8000-8000-c0de11dae333"),
+			TargetId = new Guid("c0de0000-0000-8000-9001-000000000103"),
+			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000104"),
 		};
 		await storage.AppendAsync(item1);
 
 		var key2 = guidSpace.CreateVersion7();
 		var item2 = new ComponentAddedEvent
 		{
-			CollectionId = new Guid("00000002-0001-8000-8000-c0de11dae333"),
-			CommandId = new Guid("00000002-0002-8000-8000-c0de11dae333"),
+			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000201"),
+			CommandId = new Guid("c0de0000-0000-8000-900c-000000000200"),
 			EventId = key2,
-			TargetId = new Guid("00000002-0003-8000-8000-c0de11dae333"),
-			TargetTypeId = new Guid("00000002-0004-8000-8000-c0de11dae333"),
+			TargetId = new Guid("c0de0000-0000-8000-9001-000000000203"),
+			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000204"),
 		};
 		await storage.AppendAsync(item2);
 
@@ -248,7 +248,7 @@ public abstract class AppendStorageTests : BaseTest
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000100"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
@@ -281,7 +281,7 @@ public abstract class AppendStorageTests : BaseTest
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("00000001-0001-8000-8000-000000000000"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000100"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
@@ -296,7 +296,7 @@ public abstract class AppendStorageTests : BaseTest
 		{
 			CollectionId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			EventId = Guid.Parse("00000002-0001-8000-8000-000000000000"),
+			EventId = Guid.Parse("c0de0000-0000-8000-900c-000000000200"),
 			TargetId = GuidExtensions.CreateVersion7(),
 			TargetTypeId = GuidExtensions.CreateVersion7(),
 			StreamId = GuidExtensions.CreateVersion7(),
@@ -586,20 +586,24 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_store_polimorfic_as_jsonl()
 	{
-		var eventId = new Guid("C0DEADD0-1032-8000-800C-000000000000");
-		await _storage.AppendAsync(new ComponentAddedEvent
+		// Internal-test well-known guids (see docs/model.md §8): CommandId 900C, its derived event
+		// 900C+1, root component Type 9000 / Component 9001.
+		var ev = new ComponentAddedEvent
 		{
-			CollectionId = default,
-			CommandId = default,
-			EventId = eventId,
-			TargetId = default,
-			TargetTypeId = default,
-		});
+			CollectionId    = new Guid("c0de0000-0000-8000-9000-000000000101"),
+			CommandId       = new Guid("c0de0000-0000-8000-900c-000000000100"),
+			EventId         = new Guid("c0de0000-0000-8000-900c-000000000101"),
+			TargetId        = new Guid("c0de0000-0000-8000-9001-000000000103"),
+			TargetTypeId    = new Guid("c0de0000-0000-8000-9000-000000000104"),
+			ComponentTypeId = new Guid("c0de0000-0000-8000-9000-000000000104"),
+			ComponentId     = new Guid("c0de0000-0000-8000-9001-000000000103"),
+		};
+		await _storage.AppendAsync(ev);
 
 		(_storage as IDisposable)?.Dispose();
 		await Assert.That(FileReadAllText(_fileName).NormalizeNewLines()).IsEqualTo($$"""
 {"Synqra.Storage.Jsonl":"0.1","rootItemType":"Synqra.Event"}
-{{eventId.ToString("N")}}§{"_t":"ComponentAddedEvent","ComponentTypeId":"00000000-0000-0000-0000-000000000000","ComponentId":"00000000-0000-0000-0000-000000000000","TargetId":"00000000-0000-0000-0000-000000000000","TargetTypeId":"00000000-0000-0000-0000-000000000000","CollectionId":"00000000-0000-0000-0000-000000000000","EventId":"{{eventId}}","CommandId":"00000000-0000-0000-0000-000000000000"}
+{{ev.EventId.ToString("N")}}§{"_t":"ComponentAddedEvent","ComponentTypeId":"{{ev.ComponentTypeId}}","ComponentId":"{{ev.ComponentId}}","TargetId":"{{ev.TargetId}}","TargetTypeId":"{{ev.TargetTypeId}}","CollectionId":"{{ev.CollectionId}}","EventId":"{{ev.EventId}}","CommandId":"{{ev.CommandId}}"}
 
 """.NormalizeNewLines());
 	}
@@ -613,17 +617,17 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
-		var targetId1 = Guid.Parse("00000010-0001-8000-8000-00000000aa01");
-		var targetType1 = Guid.Parse("00000010-0002-8000-8000-00000000aa02");
-		var collection1 = Guid.Parse("00000010-0003-8000-8000-00000000aa03");
-		var componentType1 = Guid.Parse("00000010-0004-8000-8000-00000000aa04");
-		var componentId1 = Guid.Parse("00000010-0005-8000-8000-00000000aa05");
+		var targetId1 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a1");
+		var targetType1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a2");
+		var collection1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a3");
+		var componentType1 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a4");
+		var componentId1 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a5");
 
-		var targetId2 = Guid.Parse("00000010-0006-8000-8000-00000000aa06");
-		var targetType2 = Guid.Parse("00000010-0007-8000-8000-00000000aa07");
-		var collection2 = Guid.Parse("00000010-0008-8000-8000-00000000aa08");
-		var componentType2 = Guid.Parse("00000010-0009-8000-8000-00000000aa09");
-		var componentId2 = Guid.Parse("00000010-000a-8000-8000-00000000aa0a");
+		var targetId2 = Guid.Parse("c0de0000-0000-8000-9001-0000000000a6");
+		var targetType2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a7");
+		var collection2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a8");
+		var componentType2 = Guid.Parse("c0de0000-0000-8000-9000-0000000000a9");
+		var componentId2 = Guid.Parse("c0de0000-0000-8000-9001-0000000000aa");
 
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
