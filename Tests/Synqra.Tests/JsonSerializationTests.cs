@@ -72,10 +72,12 @@ public class JsonSerializationTests
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		// Internal-test well-known guids (C0DE prefix, 0000 hash = internal, 8001 = v8/project0/space1=test; see docs/model.md §8): 800C=command,
-		// 8005=container/stream, 8000=generic object namespace. Commands are spaced by 0x100 so their
-		// derived events (Derive(CommandId, ordinal) = CommandId + ordinal) fit in the low byte without
-		// colliding with the next command; the CommandCreatedEvent wrapper is ordinal 0, so its EventId
-		// == the command id (same 800C space, not a separate event class).
+		// 8005=container/stream, 8000=class 000 = generic object/component — a readable stand-in for the
+		// type ids (TargetTypeId/ComponentTypeId) and instance ids (TargetId/ComponentId) here; real type
+		// ids are v8 hashes and real instance ids are v7, neither a well-known C0DE value.
+		// Commands are spaced by 0x100 so their derived events (Derive(CommandId, ordinal) = CommandId +
+		// ordinal) fit in the low byte without colliding with the next command; the CommandCreatedEvent
+		// wrapper is ordinal 0, so its EventId == the command id (same 800C space, not a separate event class).
 		var cmd = new AddComponentCommand
 		{
 			CommandId = new Guid("c0de0000-0000-8001-800c-000000000100"),
@@ -156,7 +158,8 @@ public class JsonSerializationTests
 	[Test]
 	public async Task Should_30_serialize_network_operation()
 	{
-		// Internal-test well-known guids (C0DE prefix, 0000 hash = internal, 8001 = v8/project0/space1=test; see docs/model.md §8).
+		// Internal-test well-known guids (see docs/model.md §8). 8000 = class 000 = generic object/component,
+		// a readable stand-in for type + instance ids here (real type ids are v8 hashes, instances are v7).
 		var cmd = new AddComponentCommand
 		{
 			CommandId = new Guid("c0de0000-0000-8001-800c-000000000100"),
