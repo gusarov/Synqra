@@ -16,6 +16,10 @@ public partial class ComponentAddedEvent : SingleObjectEvent
 	public partial System.Guid ComponentId { get; set; }
 	public partial object? Data { get; set; }
 
+	/// <summary>In-memory materialized object; [JsonIgnore] so it never reaches the durable log.</summary>
+	[System.Text.Json.Serialization.JsonIgnore]
+	public object? DataObject { get; set; }
+
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx)
 		=> visitor.VisitAsync(this, ctx);
 }

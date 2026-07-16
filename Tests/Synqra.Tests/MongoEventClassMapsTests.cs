@@ -62,6 +62,31 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	public async Task Should_not_persist_JsonIgnored_DataObject()
+	{
+		// DataObject is the in-memory materialized object, marked [JsonIgnore]; it must not be
+		// written to the durable log (mirrors the JSON-lines log). Semantic: a [JsonIgnore] member
+		// is dropped by the native BSON serializer.
+		var ev = new ComponentAddedEvent
+		{
+			EventId = Guid.Parse("00000020-0008-8000-8000-0000000000b8"),
+			CommandId = Guid.Parse("00000020-0009-8000-8000-0000000000b9"),
+			TargetId = Guid.Parse("00000020-000a-8000-8000-0000000000ba"),
+			TargetTypeId = Guid.Parse("00000020-000b-8000-8000-0000000000bb"),
+			CollectionId = Guid.Parse("00000020-000c-8000-8000-0000000000bc"),
+			DataObject = new { Anything = "should not be persisted" },
+		};
+
+		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
+		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("ComponentAddedEvent");
+		await Assert.That(doc.Contains("DataObject")).IsFalse();
+
+		var back = (ComponentAddedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
+		await Assert.That(back.TargetId).IsEqualTo(ev.TargetId);
+	}
+
+	[Test]
 	public async Task Should_not_write_a_null_field_at_all()
 	{
 		// Data is a plain (non-JsonIgnore'd) property; when null it must not be written as an
