@@ -142,19 +142,21 @@ that is the only form that marries with real-time world-hashing (see Historical 
   v7 data. Layout `C0DE yyyy-yyyy 8Sxx 8CCC iiii…`:
   - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
   - **`yyyy-yyyy`** — project hash: first 4 bytes of SHA-256 of the lowercase project name
-    (`synqra` → `ADD0 1032`). All-zero here = **"zero company"** = a test / internal-infrastructure
-    value. The leading nibble acts as an `S` flag: `S=0` ⇒ test/infra, `S=1` ⇒ prod — for real
-    *hashed* company ids the sense is reversed (a hashed prefix is inherently non-zero).
-  - **`8`** version nibble — RFC 9562 v8; sub-version `xx=0` = a constant, dynamic-part-free guid;
-    other sub-versions reserved.
+    (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
+    company); a non-zero hash = an external company/project.
+  - **`8S`** version + sub-version — RFC 9562 v8 (`8`), then a sub-version nibble that is the
+    **prod/test** flag: `0` ⇒ **prod**, `1` ⇒ **test**. Orthogonal to the company field, so all four
+    combinations exist (internal-prod, internal-test, external-prod, external-test). Higher
+    sub-versions reserved.
   - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
     classes: `000` object-type namespace, `005` container/stream, `00C` command, `00E` event; the root
     entity is a new class here.
   - trailing bytes — instance / counter.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
-  a legal UUID). Use the zero-company well-known form `00000000-C0DE-8000-8CCC-…`:
-  `…-800E-…` events, `…-800C-…` commands, `…-8005-…` containers/stream ids. The all-zero **instance**
-  tail (`…-000000000000`) is reserved for unit-test fixtures.
+  a legal UUID). Use the internal-test well-known form `00000000-C0DE-8001-8CCC-…` (company `00…` =
+  internal, sub-version `1` = test): `…-800E-…` events, `…-800C-…` commands, `…-8005-…`
+  containers/stream ids. The all-zero **instance** tail (`…-000000000000`) is reserved for unit-test
+  fixtures.
 - **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
   The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
   election or monotonic cluster clock.
