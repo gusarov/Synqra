@@ -239,13 +239,12 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					.Any(s => s is IPropertySymbol or IFieldSymbol);
 			bool emitComponentsCollection = isContainer && !userDeclaredComponents;
 
-			// ECS: a plain top-level model is its own self-owned root component. Infra + facets/links excluded.
 			bool isCommand = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.ISynqraCommand");
 			bool isEventType = classData.Data.AllInterfaces.Any(i =>
 				i.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::Synqra.IEvent");
-			bool isRootTypeForComponent = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
-			bool isRootComponent = isRootTypeForComponent && !isComponent && !isCommand && !isEventType;
+			bool isPlainObjectBase = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
+			bool isRootComponent = isPlainObjectBase && !isComponent && !isCommand && !isEventType;
 
 			string commandTypeName        = (isComponent || isRootComponent) ? "ChangeComponentPropertyCommand" : "ChangeObjectPropertyCommand";
 			string preAttachGuardExtra    = isComponent ? " || __containerId == default" : "";
@@ -266,7 +265,6 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				? ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__containerId) }"
 				: ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
 
-			bool isRootType = classData.Data.BaseType is null || classData.Data.BaseType.SpecialType == SpecialType.System_Object;
 			bool isSealed = classData.Data.IsSealed;
 			var virtualKeyword = isSealed ? "" : " virtual";
 
@@ -312,8 +310,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			var ifaces = ($" : {FQN(classData.Ibm)}, {FQN(classData.Ipc)}, {FQN(classData.Ipcg)}{componentIface}");
 			bool hasLinkNav = clazz.Members.OfType<PropertyDeclarationSyntax>()
 				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps, classData.LinkSymbols) is not null);
-			var linkAwareIface = hasLinkNav ? (isRootType ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
-			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isRootType ? ifaces : null)}{linkAwareIface}");
+			var linkAwareIface = hasLinkNav ? (isPlainObjectBase ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
+			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isPlainObjectBase ? ifaces : null)}{linkAwareIface}");
 			body.AppendLine("{");
 
 			body.AppendLine($"\tstatic {clazz.Identifier}()");
@@ -322,7 +320,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"\t}}");
 			body.AppendLine($"");
 
-			if (isRootType)
+			if (isPlainObjectBase)
 			{
 				body.AppendLine($$"""
 	[ThreadStatic]
