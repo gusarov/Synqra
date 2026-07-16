@@ -71,18 +71,28 @@ public class JsonSerializationTests
 	public async Task Should_20_serialize_event(int ctxId)
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
+		// Zero-company well-known test guids (see docs/model.md §8): 800E=event, 800C=command,
+		// 8005=container/stream, 8000=generic object namespace (types + instances).
+		var cmd = new AddComponentCommand
+		{
+			CommandId = new Guid("00000000-c0de-8000-800c-000000000002"),
+			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
+			TargetTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
+			CollectionId = new Guid("00000000-c0de-8000-8000-000000000002"),
+			TargetId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			ComponentTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
+			ComponentId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			Data = new SampleTaskModel
+			{
+				Subject = subject,
+			},
+		};
 		var obj = new CommandCreatedEvent
 		{
-			CommandId = Guid.NewGuid(),
-			StreamId = Guid.NewGuid(),
-			EventId = Guid.NewGuid(),
-			Data = new AddComponentCommand
-			{
-				Data = new SampleTaskModel
-				{
-					Subject = subject,
-				},
-			},
+			CommandId = new Guid("00000000-c0de-8000-800c-000000000001"),
+			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
+			EventId = new Guid("00000000-c0de-8000-800e-000000000001"),
+			Data = cmd,
 		};
 		async Task Check(JsonSerializerOptions ctx)
 		{
@@ -94,18 +104,18 @@ public class JsonSerializationTests
 				"_t": "CommandCreatedEvent",
 				"Data": {
 					"_t": "AddComponentCommand",
-					"ComponentTypeId": "00000000-0000-0000-0000-000000000000",
-					"ComponentId": "00000000-0000-0000-0000-000000000000",
+					"ComponentTypeId": "{{cmd.ComponentTypeId}}",
+					"ComponentId": "{{cmd.ComponentId}}",
 					"Data": {
 						"_t": "SampleTaskModel",
 						"Subject": "{{subject}}",
 						"Number": 0
 					},
-					"TargetTypeId": "00000000-0000-0000-0000-000000000000",
-					"CollectionId": "00000000-0000-0000-0000-000000000000",
-					"TargetId": "00000000-0000-0000-0000-000000000000",
-					"CommandId": "{{obj.Data.CommandId}}",
-					"StreamId": "00000000-0000-0000-0000-000000000000"
+					"TargetTypeId": "{{cmd.TargetTypeId}}",
+					"CollectionId": "{{cmd.CollectionId}}",
+					"TargetId": "{{cmd.TargetId}}",
+					"CommandId": "{{cmd.CommandId}}",
+					"StreamId": "{{cmd.StreamId}}"
 				},
 				"EventId": "{{obj.EventId}}",
 				"CommandId": "{{obj.CommandId}}"
@@ -143,19 +153,28 @@ public class JsonSerializationTests
 	[Test]
 	public async Task Should_30_serialize_network_operation()
 	{
+		// Zero-company well-known test guids (see docs/model.md §8).
+		var cmd = new AddComponentCommand
+		{
+			CommandId = new Guid("00000000-c0de-8000-800c-000000000002"),
+			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
+			TargetTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
+			CollectionId = new Guid("00000000-c0de-8000-8000-000000000002"),
+			TargetId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			ComponentTypeId = new Guid("00000000-c0de-8000-8000-000000000001"),
+			ComponentId = new Guid("00000000-c0de-8000-8000-000000000003"),
+			Data = new SampleTaskModel
+			{
+				Subject = "Test1",
+				Number = 1,
+			},
+		};
 		var @event = new CommandCreatedEvent
 		{
-			CommandId = Guid.NewGuid(),
-			StreamId = Guid.NewGuid(),
-			EventId = Guid.NewGuid(),
-			Data = new AddComponentCommand
-			{
-				Data = new SampleTaskModel
-				{
-					Subject = "Test1",
-					Number = 1,
-				},
-			},
+			CommandId = new Guid("00000000-c0de-8000-800c-000000000001"),
+			StreamId = new Guid("00000000-c0de-8000-8005-000000000001"),
+			EventId = new Guid("00000000-c0de-8000-800e-000000000001"),
+			Data = cmd,
 		};
 		var operation = new NewEvent1
 		{
@@ -180,18 +199,18 @@ public class JsonSerializationTests
 			"_t": "CommandCreatedEvent",
 			"Data": {
 				"_t": "AddComponentCommand",
-				"ComponentTypeId": "00000000-0000-0000-0000-000000000000",
-				"ComponentId": "00000000-0000-0000-0000-000000000000",
+				"ComponentTypeId": "{{cmd.ComponentTypeId}}",
+				"ComponentId": "{{cmd.ComponentId}}",
 				"Data": {
 					"_t": "SampleTaskModel",
 					"Subject": "Test1",
 					"Number": 1
 				},
-				"TargetTypeId": "00000000-0000-0000-0000-000000000000",
-				"CollectionId": "00000000-0000-0000-0000-000000000000",
-				"TargetId": "00000000-0000-0000-0000-000000000000",
-				"CommandId": "{{@event.Data.CommandId}}",
-				"StreamId": "00000000-0000-0000-0000-000000000000"
+				"TargetTypeId": "{{cmd.TargetTypeId}}",
+				"CollectionId": "{{cmd.CollectionId}}",
+				"TargetId": "{{cmd.TargetId}}",
+				"CommandId": "{{cmd.CommandId}}",
+				"StreamId": "{{cmd.StreamId}}"
 			},
 			"EventId": "{{@event.EventId}}",
 			"CommandId": "{{@event.CommandId}}"
