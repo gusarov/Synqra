@@ -146,7 +146,8 @@ that is the only form that marries with real-time world-hashing (see Historical 
     company); a non-zero hash = an external company.
   - **`8p`** version + **project** — the RFC 9562 version field is v8, but only its top 2 bits are
     fixed (`10`), so this nibble legally ranges `8`/`9`/`a`/`b` and its low 2 bits join the `p` nibble
-    to address a company's **projects** (4 × 16 = **64** per company). `p = 0` is the default project.
+    to address a company's **projects** (4 × 16 = **64** per company). `p = 0` = the company's main
+    affairs / core project (e.g. Synqra itself is the company-project, so `0`).
   - **`ss`** — **space** (environment): `00` = prod, `01` = test, … (space `1` is the test space).
     Orthogonal to the company/project field, so internal/external × prod/test all coexist.
   - **`8CCC`** — RFC variant (`0b10`, renders as hex `8`) + a 12-bit **class** (up to 4096). Well-known
