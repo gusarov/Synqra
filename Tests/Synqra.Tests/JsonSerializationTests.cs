@@ -81,14 +81,14 @@ public class JsonSerializationTests
 		// wrapper is ordinal 0, so its EventId == the command id (same 800C space, not a separate event class).
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			StreamId = new Guid("c0de0000-0000-8000-9005-000000000001"),
-			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000001"),
-			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000002"),
-			TargetId = new Guid("c0de0000-0000-8000-9001-000000000003"),
+			CommandId       = new Guid("c0de0000-0000-8000-900c-000000000100"),
+			StreamId        = new Guid("c0de0000-0000-8000-9005-000000000001"),
+			TargetTypeId    = new Guid("c0de0000-0000-8000-9000-000000000001"),
+			CollectionId    = new Guid("c0de0000-0000-8000-9000-000000000002"),
+			TargetId        = new Guid("c0de0000-0000-8000-9001-000000000003"),
 			ComponentTypeId = new Guid("c0de0000-0000-8000-9000-000000000001"),
-			ComponentId = new Guid("c0de0000-0000-8000-9001-000000000003"),
-			Data = new SampleTaskModel
+			ComponentId     = new Guid("c0de0000-0000-8000-9001-000000000003"),
+			Data            = new SampleTaskModel
 			{
 				Subject = subject,
 			},
@@ -96,9 +96,9 @@ public class JsonSerializationTests
 		var obj = new CommandCreatedEvent
 		{
 			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			StreamId = new Guid("c0de0000-0000-8000-9005-000000000001"),
-			EventId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			Data = cmd,
+			StreamId  = new Guid("c0de0000-0000-8000-9005-000000000001"),
+			EventId   = new Guid("c0de0000-0000-8000-900c-000000000100"),
+			Data      = cmd,
 		};
 		async Task Check(JsonSerializerOptions ctx)
 		{
@@ -164,25 +164,25 @@ public class JsonSerializationTests
 		// 9001=Component (TargetId/ComponentId) — readable stand-ins (real type ids are v8 hashes, instances are v7).
 		var cmd = new AddComponentCommand
 		{
-			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			StreamId = new Guid("c0de0000-0000-8000-9005-000000000001"),
-			TargetTypeId = new Guid("c0de0000-0000-8000-9000-000000000001"),
-			CollectionId = new Guid("c0de0000-0000-8000-9000-000000000002"),
-			TargetId = new Guid("c0de0000-0000-8000-9001-000000000003"),
+			CommandId       = new Guid("c0de0000-0000-8000-900c-000000000100"),
+			StreamId        = new Guid("c0de0000-0000-8000-9005-000000000001"),
+			TargetTypeId    = new Guid("c0de0000-0000-8000-9000-000000000001"),
+			CollectionId    = new Guid("c0de0000-0000-8000-9000-000000000002"),
+			TargetId        = new Guid("c0de0000-0000-8000-9001-000000000003"),
 			ComponentTypeId = new Guid("c0de0000-0000-8000-9000-000000000001"),
-			ComponentId = new Guid("c0de0000-0000-8000-9001-000000000003"),
-			Data = new SampleTaskModel
+			ComponentId     = new Guid("c0de0000-0000-8000-9001-000000000003"),
+			Data            = new SampleTaskModel
 			{
 				Subject = "Test1",
-				Number = 1,
+				Number  = 1,
 			},
 		};
 		var @event = new CommandCreatedEvent
 		{
 			CommandId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			StreamId = new Guid("c0de0000-0000-8000-9005-000000000001"),
-			EventId = new Guid("c0de0000-0000-8000-900c-000000000100"),
-			Data = cmd,
+			StreamId  = new Guid("c0de0000-0000-8000-9005-000000000001"),
+			EventId   = new Guid("c0de0000-0000-8000-900c-000000000100"),
+			Data      = cmd,
 		};
 		var operation = new NewEvent1
 		{
