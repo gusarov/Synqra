@@ -206,7 +206,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		}
 		if (cmd.CommandId == default)
 		{
-			cmd.CommandId = GuidExtensions.CreateVersion7();
+			cmd.CommandId = Ids.CreateCommandId();
 		}
 		// A command without a stream id inherits this store's stream; one carrying a different stream
 		// is a misroute and throws (mirrors File / InMemory).
@@ -259,7 +259,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	internal Guid Attach(object model, Guid collectionId)
 	{
-		var id = GuidExtensions.CreateVersion7();
+		var id = Ids.CreateComponentId();
 		AttachWithId(model, id, collectionId);
 		return id;
 	}
@@ -396,7 +396,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			PropertyName = cmd.PropertyName,
@@ -417,7 +417,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -434,7 +434,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -453,7 +453,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -471,7 +471,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -487,7 +487,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;
@@ -637,7 +637,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId == default ? GuidExtensions.CreateVersion7() : ev.LinkId;
+		link.LinkId = ev.LinkId == default ? Ids.CreateLinkId() : ev.LinkId;
 		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
 		// remarks) — authoritative over whatever Data happened to carry.
 		link.SourceId = ev.SourceId;

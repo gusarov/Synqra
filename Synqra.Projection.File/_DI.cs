@@ -120,7 +120,7 @@ public static class FileSynqraExtensions
 			_lazyFileProjection = fileProjection;
 			AppendStores = appendStores;
 			_pinnedStreamId = pin?.StreamId;
-			GuidGenerator = generator ?? new GuidExtensions.Generator();
+			GuidGenerator = generator ?? GuidExtensions.Default;
 		}
 
 		private void EventuallyMaintain()
@@ -229,7 +229,7 @@ public static class FileSynqraExtensions
 					case 2:
 						if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 						{
-							Id = GuidExtensions.CreateVersion7(),
+							Id = Ids.CreateComponentId(),
 							IsJustCreated = false,
 							Collection = collection ?? throw new Exception("Collection is not specified for new object"),
 						}))
@@ -305,7 +305,7 @@ public static class FileSynqraExtensions
 					case 2:
 						if (id == default)
 						{
-							id = GuidGenerator.CreateVersion7();
+							id = Ids.CreateComponentId();
 						}
 						if (collection is null)
 						{
@@ -481,7 +481,7 @@ public static class FileSynqraExtensions
 			{
 				StreamId = _store.StreamId,
 				CollectionId = CollectionId,
-				CommandId = _store.GuidGenerator.CreateVersion7(),
+				CommandId = Ids.CreateCommandId(),
 				TargetTypeId = typeId,
 				TargetId = attachedData.Id,
 				TargetObject = item,
@@ -634,7 +634,7 @@ public static class FileSynqraExtensions
 		{
 			var created = new CommandCreatedEvent
 			{
-				EventId = GuidExtensions.Derive(cmd.CommandId, 0),
+				EventId = Ids.CreateEventId(cmd.CommandId, 0),
 				Data = cmd,
 				CommandId = cmd.CommandId,
 				StreamId = cmd.StreamId,
@@ -680,7 +680,7 @@ public static class FileSynqraExtensions
 			var ev = new ObjectPropertyChangedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+				EventId = Ids.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -702,7 +702,7 @@ public static class FileSynqraExtensions
 			ctx.Events.Add(new ComponentAddedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+				EventId = Ids.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -718,7 +718,7 @@ public static class FileSynqraExtensions
 			ctx.Events.Add(new ComponentPropertyChangedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+				EventId = Ids.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -736,7 +736,7 @@ public static class FileSynqraExtensions
 			ctx.Events.Add(new ComponentDeletedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+				EventId = Ids.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
