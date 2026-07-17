@@ -154,6 +154,10 @@ public class BaseTest : TestUtils
 				_hostBuilder.Services.AddLazier();
 				_origServiceCount = _hostBuilder.Services.Count;
 				Register(_hostBuilder);
+				// Tests mint predictable ids: production code under test resolves this same singleton, so
+				// store-minted ids come out as readable per-class A-variant C0DE values. Registered last so
+				// it wins over the store's TryAdd production default. Counters reset per host (per test).
+				_hostBuilder.Services.AddSingleton<ISynqraIdProvider, DeterministicSynqraIdProvider>();
 				foreach (var service in _hostBuilder.Services)
 				{
 					EmergencyLog.Default.LogInformation("Registered service: " + service.ServiceType.FullName + " as " + service.Lifetime);
@@ -195,6 +199,12 @@ public class BaseTest : TestUtils
 	}
 
 	public IServiceProvider ServiceProvider => ApplicationHost.Services;
+
+	/// <summary>
+	/// The test id factory (deterministic per-class A-variant). Same instance the store under test
+	/// mints with, so ids a test hardcodes/fills line up with what production code produces.
+	/// </summary>
+	public ISynqraIdProvider Ids => ServiceProvider.GetRequiredService<ISynqraIdProvider>();
 }
 
 /// <summary>Kept as a thin alias — callers used AddLazier() before this moved to the

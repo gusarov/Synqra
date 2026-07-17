@@ -270,15 +270,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var c = new TestUniqueComponent { Subject = "before" };
-		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			ComponentId = cId,
 			Data = c,
 		});
+		// The store assigns the component id on Add and stamps it back onto the instance.
+		var cId = ((IIdentifiable<Guid>)c).Id;
 
 		// Every component — unique ones too — is addressed by its own ComponentId.
 		await _sut.SubmitCommandAsync(new ChangeComponentPropertyCommand
@@ -349,15 +349,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var doomed = new TestUniqueComponent { Subject = "doomed" };
-		var doomedId = ((IIdentifiable<Guid>)doomed).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			ComponentId = doomedId,
 			Data = doomed,
 		});
+		// The store assigns the component id on Add and stamps it back onto the instance.
+		var doomedId = ((IIdentifiable<Guid>)doomed).Id;
 		await Assert.That(node.Components.Count).IsEqualTo(1);
 
 		await _sut.SubmitCommandAsync(new DeleteComponentCommand
@@ -381,15 +381,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 
 		var beforeAdd = _sut.GetLastEventId(nodeId);
 		var c = new TestUniqueComponent { Subject = "x" };
-		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			ComponentId = cId,
 			Data = c,
 		});
+		// The store assigns the component id on Add and stamps it back onto the instance.
+		var cId = ((IIdentifiable<Guid>)c).Id;
 		var afterAdd = _sut.GetLastEventId(nodeId);
 		await Assert.That(afterAdd).IsNotEqualTo(beforeAdd);
 		// "Container's LastEventId advances on ComponentAddedEvent so concurrent edits conflict at container granularity."
@@ -463,15 +463,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var c = new TestUniqueComponent { Subject = "v1" };
-		var cId = ((IIdentifiable<Guid>)c).Id;
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestUniqueComponent>(),
-			ComponentId = cId,
 			Data = c,
 		});
+		// The store assigns the component id on Add and stamps it back onto the instance.
+		var cId = ((IIdentifiable<Guid>)c).Id;
 		await Assert.That(c.Subject).IsEqualTo("v1");
 
 		var commandsBefore = _sut.GetCollection<Command>().OfType<ChangeComponentPropertyCommand>().Count();
@@ -499,15 +499,15 @@ public class TestsStateManageementInMemory : TestsStateManagement
 		_sut.GetCollection<TestComponentNode>().Add(node);
 
 		var c = new TestTaggingComponent { Tag = "alpha" };
-		var tagId = ((IIdentifiable<Guid>)c).Id; // framework-assigned component id
 		await _sut.SubmitCommandAsync(new AddComponentCommand
 		{
 			CommandId = GuidExtensions.CreateVersion7(),
 			TargetObject = node,
 			ComponentTypeId = TypeIdOf<TestTaggingComponent>(),
-			ComponentId = tagId,
 			Data = c,
 		});
+		// The store assigns the component id on Add and stamps it back onto the instance.
+		var tagId = ((IIdentifiable<Guid>)c).Id;
 
 		c.Tag = "beta"; // generator-emitted path
 

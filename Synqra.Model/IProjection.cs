@@ -6,6 +6,17 @@ public interface IObjectStore
 {
 	ITypeMetadataProvider TypeMetadataProvider { get; }
 
+	/// <summary>
+	/// The injected id factory this store mints with. Real projections return their DI-supplied
+	/// instance; the default falls back to the production provider for the non-DI construction path.
+	/// </summary>
+	ISynqraIdProvider IdProvider
+#if NET8_0_OR_GREATER
+		=> SynqraIdProvider.Default;
+#else
+		{ get; }
+#endif
+
 
 	/// <summary>
 	/// Get Id of the model instance. If model is not tracked, throw exception.

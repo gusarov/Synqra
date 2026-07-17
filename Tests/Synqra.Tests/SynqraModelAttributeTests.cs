@@ -13,10 +13,10 @@ public class SynqraModelAttributeTests : BaseTest
 		var provider = ServiceProvider.GetRequiredService<ITypeMetadataProvider>();
 		var metadata = provider.GetTypeMetadata(typeof(ExplicitTypeIdModel));
 
-		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("36c3d5f8-454c-55ae-9922-c8052a7617cc"));
+		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("C0DE0000-0000-8000-9000-000000000001"));
 	}
 
-	[SynqraModel("36c3d5f8-454c-55ae-9922-c8052a7617cc")]
+	[SynqraModel("C0DE0000-0000-8000-9000-000000000001")]
 	private sealed class ExplicitTypeIdModel
 	{
 	}

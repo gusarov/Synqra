@@ -139,7 +139,6 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		{
 			StreamId = StreamId,
 			CollectionId = CollectionId,
-			CommandId = Ids.CreateCommandId(),
 			TargetTypeId = typeId,
 			TargetId = attachedData.Id,
 			TargetObject = item,

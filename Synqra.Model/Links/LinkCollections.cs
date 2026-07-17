@@ -195,11 +195,10 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 		var store = Store;
 		if (link.LinkId == default)
 		{
-			link.LinkId = Ids.CreateLinkId();
+			link.LinkId = store.IdProvider.CreateLinkId();
 		}
 		var task = store.SubmitCommandAsync(new AddLinkCommand
 		{
-			CommandId = Ids.CreateCommandId(),
 			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TLink)).TypeId,
 			LinkId = link.LinkId,
 			SourceId = link.SourceId,
@@ -213,7 +212,6 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 	{
 		var task = Store.SubmitCommandAsync(new RemoveLinkCommand
 		{
-			CommandId = Ids.CreateCommandId(),
 			LinkId = link.LinkId,
 		});
 		RunSync(task);

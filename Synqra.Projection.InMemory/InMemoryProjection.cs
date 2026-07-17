@@ -57,6 +57,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	private readonly IEventReplicationService? _eventReplicationService;
 	private readonly IServiceProvider? _serviceProvider;
+	private readonly ISynqraIdProvider _ids;
+	public ISynqraIdProvider IdProvider => _ids;
 	private readonly Dictionary<Guid, InMemoryStoreCollection> _collections = new();
 	private readonly ConcurrentDictionary<Guid, StrongReference> _attachedObjectsById = new();
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
@@ -82,8 +84,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		, IServiceProvider? serviceProvider = null
+		, ISynqraIdProvider? idProvider = null
 		)
 	{
+		_ids = idProvider ?? SynqraIdProvider.Default;
 		// The stream id is a first-class construction value — an InMemoryProjection is inherently
 		// single-tenant: one instance materializes exactly one stream's state, so it is pinned to
 		// exactly one stream up front and never reads an ambient SynqraStreamContext scope. It is
@@ -227,7 +231,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				case 2:
 					if (id == default)
 					{
-						id = Ids.CreateComponentId();
+						id = _ids.CreateComponentId();
 					}
 					if (collection is null)
 					{
@@ -298,7 +302,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			}
 			if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 			{
-				Id = Ids.CreateComponentId(),
+				Id = _ids.CreateComponentId(),
 				IsJustCreated = false,
 				Collection = collection,
 			}))
@@ -339,7 +343,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				case 2:
 					if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 					{
-						Id = Ids.CreateComponentId(),
+						Id = _ids.CreateComponentId(),
 						IsJustCreated = false,
 						Collection = collection ?? throw new Exception("Collection is not specified for new object"),
 					}))
@@ -435,7 +439,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			if (cmd.CommandId == default)
 			{
-				cmd.CommandId = Ids.CreateCommandId();
+				cmd.CommandId = _ids.CreateCommandId();
 			}
 			if (cmd.StreamId == default)
 			{
@@ -567,7 +571,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var created = new CommandCreatedEvent
 		{
-			EventId = Ids.CreateEventId(cmd.CommandId, 0),
+			EventId = _ids.CreateEventId(cmd.CommandId, 0),
 			Data = cmd,
 			CommandId = cmd.CommandId,
 			StreamId = cmd.StreamId,
@@ -605,7 +609,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
 
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -627,12 +631,22 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		// Uniqueness / veto checks happen during event apply (where the live
 		// ComponentsCollection lives). Command handling here just turns the
 		// command into the event — same pattern as ChangeObjectProperty.
+		// A facet component reaches us with no id (POCOs no longer self-mint); assign one from the
+		// injected provider and stamp it back onto the live instance so the consumer's Id is stable.
+		if (cmd.ComponentId == default)
+		{
+			cmd.ComponentId = _ids.CreateComponentId();
+			if (cmd.Data is IBindableComponent bindable)
+			{
+				bindable.SetComponentId(cmd.ComponentId);
+			}
+		}
 		ctx.Events.Add(new ComponentAddedEvent
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -650,7 +664,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -670,7 +684,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -688,7 +702,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -704,7 +718,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.Reflection;
@@ -11,6 +12,9 @@ public static class TypeMetadataProviderExtensions
 	public static void AddTypeMetadataProvider(this IServiceCollection services, params Type[] types)
 	{
 		services.AddSingleton<ITypeMetadataProvider, TypeMetadataProvider>();
+		// Production id factory. A test host registers DeterministicSynqraIdProvider before/after to
+		// override it (last explicit registration wins); TryAdd keeps this as the default otherwise.
+		services.TryAddSingleton<ISynqraIdProvider, SynqraIdProvider>();
 		services.PostConfigure<TypeMetadataProviderConfig>(x =>
 		{
 			x.Types ??= new List<Type>();

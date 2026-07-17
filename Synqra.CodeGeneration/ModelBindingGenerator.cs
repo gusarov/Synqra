@@ -413,9 +413,10 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	}
 
 	// First-class component identity, independent of [Component(IsUnique)] cardinality.
-	// Auto-assigned at construction; the projection re-stamps it from the event's ComponentId
-	// on materialize/replay so a rehydrated instance keeps its persisted id.
-	protected global::System.Guid __id = global::Synqra.Ids.CreateComponentId();
+	// Left empty at construction — a POCO has no injected id factory. The store assigns it on Add
+	// (from its ISynqraIdProvider) and stamps it back via SetComponentId; on materialize/replay the
+	// projection re-stamps it from the event's ComponentId so a rehydrated instance keeps its id.
+	protected global::System.Guid __id;
 	global::System.Guid global::Synqra.IIdentifiable<global::System.Guid>.Id => __id;
 	void global::Synqra.IBindableComponent.SetComponentId(global::System.Guid id) => __id = id;
 """);
@@ -645,7 +646,6 @@ $$"""
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
 				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
 				{
-					CommandId = Ids.CreateCommandId(),
 					CollectionId = {{collectionIdExpr}},
 
 					TargetObject = {{targetObjectExpr}},

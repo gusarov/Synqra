@@ -105,7 +105,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 		var task = _store.SubmitCommandAsync(
 			new AddComponentCommand
 			{
-				CommandId = Ids.CreateCommandId(),
 				CollectionId = _containerCollectionId,
 				TargetId = containerId,
 				TargetTypeId = containerTypeId,
@@ -129,7 +128,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 		var task = _store.SubmitCommandAsync(
 			new DeleteComponentCommand
 			{
-				CommandId = Ids.CreateCommandId(),
 				CollectionId = _containerCollectionId,
 				TargetId = containerId,
 				TargetTypeId = containerTypeId,
