@@ -415,7 +415,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	// First-class component identity, independent of [Component(IsUnique)] cardinality.
 	// Auto-assigned at construction; the projection re-stamps it from the event's ComponentId
 	// on materialize/replay so a rehydrated instance keeps its persisted id.
-	protected global::System.Guid __id = global::Synqra.GuidExtensions.CreateVersion7();
+	protected global::System.Guid __id = global::Synqra.Ids.CreateComponentId();
 	global::System.Guid global::Synqra.IIdentifiable<global::System.Guid>.Id => __id;
 	void global::Synqra.IBindableComponent.SetComponentId(global::System.Guid id) => __id = id;
 """);
@@ -645,7 +645,7 @@ $$"""
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
 				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
 				{
-					CommandId = GuidExtensions.CreateVersion7(),
+					CommandId = Ids.CreateCommandId(),
 					CollectionId = {{collectionIdExpr}},
 
 					TargetObject = {{targetObjectExpr}},

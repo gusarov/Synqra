@@ -227,7 +227,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				case 2:
 					if (id == default)
 					{
-						id = GuidExtensions.CreateVersion7();
+						id = Ids.CreateComponentId();
 					}
 					if (collection is null)
 					{
@@ -298,7 +298,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			}
 			if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 			{
-				Id = GuidExtensions.CreateVersion7(),
+				Id = Ids.CreateComponentId(),
 				IsJustCreated = false,
 				Collection = collection,
 			}))
@@ -339,7 +339,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				case 2:
 					if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 					{
-						Id = GuidExtensions.CreateVersion7(),
+						Id = Ids.CreateComponentId(),
 						IsJustCreated = false,
 						Collection = collection ?? throw new Exception("Collection is not specified for new object"),
 					}))
@@ -435,7 +435,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			if (cmd.CommandId == default)
 			{
-				cmd.CommandId = GuidExtensions.CreateVersion7();
+				cmd.CommandId = Ids.CreateCommandId();
 			}
 			if (cmd.StreamId == default)
 			{
@@ -567,7 +567,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var created = new CommandCreatedEvent
 		{
-			EventId = GuidExtensions.Derive(cmd.CommandId, 0),
+			EventId = Ids.CreateEventId(cmd.CommandId, 0),
 			Data = cmd,
 			CommandId = cmd.CommandId,
 			StreamId = cmd.StreamId,
@@ -605,7 +605,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
 
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -632,7 +632,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -650,7 +650,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -670,7 +670,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -688,7 +688,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -704,7 +704,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = GuidExtensions.Derive(cmd.CommandId, 1),
+			EventId = Ids.CreateEventId(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;

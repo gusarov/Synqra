@@ -244,12 +244,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev = new ComponentAddedEvent
 		{
-			CollectionId = TestGuids.NewAuto(),
-			CommandId = TestGuids.NewAuto(),
+			CollectionId = Ids.CreateComponentId(),
+			CommandId = Ids.CreateCommandId(),
 			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
-			TargetId = TestGuids.NewAuto(),
-			TargetTypeId = TestGuids.NewAuto(),
-			StreamId = TestGuids.NewAuto(),
+			TargetId = Ids.CreateComponentId(),
+			TargetTypeId = Ids.CreateComponentId(),
+			StreamId = Ids.CreateStreamId(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -277,12 +277,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev = new ComponentAddedEvent
 		{
-			CollectionId = TestGuids.NewAuto(),
-			CommandId = TestGuids.NewAuto(),
+			CollectionId = Ids.CreateComponentId(),
+			CommandId = Ids.CreateCommandId(),
 			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
-			TargetId = TestGuids.NewAuto(),
-			TargetTypeId = TestGuids.NewAuto(),
-			StreamId = TestGuids.NewAuto(),
+			TargetId = Ids.CreateComponentId(),
+			TargetTypeId = Ids.CreateComponentId(),
+			StreamId = Ids.CreateStreamId(),
 			Data = new StorableModel
 			{
 				Title = "Alice",
@@ -292,12 +292,12 @@ public abstract class AppendStorageTests : BaseTest
 
 		var ev2 = new ComponentAddedEvent
 		{
-			CollectionId = TestGuids.NewAuto(),
-			CommandId = TestGuids.NewAuto(),
+			CollectionId = Ids.CreateComponentId(),
+			CommandId = Ids.CreateCommandId(),
 			EventId = new Guid("C0DE0000-0000-8000-900C-000000000200"),
-			TargetId = TestGuids.NewAuto(),
-			TargetTypeId = TestGuids.NewAuto(),
-			StreamId = TestGuids.NewAuto(),
+			TargetId = Ids.CreateComponentId(),
+			TargetTypeId = Ids.CreateComponentId(),
+			StreamId = Ids.CreateStreamId(),
 			Data = new StorableModel
 			{
 				Title = "Bob",
@@ -340,23 +340,23 @@ public abstract class AppendStorageTests : BaseTest
 
 		var item0 = new Item
 		{
-			CollectionId = TestGuids.NewAuto(), // different collection
-			ObjectId = TestGuids.NewAuto(),
+			CollectionId = Ids.CreateComponentId(), // different collection
+			ObjectId = Ids.CreateComponentId(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + TestGuids.NewAuto(),
+				Subject = "test" + Ids.CreateComponentId(),
 			},
 		};
 		await storage.AppendAsync(item0);
 
-		var collectionId1 = TestGuids.NewAuto();
+		var collectionId1 = Ids.CreateComponentId();
 		var item1 = new Item
 		{
 			CollectionId = collectionId1,
-			ObjectId = TestGuids.NewAuto(),
+			ObjectId = Ids.CreateComponentId(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + TestGuids.NewAuto(),
+				Subject = "test" + Ids.CreateComponentId(),
 			},
 		};
 		await storage.AppendAsync(item1);
@@ -364,21 +364,21 @@ public abstract class AppendStorageTests : BaseTest
 		var item2 = new Item
 		{
 			CollectionId = collectionId1,
-			ObjectId = TestGuids.NewAuto(),
+			ObjectId = Ids.CreateComponentId(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test" + TestGuids.NewAuto(),
+				Subject = "test" + Ids.CreateComponentId(),
 			},
 		};
 		await storage.AppendAsync(item2);
 
 		var item3 = new Item
 		{
-			CollectionId = TestGuids.NewAuto(), // different collection
-			ObjectId = TestGuids.NewAuto(),
+			CollectionId = Ids.CreateComponentId(), // different collection
+			ObjectId = Ids.CreateComponentId(),
 			Blob = new MyPocoTask
 			{
-				Subject = "test"+ TestGuids.NewAuto(),
+				Subject = "test"+ Ids.CreateComponentId(),
 			},
 		};
 		await storage.AppendAsync(item3);
@@ -629,8 +629,8 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
-			EventId = TestGuids.NewAuto(),
-			CommandId = TestGuids.NewAuto(),
+			EventId = Ids.CreateComponentId(),
+			CommandId = Ids.CreateCommandId(),
 			TargetId = targetId1,
 			TargetTypeId = targetType1,
 			CollectionId = collection1,
@@ -639,8 +639,8 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		});
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
-			EventId = TestGuids.NewAuto(),
-			CommandId = TestGuids.NewAuto(),
+			EventId = Ids.CreateComponentId(),
+			CommandId = Ids.CreateCommandId(),
 			TargetId = targetId2,
 			TargetTypeId = targetType2,
 			CollectionId = collection2,

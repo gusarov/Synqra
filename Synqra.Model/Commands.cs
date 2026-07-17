@@ -26,7 +26,7 @@ public abstract partial class Command : ISynqraCommand
 {
 	protected Command()
 	{
-		CommandId = GuidExtensions.CreateVersion7();
+		CommandId = Ids.CreateCommandId();
 	}
 
 	public partial Guid CommandId { get; set; }
