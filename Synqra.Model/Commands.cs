@@ -24,11 +24,8 @@ namespace Synqra;
 [Schema(2026.198, "1 CommandId Guid StreamId Guid")]
 public abstract partial class Command : ISynqraCommand
 {
-	protected Command()
-	{
-		CommandId = Ids.CreateCommandId();
-	}
-
+	// CommandId is assigned by the store on submit (SubmitCommandAsync) from the injected
+	// ISynqraIdProvider when left empty — a detached command has no ambient id factory.
 	public partial Guid CommandId { get; set; }
 	public partial Guid StreamId { get; set; }
 

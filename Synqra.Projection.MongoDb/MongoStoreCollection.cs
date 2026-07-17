@@ -73,7 +73,6 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 		{
 			StreamId = _projection.StreamId,
 			CollectionId = CollectionId,
-			CommandId = Ids.CreateCommandId(),
 			TargetTypeId = typeId,
 			TargetId = id,
 			TargetObject = item,

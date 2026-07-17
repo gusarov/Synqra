@@ -77,6 +77,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	readonly IAppendStorage? _eventStorage;
 	readonly JsonSerializerOptions _jsonSerializerOptions;
 	readonly IServiceProvider? _serviceProvider;
+	readonly ISynqraIdProvider _ids;
+	public ISynqraIdProvider IdProvider => _ids;
 
 	// null => multitenant (read the ambient scope per call); a value => pinned to that one stream.
 	readonly Guid? _pinnedStreamId;
@@ -118,8 +120,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		, JsonSerializerContext? jsonSerializerContext = null
 		, IServiceProvider? serviceProvider = null
 		, StreamPin? pin = null
+		, ISynqraIdProvider? idProvider = null
 		)
 	{
+		_ids = idProvider ?? SynqraIdProvider.Default;
 		_database = database ?? throw new ArgumentNullException(nameof(database));
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
@@ -206,7 +210,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		}
 		if (cmd.CommandId == default)
 		{
-			cmd.CommandId = Ids.CreateCommandId();
+			cmd.CommandId = _ids.CreateCommandId();
 		}
 		// A command without a stream id inherits this store's stream; one carrying a different stream
 		// is a misroute and throws (mirrors File / InMemory).
@@ -259,7 +263,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	internal Guid Attach(object model, Guid collectionId)
 	{
-		var id = Ids.CreateComponentId();
+		var id = _ids.CreateComponentId();
 		AttachWithId(model, id, collectionId);
 		return id;
 	}
@@ -396,7 +400,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			PropertyName = cmd.PropertyName,
@@ -412,12 +416,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		// Uniqueness / veto checks happen during event apply (where the live ComponentsCollection
 		// lives) — same pattern as ChangeObjectProperty.
+		// A facet component reaches us with no id (POCOs no longer self-mint); assign one from the
+		// injected provider and stamp it back onto the live instance so the consumer's Id is stable.
+		if (cmd.ComponentId == default)
+		{
+			cmd.ComponentId = _ids.CreateComponentId();
+			if (cmd.Data is IBindableComponent bindable)
+			{
+				bindable.SetComponentId(cmd.ComponentId);
+			}
+		}
 		ctx.Events.Add(new ComponentAddedEvent
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -434,7 +448,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -453,7 +467,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 			ComponentTypeId = cmd.ComponentTypeId,
@@ -471,7 +485,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -487,7 +501,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = Ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;
@@ -637,7 +651,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId == default ? Ids.CreateLinkId() : ev.LinkId;
+		link.LinkId = ev.LinkId == default ? _ids.CreateLinkId() : ev.LinkId;
 		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
 		// remarks) — authoritative over whatever Data happened to carry.
 		link.SourceId = ev.SourceId;

@@ -106,6 +106,9 @@ public static class FileSynqraExtensions
 
 		public GuidExtensions.Generator GuidGenerator { get; }
 
+		readonly ISynqraIdProvider _ids;
+		public ISynqraIdProvider IdProvider => _ids;
+
 		public FileObjectStore(
 			  ITypeMetadataProvider typeMetadataProvider
 			, ISbxSerializerFactory serializerFactory
@@ -113,6 +116,7 @@ public static class FileSynqraExtensions
 			, AppendStores appendStores
 			, StreamPin? pin = null
 			, GuidExtensions.Generator? generator = null
+			, ISynqraIdProvider? idProvider = null
 			)
 		{
 			TypeMetadataProvider = typeMetadataProvider;
@@ -121,6 +125,7 @@ public static class FileSynqraExtensions
 			AppendStores = appendStores;
 			_pinnedStreamId = pin?.StreamId;
 			GuidGenerator = generator ?? GuidExtensions.Default;
+			_ids = idProvider ?? SynqraIdProvider.Default;
 		}
 
 		private void EventuallyMaintain()
@@ -229,7 +234,7 @@ public static class FileSynqraExtensions
 					case 2:
 						if (_attachedObjects.TryAdd(model, attachedData = new AttachedObjectData
 						{
-							Id = Ids.CreateComponentId(),
+							Id = _ids.CreateComponentId(),
 							IsJustCreated = false,
 							Collection = collection ?? throw new Exception("Collection is not specified for new object"),
 						}))
@@ -305,7 +310,7 @@ public static class FileSynqraExtensions
 					case 2:
 						if (id == default)
 						{
-							id = Ids.CreateComponentId();
+							id = _ids.CreateComponentId();
 						}
 						if (collection is null)
 						{
@@ -481,7 +486,6 @@ public static class FileSynqraExtensions
 			{
 				StreamId = _store.StreamId,
 				CollectionId = CollectionId,
-				CommandId = Ids.CreateCommandId(),
 				TargetTypeId = typeId,
 				TargetId = attachedData.Id,
 				TargetObject = item,
@@ -606,6 +610,10 @@ public static class FileSynqraExtensions
 			// Single normalization point (mirrors InMemoryProjection / MongoProjection): a command
 			// arriving without a stream id (e.g. from the generated setter / component / link visitors)
 			// inherits this store's stream; one carrying a different stream is a misroute and throws.
+			if (cmd.CommandId == default)
+			{
+				cmd.CommandId = _objectStore.IdProvider.CreateCommandId();
+			}
 			var streamId = _objectStore.StreamId;
 			if (cmd.StreamId == default)
 			{
@@ -634,7 +642,7 @@ public static class FileSynqraExtensions
 		{
 			var created = new CommandCreatedEvent
 			{
-				EventId = Ids.CreateEventId(cmd.CommandId, 0),
+				EventId = _objectStore.IdProvider.CreateEventId(cmd.CommandId, 0),
 				Data = cmd,
 				CommandId = cmd.CommandId,
 				StreamId = cmd.StreamId,
@@ -680,7 +688,7 @@ public static class FileSynqraExtensions
 			var ev = new ObjectPropertyChangedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = Ids.CreateEventId(cmd.CommandId, 1),
+				EventId = _objectStore.IdProvider.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -699,10 +707,18 @@ public static class FileSynqraExtensions
 		// visitors below. Each command still emits its component event so the log is backend-independent.
 		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx)
 		{
+			if (cmd.ComponentId == default)
+			{
+				cmd.ComponentId = _objectStore.IdProvider.CreateComponentId();
+				if (cmd.Data is IBindableComponent bindable)
+				{
+					bindable.SetComponentId(cmd.ComponentId);
+				}
+			}
 			ctx.Events.Add(new ComponentAddedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = Ids.CreateEventId(cmd.CommandId, 1),
+				EventId = _objectStore.IdProvider.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -718,7 +734,7 @@ public static class FileSynqraExtensions
 			ctx.Events.Add(new ComponentPropertyChangedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = Ids.CreateEventId(cmd.CommandId, 1),
+				EventId = _objectStore.IdProvider.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,
@@ -736,7 +752,7 @@ public static class FileSynqraExtensions
 			ctx.Events.Add(new ComponentDeletedEvent
 			{
 				StreamId = cmd.StreamId,
-				EventId = Ids.CreateEventId(cmd.CommandId, 1),
+				EventId = _objectStore.IdProvider.CreateEventId(cmd.CommandId, 1),
 				CollectionId = cmd.CollectionId,
 				CommandId = cmd.CommandId,
 				TargetTypeId = cmd.TargetTypeId,

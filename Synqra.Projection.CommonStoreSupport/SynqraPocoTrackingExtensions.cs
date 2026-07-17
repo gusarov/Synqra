@@ -104,7 +104,6 @@ public static class SynqraPocoTrackingExtensions
 						{
 							await _storeCollection.Store.SubmitCommandAsync(new ChangeObjectPropertyCommand
 							{
-								CommandId = Ids.CreateCommandId(),
 								StreamId = _storeCollection.StreamId,
 								CollectionId = _storeCollection.CollectionId,
 								TargetTypeId = _storeCollection.Store.TypeMetadataProvider.GetTypeMetadata(_storeCollection.Type).TypeId,

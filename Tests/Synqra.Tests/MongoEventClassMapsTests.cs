@@ -38,7 +38,7 @@ public class MongoEventClassMapsTests
 			CommandId = new Guid("C0DE0000-0000-8000-900C-0000000000B3"),
 			TargetId = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-0000000000B5"),
-			CollectionId = new Guid("C0DE0000-0000-8000-9000-0000000000B6"),
+			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000B6"),
 			PropertyName = "Name",
 			NewValue = "Alice",
 		};
@@ -116,7 +116,7 @@ public class MongoEventClassMapsTests
 		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
 		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
 		// essentially empty: just its own discriminator, nothing from the Link base).
-		var linkId = new Guid("C0DE0000-0000-8000-9001-0000000000C3");
+		var linkId = new Guid("C0DE0000-0000-8000-9003-0000000000C3");
 		var sourceId = new Guid("C0DE0000-0000-8000-9001-0000000000C4");
 		var targetId = new Guid("C0DE0000-0000-8000-9001-0000000000C5");
 		var ev = new LinkAddedEvent

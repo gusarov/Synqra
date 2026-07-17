@@ -159,7 +159,9 @@ that is the only form that marries with real-time world-hashing (see Historical 
     - **`B`** = reserved.
   - **`CCC`** — 12-bit **class** (up to 4096). By definitional precedence (schema layer takes the lower
     number): `000` **Type** (object-type/schema layer), `001` **Component** (entity/component
-    instances), `005` container/stream, `00C` command, `00E` event; the root entity is a new class
+    instances), `002` **collection** *(reserved — being retired, kept documented/compliant while still
+    present)*, `003` **link** *(reserved — links fold into components, kept documented/compliant while
+    still present)*, `005` container/stream, `00C` command, `00E` event; the root entity is a new class
     here. In production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId` and an
     **instance** id is v7 data — neither is a well-known `C0DE` value, so `000`/`001` appear as readable
     stand-ins in fixtures.
