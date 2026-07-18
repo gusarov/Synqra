@@ -615,17 +615,17 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
-		var targetId1 = new Guid("C0DE0000-0000-8000-9001-0000000000A1");
-		var targetType1 = new Guid("C0DE0000-0000-8000-9000-0000000000A2");
-		var collection1 = new Guid("C0DE0000-0000-8000-9002-0000000000A3");
+		var targetId1      = new Guid("C0DE0000-0000-8000-9001-0000000000A1");
+		var targetType1    = new Guid("C0DE0000-0000-8000-9000-0000000000A2");
+		var collection1    = new Guid("C0DE0000-0000-8000-9002-0000000000A3");
 		var componentType1 = new Guid("C0DE0000-0000-8000-9000-0000000000A4");
-		var componentId1 = new Guid("C0DE0000-0000-8000-9001-0000000000A5");
+		var componentId1   = new Guid("C0DE0000-0000-8000-9001-0000000000A5");
 
-		var targetId2 = new Guid("C0DE0000-0000-8000-9001-0000000000A6");
-		var targetType2 = new Guid("C0DE0000-0000-8000-9000-0000000000A7");
-		var collection2 = new Guid("C0DE0000-0000-8000-9002-0000000000A8");
+		var targetId2      = new Guid("C0DE0000-0000-8000-9001-0000000000A6");
+		var targetType2    = new Guid("C0DE0000-0000-8000-9000-0000000000A7");
+		var collection2    = new Guid("C0DE0000-0000-8000-9002-0000000000A8");
 		var componentType2 = new Guid("C0DE0000-0000-8000-9000-0000000000A9");
-		var componentId2 = new Guid("C0DE0000-0000-8000-9001-0000000000AA");
+		var componentId2   = new Guid("C0DE0000-0000-8000-9001-0000000000AA");
 
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
