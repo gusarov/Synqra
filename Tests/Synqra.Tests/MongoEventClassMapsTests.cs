@@ -34,13 +34,13 @@ public class MongoEventClassMapsTests
 	{
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = new Guid("C0DE0000-0000-8000-900C-0000000000B2"),
-			CommandId = new Guid("C0DE0000-0000-8000-900C-0000000000B3"),
-			TargetId = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
+			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B2"),
+			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B3"),
+			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-0000000000B5"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000B6"),
 			PropertyName = "Name",
-			NewValue = "Alice",
+			NewValue     = "Alice",
 		};
 
 		// Serialize through the polymorphic base — this is what IMongoCollection<Event> does.
@@ -69,12 +69,12 @@ public class MongoEventClassMapsTests
 		// is dropped by the native BSON serializer.
 		var ev = new ComponentAddedEvent
 		{
-			EventId = new Guid("C0DE0000-0000-8000-900C-0000000000B8"),
-			CommandId = new Guid("C0DE0000-0000-8000-900C-0000000000B9"),
-			TargetId = new Guid("C0DE0000-0000-8000-9001-0000000000BA"),
+			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B8"),
+			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B9"),
+			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000BA"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-0000000000BB"),
-			CollectionId = new Guid("C0DE0000-0000-8000-9000-0000000000BC"),
-			DataObject = new { Anything = "should not be persisted" },
+			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000BC"),
+			DataObject   = new { Anything = "should not be persisted" },
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
@@ -94,12 +94,12 @@ public class MongoEventClassMapsTests
 		// still carry it for every single event, just to record the absence of a value.
 		var ev = new ComponentAddedEvent
 		{
-			EventId = new Guid("C0DE0000-0000-8000-900C-0000000000BE"),
-			CommandId = new Guid("C0DE0000-0000-8000-900C-0000000000BF"),
-			TargetId = new Guid("C0DE0000-0000-8000-9001-0000000000C0"),
+			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000BE"),
+			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000BF"),
+			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000C0"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9000-0000000000C1"),
-			CollectionId = new Guid("C0DE0000-0000-8000-9000-0000000000C2"),
-			Data = null,
+			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000C2"),
+			Data         = null,
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
@@ -116,18 +116,18 @@ public class MongoEventClassMapsTests
 		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
 		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
 		// essentially empty: just its own discriminator, nothing from the Link base).
-		var linkId = new Guid("C0DE0000-0000-8000-9003-0000000000C3");
+		var linkId   = new Guid("C0DE0000-0000-8000-9003-0000000000C3");
 		var sourceId = new Guid("C0DE0000-0000-8000-9001-0000000000C4");
 		var targetId = new Guid("C0DE0000-0000-8000-9001-0000000000C5");
 		var ev = new LinkAddedEvent
 		{
-			EventId = new Guid("C0DE0000-0000-8000-900C-0000000000C6"),
-			CommandId = new Guid("C0DE0000-0000-8000-900C-0000000000C7"),
+			EventId    = new Guid("C0DE0000-0000-8000-900C-0000000000C6"),
+			CommandId  = new Guid("C0DE0000-0000-8000-900C-0000000000C7"),
 			LinkTypeId = new Guid("C0DE0000-0000-8000-9000-0000000000C8"),
-			LinkId = linkId,
-			SourceId = sourceId,
-			TargetId = targetId,
-			Data = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId },
+			LinkId     = linkId,
+			SourceId   = sourceId,
+			TargetId   = targetId,
+			Data       = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId },
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
@@ -155,13 +155,13 @@ public class MongoEventClassMapsTests
 		// event id, so dedup / idempotent inserts and ordered replay work.
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId = new Guid("C0DE0000-0000-8000-900C-0000000000BD"),
-			CommandId = Guid.Empty,
-			TargetId = Guid.Empty,
+			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000BD"),
+			CommandId    = Guid.Empty,
+			TargetId     = Guid.Empty,
 			TargetTypeId = Guid.Empty,
 			CollectionId = Guid.Empty,
 			PropertyName = "Name",
-			NewValue = null,
+			NewValue     = null,
 		};
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
 		await Assert.That(doc.Contains("_id")).IsTrue();
