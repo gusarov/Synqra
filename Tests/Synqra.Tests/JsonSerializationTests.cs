@@ -73,9 +73,11 @@ public class JsonSerializationTests
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		// Internal-test well-known guids (C0DE prefix, 0000 hash = internal; see docs/model.md §8). Group-3
 		// 8000 = version 8 (fixed) + project 0. Group-4 = variant nibble (RFC 10xx free bits: 8=prod, 9=test —
-		// so 9 here) + 12-bit class: 900C=command, 9005=container/stream, 9000=class 000 Type
-		// (TargetTypeId/ComponentTypeId), 9001=class 001 Component (TargetId/ComponentId). These type/instance
-		// values are readable stand-ins — real type ids are v8 hashes, real instances are v7, neither a C0DE value.
+		// so 9 here) + 12-bit class: 900C=command, 9005=container/stream, 9001=class 001 Component. An all-zero
+		// node is a class-self-reference (the type itself), so a *type* id carries its discriminator in the
+		// class field with node 000…0 — TargetTypeId/ComponentTypeId here are 9001-…000 (the SampleTaskModel
+		// type), while its instance TargetId/ComponentId is 9001-…003. Readable stand-ins — real type ids are
+		// v8 hashes, real instances are v7, neither a C0DE value.
 		// Commands are spaced by 0x100 so their derived events (Derive(CommandId, ordinal) = CommandId +
 		// ordinal) fit in the low byte without colliding with the next command; the CommandCreatedEvent
 		// wrapper is ordinal 0, so its EventId == the command id (same 800C space, not a separate event class).
@@ -83,10 +85,10 @@ public class JsonSerializationTests
 		{
 			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			TargetTypeId    = new Guid("C0DE0000-0000-8000-9000-000000000001"),
-			CollectionId    = new Guid("C0DE0000-0000-8000-9000-000000000002"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9001-000000000000"),
+			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000003"),
-			ComponentTypeId = new Guid("C0DE0000-0000-8000-9000-000000000001"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9001-000000000000"),
 			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000003"),
 			Data            = new SampleTaskModel
 			{
@@ -160,16 +162,17 @@ public class JsonSerializationTests
 	public async Task Should_30_serialize_network_operation()
 	{
 		// Internal-test well-known guids (see docs/model.md §8). Group-3 8000 = v8 + project 0; group-4
-		// variant nibble 9 = test (RFC 10xx). Class: 9000=Type (TargetTypeId/ComponentTypeId),
-		// 9001=Component (TargetId/ComponentId) — readable stand-ins (real type ids are v8 hashes, instances are v7).
+		// variant nibble 9 = test (RFC 10xx). Class 9001=Component; an all-zero node is a class-self-reference,
+		// so the type is 9001-…000 (TargetTypeId/ComponentTypeId) and its instance is 9001-…003 (TargetId/
+		// ComponentId) — readable stand-ins (real type ids are v8 hashes, instances are v7).
 		var cmd = new AddComponentCommand
 		{
 			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			TargetTypeId    = new Guid("C0DE0000-0000-8000-9000-000000000001"),
-			CollectionId    = new Guid("C0DE0000-0000-8000-9000-000000000002"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9001-000000000000"),
+			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000003"),
-			ComponentTypeId = new Guid("C0DE0000-0000-8000-9000-000000000001"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9001-000000000000"),
 			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000003"),
 			Data            = new SampleTaskModel
 			{
