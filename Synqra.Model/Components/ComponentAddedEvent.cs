@@ -8,7 +8,7 @@ namespace Synqra;
 /// the container's <see cref="IComponentContainer.Components"/> collection,
 /// and (when applicable) firing <see cref="IActivatableComponent.Activate"/>.
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-8E02-000000000000")]
+[SynqraModel("C0DEADD0-1032-8000-8E01-000000000000")]
 [Schema(2026.405, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid Data object?")]
 public partial class ComponentAddedEvent : SingleObjectEvent
 {

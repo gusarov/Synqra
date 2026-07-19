@@ -7,7 +7,7 @@ namespace Synqra;
 /// applies it by removing the link from its index and notifying both former endpoints via
 /// <see cref="ILinkAware"/>.
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-9E03-000000000000")]
+[SynqraModel("C0DEADD0-1032-8000-9E04-000000000000")]
 [Schema(2026.504, "1 EventId Guid CommandId Guid LinkId Guid")]
 public partial class LinkRemovedEvent : Event
 {
