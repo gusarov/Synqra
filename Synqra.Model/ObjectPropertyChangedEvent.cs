@@ -1,6 +1,6 @@
 namespace Synqra;
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9E01-000000000000")]
 [Schema(2025.794, "1 PropertyName string OldValue object? NewValue object? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid-")]
 [Schema(2025.795, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2025.796, "1 PropertyName string OldValue object? NewValue object? TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]

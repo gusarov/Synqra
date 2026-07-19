@@ -13,7 +13,7 @@ namespace Synqra;
 /// addresses the instance.
 /// </para>
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8C01-000000000000")]
 [Schema(2026.405, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid ComponentTypeId Guid ComponentId Guid Data object?")]
 public partial class AddComponentCommand : SingleObjectCommand
 {

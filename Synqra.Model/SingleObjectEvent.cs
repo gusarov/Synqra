@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Synqra;
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8E0F-000000000000")]
 [Schema(2025.789, "1 TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2025.790, "1 TargetId Guid TargetTypeId Guid CollectionId Guid EventId Guid CommandId Guid")]
 [Schema(2025.791, "1 EventId Guid CommandId Guid")]

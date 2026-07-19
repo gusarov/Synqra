@@ -7,7 +7,7 @@ namespace Synqra;
 /// The projection applies it by removing the addressed component from the
 /// container's <see cref="IComponentContainer.Components"/> collection.
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8E04-000000000000")]
 [Schema(2026.405, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid")]
 public partial class ComponentDeletedEvent : SingleObjectEvent
 {

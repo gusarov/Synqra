@@ -24,7 +24,7 @@ namespace Synqra;
 /// win (see <see cref="LinkAddedEvent"/>'s remarks).
 /// </para>
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9C03-000000000000")]
 [Schema(2026.501, "1 CommandId Guid StreamId Guid LinkTypeId Guid LinkId Guid SourceId Guid TargetId Guid Data object?")]
 public partial class AddLinkCommand : Command
 {

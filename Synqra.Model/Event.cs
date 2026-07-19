@@ -11,7 +11,7 @@ namespace Synqra;
 [JsonDerivedType(typeof(ComponentDeletedEvent), "ComponentDeletedEvent")]
 [JsonDerivedType(typeof(LinkAddedEvent), "LinkAddedEvent")]
 [JsonDerivedType(typeof(LinkRemovedEvent), "LinkRemovedEvent")]
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8E00-000000000000")]
 [Schema(2025.789, "1 EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2025.791, "1")]
 [Schema(2025.792, "1 EventId Guid CommandId Guid ContainerId Guid")]
