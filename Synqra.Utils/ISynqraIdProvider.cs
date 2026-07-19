@@ -67,17 +67,17 @@ public sealed class SynqraIdProvider : ISynqraIdProvider
 /// </summary>
 public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 {
-	// One counter per class. Spaced by 0x100 so a command's derived events
-	// (CreateEventId = CommandId + ordinal) fill the low byte without hitting the next minted id.
+	// One counter per class. Only the command counter strides by 0x100, to reserve the low byte for a
+	// command's derived events (CreateEventId = CommandId + ordinal); every other class steps by 1.
 	long _command, _stream, _component, _collection, _link;
 
-	public Guid CreateCommandId() => New(0x00C, ref _command);
-	public Guid CreateStreamId() => New(0x005, ref _stream);
-	public Guid CreateComponentId() => New(0x001, ref _component);
-	public Guid CreateCollectionId() => New(0x002, ref _collection);
-	public Guid CreateLinkId() => New(0x003, ref _link);
+	public Guid CreateCommandId() => New(0x00C, ref _command, 0x100);
+	public Guid CreateStreamId() => New(0x005, ref _stream, 1);
+	public Guid CreateComponentId() => New(0x001, ref _component, 1);
+	public Guid CreateCollectionId() => New(0x002, ref _collection, 1);
+	public Guid CreateLinkId() => New(0x003, ref _link, 1);
 	public Guid CreateEventId(Guid commandId, int ordinal) => GuidExtensions.Derive(commandId, ordinal);
 
-	static Guid New(ushort @class, ref long counter) =>
-		new Guid($"C0DE0000-0000-8000-A{@class:X3}-{Interlocked.Add(ref counter, 0x100):X12}");
+	static Guid New(ushort @class, ref long counter, long step) =>
+		new Guid($"C0DE0000-0000-8000-A{@class:X3}-{Interlocked.Add(ref counter, step):X12}");
 }
