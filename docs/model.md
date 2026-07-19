@@ -161,17 +161,22 @@ that is the only form that marries with real-time world-hashing (see Historical 
     number): `000` **Type** (object-type/schema layer), `001` **Component** (entity/component
     instances), `002` **collection** *(reserved — being retired, kept documented/compliant while still
     present)*, `003` **link** *(reserved — links fold into components, kept documented/compliant while
-    still present)*, `005` container/stream, `00C` command, `00E` event; the root entity is a new class
-    here. In production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId` and an
-    **instance** id is v7 data — neither is a well-known `C0DE` value, so `000`/`001` appear as readable
+    still present)*, `005` container/stream, `00C` command, `00E` event; `000` **Type** is the
+    class-of-class root. In production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId`
+    and an **instance** id is v7 data — neither is a well-known `C0DE` value, so these appear as readable
     stand-ins in fixtures.
-  - trailing bytes — instance / counter.
+  - trailing bytes — instance / counter. **An all-zero node is a class-self-reference** — the class/type
+    itself (its "static/default instance"), never a real instance. So a **type/class id carries its
+    discriminator in the class field with node `000…0`** (`…-900X-000000000000`), while an instance of
+    that same class keeps a non-zero node (`…-900X-…0003`). Type and instance therefore share one class
+    namespace, split only by node == 0 vs != 0.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8000-9CCC-…` (`C0DE` magic
   prefix, zero company-hash `0000-0000` = internal, group-3 `8000` = **version 8 / project 0**,
-  variant nibble `9` = **test**): `…-9000-…` = class `000` **Type**, `…-9001-…` = class `001`
-  **Component**, `…-900C-…` commands, `…-9005-…` containers/stream ids. (Prod flips the variant nibble
-  to `8`: `…-8000-…` etc.)
+  variant nibble `9` = **test**): `…-9001-…` = class `001` **Component**, `…-900C-…` commands,
+  `…-9005-…` containers/stream ids. A **type** is a class-self-reference — its discriminator sits in the
+  class field with an all-zero node, e.g. `…-9001-000000000000` is the type of a `…-9001-…0003` instance;
+  `…-9000-000000000000` is the class-of-class root. (Prod flips the variant nibble to `8`: `…-8001-…` etc.)
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures
