@@ -151,8 +151,11 @@ that is the only form that marries with real-time world-hashing (see Historical 
     version field and must stay `8`.
   - **`prs`** — **project** + **space** (group-3's 3 low nibbles). `project = 0` = the company's main
     affairs / core project (e.g. Synqra itself); `space` sub-partitions within a project. Both `0` for the
-    default/internal project+space (so group-3 reads `8000`); the exact project/space nibble widths are
-    per the spec diagram. A company that outgrows this simply gets a new company hash.
+    default/internal project+space (so group-3 reads `8000`). The **project/space boundary is intentionally
+    left unspecified** — how these nibbles divide between project and space is a *company-wide* allocation:
+    within its own company-hash space each company splits them as it needs (more projects, or more space per
+    project) and owns the responsibility of avoiding its own collisions. A company that outgrows the whole
+    region simply takes a new company hash.
   - **`v` (env / variant nibble)** — RFC **variant**: its top 2 bits are fixed at `10`, so it ranges
     `8`/`9`/`a`/`b`. Its **2 free low bits are the environment / id-origin mode** (this is where the `10xx`
     freedom lives — the *variant*, never the version):
