@@ -140,18 +140,22 @@ that is the only form that marries with real-time world-hashing (see Historical 
   increment.)
 - **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
   source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
-  v7 data. Layout `C0DE yyyy-yyyy 8ppp vCCC iiii…` (`8ppp` = version+project, `vCCC` = variant+class):
+  v7 data. Layout `C0DE yyyy-yyyy 8prs vCCC iiii…` — group-3 `8prs` = version + **project** + **space**;
+  group-4 `vCCC` = **env**-variant + a full 3-nibble **class** (project/space were moved into group-3 so
+  the class owns all of group-4's tail):
   - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
   - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
     (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
     company); a non-zero hash = an external company.
   - **`8`** — RFC 9562 **version**, fixed at `8` (v8 = `1000`). This nibble is *not* free; it is the
     version field and must stay `8`.
-  - **`ppp`** — **project** (`p = 0` = the company's main affairs / core project, e.g. Synqra itself;
-    a company that outgrows its project space simply gets a new company hash).
-  - **`v` (variant nibble)** — RFC **variant**: its top 2 bits are fixed at `10`, so it ranges
-    `8`/`9`/`a`/`b`. Its **2 free low bits are the id-origin mode** (this is where the `10xx` freedom
-    lives — the *variant*, never the version):
+  - **`prs`** — **project** + **space** (group-3's 3 low nibbles). `project = 0` = the company's main
+    affairs / core project (e.g. Synqra itself); `space` sub-partitions within a project. Both `0` for the
+    default/internal project+space (so group-3 reads `8000`); the exact project/space nibble widths are
+    per the spec diagram. A company that outgrows this simply gets a new company hash.
+  - **`v` (env / variant nibble)** — RFC **variant**: its top 2 bits are fixed at `10`, so it ranges
+    `8`/`9`/`a`/`b`. Its **2 free low bits are the environment / id-origin mode** (this is where the `10xx`
+    freedom lives — the *variant*, never the version):
     - **`8`** = **prod / manual** — a real production id, or a manually-authored well-known id.
     - **`9`** = **test / unittest** — a **hardcoded** test guid, hand-written and pinned (predictable).
     - **`A`** = **test auto-incremented** — minted by the test guid generator during a run
