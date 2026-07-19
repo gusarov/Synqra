@@ -166,17 +166,18 @@ that is the only form that marries with real-time world-hashing (see Historical 
     and an **instance** id is v7 data — neither is a well-known `C0DE` value, so these appear as readable
     stand-ins in fixtures.
   - trailing bytes — instance / counter. **An all-zero node is a class-self-reference** — the class/type
-    itself (its "static/default instance"), never a real instance. So a **type/class id carries its
-    discriminator in the class field with node `000…0`** (`…-900X-000000000000`), while an instance of
-    that same class keeps a non-zero node (`…-900X-…0003`). Type and instance therefore share one class
-    namespace, split only by node == 0 vs != 0.
+    itself, never a real instance. The reserved low `00x` codes (`001` Component, `002` collection, `003`
+    link, `005` stream, `00C` command) are the built-in **kinds**; a concrete/user **type** id therefore
+    lives in the **`F` class-space** with an all-zero node (`…-9Fxx-000000000000`), keeping it clear of the
+    reserved kind codes — e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003`
+    Component *instances* it types. `…-9000-000000000000` (node-zero `000`) is the class-of-class root.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8000-9CCC-…` (`C0DE` magic
   prefix, zero company-hash `0000-0000` = internal, group-3 `8000` = **version 8 / project 0**,
-  variant nibble `9` = **test**): `…-9001-…` = class `001` **Component**, `…-900C-…` commands,
-  `…-9005-…` containers/stream ids. A **type** is a class-self-reference — its discriminator sits in the
-  class field with an all-zero node, e.g. `…-9001-000000000000` is the type of a `…-9001-…0003` instance;
-  `…-9000-000000000000` is the class-of-class root. (Prod flips the variant nibble to `8`: `…-8001-…` etc.)
+  variant nibble `9` = **test**): `…-9001-…0003` = a class `001` **Component** instance, `…-900C-…` commands,
+  `…-9005-…` containers/stream ids. A concrete **type** is a class-self-reference in the **`F` class-space** —
+  e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003` component instances it types;
+  `…-9000-000000000000` is the class-of-class root. (Prod flips the variant nibble to `8`: `…-8F01-…` etc.)
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures

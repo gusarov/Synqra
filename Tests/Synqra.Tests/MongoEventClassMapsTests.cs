@@ -37,7 +37,7 @@ public class MongoEventClassMapsTests
 			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B2"),
 			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B3"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
-			TargetTypeId = new Guid("C0DE0000-0000-8000-90B5-000000000000"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9FB5-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000B6"),
 			PropertyName = "Name",
 			NewValue     = "Alice",
@@ -72,7 +72,7 @@ public class MongoEventClassMapsTests
 			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B8"),
 			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B9"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000BA"),
-			TargetTypeId = new Guid("C0DE0000-0000-8000-90BB-000000000000"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9FBB-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000BC"),
 			DataObject   = new { Anything = "should not be persisted" },
 		};
@@ -97,7 +97,7 @@ public class MongoEventClassMapsTests
 			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000BE"),
 			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000BF"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000C0"),
-			TargetTypeId = new Guid("C0DE0000-0000-8000-90C1-000000000000"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9FC1-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000C2"),
 			Data         = null,
 		};
@@ -123,7 +123,7 @@ public class MongoEventClassMapsTests
 		{
 			EventId    = new Guid("C0DE0000-0000-8000-900C-0000000000C6"),
 			CommandId  = new Guid("C0DE0000-0000-8000-900C-0000000000C7"),
-			LinkTypeId = new Guid("C0DE0000-0000-8000-90C8-000000000000"),
+			LinkTypeId = new Guid("C0DE0000-0000-8000-9FC8-000000000000"),
 			LinkId     = linkId,
 			SourceId   = sourceId,
 			TargetId   = targetId,
