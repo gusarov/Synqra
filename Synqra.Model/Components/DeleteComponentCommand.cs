@@ -10,7 +10,7 @@ namespace Synqra;
 /// <see cref="ComponentTypeId"/> alone for unique ones.
 /// </para>
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8C03-000000000000")]
 [Schema(2026.405, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid ComponentTypeId Guid ComponentId Guid")]
 public partial class DeleteComponentCommand : SingleObjectCommand
 {

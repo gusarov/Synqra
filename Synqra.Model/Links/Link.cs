@@ -19,7 +19,7 @@ namespace Synqra;
 /// navigation properties on their own models give a fully typed surface. See plans/links.md.
 /// </para>
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9300-000000000000")]
 [Schema(2026.500, "1 LinkId Guid SourceId Guid TargetId Guid")]
 public abstract partial class Link : IIdentifiable<Guid>
 {

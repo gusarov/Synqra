@@ -884,7 +884,7 @@ public static class FileSynqraExtensions
 	}
 }
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8A00-000000000000")]
 [Schema(1, "0")]
 [Schema(3000.0, "1 ObjectId Guid Blob object")]
 [Schema(2026.213, "1 ObjectId Guid Blob object")]

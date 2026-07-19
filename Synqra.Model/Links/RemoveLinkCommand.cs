@@ -7,7 +7,7 @@ namespace Synqra;
 /// so there is no (container, type, id) triple to address by the way <see cref="DeleteComponentCommand"/>
 /// addresses a component.
 /// </summary>
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9C04-000000000000")]
 [Schema(2026.503, "1 CommandId Guid StreamId Guid LinkId Guid")]
 public partial class RemoveLinkCommand : Command
 {

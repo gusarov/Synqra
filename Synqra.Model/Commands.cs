@@ -15,7 +15,7 @@ namespace Synqra;
 [JsonDerivedType(typeof(DeleteComponentCommand), "DeleteComponentCommand")]
 [JsonDerivedType(typeof(AddLinkCommand), "AddLinkCommand")]
 [JsonDerivedType(typeof(RemoveLinkCommand), "RemoveLinkCommand")]
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8C00-000000000000")] // command family C, type 00 = the base kind (node 0 = type ref)
 [Schema(2025.1, "")]
 [Schema(2025.791, "1")]
 [Schema(2025.792, "1 CommandId Guid ContainerId Guid")]
@@ -44,7 +44,7 @@ public abstract partial class Command : ISynqraCommand
 	}
 }
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-8C0F-000000000000")] // abstract shared base for object+component single-target commands
 [Schema(2025.1, "")]
 [Schema(2025.791, "1 CommandId Guid ContainerId Guid-")]
 [Schema(2025.792, "1 CommandId Guid ContainerId Guid")]
@@ -72,14 +72,14 @@ public abstract partial class SingleObjectCommand : Command
 	public object? TargetObject { get; set; }
 }
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9C02-000000000000")] // object vocabulary — dying (test/temp space 9)
 [Schema(2025.1, "")]
 public class DeleteObjectCommand : Command
 {
 	protected override Task AcceptCoreAsync<T>(ICommandVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }
 
-[SynqraModel]
+[SynqraModel("C0DEADD0-1032-8000-9C01-000000000000")] // object vocabulary — dying (test/temp space 9), command family C, type 01
 [Schema(2025.1, "")]
 [Schema(2025.791, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid")]
 [Schema(2025.792, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
