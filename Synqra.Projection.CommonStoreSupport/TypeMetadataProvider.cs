@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -60,7 +61,16 @@ public static class TypeMetadataProviderExtensions
 			if (!exists)
 			{
 				var sma = type.GetCustomAttribute<SynqraModelAttribute>();
+				var legacyTypeIds = type.GetCustomAttributes<SynqraLegacyTypeIdAttribute>()
+					.Select(x => x.SynqraTypeId)
+					.Distinct()
+					.ToArray();
 				Guid typeId = sma?.SynqraTypeId ?? GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName); // it is not a secret, so for type identification SHA1 is totally fine
+				if (typeId.GetVersion() == 5 && type.Namespace?.ToLowerInvariant().Contains("test") == false && type.Namespace.StartsWith("Synqra."))
+				{
+					throw new Exception("Built-in types must have ");
+					Console.WriteLine();
+				}
 				slot = new TypeMetadata
 				{
 					Type = type,
@@ -68,6 +78,12 @@ public static class TypeMetadataProviderExtensions
 				};
 				_typeMetadataByType[type] = slot;
 				_typeMetadataByTypeId[slot.TypeId] = slot;
+				// Old ids resolve to the same type after the current id changes — lets a type's id be
+				// migrated without orphaning already-persisted data. See SynqraLegacyTypeIdAttribute.
+				foreach (var legacyTypeId in legacyTypeIds)
+				{
+					_typeMetadataByTypeId[legacyTypeId] = slot;
+				}
 			}
 		}
 
