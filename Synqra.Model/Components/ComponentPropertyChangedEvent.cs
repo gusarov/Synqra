@@ -9,7 +9,7 @@ namespace Synqra;
 /// that the generator-emitted setter uses (so <c>OnPropertyChanged</c> fires
 /// naturally on listeners).
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-8E03-000000000000")]
+[SynqraModel("C0DEADD0-1032-8000-8E02-000000000000")]
 [Schema(2026.405, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid PropertyName string OldValue object? NewValue object?")]
 public partial class ComponentPropertyChangedEvent : SingleObjectEvent
 {

@@ -1,7 +1,7 @@
 
 namespace Synqra;
 
-[SynqraModel("C0DEADD0-1032-8000-8E01-000000000000")]
+[SynqraModel("C0DEADD0-1032-8000-8E0E-000000000000")]
 [Schema(2025.791, "1 EventId Guid CommandId Guid")]
 [Schema(2025.792, "1 EventId Guid CommandId Guid Data Command")]
 [Schema(2025.793, "1 EventId Guid CommandId Guid")]

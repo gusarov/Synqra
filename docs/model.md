@@ -196,6 +196,41 @@ that is the only form that marries with real-time world-hashing (see Historical 
   The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
   election or monotonic cluster clock.
 
+### Reserved built-in type ids (registry)
+
+Every built-in Synqra type carries an explicit `[SynqraModel("C0DEADD0-1032-8000-<g4>-000000000000")]`:
+company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + default project/space, node
+`000000000000` = the type itself (class-self-reference). Group-4 `<g4>` = `<env><family><nn>` — env `8` =
+live / `9` = dying (object & link vocabularies being retired); family `C` command · `E` event · `3` link ·
+`A` infra *(provisional home)*; `nn` = type number (`00` = the kind base, `0F` = an abstract shared base).
+**A command and the event it emits share `nn`** (e.g. `8C01` `AddComponentCommand` → `8E01`
+`ComponentAddedEvent`). Keep this table in sync when adding a built-in type.
+
+| g4 | type | env | note |
+|---|---|---|---|
+| `8C00` | `Command` | live | command base |
+| `8C0F` | `SingleObjectCommand` | live | abstract shared base |
+| `8C01` | `AddComponentCommand` | live | ↔ `8E01` |
+| `8C02` | `ChangeComponentPropertyCommand` | live | ↔ `8E02` |
+| `8C03` | `DeleteComponentCommand` | live | ↔ `8E03` |
+| `9C01` | `ChangeObjectPropertyCommand` | dying | ↔ `9E01` |
+| `9C02` | `DeleteObjectCommand` | dying | (no paired event) |
+| `9C03` | `AddLinkCommand` | dying | ↔ `9E03` |
+| `9C04` | `RemoveLinkCommand` | dying | ↔ `9E04` |
+| `8E00` | `Event` | live | event base |
+| `8E0F` | `SingleObjectEvent` | live | abstract shared base |
+| `8E0E` | `CommandCreatedEvent` | live | framework wrapper (not command-correlated) |
+| `8E01` | `ComponentAddedEvent` | live | ↔ `8C01` |
+| `8E02` | `ComponentPropertyChangedEvent` | live | ↔ `8C02` |
+| `8E03` | `ComponentDeletedEvent` | live | ↔ `8C03` |
+| `9E01` | `ObjectPropertyChangedEvent` | dying | ↔ `9C01` |
+| `9E03` | `LinkAddedEvent` | dying | ↔ `9C03` |
+| `9E04` | `LinkRemovedEvent` | dying | ↔ `9C04` |
+| `9300` | `Link` | dying | link base |
+| `8A00` | `Item` | live | File-store envelope — **provisional family A** |
+| `9A01` | `TransportOperation` | prov | **provisional family A** |
+| `9A02` | `NewEvent1` | prov | **provisional family A** |
+
 ## 9. Storage & projections
 
 - **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _eid, …,
