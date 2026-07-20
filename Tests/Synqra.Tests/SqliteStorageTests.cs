@@ -262,12 +262,14 @@ public class SqliteStorageTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_reject_duplicate_key()
+	public async Task Should_replace_existing_key()
 	{
 		var id = GuidExtensions.CreateVersion7();
 		await _storage!.AppendAsync(new SqliteTestItem { Id = id, Name = "First" });
+		await _storage.AppendAsync(new SqliteTestItem { Id = id, Name = "Replacement" });
 
-		var ex = await Assert.ThrowsAsync(() =>
-			_storage.AppendAsync(new SqliteTestItem { Id = id, Name = "Duplicate" }));
+		var item = await _storage.GetAsync(id);
+
+		await Assert.That(item.Name).IsEqualTo("Replacement");
 	}
 }

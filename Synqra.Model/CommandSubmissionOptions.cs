@@ -15,6 +15,13 @@ namespace Synqra;
 public sealed class CommandSubmissionOptions
 {
 	/// <summary>
+	/// Event identities allocated during optimistic command execution. Replication transports these
+	/// identities with the command so authoritative execution preserves the same event lineage; event
+	/// payloads are still produced and validated exclusively by the server.
+	/// </summary>
+	public IReadOnlyList<Guid>? AllocatedEventIds { get; set; }
+
+	/// <summary>
 	/// Optimistic concurrency precondition — content-addressed, in the spirit of
 	/// <c>git push --force-with-lease=&lt;sha&gt;</c>.
 	/// <para>
@@ -37,4 +44,28 @@ public sealed class CommandSubmissionOptions
 	/// </para>
 	/// </summary>
 	public Guid ExpectedLastEventId { get; set; }
+
+	public void ApplyAllocatedEventIds(IReadOnlyList<Event> events)
+	{
+		if (AllocatedEventIds is null)
+		{
+			return;
+		}
+		if (AllocatedEventIds.Count != events.Count)
+		{
+			throw new InvalidDataException(
+				$"The command allocated {AllocatedEventIds.Count} event ids but produced {events.Count} events."
+			);
+		}
+		if (AllocatedEventIds.Any(x => x == Guid.Empty)
+			|| AllocatedEventIds.Distinct().Count() != AllocatedEventIds.Count
+		)
+		{
+			throw new InvalidDataException("Allocated event ids must be non-empty and unique.");
+		}
+		for (var i = 0; i < events.Count; i++)
+		{
+			events[i].EventId = AllocatedEventIds[i];
+		}
+	}
 }

@@ -8,7 +8,7 @@ using Synqra.BlobStorage;
 
 namespace Synqra.AppendStorage.BlobStorage;
 
-public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableAppendStorage
+public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	where T : class
 	where TKey : notnull, IComparable<TKey>
 {
@@ -92,18 +92,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	public Task FlushAsync(CancellationToken cancellationToken = default)
 	{
 		return Task.CompletedTask;
-	}
-
-	public async Task ClearAllAsync(CancellationToken cancellationToken = default)
-	{
-		if (_blobStorage is not IClearableBlobStorage clearable)
-		{
-			throw new NotSupportedException($"{_blobStorage.GetType().Name} does not support clearing — only implementations of IClearableBlobStorage do.");
-		}
-		await clearable.ClearAllAsync(cancellationToken);
-		// The attached-objects cache would otherwise keep serving these same in-memory
-		// instances back out of GetAllAsync/GetAsync even though the backing store is empty.
-		_attachedObjectsById.Clear();
 	}
 
 	public void Dispose()

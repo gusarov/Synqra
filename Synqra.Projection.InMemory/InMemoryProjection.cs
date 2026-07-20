@@ -503,13 +503,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			}
 		}
 
-		return ProcessCommandAsync(newCommand);
+		return ProcessCommandAsync(newCommand, options);
 	}
 
 	// [UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
-		ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
+		ProcessCommandAsync(newCommand, options: null).GetAwaiter().GetResult();
 	}
 
 	/// <summary>
@@ -529,7 +529,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	/// <summary>
 	/// Process and apply it locally
 	/// </summary>
-	private async Task ProcessCommandAsync(ISynqraCommand newCommand)
+	private async Task ProcessCommandAsync(
+		  ISynqraCommand newCommand
+		, CommandSubmissionOptions? options
+	)
 	{
 		var commandHandlingContext = new CommandHandlerContext();
 		if (newCommand is not Command cmd)
@@ -537,11 +540,16 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			throw new Exception("Only Syncra.Command can be an implementation of ICommand, please derive from Syncra.Command");
 		}
 		await cmd.AcceptAsync(this, commandHandlingContext);
+		options?.ApplyAllocatedEventIds(commandHandlingContext.Events);
+		if (_eventReplicationService is not null)
+		{
+			await _eventReplicationService.StageAsync(cmd, commandHandlingContext.Events, options);
+		}
 		foreach (var @event in commandHandlingContext.Events)
 		{
 			await ProcessEventAsync(@event); // error handling - how to rollback state of entire model?
 		}
-		if (_eventStorage != null)
+		if (_eventStorage != null && _eventReplicationService is null)
 		{
 			// Domain events are always durable. CommandCreatedEvents are only persisted when
 			// PersistCommandEvents is on — see that property for the temporary opt-out used by
@@ -552,7 +560,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			await _eventStorage.AppendBatchAsync(toStore); // store event in storage and trigger replication
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
-		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
 	}
 
 	public event EventHandler<EventArgs>? CommandProcessed;

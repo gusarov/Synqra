@@ -368,7 +368,7 @@ public static class FileSynqraExtensions
 			// when ExpectedLastEventId is set here, callers get last-writer-wins semantics
 			// (the same behaviour Sqlite gives today). InMemoryProjection is the reference impl.
 			_ = options;
-			await _fileProjection.ProcessCommandAsync(newCommand);
+			await _fileProjection.ProcessCommandAsync(newCommand, options);
 		}
 	}
 
@@ -600,7 +600,10 @@ public static class FileSynqraExtensions
 		/// <param name="newCommand"></param>
 		/// <returns></returns>
 		/// <exception cref="Exception"></exception>
-		public async Task ProcessCommandAsync(ISynqraCommand newCommand)
+		public async Task ProcessCommandAsync(
+			  ISynqraCommand newCommand
+			, CommandSubmissionOptions? options = null
+		)
 		{
 			var commandHandlingContext = new CommandHandlerContext();
 			if (newCommand is not Command cmd)
@@ -625,17 +628,21 @@ public static class FileSynqraExtensions
 					$"Command stream {cmd.StreamId} does not match this store's stream {streamId} — refusing misrouted command {cmd.CommandId}.");
 			}
 			await cmd.AcceptAsync(this, commandHandlingContext);
+			options?.ApplyAllocatedEventIds(commandHandlingContext.Events);
+			if (_eventReplicationService is not null)
+			{
+				await _eventReplicationService.StageAsync(cmd, commandHandlingContext.Events, options);
+			}
 			var eventVisitorContext = new EventVisitorContext();
 			foreach (var @event in commandHandlingContext.Events)
 			{
 				await @event.AcceptAsync(this, eventVisitorContext); // error handling - how to rollback state of entire model?
 			}
-			if (_eventStorage != null)
+			if (_eventStorage != null && _eventReplicationService is null)
 			{
 				await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
 			}
 			CommandProcessed?.Invoke(this, EventArgs.Empty);
-			_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
 		}
 
 		public async Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)

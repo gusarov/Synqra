@@ -241,13 +241,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				soc.TargetTypeId = typeId;
 			}
 		}
-		return ProcessCommandAsync(cmd);
+		return ProcessCommandAsync(cmd, options);
 	}
 
-	async Task ProcessCommandAsync(Command cmd)
+	async Task ProcessCommandAsync(Command cmd, CommandSubmissionOptions? options)
 	{
 		var ctx = new CommandHandlerContext();
 		await cmd.AcceptAsync(this, ctx);
+		options?.ApplyAllocatedEventIds(ctx.Events);
 		foreach (var ev in ctx.Events)
 		{
 			await ev.AcceptAsync(this, null);
