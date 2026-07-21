@@ -74,7 +74,40 @@ RUN chmod +777 Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64
 FROM scratch AS art
 COPY --from=pack /out /
 
+# Publish the demo host so the container serves a self-contained wwwroot (_framework/blazor.web.js + WASM
+# payload). Publish MUST restore: `dotnet publish --no-restore` silently drops blazor.web.js from the output,
+# which then 404s and the WASM never boots. Done in a build-derived stage for the wasm-tools workload.
+# ErrorOnDuplicatePublishOutputFiles=false: two projects ship a tsconfig.json at the same relative path
+# (NETSDK1152); neither is a runtime asset.
+FROM build AS webpublish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish Contoso/Contoso.WebHost -c $BUILD_CONFIGURATION -o /app -p:ErrorOnDuplicatePublishOutputFiles=false
+
+# Browser-level gate for the v7 sub-ms fix. The official Playwright image ships Chromium + all OS deps
+# preinstalled (tag pinned to the Microsoft.Playwright package version so the driver matches the browser).
+# We copy the pinned SDK + built test project from `build` and the published host from `webpublish`, serve it
+# (from /app so the content root finds the static-assets manifest), and run the single non-[Explicit] test.
+FROM mcr.microsoft.com/playwright/dotnet:v1.52.0-jammy AS playwright
+ARG BUILD_CONFIGURATION=Release
+SHELL ["/bin/bash", "-c"]
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH="/usr/share/dotnet:${PATH}"
+COPY --from=build /usr/share/dotnet /usr/share/dotnet
+WORKDIR /src
+COPY --from=build /src /src
+COPY --from=webpublish /app /app
+RUN set -eux; \
+    ( cd /app && dotnet Contoso.WebHost.dll --urls http://127.0.0.1:5063 ) >/tmp/host.log 2>&1 & \
+    hostpid=$!; \
+    for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5063) 2>/dev/null && break || sleep 2; done; \
+    SYNQRA_CONTOSO_TEST_HOST=http://127.0.0.1:5063/ dotnet test Contoso/Contoso.Playwright -c $BUILD_CONFIGURATION --no-restore --no-build 2>&1 | tee /tmp/test.log; \
+    rc=${PIPESTATUS[0]}; \
+    kill $hostpid 2>/dev/null || true; \
+    if [ "$rc" != "0" ]; then echo "===HOSTLOG==="; cat /tmp/host.log || true; fi; \
+    exit $rc
+
 #Sync parallel builds here (should be last stage)
 FROM scratch AS log
 COPY --from=test /src /stage/test
 COPY --from=buildaot /src /stage/buildaot
+COPY --from=playwright /src /stage/playwright
