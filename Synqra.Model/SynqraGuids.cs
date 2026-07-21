@@ -38,13 +38,21 @@ public static class SynqraGuids
 	 * Reserved UUIDs:
 	 *   - C0DE0000-0000-8000-8000-000000000000 is a reserved UUID to identify principles behind custom UUIDs (vendor-neutral)
 	 *   - C0DEADD0-1032-8000-8000-000000000000 is a reserved synqra-zero UUID to identify "the Synqra UUID reservations table and principles document". Sha256('synqra')[..4] = ADD01032
+	 *   - C0DEADD0-1032-8000-8000-000000000001 is the Synqra object-type namespace (class 000, node 1) — the fixed salt for derived (v5) type ids. See SynqraTypeNamespaceId.
 	 *   - C0DEADD0-1032-8000-800C-000000000000 is a reserved synqra GUID for root/default stream id (before stream id is fully supported in a system, it is a reserved field and requires reserved value to avoid zeros validation)
 	 *
 	 * For Synqra: SHA256("synqra") → first 4 bytes → ADD01032
 	 * To compute: pwsh -c "$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes('synqra'));($h[0..3]|%{$_.ToString('X2')})-join''"
 	 */
 
-	public static Guid SynqraTypeNamespaceId = new("BAD8F923-FA74-4CA0-9AA3-70BB874ACC76"); // NEVER CHANGE THAT! Object type namespace. It does not matter, what pattern it follows, it is just a random but fixed input to sha256 v8 guids it produces from type names.
+	// The Synqra object-type namespace: the fixed salt fed to CreateVersion5(namespace, type.FullName)
+	// to derive a type id for any [SynqraModel] type that does not carry an explicit id
+	// (see TypeMetadataProvider). Follows the v8 C0DE convention — C0DE + sha256("synqra")[..4]=ADD01032
+	// + version 8 + class 000 (object-type namespace) + node 1 (…0000 is the reserved synqra-zero doc).
+	// This value is a persisted contract: derived type ids are written into stored events, so once data
+	// exists this MUST NOT change. (It was migrated once, from the legacy random BAD8F923… salt, to the
+	// self-documenting C0DE form; affected types carry [SynqraLegacyTypeId] aliases for the old ids.)
+	public static Guid SynqraTypeNamespaceId = new("C0DEADD0-1032-8000-8000-000000000001");
 
 	// There is no default/root stream. A stream id is a first-class, mandatory value (a security
 	// boundary): multitenant stores read the ambient SynqraStreamContext.Current (entered per

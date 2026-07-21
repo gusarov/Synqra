@@ -31,7 +31,7 @@ public class SynqraModelAttributeTests : BaseTest
 	}
 
 	[SynqraModel("C0DE0000-0000-8000-9041-000000000000")] // 9041 where 9 means test, 41 means exact this test model class (unique per class and above any potential 640 production type codes from 8 space)
-	[SynqraLegacyTypeId("C0DE0000-0000-8000-9040-000000000000")] // a former id (e.g. 9040 before the change to 9041) — still resolves
+	[SynqraLegacyTypeId("C0DE0000-0000-8000-9040-000000000000", "2026-07-19", "test: former id (9040) must still resolve after change to 9041")] // a former id (e.g. 9040 before the change to 9041) — still resolves
 	private sealed class ExplicitTypeIdModel
 	{
 	}
