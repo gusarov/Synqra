@@ -230,13 +230,21 @@ public static class GuidExtensions
 			// 2) Reduces rand_b space from full 0-4095 range to only 0-2500. Time remained in ticks is up to 10000 ticks. So it is 40% of the range, the rest is good to avoid spinning ms to compensate overflows.
 			// 3) This considered a good compromise because allows to issue bulk of GUIDs in a single ms.
 
-			var g = Guid.NewGuid(); // extremely optimized
+			var g = Guid.NewGuid(); // extremely optimized — supplies rand_b and the sub-ms seed below
+			byte* bytes = (byte*)&g;
+
+			// Sub-ms field seed. DateTime.UtcNow is millisecond-granular on some hosts (Linux/containers),
+			// so `ticks % 10000` was 0 there and every id read "…-7000-…". Seed the 12-bit sub-ms field from
+			// entropy instead (top bit cleared so the monotonic bump below keeps headroom to increment within
+			// a ms). GetTimestamp is unaffected — v7 reads only the millisecond bits from groups 1-2, never
+			// this field — and ordering stays monotonic via the counter loop, now by generation order rather
+			// than the (frequently-unavailable) sub-ms clock. Source bytes 0-1 are overwritten below.
+			ushort subMsSeed = (ushort)(*(ushort*)bytes & 0x07FF);
 
 			ticks -= UnixEpochTicks;
 
-			// Omni Stamp is a combo of ms<<12 & custom sub_ms part
-			long omniStamp = (ticks / 10000) << 12;
-			omniStamp |= (ticks % 10000) >> 2;
+			// Omni Stamp is a combo of ms<<12 & the sub-ms seed
+			long omniStamp = ((ticks / 10000) << 12) | subMsSeed;
 
 			while (true)
 			{
@@ -251,7 +259,6 @@ public static class GuidExtensions
 				}
 			}
 
-			byte* bytes = (byte*)&g;
 			uint a = (uint)(omniStamp >> 28);
 			ushort b = (ushort)(omniStamp >> 12);
 			ushort c = (ushort)((((ushort)(omniStamp)) & 0xfff | (0x7 << 12))); // version 7 in high nibble and 12 bits of sub-ms time
