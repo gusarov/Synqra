@@ -195,6 +195,13 @@ that is the only form that marries with real-time world-hashing (see Historical 
 - **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
   The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
   election or monotonic cluster clock.
+- **`SynqraTypeNamespaceId`** — the object-type namespace (class `000`, node `1`):
+  `C0DEADD0-1032-8000-8000-000000000001`. It is the fixed salt fed to `CreateVersion5(namespace,
+  type.FullName)` for any `[SynqraModel]` type that has no explicit id. It is a persisted contract
+  (derived type ids are written into stored events), so once data exists it must not change. It was
+  migrated once from the legacy random salt `BAD8F923-FA74-4CA0-9AA3-70BB874ACC76`; consumer types
+  that were persisted under the old salt carry `[SynqraLegacyTypeId(oldId, when, why)]` aliases so
+  their existing events still resolve.
 
 ### Reserved built-in type ids (registry)
 

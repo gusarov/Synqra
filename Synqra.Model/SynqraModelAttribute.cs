@@ -37,10 +37,20 @@ public sealed class SynqraModelAttribute : Attribute
 [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
 public sealed class SynqraLegacyTypeIdAttribute : Attribute
 {
-	public SynqraLegacyTypeIdAttribute(string synqraTypeId)
+	public SynqraLegacyTypeIdAttribute(string synqraTypeId, string when, string why)
 	{
 		SynqraTypeId = Guid.Parse(synqraTypeId ?? throw new ArgumentNullException(nameof(synqraTypeId)));
+		When = DateTime.Parse(when ?? throw new ArgumentNullException(nameof(when)), CultureInfo.InvariantCulture, DateTimeStyles.None).Date;
+		Why = !string.IsNullOrWhiteSpace(why)
+			? why
+			: throw new ArgumentException("A reason is required so the motivation for the id change is preserved in the source.", nameof(why));
 	}
 
 	public Guid SynqraTypeId { get; }
+
+	/// <summary>ISO-8601 date (yyyy-MM-dd) the id was superseded — a historic record of when the migration happened.</summary>
+	public DateTime When { get; }
+
+	/// <summary>Why the type id was changed — a historic record of the reason, kept in the source next to the type.</summary>
+	public string Why { get; }
 }
