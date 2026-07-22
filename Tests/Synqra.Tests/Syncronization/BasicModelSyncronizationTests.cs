@@ -127,9 +127,13 @@ internal class BasicModelSyncronizationTests : BaseTest
 		await Assert.That(taskB.Subject).IsEqualTo("Task 1 - updated");
 	}
 
-	// Generous because CI runs these targets in parallel inside docker; the polling
-	// loops above exit as soon as the condition is met, so the happy path never waits.
-	const int PropagationTimeoutMs = 10_000;
+	// Matches the 30s online-wait budget below: CI runs the net8 and net10 targets in parallel
+	// inside docker, each spinning up several Kestrel+WebSocket hosts, so under CPU contention a
+	// node can take most of that budget just to come online — leaving a tighter 10s propagation
+	// window that occasionally lapses (a peer at count 0), even though the events never drop. The
+	// polling loops exit the instant the condition is met, so the happy path never waits the full
+	// budget; this only widens the ceiling before a genuinely stuck sync is declared a failure.
+	const int PropagationTimeoutMs = 30_000;
 
 	async Task WaitForOnlineAsync()
 	{
