@@ -1,6 +1,6 @@
 Synqra
 
-[![Build Status](https://dev.azure.com/xkit/Synqra/_apis/build/status%2FBuild?branchName=master)](https://dev.azure.com/xkit/Synqra/_build/latest?definitionId=103&branchName=master)
+[![Build Status](https://dev.azure.com/xkit/Synqra/_apis/build/status%2FBuild?branchName=main)](https://dev.azure.com/xkit/Synqra/_build/latest?definitionId=103&branchName=main)
 
 1) State management framework. It brings abstractions and mechanisms to provide you a data model, events and commands
 
