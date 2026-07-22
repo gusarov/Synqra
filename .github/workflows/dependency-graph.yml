@@ -1,14 +1,14 @@
 name: Dependency Graph
 
 # Overrides GitHub's dynamically-generated "Automatic Dependency Submission" workflow, which
-# fails repo-wide (every branch, including master) with NETSDK1147 because it never installs the
+# fails repo-wide (every branch, including main) with NETSDK1147 because it never installs the
 # wasm-tools workload that Contoso.Wasm.csproj requires to restore. Defining a workflow here that
 # performs the submission ourselves makes GitHub stop auto-generating its own.
 
 on:
   # GitHub's dynamic version ran on push to every branch, not just the default ones (observed
   # failing on arbitrary feature branches) — match that breadth so it actually supersedes it
-  # everywhere, not just on master/master-quotaly.
+  # everywhere, not just on main.
   push:
   workflow_dispatch:
 
