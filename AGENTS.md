@@ -8,10 +8,9 @@ This repository is also used as a **submodule of Quotaly**.
 
 ## Branch Workflow
 
-- Active development for the Quotaly-integrated flow happens on `master-quotaly`.
-- Treat `master-quotaly` as the working branch for new changes unless explicitly told otherwise.
-- `master` remains the upstream/mainline branch that changes will eventually be merged into.
-- Be careful when discussing or preparing merges: in this repo, branch choice is part of the intended workflow, not an incidental local preference.
+- `main` is the single mainline branch for this repo (also the branch Quotaly pins its submodule to).
+- Treat `main` as the working branch for new changes unless explicitly told otherwise.
+- No direct/force push to `main`: land changes via a feature branch + PR against `main`.
 
 ### PR push + CI tracking
 
