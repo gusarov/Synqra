@@ -126,6 +126,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			try
 			{
 				wsConnection = new ClientWebSocket();
+				_config.ConfigureSocket?.Invoke(wsConnection.Options);
 				await wsConnection.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
 				_networkSerializationService.Reinitialize();
 				// Not online yet — that is declared only after the HELLO handshake completes,
@@ -234,6 +235,16 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			while (await myEnumerator.MoveNextAsync())
 			{
 				var ev = myEnumerator.Current;
+				// Single-stream connection: skip events belonging to any other stream that shares this
+				// local multitenant store (e.g. the primary stream's events when this connection only
+				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
+				// they are never re-examined, and they are never sent to — and mis-stamped by — the
+				// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
+				if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
+				{
+					_eventReplicationState.LastEventIdFromMe = ev.EventId;
+					continue;
+				}
 				lock (_skipSet)
 				{
 					if (_skipSet.Add(ev.EventId))
