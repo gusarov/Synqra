@@ -22,7 +22,11 @@ namespace Synqra.Tests.Syncronization;
 [NotInParallel]
 internal class ReplicationEndpointIsolationTests : BaseTest
 {
-	const int PropagationTimeoutMs = 10_000;
+	// Matches the 30s online-wait budget (see WaitForOnlineAsync): under docker CPU contention a
+	// node can spend most of that budget just connecting, so a tighter propagation window
+	// occasionally lapses under load even though no event is dropped. Polling exits on first
+	// success, so the happy path never waits the full budget.
+	const int PropagationTimeoutMs = 30_000;
 	// After the same-stream peer has demonstrably received an event, a cross-stream peer either
 	// already has it (a leak) or never will — the endpoint fans a single event out to all sockets in
 	// one guarded pass. This grace just lets any erroneous delivery land before we assert its absence.

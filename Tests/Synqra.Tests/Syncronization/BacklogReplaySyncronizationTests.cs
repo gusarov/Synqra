@@ -17,7 +17,11 @@ namespace Synqra.Tests.Syncronization;
 [NotInParallel]
 internal class BacklogReplaySyncronizationTests : BaseTest
 {
-	const int PropagationTimeoutMs = 10_000;
+	// Matches the 30s online-wait budget (see WaitForOnlineAsync): under docker CPU contention a
+	// node can spend most of that budget just connecting, so a tighter propagation window
+	// occasionally lapses under load even though no event is dropped. Polling exits on first
+	// success, so the happy path never waits the full budget.
+	const int PropagationTimeoutMs = 30_000;
 
 	[Test]
 	public async Task Should_replay_existing_history_to_a_client_that_connects_after_the_data_already_exists()
