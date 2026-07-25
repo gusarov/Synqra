@@ -42,5 +42,27 @@ public class ReplicationStreamScopeTests
 		await Assert.That(ReplicationStreamScope.Admits(null, null)).IsTrue();
 		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, null)).IsTrue();
 	}
+
+	[Test]
+	public async Task A_scoped_connection_also_admits_host_granted_readable_streams()
+	{
+		// Multi-stream read: a connection scoped to A that the host additionally grants read access
+		// to B sees both A's and B's events, but still nothing else (C), and still never an
+		// unstamped/zero event.
+		var readable = new HashSet<Guid> { StreamB };
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, readable)).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, readable)).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(Guid.NewGuid(), StreamA, readable)).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(null, StreamA, readable)).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, StreamA, readable)).IsFalse();
+	}
+
+	[Test]
+	public async Task An_empty_readable_set_is_own_stream_only()
+	{
+		// A resolver that grants nothing is identical to the single-stream behavior.
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, new HashSet<Guid>())).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, new HashSet<Guid>())).IsFalse();
+	}
 }
 #endif
