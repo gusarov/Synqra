@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Synqra;
@@ -34,17 +35,24 @@ public static class SynqraReplicationEndpointExtensions
 	/// <see cref="IAppendStorage{Event, Guid}"/> from the keyed DI slot so each feature
 	/// operates against its own store rather than sharing one global singleton.
 	/// </para>
+	/// <para>
+	/// Pass <paramref name="readableStreamsResolver"/> to let each connection additionally
+	/// <em>read</em> a host-chosen set of shared/public streams beyond its own writable stream
+	/// (see <see cref="ReplicationStreamScope"/>). It is evaluated once per connection from the
+	/// authenticated <see cref="HttpContext"/> and is never taken from the wire, so a client can
+	/// only ever gain read access the host grants it — it still writes solely to its own stream.
+	/// </para>
 	/// </summary>
-	public static WebApplication MapSynqraReplicationEndpoint(this WebApplication app, string path = "/api/synqra/ws", string? serviceKey = null)
+	public static WebApplication MapSynqraReplicationEndpoint(this WebApplication app, string path = "/api/synqra/ws", string? serviceKey = null, Func<HttpContext, IReadOnlySet<Guid>>? readableStreamsResolver = null)
 	{
 		app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 
-		// Each connected socket is tagged with the stream it is authorized for, so a broadcast
-		// only reaches peers on the same stream (see the broadcast loop below). Was a
-		// ConcurrentBag<WebSocket> — a set with no per-socket stream and, worse, no removal, so
-		// dead sockets accumulated forever. A dictionary gives both the stream tag and O(1)
-		// removal on disconnect.
-		var sockets = new ConcurrentDictionary<WebSocket, Guid?>();
+		// Each connected socket is tagged with its own writable stream plus the host-granted set of
+		// additional readable streams, so a broadcast only reaches peers that may read the event's
+		// stream (see the broadcast loop below). Was a ConcurrentBag<WebSocket> — a set with no
+		// per-socket stream and, worse, no removal, so dead sockets accumulated forever. A dictionary
+		// gives both the routing tags and O(1) removal on disconnect.
+		var sockets = new ConcurrentDictionary<WebSocket, SocketScope>();
 		var broadcastGate = new SemaphoreSlim(1, 1);
 		var knownEvents = new ConcurrentDictionary<Guid, object?>();
 
@@ -66,6 +74,12 @@ public static class SynqraReplicationEndpointExtensions
 			// must not be able to name another user's stream. null means the host set no scope at
 			// all (a single-tenant deployment): everything below then behaves as before, unscoped.
 			var connectionStream = SynqraStreamContext.CurrentOrNull;
+
+			// Additional streams this connection may READ (never write) — a host-chosen set of
+			// shared/public streams resolved from the authenticated context, never from the wire.
+			// null/empty means "own stream only", the pre-existing behavior.
+			var readableStreams = readableStreamsResolver?.Invoke(ctx);
+			var socketScope = new SocketScope(connectionStream, readableStreams);
 
 			#region HELLO — from client
 			// 8 bytes magic + 16 bytes the client's own "last event id it already received
@@ -100,7 +114,7 @@ public static class SynqraReplicationEndpointExtensions
 			await broadcastGate.WaitAsync(ctx.RequestAborted);
 			try
 			{
-				sockets[socket] = connectionStream;
+				sockets[socket] = socketScope;
 				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
 
 				var storage = serviceKey is null
@@ -111,11 +125,12 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 					{
-						// Replay only THIS connection's stream. The log is one shared multitenant
-						// collection; ev.StreamId (persisted as _sid) says which stream each event
-						// belongs to. Without this filter the backlog leaked every stream's events
-						// to any connecting client. Unscoped host (connectionStream null) → send all.
-						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream))
+						// Replay only streams THIS connection may read — its own stream plus any host-
+						// granted readable stream. The log is one shared multitenant collection;
+						// ev.StreamId (persisted as _sid) says which stream each event belongs to.
+						// Without this filter the backlog leaked every stream's events to any
+						// connecting client. Unscoped host (connectionStream null) → send all.
+						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream, readableStreams))
 						{
 							continue;
 						}
@@ -181,15 +196,16 @@ public static class SynqraReplicationEndpointExtensions
 					try
 					{
 						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
-						foreach (var (other, otherStream) in sockets)
+						foreach (var (other, otherScope) in sockets)
 						{
 							if (other == socket || other.State != WebSocketState.Open) { continue; }
-							// Only fan out to peers on the same stream as the event. Without this a
-							// client's event was broadcast to every connected socket regardless of
-							// stream — a live cross-tenant leak. Unscoped host (connectionStream null)
-							// → broadcast to all, as before. (connectionStream == ev.StreamId here,
-							// since inbound events were stamped with it above.)
-							if (!ReplicationStreamScope.Admits(otherStream, connectionStream))
+							// Only fan out to peers that may READ the event's stream (their own stream
+							// or a host-granted readable stream). Without this a client's event was
+							// broadcast to every connected socket regardless of stream — a live
+							// cross-tenant leak. The check is oriented per peer: does THIS peer admit
+							// the event's stream (ev.StreamId, stamped above from the sender's stream)?
+							// Unscoped peer (null own stream) → admits all, as before.
+							if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.ReadableStreams))
 							{
 								continue;
 							}
@@ -262,4 +278,8 @@ public static class SynqraReplicationEndpointExtensions
 			ArrayPool<byte>.Shared.Return(rent);
 		}
 	}
+
+	/// <summary>Per-connection routing tags: the connection's own writable stream and the host-granted
+	/// set of additional readable streams. Both feed <see cref="ReplicationStreamScope.Admits"/>.</summary>
+	readonly record struct SocketScope(Guid? WritableStream, IReadOnlySet<Guid>? ReadableStreams);
 }
