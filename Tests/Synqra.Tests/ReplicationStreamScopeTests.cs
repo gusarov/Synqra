@@ -15,12 +15,13 @@ public class ReplicationStreamScopeTests
 	static readonly Guid StreamB = Guid.NewGuid();
 
 	[Test]
-	public async Task A_scoped_connection_admits_only_its_own_stream()
+	public async Task A_scoped_connection_admits_only_its_active_streams()
 	{
-		// The core isolation guarantee: a connection authorized for stream A sees A's events and
-		// nothing else. Before this rule the backlog and broadcast admitted every stream.
-		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA)).IsTrue();
-		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA)).IsFalse();
+		// The core isolation guarantee: a connection subscribed to stream A sees A's events and
+		// nothing else. The own writable stream is admitted only because it is in the active set.
+		var active = new HashSet<Guid> { StreamA };
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, active)).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, active)).IsFalse();
 	}
 
 	[Test]
@@ -28,8 +29,9 @@ public class ReplicationStreamScopeTests
 	{
 		// A legacy/unstamped event (StreamId null or default) must NOT leak onto a scoped
 		// connection — the whole point of stamping inbound events and backfilling _sid.
-		await Assert.That(ReplicationStreamScope.Admits(null, StreamA)).IsFalse();
-		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, StreamA)).IsFalse();
+		var active = new HashSet<Guid> { StreamA };
+		await Assert.That(ReplicationStreamScope.Admits(null, StreamA, active)).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, StreamA, active)).IsFalse();
 	}
 
 	[Test]
@@ -44,25 +46,26 @@ public class ReplicationStreamScopeTests
 	}
 
 	[Test]
-	public async Task A_scoped_connection_also_admits_host_granted_readable_streams()
+	public async Task A_scoped_connection_admits_every_active_stream()
 	{
-		// Multi-stream read: a connection scoped to A that the host additionally grants read access
-		// to B sees both A's and B's events, but still nothing else (C), and still never an
-		// unstamped/zero event.
-		var readable = new HashSet<Guid> { StreamB };
-		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, readable)).IsTrue();
-		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, readable)).IsTrue();
-		await Assert.That(ReplicationStreamScope.Admits(Guid.NewGuid(), StreamA, readable)).IsFalse();
-		await Assert.That(ReplicationStreamScope.Admits(null, StreamA, readable)).IsFalse();
-		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, StreamA, readable)).IsFalse();
+		// Multi-stream read: a connection subscribed to both A and B sees both, but still nothing
+		// else (C), and still never an unstamped/zero event.
+		var active = new HashSet<Guid> { StreamA, StreamB };
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, active)).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, active)).IsTrue();
+		await Assert.That(ReplicationStreamScope.Admits(Guid.NewGuid(), StreamA, active)).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(null, StreamA, active)).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(Guid.Empty, StreamA, active)).IsFalse();
 	}
 
 	[Test]
-	public async Task An_empty_readable_set_is_own_stream_only()
+	public async Task An_empty_active_set_admits_nothing_not_even_the_own_stream()
 	{
-		// A resolver that grants nothing is identical to the single-stream behavior.
-		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, new HashSet<Guid>())).IsTrue();
+		// The EMPTY subscription mode: a scoped connection that has subscribed to nothing yet
+		// receives no events at all — not even its own stream — until it Subscribes.
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, new HashSet<Guid>())).IsFalse();
 		await Assert.That(ReplicationStreamScope.Admits(StreamB, StreamA, new HashSet<Guid>())).IsFalse();
+		await Assert.That(ReplicationStreamScope.Admits(StreamA, StreamA, null)).IsFalse();
 	}
 }
 #endif

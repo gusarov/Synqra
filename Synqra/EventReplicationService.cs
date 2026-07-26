@@ -33,9 +33,32 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	public bool IsOnline { get => _isOnline; private set => _isOnline = value; }
 
 	private Task? _readerTask;
+	private ClientWebSocket? _wsConnection;
+	private volatile IReadOnlyCollection<Guid> _activeStreams = Array.Empty<Guid>();
+
+	/// <inheritdoc />
+	public IReadOnlyCollection<Guid> ActiveStreams => _activeStreams;
+
+	/// <inheritdoc />
+	public event Action? SubscriptionChanged;
 
 	/// <inheritdoc />
 	public event Action? EventsReceived;
+
+	/// <inheritdoc />
+	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
+		=> SendStreamControlAsync(ReplicationFrameTag.Subscribe, streamId, ct);
+
+	/// <inheritdoc />
+	public Task UnsubscribeAsync(Guid streamId, CancellationToken ct = default)
+		=> SendStreamControlAsync(ReplicationFrameTag.Unsubscribe, streamId, ct);
+
+	private async Task SendStreamControlAsync(ReplicationFrameTag tag, Guid streamId, CancellationToken ct)
+	{
+		var socket = _wsConnection ?? throw new InvalidOperationException("Not connected — cannot change subscriptions before the replication client has connected.");
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
+		await socket.SendStreamControlFrameAsync(tag, streamId, _networkSerializationService.IsTextOrBinary, linked.Token);
+	}
 
 	public EventReplicationService(
 		  IOptions<EventReplicationConfig> options
@@ -128,6 +151,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				wsConnection = new ClientWebSocket();
 				_config.ConfigureSocket?.Invoke(wsConnection.Options);
 				await wsConnection.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
+				_wsConnection = wsConnection;
 				_networkSerializationService.Reinitialize();
 				// Not online yet — that is declared only after the HELLO handshake completes,
 				// when the master is guaranteed to have registered this node for broadcasts.
@@ -170,7 +194,27 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					IsOnline = false;
 					break;
 				}
-				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+				var frameTag = (ReplicationFrameTag)bytes[0];
+				if (frameTag == ReplicationFrameTag.SubscriptionState)
+				{
+					// Master's authoritative snapshot of the streams this connection is now subscribed
+					// to (N*16 bytes after the tag). Lets the client detect an unexpected default and
+					// drive its own UI off the confirmed set. Sent after HELLO and every sub/unsub.
+					var count = (bytes.Length - 1) / 16;
+					var streams = new Guid[count];
+					for (var i = 0; i < count; i++)
+					{
+						streams[i] = new Guid(bytes.AsSpan(1 + (i * 16), 16));
+					}
+					_activeStreams = streams;
+					SubscriptionChanged?.Invoke();
+					continue;
+				}
+				if (frameTag != ReplicationFrameTag.Event)
+				{
+					throw new NotSupportedException($"Unsupported replication frame tag: {frameTag}.");
+				}
+				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes.AsSpan(1));
 				switch (operation)
 				{
 					case NewEvent1 ne1:
@@ -203,16 +247,22 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 		#region HELLO
 		{
-			// 8 bytes magic + 16 bytes LastEventIdFromServer — tells the server exactly
-			// where this client's backlog catch-up should resume from (Guid.Empty means
-			// "never synced, send me everything"). See SynqraReplicationEndpointExtensions.cs's
-			// own remarks on the server side of this handshake.
-			var buffer = ArrayPool<byte>.Shared.Rent(24);
+			// 8 bytes magic + 16 bytes LastEventIdFromServer (Guid.Empty = "send me everything") + the
+			// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
+			// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
+			var isSubscribeTo = _config.HelloKind == ReplicationHelloKind.SubscribeTo;
+			var helloSize = isSubscribeTo ? 41 : 25;
+			var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
 			try
 			{
 				BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
 				_eventReplicationState.LastEventIdFromServer.TryWriteBytes(buffer.AsSpan(8, 16));
-				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, 24), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+				buffer[24] = (byte)_config.HelloKind;
+				if (isSubscribeTo)
+				{
+					(_config.InitialSubscribeStreamId ?? throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId.")).TryWriteBytes(buffer.AsSpan(25, 16));
+				}
+				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 			}
 			finally
 			{
@@ -263,9 +313,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// var span = new Span<byte>(bytes);
 				try
 				{
-					var serialized = _networkSerializationService.Serialize<TransportOperation>(inv, bytes);
+					// [1 tag byte][SBX payload] — payload written at offset 1 so the Event tag prefixes
+					// it without a second copy. Matches the server's framing (ReplicationFrameTag).
+					var serialized = _networkSerializationService.Serialize<TransportOperation>(inv, new ArraySegment<byte>(bytes, 1, bytes.Length - 1));
+					bytes[0] = (byte)ReplicationFrameTag.Event;
 					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
-					await wsConnection.SendAsync(serialized, _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+					await wsConnection.SendAsync(new ArraySegment<byte>(bytes, 0, serialized.Count + 1), _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 				}
 				finally
 				{

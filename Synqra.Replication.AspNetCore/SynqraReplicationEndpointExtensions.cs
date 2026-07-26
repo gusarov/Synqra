@@ -36,11 +36,13 @@ public static class SynqraReplicationEndpointExtensions
 	/// operates against its own store rather than sharing one global singleton.
 	/// </para>
 	/// <para>
-	/// Pass <paramref name="readableStreamsResolver"/> to let each connection additionally
-	/// <em>read</em> a host-chosen set of shared/public streams beyond its own writable stream
-	/// (see <see cref="ReplicationStreamScope"/>). It is evaluated once per connection from the
-	/// authenticated <see cref="HttpContext"/> and is never taken from the wire, so a client can
-	/// only ever gain read access the host grants it — it still writes solely to its own stream.
+	/// Pass <paramref name="readableStreamsResolver"/> to define, per connection, the set of
+	/// shared/public streams the connection is <em>allowed</em> to read beyond its own writable
+	/// stream (see <see cref="ReplicationStreamScope"/>). It is evaluated once per connection from
+	/// the authenticated <see cref="HttpContext"/> and is never taken from the wire, so a client can
+	/// only ever gain read access the host grants — it still writes solely to its own stream. This is
+	/// the <em>authorization ceiling</em>; which of those streams are actually delivered is chosen by
+	/// the client's HELLO subscription mode and live Subscribe/Unsubscribe frames.
 	/// </para>
 	/// </summary>
 	public static WebApplication MapSynqraReplicationEndpoint(this WebApplication app, string path = "/api/synqra/ws", string? serviceKey = null, Func<HttpContext, IReadOnlySet<Guid>>? readableStreamsResolver = null)
@@ -75,24 +77,48 @@ public static class SynqraReplicationEndpointExtensions
 			// all (a single-tenant deployment): everything below then behaves as before, unscoped.
 			var connectionStream = SynqraStreamContext.CurrentOrNull;
 
-			// Additional streams this connection may READ (never write) — a host-chosen set of
-			// shared/public streams resolved from the authenticated context, never from the wire.
-			// null/empty means "own stream only", the pre-existing behavior.
-			var readableStreams = readableStreamsResolver?.Invoke(ctx);
-			var socketScope = new SocketScope(connectionStream, readableStreams);
+			// Additional streams this connection is AUTHORIZED to read (never write) — a host-chosen
+			// ceiling resolved from the authenticated context, never from the wire. Combined with the
+			// own writable stream this forms the "grantable" set: the most a client could ever be
+			// subscribed to. null/empty resolver means "own stream only".
+			var granted = readableStreamsResolver?.Invoke(ctx);
+			var grantable = new HashSet<Guid>();
+			if (connectionStream is Guid ownStream)
+			{
+				grantable.Add(ownStream);
+			}
+			if (granted is not null)
+			{
+				foreach (var g in granted)
+				{
+					grantable.Add(g);
+				}
+			}
+
+			// Serializes one event as a tagged Event frame: [1 tag byte][SBX NewEvent1 payload]. The
+			// payload is written at offset 1 so the tag can prefix it without a second copy.
+			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev)
+			{
+				var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(frameBuffer, 1, frameBuffer.Length - 1));
+				frameBuffer[0] = (byte)ReplicationFrameTag.Event;
+				await target.SendAsync(new ArraySegment<byte>(frameBuffer, 0, payload.Count + 1), networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+			}
 
 			#region HELLO — from client
-			// 8 bytes magic + 16 bytes the client's own "last event id it already received
-			// from a server" cursor (Guid.Empty means "never synced, send me everything") —
-			// see EventReplicationState.LastEventIdFromServer's own remarks.
+			// 8 bytes magic + 16 bytes the client's own "last event id it already received from a
+			// server" cursor (Guid.Empty means "never synced, send me everything") — see
+			// EventReplicationState.LastEventIdFromServer's remarks — plus the HELLO "ws-method":
+			//   byte[24] kind: 0 = NoAutoSubscription, 1 = UserDefaultMainStream, 2 = SubscribeTo.
+			//   For kind 2 the next 16 bytes are the stream id to subscribe to (total 41 bytes).
+			// A legacy 24-byte HELLO omits the kind and is treated as UserDefaultMainStream.
 			var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
 			if (helloBytes is null)
 			{
 				return;
 			}
-			if (helloBytes.Length != 24)
+			if (helloBytes.Length is not (24 or 25 or 41))
 			{
-				throw new InvalidOperationException($"Protocol negotiation failed: received {helloBytes.Length} bytes instead of 24.");
+				throw new InvalidOperationException($"Protocol negotiation failed: received {helloBytes.Length} bytes (expected 24, 25, or 41).");
 			}
 			var magic = BitConverter.ToUInt64(helloBytes, 0);
 			if (magic != networkSerializationService.Magic)
@@ -100,6 +126,39 @@ public static class SynqraReplicationEndpointExtensions
 				throw new InvalidOperationException($"Protocol negotiation failed: received magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 			}
 			var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
+			var helloKind = helloBytes.Length >= 25 ? (ReplicationHelloKind)helloBytes[24] : ReplicationHelloKind.UserDefaultMainStream;
+			// The streams this connection is currently subscribed to. Seeded from the HELLO kind, then
+			// mutated live by Subscribe/Unsubscribe frames. Only ever touched under broadcastGate, so
+			// the broadcast loop's reads never race a subscription change.
+			var active = new HashSet<Guid>();
+			switch (helloKind)
+			{
+				case ReplicationHelloKind.NoAutoSubscription:
+					break;
+				case ReplicationHelloKind.UserDefaultMainStream:
+					if (connectionStream is Guid ownAtHello)
+					{
+						active.Add(ownAtHello);
+					}
+					break;
+				case ReplicationHelloKind.SubscribeTo:
+					if (helloBytes.Length != 41)
+					{
+						throw new InvalidOperationException("Protocol negotiation failed: Hello_SubscribeTo requires a 16-byte stream id (41-byte HELLO).");
+					}
+					var helloTarget = new Guid(helloBytes.AsSpan(25, 16));
+					// Authorize against the ceiling — an unscoped host (no connectionStream) admits any
+					// stream; a scoped host admits only streams in the grantable set. A rejected target
+					// simply leaves the active set empty; the ack below reveals what actually took.
+					if (connectionStream is null || grantable.Contains(helloTarget))
+					{
+						active.Add(helloTarget);
+					}
+					break;
+				default:
+					throw new InvalidOperationException($"Protocol negotiation failed: unknown HELLO kind {helloBytes[24]}.");
+			}
+			var socketScope = new SocketScope(connectionStream, grantable, active);
 			#endregion
 
 			#region HELLO — to client, then replay this stream's backlog since clientCursor
@@ -117,6 +176,10 @@ public static class SynqraReplicationEndpointExtensions
 				sockets[socket] = socketScope;
 				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
 
+				// Auto-ack the HELLO with the authoritative active set, so the client can immediately
+				// tell whether the server's default matched what it expected (see SubscriptionState).
+				await socket.SendSubscriptionStateAsync(socketScope.Active, networkSerializationService.IsTextOrBinary, ctx.RequestAborted);
+
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
 					: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
@@ -125,18 +188,16 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 					{
-						// Replay only streams THIS connection may read — its own stream plus any host-
-						// granted readable stream. The log is one shared multitenant collection;
-						// ev.StreamId (persisted as _sid) says which stream each event belongs to.
-						// Without this filter the backlog leaked every stream's events to any
-						// connecting client. Unscoped host (connectionStream null) → send all.
-						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream, readableStreams))
+						// Replay only streams THIS connection is currently subscribed to. The log is one
+						// shared multitenant collection; ev.StreamId (persisted as _sid) says which stream
+						// each event belongs to. Without this filter the backlog leaked every stream's
+						// events to any connecting client. Unscoped host (connectionStream null) → send all.
+						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream, socketScope.Active))
 						{
 							continue;
 						}
 						knownEvents.TryAdd(ev.EventId, null);
-						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, backlogBuffer);
-						await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+						await SendEventFrameAsync(socket, backlogBuffer, ev);
 					}
 				}
 				finally
@@ -160,7 +221,72 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					break;
 				}
-				var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
+				if (messageBytes.Length == 0)
+				{
+					continue;
+				}
+				var frameTag = (ReplicationFrameTag)messageBytes[0];
+
+				// Subscribe / Unsubscribe control frames: [tag][16-byte stream id]. Mutate this
+				// connection's active set (under the broadcast gate so the fan-out loop never races it),
+				// replay the newly-subscribed stream's backlog, then ack the resulting active set.
+				if (frameTag is ReplicationFrameTag.Subscribe or ReplicationFrameTag.Unsubscribe)
+				{
+					if (messageBytes.Length != 17)
+					{
+						throw new InvalidOperationException($"Malformed {frameTag} frame: {messageBytes.Length} bytes (expected 17).");
+					}
+					var target = new Guid(messageBytes.AsSpan(1, 16));
+					await broadcastGate.WaitAsync(ctx.RequestAborted);
+					try
+					{
+						if (frameTag is ReplicationFrameTag.Subscribe)
+						{
+							// Authorize against the ceiling: unscoped host admits any stream, scoped host
+							// only its grantable set. A rejected target leaves the active set unchanged —
+							// the ack tells the client it did not take.
+							if ((connectionStream is null || grantable.Contains(target)) && socketScope.Active.Add(target))
+							{
+								var storage = serviceKey is null
+									? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
+									: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+								try
+								{
+									await foreach (var ev in storage.GetAllAsync(from: default, ctx.RequestAborted))
+									{
+										if (ev.StreamId != target)
+										{
+											continue;
+										}
+										knownEvents.TryAdd(ev.EventId, null);
+										await SendEventFrameAsync(socket, subBuffer, ev);
+									}
+								}
+								finally
+								{
+									ArrayPool<byte>.Shared.Return(subBuffer);
+								}
+							}
+						}
+						else
+						{
+							socketScope.Active.Remove(target);
+						}
+						await socket.SendSubscriptionStateAsync(socketScope.Active, networkSerializationService.IsTextOrBinary, ctx.RequestAborted);
+					}
+					finally
+					{
+						broadcastGate.Release();
+					}
+					continue;
+				}
+
+				if (frameTag is not ReplicationFrameTag.Event)
+				{
+					throw new NotSupportedException($"Unsupported replication frame tag: {frameTag}.");
+				}
+				var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes.AsSpan(1));
 				if (operation is not NewEvent1 newEvent1)
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation.GetType()}.");
@@ -195,23 +321,21 @@ public static class SynqraReplicationEndpointExtensions
 					var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 					try
 					{
-						var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
 						foreach (var (other, otherScope) in sockets)
 						{
 							if (other == socket || other.State != WebSocketState.Open) { continue; }
-							// Only fan out to peers that may READ the event's stream (their own stream
-							// or a host-granted readable stream). Without this a client's event was
-							// broadcast to every connected socket regardless of stream — a live
-							// cross-tenant leak. The check is oriented per peer: does THIS peer admit
-							// the event's stream (ev.StreamId, stamped above from the sender's stream)?
-							// Unscoped peer (null own stream) → admits all, as before.
-							if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.ReadableStreams))
+							// Only fan out to peers subscribed to the event's stream. Without this a
+							// client's event was broadcast to every connected socket regardless of stream
+							// — a live cross-tenant leak. The check is oriented per peer: is THIS peer
+							// currently subscribed to the event's stream (ev.StreamId, stamped above from
+							// the sender's stream)? Unscoped peer (null own stream) → admits all, as before.
+							if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.Active))
 							{
 								continue;
 							}
 							try
 							{
-								await other.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+								await SendEventFrameAsync(other, buffer, ev);
 							}
 							catch (Exception broadcastEx)
 							{
@@ -279,7 +403,21 @@ public static class SynqraReplicationEndpointExtensions
 		}
 	}
 
-	/// <summary>Per-connection routing tags: the connection's own writable stream and the host-granted
-	/// set of additional readable streams. Both feed <see cref="ReplicationStreamScope.Admits"/>.</summary>
-	readonly record struct SocketScope(Guid? WritableStream, IReadOnlySet<Guid>? ReadableStreams);
+	/// <summary>Per-connection routing state: the connection's own writable stream, the host-authorized
+	/// ceiling of streams it MAY read (<see cref="Grantable"/>), and the subset it is currently
+	/// subscribed to (<see cref="Active"/>, mutated live by Subscribe/Unsubscribe frames, only ever under
+	/// the endpoint's broadcast gate). <see cref="Active"/> feeds <see cref="ReplicationStreamScope.Admits"/>.</summary>
+	sealed class SocketScope
+	{
+		public SocketScope(Guid? writableStream, IReadOnlySet<Guid> grantable, HashSet<Guid> active)
+		{
+			WritableStream = writableStream;
+			Grantable = grantable;
+			Active = active;
+		}
+
+		public Guid? WritableStream { get; }
+		public IReadOnlySet<Guid> Grantable { get; }
+		public HashSet<Guid> Active { get; }
+	}
 }
