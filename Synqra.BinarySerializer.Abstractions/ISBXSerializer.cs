@@ -10,23 +10,23 @@ public interface ISbxSerializer
 
 	#region SERIALIZE
 
-	void Serialize<T>(in Span<byte> buffer, in T value, ref int pos);
+	void Serialize<T>(in Span<byte> buffer, ref int pos, in T value);
 
-	void Serialize(in Span<byte> buffer, long value, ref int pos);
-	void Serialize(in Span<byte> buffer, ulong value, ref int pos);
-	// void Serialize(in Span<byte> buffer, string? value, ref int pos); // here string is nullable intentionally // it is disabled intentionally as nullable renamed and this one is duplicated from object nullability standpoint
-	void Serialize(in Span<byte> buffer, Guid value, ref int pos); // There is no "in" for guid, becuase Guid logic uses stack copy for quick unsafe operations
-	void Serialize(in Span<byte> buffer, float data, ref int pos);
-	void Serialize(in Span<byte> buffer, double data, ref int pos);
+	void Serialize(in Span<byte> buffer, ref int pos, long value);
+	void Serialize(in Span<byte> buffer, ref int pos, ulong value);
+	// void Serialize(in Span<byte> buffer, ref int pos, string? value); // here string is nullable intentionally // it is disabled intentionally as nullable renamed and this one is duplicated from object nullability standpoint
+	void Serialize(in Span<byte> buffer, ref int pos, Guid value); // There is no "in" for guid, becuase Guid logic uses stack copy for quick unsafe operations
+	void Serialize(in Span<byte> buffer, ref int pos, float data);
+	void Serialize(in Span<byte> buffer, ref int pos, double data);
 
 	#region Nullable
 
-	void Serialize(in Span<byte> buffer, long? data, ref int pos);
-	void Serialize(in Span<byte> buffer, ulong? data, ref int pos);
-	void Serialize(in Span<byte> buffer, string? data, ref int pos);
-	void Serialize(in Span<byte> buffer, Guid? data, ref int pos);
-	void Serialize(in Span<byte> buffer, float? data, ref int pos);
-	void Serialize(in Span<byte> buffer, double? data, ref int pos);
+	void Serialize(in Span<byte> buffer, ref int pos, long? data);
+	void Serialize(in Span<byte> buffer, ref int pos, ulong? data);
+	void Serialize(in Span<byte> buffer, ref int pos, string? data);
+	void Serialize(in Span<byte> buffer, ref int pos, Guid? data);
+	void Serialize(in Span<byte> buffer, ref int pos, float? data);
+	void Serialize(in Span<byte> buffer, ref int pos, double? data);
 
 	#endregion
 
@@ -57,7 +57,7 @@ public interface ISbxSerializer
 	#endregion
 
 	// it will go <T> route and will emit proper prefixes
-	// void Serialize<T>(in Span<byte> buffer, in IEnumerable<T> value, ref int pos);
+	// void Serialize<T>(in Span<byte> buffer, ref int pos, in IEnumerable<T> value);
 	IList<T> DeserializeList<T>(in ReadOnlySpan<byte> buffer, ref int pos);
 	IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos);
 }

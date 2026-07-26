@@ -288,8 +288,8 @@ public class SbxSerializer : ISbxSerializer
 	{
 		public void Get(KeyValuePair<TK, TV> model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 		{
-			serializer.Serialize(buffer, model.Key, ref pos);
-			serializer.Serialize(buffer, model.Value, ref pos);
+			serializer.Serialize(buffer, ref pos, model.Key);
+			serializer.Serialize(buffer, ref pos, model.Value);
 		}
 
 		public void Get(object model, ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
@@ -373,24 +373,24 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, in T? obj
 		, ref int pos
+		, in T? obj
 		)
 	{
-		Serialize(buffer, obj, ref pos, typeof(T));
+		Serialize(buffer, ref pos, obj, typeof(T));
 	}
 
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, in T? obj
 		, ref int pos
+		, in T? obj
 		, bool? emitTypeId = null
 		)
 	{
 		Serialize(
 			  buffer
-			, obj
 			, ref pos
+			, obj
 			, typeof(T)
 			, emitTypeId
 			);
@@ -398,8 +398,8 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(
 		  in Span<byte> buffer
-		, in object? obj
 		, ref int pos
+		, in object? obj
 		, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type requestedType
 		, bool? emitTypeId = null
 		)
@@ -461,14 +461,14 @@ public class SbxSerializer : ISbxSerializer
 				{
 					var (IdForList, SpecList, ListTSpecified, SharedElementType) = GetTypeIdForList(requestedType, obj);
 					typeId = IdForList;
-					Serialize(in buffer, (long)typeId, ref pos
+					Serialize(in buffer, ref pos, (long)typeId
 #if DEBUG
 						, $"List TypeId for requested {requestedType.FullName}, actual {actualType?.FullName}, SpecList={SpecList}, ListTSpecified={ListTSpecified}, SharedElementType={SharedElementType}"
 #endif
 						);
 					if (SpecList != null)
 					{
-						Serialize(in buffer, (int)SpecList.Value, ref pos
+						Serialize(in buffer, ref pos, (int)SpecList.Value
 #if DEBUG
 							, $"SpecList"
 #endif
@@ -476,7 +476,7 @@ public class SbxSerializer : ISbxSerializer
 					}
 					if (ListTSpecified != null)
 					{
-						Serialize(in buffer, (int)ListTSpecified.Value, ref pos
+						Serialize(in buffer, ref pos, (int)ListTSpecified.Value
 #if DEBUG
 							, $"ListTSpecified"
 #endif
@@ -484,7 +484,7 @@ public class SbxSerializer : ISbxSerializer
 					}
 					if (SharedElementType != null)
 					{
-						Serialize(in buffer, (int)SharedElementType.Value, ref pos
+						Serialize(in buffer, ref pos, (int)SharedElementType.Value
 #if DEBUG
 							, $"SharedElementType"
 #endif
@@ -493,7 +493,7 @@ public class SbxSerializer : ISbxSerializer
 				}
 				else
 				{
-					Serialize(in buffer, (long)typeId, ref pos
+					Serialize(in buffer, ref pos, (long)typeId
 #if DEBUG
 							, $"typeId"
 #endif
@@ -504,22 +504,22 @@ public class SbxSerializer : ISbxSerializer
 					var aqn = actualType.AssemblyQualifiedName;
 					aqn = aqn[0..aqn.IndexOf(',', aqn.IndexOf(',') + 1)]; // trim assembly part
 
-					Serialize(buffer, aqn ?? throw new NotSupportedException(), ref pos);
+					Serialize(buffer, ref pos, aqn ?? throw new NotSupportedException());
 				}
 			}
 			else if (obj == null)
 			{
-				Serialize(in buffer, (long)TypeId.Null, ref pos);
+				Serialize(in buffer, ref pos, (long)TypeId.Null);
 			}
 			/*
 			else if (typeId == TypeId.Unknown)
 			{
-				Serialize(in buffer, (int)TypeId.AsRequested, ref pos);
+				Serialize(in buffer, ref pos, (int)TypeId.AsRequested);
 			}
 			*/
 			else
 			{
-				Serialize(in buffer, (int)TypeId.AsRequested, ref pos);
+				Serialize(in buffer, ref pos, (int)TypeId.AsRequested);
 			}
 		}
 		else if (obj == null)
@@ -533,7 +533,7 @@ public class SbxSerializer : ISbxSerializer
 			*/
 			if (requestedType.IsAssignableTo(typeof(IEnumerable)))
 			{
-				Serialize(buffer, (ulong?)null, ref pos);
+				Serialize(buffer, ref pos, (ulong?)null);
 				return;
 			}
 			throw new NotSupportedException("Need to track capability of a type to encode null state inside value. You likely hitting generic overload of Serialize instead of some specific type capable to encode nullability.");
@@ -558,45 +558,45 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else if (obj is int i)
 		{
-			Serialize(in buffer, (long)i, ref pos);
+			Serialize(in buffer, ref pos, (long)i);
 		}
 		else if (obj is long l)
 		{
-			Serialize(in buffer, (long)l, ref pos);
+			Serialize(in buffer, ref pos, (long)l);
 		}
 		else if (obj is uint ui)
 		{
-			Serialize(in buffer, (ulong)ui, ref pos);
+			Serialize(in buffer, ref pos, (ulong)ui);
 		}
 		else if (obj is ulong ul)
 		{
-			Serialize(in buffer, (ulong)ul, ref pos);
+			Serialize(in buffer, ref pos, (ulong)ul);
 		}
 		else if (obj is float f)
 		{
-			Serialize(in buffer, f, ref pos);
+			Serialize(in buffer, ref pos, f);
 		}
 		else if (obj is double d)
 		{
-			Serialize(in buffer, d, ref pos);
+			Serialize(in buffer, ref pos, d);
 		}
 		else if (obj is Guid g)
 		{
-			Serialize(in buffer, g, ref pos);
+			Serialize(in buffer, ref pos, g);
 		}
 		else if (obj is string s)
 		{
-			Serialize(in buffer, s, ref pos);
+			Serialize(in buffer, ref pos, s);
 		}
 		else if (obj is KeyValuePair<string, string> ks)
 		{
-			Serialize(in buffer, ks.Key, ref pos);
-			Serialize(in buffer, ks.Value, ref pos);
+			Serialize(in buffer, ref pos, ks.Key);
+			Serialize(in buffer, ref pos, ks.Value);
 		}
 		else if (obj is KeyValuePair<string, object> ko)
 		{
-			Serialize(in buffer, ko.Key, ref pos);
-			Serialize(in buffer, ko.Value, ref pos);
+			Serialize(in buffer, ref pos, ko.Key);
+			Serialize(in buffer, ref pos, ko.Value);
 		}
 		else if (obj is IEnumerable enumerable)
 		{
@@ -611,12 +611,12 @@ public class SbxSerializer : ISbxSerializer
 				(bool SpecList, bool CustomT, ListItemTypeId ItemsType) = Decompose(listTypeId);
 				if (ItemsType != ListItemTypeId.Empty)
 				{
-					Serialize(in buffer, enumerable, ref pos/*, requestedCollectionType: requestedType*/, emitTypePerElement: ItemsType == ListItemTypeId.Heterogen);
+					Serialize(in buffer, ref pos, enumerable/*, requestedCollectionType: requestedType*/, emitTypePerElement: ItemsType == ListItemTypeId.Heterogen);
 				}
 			}
 			else // statically known!
 			{
-				Serialize(in buffer, enumerable, ref pos/*, requestedCollectionType: requestedType*/, emitTypePerElement: false);
+				Serialize(in buffer, ref pos, enumerable/*, requestedCollectionType: requestedType*/, emitTypePerElement: false);
 				// throw new Exception($"List type expected but typeId is {typeId}");
 			}
 		}
@@ -653,12 +653,12 @@ public class SbxSerializer : ISbxSerializer
 				var val = item.GetValue(obj);
 				if (val != null)
 				{
-					Serialize(in buffer, item.Name, ref pos);
-					Serialize(in buffer, val, ref pos);
+					Serialize(in buffer, ref pos, item.Name);
+					Serialize(in buffer, ref pos, val);
 				}
 			}
 			// we keep reading strings for the next property name! So let empty string be EndOfObject
-			Serialize(in buffer, "", ref pos);
+			Serialize(in buffer, ref pos, "");
 		}
 	}
 
@@ -977,14 +977,14 @@ public class SbxSerializer : ISbxSerializer
 	/*
 	public void Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
 		  in Span<byte> buffer
-		, in IEnumerable<T> list
 		, ref int pos
+		, in IEnumerable<T> list
 		)
 	{
 		Serialize(
 			  buffer
-			, list
 			, ref pos
+			, list
 			, requestedCollectionType: typeof(T)
 			);
 	}
@@ -992,8 +992,8 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(
 		  in Span<byte> buffer
-		, in IEnumerable enumerable
 		, ref int pos
+		, in IEnumerable enumerable
 		, bool emitTypePerElement
 		// , [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] Type? requestedCollectionType = null
 		)
@@ -1053,7 +1053,7 @@ public class SbxSerializer : ISbxSerializer
 
 		if (enumerable is null)
 		{
-			Serialize(buffer, (ulong?)null, ref pos);
+			Serialize(buffer, ref pos, (ulong?)null);
 			return;
 		}
 
@@ -1062,11 +1062,11 @@ public class SbxSerializer : ISbxSerializer
 		var cnt = materialized.Count;
 		// if (cnt > 0)
 		{
-			Serialize(buffer, (ulong?)cnt, ref pos);
+			Serialize(buffer, ref pos, (ulong?)cnt);
 		}
 		foreach (var item in materialized)
 		{
-			Serialize(buffer, item, ref pos, emitTypeId: emitTypePerElement);
+			Serialize(buffer, ref pos, item, emitTypeId: emitTypePerElement);
 		}
 	}
 
@@ -1392,14 +1392,14 @@ public class SbxSerializer : ISbxSerializer
 		};
 	}
 
-	public void Serialize(in Span<byte> buffer, Type type, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, Type type)
 	{
 		var typeId = GetTypeId(type);
-		Serialize(buffer, typeId, ref pos);
+		Serialize(buffer, ref pos, typeId);
 		if (typeId == TypeId.Unknown)
 		{
 			var typeName = type.FullName ?? throw new Exception("Type has no full name: " + type.Name);
-			Serialize(buffer, typeName, ref pos);
+			Serialize(buffer, ref pos, typeName);
 		}
 	}
 
@@ -1503,7 +1503,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 	}
 
-	public void Serialize(in Span<byte> buffer, string? data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, string? data)
 	{
 		if (data == null)
 		{
@@ -1571,7 +1571,7 @@ public class SbxSerializer : ISbxSerializer
 	/*
 	public void Serialize(ref Span<byte> buffer, string data)
 	{
-		// Serialize(buffer, (uint)data.Length, ref pos);
+		// Serialize(buffer, ref pos, (uint)data.Length);
 		var pos = _utf8.GetBytes(data, buffer);
 		buffer[pos++] = 0; // null terminator
 		buffer = buffer[pos..];
@@ -1588,7 +1588,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Floating Point
 
-	public unsafe void Serialize(in Span<byte> buffer, float data, ref int pos)
+	public unsafe void Serialize(in Span<byte> buffer, ref int pos, float data)
 	{
 		var bytes = (byte*)&data;
 		buffer[pos++] = bytes[0];
@@ -1596,14 +1596,14 @@ public class SbxSerializer : ISbxSerializer
 		buffer[pos++] = bytes[2];
 		buffer[pos++] = bytes[3];
 	}
-	public unsafe void Serialize(in Span<byte> buffer, double data, ref int pos)
+	public unsafe void Serialize(in Span<byte> buffer, ref int pos, double data)
 	{
 		/*
 		// test single downgrade
 		var single = Convert.ToSingle(data);
 		if (single == data)
 		{
-			Serialize(buffer, single, ref pos);
+			Serialize(buffer, ref pos, single);
 		}
 		else
 		{
@@ -1620,34 +1620,34 @@ public class SbxSerializer : ISbxSerializer
 		buffer[pos++] = bytes[6];
 		buffer[pos++] = bytes[7];
 	}
-	public unsafe void Serialize(in Span<byte> buffer, float? data, ref int pos)
+	public unsafe void Serialize(in Span<byte> buffer, ref int pos, float? data)
 	{
 		if (data == null)
 		{
-			Serialize(buffer, float.NegativeZero, ref pos);
+			Serialize(buffer, ref pos, float.NegativeZero);
 		}
 		else if (data == 0f)
 		{
-			Serialize(buffer, 0f, ref pos); // silent normalization of nezative zero
+			Serialize(buffer, ref pos, 0f); // silent normalization of nezative zero
 		}
 		else
 		{
-			Serialize(buffer, data.Value, ref pos);
+			Serialize(buffer, ref pos, data.Value);
 		}
 	}
-	public void Serialize(in Span<byte> buffer, double? data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, double? data)
 	{
 		if (data == null)
 		{
-			Serialize(buffer, double.NegativeZero, ref pos);
+			Serialize(buffer, ref pos, double.NegativeZero);
 		}
 		else if (data == 0d)
 		{
-			Serialize(buffer, 0d, ref pos); // silent normalization of nezative zero
+			Serialize(buffer, ref pos, 0d); // silent normalization of nezative zero
 		}
 		else
 		{
-			Serialize(buffer, data.Value, ref pos);
+			Serialize(buffer, ref pos, data.Value);
 		}
 	}
 	public unsafe float DeserializeSingle(in ReadOnlySpan<byte> buffer, ref int pos)
@@ -1692,12 +1692,12 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Nullable Signed Integer
 
-	public void Serialize(in Span<byte> buffer, long? data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, long? data)
 	{
 		// ZigZag encode the signed int with null offset
 		if (data == null)
 		{
-			Serialize(buffer, (ulong)0, ref pos);
+			Serialize(buffer, ref pos, (ulong)0);
 			return;
 		}
 		if (data > 0)
@@ -1742,23 +1742,23 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Signed Integer
 
-	private void Serialize(in Span<byte> buffer, TypeId data, ref int pos)
+	private void Serialize(in Span<byte> buffer, ref int pos, TypeId data)
 	{
-		Serialize(buffer, (long)data, ref pos);
+		Serialize(buffer, ref pos, (long)data);
 	}
 
 #if DEBUG
 	public List<(int, int, string)> Tokens = new List<(int, int, string)>();
 
-	public void Serialize(in Span<byte> buffer, long data, ref int pos, string tokenDebugData)
+	public void Serialize(in Span<byte> buffer, ref int pos, long data, string tokenDebugData)
 	{
 		var start = pos;
-		Serialize(in buffer, in data, ref pos);
+		Serialize(in buffer, ref pos, in data);
 		Tokens.Add((start, pos, tokenDebugData));
 	}
 #endif
 
-	public void Serialize(in Span<byte> buffer, long data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, long data)
 	{
 		// ZigZag encode the signed int
 		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
@@ -1820,7 +1820,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Nullable Unsigned Integer
 
-	public void Serialize(in Span<byte> buffer, ulong? value, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, ulong? value)
 	{
 		if (value == null)
 		{
@@ -1830,7 +1830,7 @@ public class SbxSerializer : ISbxSerializer
 		{
 			value++;
 		}
-		Serialize(buffer, value.Value, ref pos);
+		Serialize(buffer, ref pos, value.Value);
 	}
 
 	public ulong? DeserializeNullableUnsigned(in ReadOnlySpan<byte> buffer, ref int pos)
@@ -1850,7 +1850,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Unsigned Integer
 
-	public void Serialize(in Span<byte> buffer, ulong value, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, ulong value)
 	{
 		// Protobuf-style varint encoding for uint32 (little-endian, 7 bits per byte, MSB=1 means more)
 		while (value >= 0x80)
@@ -1930,7 +1930,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Guid
 
-	public void Serialize(in Span<byte> buffer, Guid? data, ref int pos)
+	public void Serialize(in Span<byte> buffer, ref int pos, Guid? data)
 	{
 		if (data == null)
 		{
@@ -1938,11 +1938,11 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else
 		{
-			Serialize<Guid?>(buffer, data, ref pos);
+			Serialize<Guid?>(buffer, ref pos, data);
 		}
 	}
 
-	public unsafe void Serialize(in Span<byte> buffer, Guid data, ref int pos)
+	public unsafe void Serialize(in Span<byte> buffer, ref int pos, Guid data)
 	{
 		// In scope of Synqra and SBX we only use Guid v4, v5, v7, v8
 		// In guid v4 there is nothing to compress
@@ -2076,7 +2076,7 @@ public class SbxSerializer : ISbxSerializer
 							time = _streamBaseTime.AddMilliseconds(dms);
 							// Console.WriteLine($">> time2_ {time:HH:mm:ss.fffff}");
 							// Console.WriteLine(">> dms_ " + (ulong)dms);
-							Serialize(buffer, dms, ref pos);
+							Serialize(buffer, ref pos, dms);
 							buffer[pos++] = bytes[6]; // rand_a_low
 							buffer[pos++] = (byte)((bytes[7] & 0x0C) << 4 | bytes[8] & 0x3F); // packed8 rand_a_high 2 other bit + byte8
 							// buffer[pos++] = 0;
