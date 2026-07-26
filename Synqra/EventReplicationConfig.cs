@@ -4,9 +4,43 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
+/// <summary>
+/// What a replication client asks the master to start pushing right after HELLO — the "ws-method"
+/// encoded as the HELLO kind byte (see <see cref="EventReplicationService"/> /
+/// <see cref="Synqra.Replication.AspNetCore"/>'s endpoint). Whatever the choice, the master replies
+/// with an authoritative subscription-state ack so the client can detect an unexpected default.
+/// </summary>
+public enum ReplicationHelloKind : byte
+{
+	/// <summary>Hello_NoAutoSubscription — start subscribed to nothing (not even the own stream) until
+	/// the client issues its own Subscribe frames. For UIs that drive their own per-view subscriptions.</summary>
+	NoAutoSubscription = 0,
+
+	/// <summary>Hello_Subscribed_UserDefaultMainStream — start subscribed to just the user's own default
+	/// main stream. The simple "give me my data" default.</summary>
+	UserDefaultMainStream = 1,
+
+	/// <summary>Hello_SubscribeTo — start subscribed to one specific stream named in the HELLO (see
+	/// <see cref="EventReplicationConfig.InitialSubscribeStreamId"/>), if the host ceiling authorizes it.</summary>
+	SubscribeTo = 2,
+}
+
 public class EventReplicationConfig
 {
 	public virtual ushort Port { get; set; }
+
+	/// <summary>
+	/// The HELLO "ws-method" announced in the handshake. <see cref="ReplicationHelloKind.UserDefaultMainStream"/>
+	/// (start subscribed to the own main stream) unless a self-subscribing client chooses
+	/// <see cref="ReplicationHelloKind.NoAutoSubscription"/> or <see cref="ReplicationHelloKind.SubscribeTo"/>.
+	/// </summary>
+	public virtual ReplicationHelloKind HelloKind { get; set; } = ReplicationHelloKind.UserDefaultMainStream;
+
+	/// <summary>
+	/// The stream to subscribe to at HELLO when <see cref="HelloKind"/> is
+	/// <see cref="ReplicationHelloKind.SubscribeTo"/>. Ignored for the other kinds.
+	/// </summary>
+	public virtual Guid? InitialSubscribeStreamId { get; set; }
 
 	/// <summary>
 	/// Full WebSocket endpoint URI for the replication master. When set, overrides the default

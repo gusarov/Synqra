@@ -15,24 +15,26 @@ namespace Synqra.Replication.AspNetCore;
 /// case every event is admitted, exactly the pre-isolation behavior.
 /// </para>
 /// <para>
-/// <paramref name="readableStreams"/> is an optional host-supplied set of <em>additional</em> streams
-/// the connection may <em>read</em> (never write) — genuinely shared/public streams the host chose to
-/// fan out to every connection (for Quotaly, e.g. the shared metering/main-menu content streams). It is
-/// host-controlled and never taken from the wire, so admitting them onto a scoped connection is safe.
-/// A scoped connection therefore sees its own stream plus these; an unscoped connection still sees all.
+/// <paramref name="activeStreams"/> is the set of streams the connection is currently <em>subscribed</em>
+/// to read — its own writable stream and/or host-granted shared streams (for Quotaly, e.g. the shared
+/// metering/main-menu content streams), as chosen by the HELLO subscription mode and any live
+/// Subscribe/Unsubscribe control frames. It is host-authorized and never taken raw from the wire, so
+/// admitting these onto a scoped connection is safe. Crucially the own writable stream is <em>not</em>
+/// implicitly readable: a connection that opened in EMPTY mode (empty active set) receives nothing —
+/// not even its own stream — until it subscribes. An unscoped connection still sees everything.
 /// </para>
 /// </summary>
 internal static class ReplicationStreamScope
 {
 	/// <summary>
 	/// True if an event on stream <paramref name="candidateStream"/> may be delivered to a connection
-	/// whose own writable stream is <paramref name="connectionStream"/> and which may additionally read
-	/// <paramref name="readableStreams"/>. A scoped connection sees its own stream and any host-supplied
-	/// readable stream (a peer that carries no stream, <c>null</c>, is never admitted onto a scoped
-	/// connection); an unscoped connection sees everything.
+	/// whose own writable stream is <paramref name="connectionStream"/> and whose currently-subscribed
+	/// read-set is <paramref name="activeStreams"/>. A scoped connection admits exactly the streams in
+	/// its active set (a peer/event that carries no stream, <c>null</c>, is never admitted onto a scoped
+	/// connection, and neither is the own stream unless it is in the active set); an unscoped connection
+	/// (<paramref name="connectionStream"/> is <c>null</c>) sees everything.
 	/// </summary>
-	public static bool Admits(System.Guid? candidateStream, System.Guid? connectionStream, System.Collections.Generic.IReadOnlySet<System.Guid>? readableStreams = null)
-		=> connectionStream is not System.Guid stream
-			|| candidateStream == stream
-			|| (candidateStream is System.Guid candidate && readableStreams is not null && readableStreams.Contains(candidate));
+	public static bool Admits(System.Guid? candidateStream, System.Guid? connectionStream, System.Collections.Generic.IReadOnlySet<System.Guid>? activeStreams = null)
+		=> connectionStream is not System.Guid
+			|| (candidateStream is System.Guid candidate && activeStreams is not null && activeStreams.Contains(candidate));
 }

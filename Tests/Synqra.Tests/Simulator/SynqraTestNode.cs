@@ -384,16 +384,18 @@ internal class SynqraTestNode
 
 				#region HELLO - from client
 				// 8 bytes magic + 16 bytes the client's own "last event id it already
-				// received from a server" cursor — see EventReplicationService's HELLO send
-				// and EventReplicationState.LastEventIdFromServer's own remarks.
+				// received from a server" cursor, plus an optional 25th subscription-mode byte
+				// (see EventReplicationService's HELLO send). This simulator is single-stream by
+				// construction, so the mode byte is accepted and ignored — there is only ever one
+				// stream to subscribe to.
 				var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
 				if (helloBytes is null)
 				{
 					return;
 				}
-				if (helloBytes.Length != 24)
+				if (helloBytes.Length is not (24 or 25 or 41))
 				{
-					throw new Exception($"Protocol Negotiation Failed! Received {helloBytes.Length} bytes instead of 24.");
+					throw new Exception($"Protocol Negotiation Failed! Received {helloBytes.Length} bytes instead of 24, 25 or 41.");
 				}
 				var magic = BitConverter.ToUInt64(helloBytes, 0);
 				if (magic != networkSerializationService.Magic)
@@ -422,8 +424,9 @@ internal class SynqraTestNode
 						await foreach (var ev in backlogStorage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 						{
 							knownEvents.TryAdd(ev.EventId, null);
-							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, backlogBuffer);
-							await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(backlogBuffer, 1, backlogBuffer.Length - 1));
+							backlogBuffer[0] = (byte)ReplicationFrameTag.Event;
+							await socket.SendAsync(new ArraySegment<byte>(backlogBuffer, 0, payload.Count + 1), networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 						}
 					}
 					finally
@@ -446,7 +449,15 @@ internal class SynqraTestNode
 						{
 							break;
 						}
-						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
+						// Post-HELLO frames carry a 1-byte channel tag (Event/Subscribe/Unsubscribe/
+						// SubscriptionState). This single-stream simulator only acts on Event frames;
+						// client-driven Subscribe/Unsubscribe control frames are accepted and ignored.
+						var frameTag = (ReplicationFrameTag)messageBytes[0];
+						if (frameTag is ReplicationFrameTag.Subscribe or ReplicationFrameTag.Unsubscribe)
+						{
+							continue;
+						}
+						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes.AsSpan(1));
 
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is NewEvent1 newEvent1)
@@ -468,14 +479,16 @@ internal class SynqraTestNode
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try
 								{
-									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, buffer);
+									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(buffer, 1, buffer.Length - 1));
+									buffer[0] = (byte)ReplicationFrameTag.Event;
+									var taggedFrame = new ArraySegment<byte>(buffer, 0, payload.Count + 1);
 									foreach (var item in _sockets)
 									{
 										if (item != socket)
 										{
 											try
 											{
-												await item.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+												await item.SendAsync(taggedFrame, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 											}
 											catch
 											{
