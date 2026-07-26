@@ -1,4 +1,5 @@
 using Synqra.BinarySerializer;
+using Synqra.Tests.SampleModels.Syncronization;
 using System.Text.Json;
 
 namespace Synqra.BinarySerializer.Tests;
@@ -10,6 +11,18 @@ namespace Synqra.BinarySerializer.Tests;
 public class SbxBaseTest
 {
 	public HexDumpWriter HexDumpWriter = new HexDumpWriter();
+
+	/// <summary>
+	/// A serializer whose segment already carries a schema, so low-level codec tests can drive the
+	/// primitive encoders directly. A segment refuses to serialize anything until its schema (rule set)
+	/// is configured; id 99 is unused by any test, so it never collides with a test's own Map() calls.
+	/// </summary>
+	public static SbxSerializer NewSchemaSerializer()
+	{
+		var s = new SbxSerializer();
+		s.Map(99, typeof(SampleTaskModel));
+		return s;
+	}
 
 	public void HexDump(ReadOnlySpan<byte> data, SbxSerializer? serializer = null)
 	{

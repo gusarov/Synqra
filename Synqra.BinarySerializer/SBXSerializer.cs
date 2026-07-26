@@ -250,9 +250,14 @@ public class SbxSerializer : ISbxSerializer
 		Map(-75, typeof(AddLinkCommand));
 		Map(-76, typeof(RemoveLinkCommand));
 		Map(-77, typeof(DeleteObjectCommand));
+
+		_building = false; // built-ins registered; from here Map()/auto-track counts as configuring the segment schema
 	}
 
 	SbxSerializer? _spanshotPrimitives;
+	bool _frozen; // once a segment starts writing (or is snapshotted) its schema (rule set) is locked against further Map()
+	bool _building = true; // true only during construction, while the framework built-in rules are registered
+	bool _segmentSchemaConfigured; // set once a user Map() (or model auto-tracking) adds a rule to this segment
 
 	public void Snapshot()
 	{
@@ -262,6 +267,7 @@ public class SbxSerializer : ISbxSerializer
 		{
 			throw new Exception("Snapshot already exists");
 		}
+		_frozen = true;
 		_spanshotPrimitives = (SbxSerializer)MemberwiseClone();
 		if (_stringById.Count > 0) throw new Exception("Strings must be empty");
 		if (_stringByValue.Count > 0) throw new Exception("Strings must be empty");
@@ -331,25 +337,46 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Map(int typeId, double schemaVersion, Type type, IModelBinder? binder = null)
 	{
+		if (_frozen)
+		{
+			throw new InvalidOperationException($"Cannot Map {type.Name} after serialization has started — the segment's schema is frozen.");
+		}
+		if (!_building)
+		{
+			_segmentSchemaConfigured = true; // a user rule was added to the segment schema
+		}
 		if (schemaVersion == 0)
 		{
-			// if (!type.IsAbstract && !type.IsInterface)
-			{
-				var schemaAttribute = (SchemaAttribute)type.GetCustomAttributes(typeof(SchemaAttribute), false)
-					.Cast<SchemaAttribute>()
-					.OrderByDescending(x => x.Version)
-					.FirstOrDefault()
-					;
-				if (schemaAttribute is null)
-				{
-					throw new Exception($"Can not detect latest version, no schema defined for {type.Name}");
-				}
-				schemaVersion = schemaAttribute.Version;
-			}
+			schemaVersion = TryGetLatestSchemaVersion(type)
+				?? throw new Exception($"Can not detect latest version, no schema defined for {type.Name}");
 		}
 		var schemaVersionF = (float)schemaVersion;
 		_typeById[typeId] = (schemaVersionF, type, binder);
 		_idByType[type] = (typeId, schemaVersionF, binder);
+	}
+
+	/// <summary>Latest [Schema] version stamped on a type, or null if it carries no schema at all.</summary>
+	static float? TryGetLatestSchemaVersion(Type type)
+	{
+		var schemaAttribute = type.GetCustomAttributes(typeof(SchemaAttribute), false)
+			.Cast<SchemaAttribute>()
+			.OrderByDescending(x => x.Version)
+			.FirstOrDefault();
+		return schemaAttribute is null ? (float?)null : (float)schemaAttribute.Version;
+	}
+
+	/// <summary>
+	/// A segment's schema is the set of rules (type-id mappings among them) established via Map() or model auto-tracking.
+	/// It is "configured" once it holds at least one rule beyond the framework built-ins.
+	/// </summary>
+	bool HasSegmentSchema => _segmentSchemaConfigured;
+
+	void RequireSegmentSchema()
+	{
+		if (!HasSegmentSchema)
+		{
+			throw new InvalidOperationException("No schemas configured.");
+		}
 	}
 
 	/*
@@ -404,6 +431,7 @@ public class SbxSerializer : ISbxSerializer
 		, bool? emitTypeId = null
 		)
 	{
+		_frozen = true; // first write freezes the session's type/schema table
 		// TODO: Actually utf8 is not efficient encoding, it is very verbose. Consider to reencode this as varints sequence. On top of that - delata encoding and offset pointer(s) might give huge benefit for different countries, e.g. imagine to use 2 bytes to refer to 32K of most typical hyeroglyphs!
 		//  0x0000 –   0x007F: utf8: 1 bytes, varint_array: 1 bytes
 		//  0x0080 –   0x07FF: utf8: 2 bytes, varint_array: 2 bytes
@@ -419,6 +447,22 @@ public class SbxSerializer : ISbxSerializer
 		// If this is level 3, the reset of the fields are in alphabetical order by field name (to ensure canonical normalization for auto-repairs & hash tree)
 
 		var actualType = obj?.GetType();
+
+		// Segment-schema gate (point 3). A model brings its own [Schema] into the segment's rule set
+		// (auto-tracking), so it's always allowed; anything else requires the segment to already carry a
+		// schema. Registering the model here — before the type-id is emitted — keeps nested field writes valid.
+		if (obj is IBindableModel && !_idByType.ContainsKey(actualType!))
+		{
+			var autoVersion = TryGetLatestSchemaVersion(actualType!)
+				?? throw new InvalidOperationException($"Cannot serialize {actualType!.FullName}: it is an IBindableModel with no [Schema] and was never registered via Map(). A segment needs a derivable schema for every type it writes.");
+			_idByType[actualType!] = (0, autoVersion, null); // 0 = self-describing (emitted by name); rule tracked for the segment/header
+			_segmentSchemaConfigured = true;
+		}
+		else if (!HasSegmentSchema)
+		{
+			throw new InvalidOperationException("No schemas configured.");
+		}
+
 		if (emitTypeId == null)
 		{
 			var testType = requestedType;
@@ -548,7 +592,8 @@ public class SbxSerializer : ISbxSerializer
 			}
 			else
 			{
-				throw new Exception($"BindableModel {obj.GetType().Name} type id is not registered");
+				// Unreachable: the hub hoists/registers any IBindableModel into the segment schema before this point.
+				throw new InvalidOperationException($"BindableModel {obj.GetType().Name} was not tracked into the segment schema");
 			}
 		}
 		else if (obj is null)
@@ -1394,6 +1439,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, Type type)
 	{
+		RequireSegmentSchema();
 		var typeId = GetTypeId(type);
 		Serialize(buffer, ref pos, typeId);
 		if (typeId == TypeId.Unknown)
@@ -1505,6 +1551,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, string? data)
 	{
+		RequireSegmentSchema();
 		if (data == null)
 		{
 			buffer[pos++] = 0xFF; // special value for null string. This value is outside of legit UTF8 space
@@ -1590,6 +1637,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public unsafe void Serialize(in Span<byte> buffer, ref int pos, float data)
 	{
+		RequireSegmentSchema();
 		var bytes = (byte*)&data;
 		buffer[pos++] = bytes[0];
 		buffer[pos++] = bytes[1];
@@ -1598,6 +1646,7 @@ public class SbxSerializer : ISbxSerializer
 	}
 	public unsafe void Serialize(in Span<byte> buffer, ref int pos, double data)
 	{
+		RequireSegmentSchema();
 		/*
 		// test single downgrade
 		var single = Convert.ToSingle(data);
@@ -1622,6 +1671,7 @@ public class SbxSerializer : ISbxSerializer
 	}
 	public unsafe void Serialize(in Span<byte> buffer, ref int pos, float? data)
 	{
+		RequireSegmentSchema();
 		if (data == null)
 		{
 			Serialize(buffer, ref pos, float.NegativeZero);
@@ -1637,6 +1687,7 @@ public class SbxSerializer : ISbxSerializer
 	}
 	public void Serialize(in Span<byte> buffer, ref int pos, double? data)
 	{
+		RequireSegmentSchema();
 		if (data == null)
 		{
 			Serialize(buffer, ref pos, double.NegativeZero);
@@ -1694,6 +1745,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, long? data)
 	{
+		RequireSegmentSchema();
 		// ZigZag encode the signed int with null offset
 		if (data == null)
 		{
@@ -1744,6 +1796,7 @@ public class SbxSerializer : ISbxSerializer
 
 	private void Serialize(in Span<byte> buffer, ref int pos, TypeId data)
 	{
+		RequireSegmentSchema();
 		Serialize(buffer, ref pos, (long)data);
 	}
 
@@ -1752,6 +1805,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, long data, string tokenDebugData)
 	{
+		RequireSegmentSchema();
 		var start = pos;
 		Serialize(in buffer, ref pos, in data);
 		Tokens.Add((start, pos, tokenDebugData));
@@ -1760,6 +1814,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, long data)
 	{
+		RequireSegmentSchema();
 		// ZigZag encode the signed int
 		ulong zigzag = (ulong)(data << 1 ^ data >> 63);
 		while (zigzag >= 0x80UL)
@@ -1822,6 +1877,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, ulong? value)
 	{
+		RequireSegmentSchema();
 		if (value == null)
 		{
 			value = 0;
@@ -1852,6 +1908,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, ulong value)
 	{
+		RequireSegmentSchema();
 		// Protobuf-style varint encoding for uint32 (little-endian, 7 bits per byte, MSB=1 means more)
 		while (value >= 0x80)
 		{
@@ -1932,6 +1989,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, Guid? data)
 	{
+		RequireSegmentSchema();
 		if (data == null)
 		{
 			buffer[pos++] = 0x03; // glyph 0x03 - NULL object guid
@@ -1944,6 +2002,7 @@ public class SbxSerializer : ISbxSerializer
 
 	public unsafe void Serialize(in Span<byte> buffer, ref int pos, Guid data)
 	{
+		RequireSegmentSchema();
 		// In scope of Synqra and SBX we only use Guid v4, v5, v7, v8
 		// In guid v4 there is nothing to compress
 		// In guid v5 there is nothing to compress
