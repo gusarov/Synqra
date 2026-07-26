@@ -77,10 +77,12 @@ public static class SynqraReplicationEndpointExtensions
 			// all (a single-tenant deployment): everything below then behaves as before, unscoped.
 			var connectionStream = SynqraStreamContext.CurrentOrNull;
 
-			// Additional streams this connection is AUTHORIZED to read (never write) — a host-chosen
-			// ceiling resolved from the authenticated context, never from the wire. Combined with the
-			// own writable stream this forms the "grantable" set: the most a client could ever be
-			// subscribed to. null/empty resolver means "own stream only".
+			// Additional streams this connection may read — a host-chosen ceiling resolved from the
+			// authenticated context, never from the wire. Combined with the own stream this forms the
+			// "grantable" set: the most a client could ever be subscribed to. null/empty resolver means
+			// "own stream only". Only the read (event-delivery) path exists today; submitting events
+			// to a subscribed stream is a future replication-API concern tracked separately, not an
+			// inherent restriction of these streams.
 			var granted = readableStreamsResolver?.Invoke(ctx);
 			var grantable = new HashSet<Guid>();
 			if (connectionStream is Guid ownStream)
