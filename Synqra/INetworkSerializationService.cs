@@ -83,7 +83,7 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 		ArraySegment<byte> span = buffer == default ? new byte[EventReplicationService.DefaultFrameSize] : buffer; // stackalloc byte[EventReplicationService.DefaultFrameSize];
 		int pos = 0;
-		_sbxSerializerSender.Serialize(span, obj, ref pos);
+		_sbxSerializerSender.Serialize(span, ref pos, obj);
 		span = span[..pos];
 
 #if DEBUG

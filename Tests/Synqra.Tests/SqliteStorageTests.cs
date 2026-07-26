@@ -16,7 +16,7 @@ namespace Synqra.Tests;
 /// </summary>
 file class TestBinarySerializer : ISbxSerializer
 {
-	public void Serialize<T>(in Span<byte> buffer, in T value, ref int pos)
+	public void Serialize<T>(in Span<byte> buffer, ref int pos, in T value)
 	{
 		if (value is SqliteTestItem item)
 		{
@@ -51,18 +51,18 @@ file class TestBinarySerializer : ISbxSerializer
 	public void Reset() { }
 
 	//// SERIALIZE
-	public void Serialize(in Span<byte> buffer, long value, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, ulong value, ref int pos) => throw new NotImplementedException();
-	// public void Serialize(in Span<byte> buffer, string value, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, Guid data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, float data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, double data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, long? value, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, ulong? value, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, string? data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, Guid? data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, float? data, ref int pos) => throw new NotImplementedException();
-	public void Serialize(in Span<byte> buffer, double? data, ref int pos) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, long value) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, ulong value) => throw new NotImplementedException();
+	// public void Serialize(in Span<byte> buffer, ref int pos, string value) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, Guid data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, float data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, double data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, long? value) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, ulong? value) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, string? data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, Guid? data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, float? data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, double? data) => throw new NotImplementedException();
 
 	//// DESERIALIZE
 	public long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();

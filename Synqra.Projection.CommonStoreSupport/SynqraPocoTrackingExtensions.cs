@@ -66,7 +66,7 @@ public static class SynqraPocoTrackingExtensions
 			_serializer.Reset();
 			Span<byte> buffer = stackalloc byte[10240];
 			var pos = 0;
-			_serializer.Serialize(buffer, item, ref pos);
+			_serializer.Serialize(buffer, ref pos, item);
 			_originalsSerialized[item] = buffer[..pos].ToArray();
 		}
 
@@ -89,7 +89,7 @@ public static class SynqraPocoTrackingExtensions
 				// serialzie again
 				_serializer.Reset();
 				var pos = 0;
-				_serializer.Serialize(buffer, kvp.Key, ref pos);
+				_serializer.Serialize(buffer, ref pos, kvp.Key);
 				if (!buffer[..pos].SequenceEqual(kvp.Value))
 				{
 					// changed!!

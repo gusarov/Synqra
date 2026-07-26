@@ -801,7 +801,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 				var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
 					? GetFieldName(pro, doesSupportField: false)
 					: "this." + pro.Name;
-				body.AppendLine($"\t\t\tserializer.Serialize(in buffer, {access}, ref pos);");
+				body.AppendLine($"\t\t\tserializer.Serialize(in buffer, ref pos, {access});");
 			}
 			body.AppendLine($"\t\t}}");
 			els = "else ";

@@ -207,7 +207,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		{
 			bytesWritten = 0;
 			_serializer.Reset();
-			_serializer.Serialize(destination, item, ref bytesWritten);
+			_serializer.Serialize(destination, ref bytesWritten, item);
 			return true;
 		}
 		catch (Exception ex) when (IsCapacityException(ex))

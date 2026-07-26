@@ -34,7 +34,7 @@ public class SampleFieldListBaseModel_ : IBindableModel
 
 	public void Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 	{
-		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass whether this list requires typeId or not
+		serializer.Serialize(in buffer, ref pos, Data); // TODO need to pass whether this list requires typeId or not
 	}
 
 	public void Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
@@ -65,7 +65,7 @@ public class SampleFieldEnumerableBaseModel_ : IBindableModel
 
 	public void Get(ISbxSerializer serializer, float schemaVersion, in Span<byte> buffer, ref int pos)
 	{
-		serializer.Serialize(in buffer, Data, ref pos); // TODO need to pass whether this list requires typeId or not
+		serializer.Serialize(in buffer, ref pos, Data); // TODO need to pass whether this list requires typeId or not
 	}
 
 	public void Set(ISbxSerializer serializer, float schemaVersion, in ReadOnlySpan<byte> buffer, ref int pos)
@@ -215,7 +215,7 @@ partial class SamplePublicModel_ : INotifyPropertyChanging, INotifyPropertyChang
 	public void Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 		// Positional Fields: Name
-		serializer.Serialize(in buffer, __name, ref pos);
+		serializer.Serialize(in buffer, ref pos, __name);
 
 		// Optional Presence Mask Fields: (??)
 		// Keyed Fields: (??)

@@ -47,7 +47,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 		var ser = new SbxSerializer();
 		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
 		int pos = 0;
-		ser.Serialize(buffer, guid, ref pos);
+		ser.Serialize(buffer, ref pos, guid);
 		var pos2 = 0;
 		HexDump(buffer.Slice(0, pos));
 		var deserialized = ser.DeserializeGuid(buffer[0..pos], ref pos2);
@@ -72,7 +72,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 			int pos = 0;
 			
 			var original = new GuidExtensions.Generator().CreateVersion7(i);
-			ser.Serialize(buffer, original, ref pos);
+			ser.Serialize(buffer, ref pos, original);
 
 			if (pos > lastLen)
 			{
@@ -116,7 +116,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
 		Span<byte> buffer = stackalloc byte[20];
 		int pos = 0;
-		ser.Serialize(buffer, id, ref pos);
+		ser.Serialize(buffer, ref pos, id);
 		int rpos = 0;
 		var back = ser.DeserializeGuid(buffer[..pos], ref rpos);
 		Assert.That(back).IsEqualTo(id).GetAwaiter().GetResult();
@@ -140,7 +140,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 			var guid = GuidExtensions.CreateVersion7();
 #endif
 			int pos = 0;
-			ser.Serialize(buffer, guid, ref pos);
+			ser.Serialize(buffer, ref pos, guid);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeGuid(buffer[..pos], ref pos2);
 			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
@@ -177,7 +177,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 		{
 			var guid = new GuidExtensions.Generator().CreateVersion7(date);
 			int pos = 0;
-			ser.Serialize(buffer, guid, ref pos);
+			ser.Serialize(buffer, ref pos, guid);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeGuid(buffer[..pos], ref pos2);
 			Assert.That(pos2).IsEqualTo(pos).GetAwaiter().GetResult();
@@ -208,7 +208,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 		{
 			var guid = GuidExtensions.CreateVersion8_Sha256_Dns(Guid.NewGuid().ToString());
 			int pos = 0;
-			ser.Serialize(buffer, guid, ref pos);
+			ser.Serialize(buffer, ref pos, guid);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
 			try
@@ -258,7 +258,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 #endif
 
 			int pos = 0;
-			ser.Serialize(buffer, guid, ref pos);
+			ser.Serialize(buffer, ref pos, guid);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
 			try
@@ -292,7 +292,7 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 		{
 			var guid = Guid.NewGuid();
 			int pos = 0;
-			ser.Serialize(buffer, guid, ref pos);
+			ser.Serialize(buffer, ref pos, guid);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeGuid(buffer, ref pos2);
 			using (Assert.Multiple())
@@ -321,7 +321,7 @@ internal class BinarySerializationFloatingPointTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SbxSerializer();
 		int pos = 0;
-		ser.Serialize(buffer, f, ref pos);
+		ser.Serialize(buffer, ref pos, f);
 		Assert.That(pos).IsLessThan(5).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.DeserializeNullableSingle(buffer, ref pos2);
@@ -344,7 +344,7 @@ internal class BinarySerializationFloatingPointTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SbxSerializer();
 		int pos = 0;
-		ser.Serialize(buffer, f, ref pos);
+		ser.Serialize(buffer, ref pos, f);
 		Assert.That(pos).IsLessThan(9).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.DeserializeNullableDouble(buffer, ref pos2);
@@ -388,7 +388,7 @@ internal class BinarySerializationSignedTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SbxSerializer();
 		int pos = 0;
-		ser.Serialize(buffer, i, ref pos);
+		ser.Serialize(buffer, ref pos, i);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.DeserializeSigned(buffer, ref pos2);
@@ -410,7 +410,7 @@ internal class BinarySerializationSignedTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		int pos = 0;
 		var ser = new SbxSerializer();
-		ser.Serialize(buffer, i, ref pos);
+		ser.Serialize(buffer, ref pos, i);
 		ReadOnlySpan<byte> buffer2 = buffer;
 		int pos2 = 0;
 		var deserialized = ser.DeserializeSigned(buffer2, ref pos2);
@@ -432,7 +432,7 @@ internal class BinarySerializationSignedTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		int pos = 0;
 		var ser = new SbxSerializer();
-		ser.Serialize(buffer, (long?)i, ref pos);
+		ser.Serialize(buffer, ref pos, (long?)i);
 		ReadOnlySpan<byte> buffer2 = buffer;
 		int pos2 = 0;
 		var deserialized = ser.DeserializeNullableSigned(buffer2, ref pos2);
@@ -449,7 +449,7 @@ internal class BinarySerializationSignedTests : SbxBaseTest
 		for (int i = short.MinValue; i <= short.MaxValue; i++)
 		{
 			int pos = 0;
-			ser.Serialize(buffer, i, ref pos);
+			ser.Serialize(buffer, ref pos, i);
 			ReadOnlySpan<byte> buffer2 = buffer;
 			int pos2 = 0;
 			var deserialized = ser.DeserializeSigned(buffer2, ref pos2);
@@ -467,7 +467,7 @@ internal class BinarySerializationSignedTests : SbxBaseTest
 		for (int i = -200; i <= 200; i++)
 		{
 			int pos = 0;
-			ser.Serialize(buffer, i, ref pos);
+			ser.Serialize(buffer, ref pos, i);
 			int pos2 = 0;
 			var deserialized = ser.DeserializeSigned(buffer, ref pos2);
 			Assert.That(deserialized).IsEqualTo(i).GetAwaiter().GetResult();
@@ -493,7 +493,7 @@ internal class BinarySerializationStringTests : SbxBaseTest
 		var ser = new SbxSerializer();
 		Span<byte> buffer = stackalloc byte[20];
 		int pos = 0;
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 		Assert.That(pos).IsEqualTo(hex.Length / 2).GetAwaiter().GetResult();
 
 		var pos2 = 0;
@@ -510,7 +510,7 @@ internal class BinarySerializationStringTests : SbxBaseTest
 
 		var serBuf = buffer;
 		int pos4 = pos;
-		ser.Serialize(serBuf, data, ref pos4);
+		ser.Serialize(serBuf, ref pos4, data);
 		if (hex.Length > 2) // 1 byte strings are not interned, it's a glyph or char or special value, so useless to intern
 		{
 			Assert.That(pos4).IsEqualTo(pos + 1).GetAwaiter().GetResult(); // interning
@@ -531,7 +531,7 @@ internal class BinarySerializationStringTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 		var data = new List<string> { "Three", "", "Three" };
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 		buffer = buffer[0..pos];
 		HexDump(buffer);
 
@@ -549,7 +549,7 @@ internal class BinarySerializationStringTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 		var data = new List<string> { "Three", "", "Three" };
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 		buffer = buffer[0..pos];
 		HexDump(buffer);
 
@@ -578,7 +578,7 @@ internal class BinarySerializationStringTests : SbxBaseTest
 			{
 				var str = Random.Shared.Next(200).ToString("000"); // 200 strings should be shufled between 66 interning slots, so we will have some hits and some misses
 				var prePos = pos;
-				ser.Serialize(buffer, str, ref pos);
+				ser.Serialize(buffer, ref pos, str);
 				ref var cnt = ref CollectionsMarshal.GetValueRefOrAddDefault(stat, pos - prePos, out _);
 				cnt++;
 
@@ -619,7 +619,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		int data = 4;
 
-		ser.Serialize<int>(buffer, data, ref pos, emitTypeId: false);
+		ser.Serialize<int>(buffer, ref pos, data, emitTypeId: false);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -642,7 +642,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		var data = 4.44f;
 
-		ser.Serialize<float>(buffer, data, ref pos, emitTypeId: false);
+		ser.Serialize<float>(buffer, ref pos, data, emitTypeId: false);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -665,7 +665,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		var data = 4.44d;
 
-		ser.Serialize<double>(buffer, data, ref pos, emitTypeId: false);
+		ser.Serialize<double>(buffer, ref pos, data, emitTypeId: false);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -688,7 +688,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		int data = 4;
 
-		ser.Serialize<int>(buffer, data, ref pos, emitTypeId: true);
+		ser.Serialize<int>(buffer, ref pos, data, emitTypeId: true);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -711,7 +711,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		int data = 4;
 
-		ser.Serialize<object>(buffer, data, ref pos);
+		ser.Serialize<object>(buffer, ref pos, data);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -902,7 +902,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
-		ser.Serialize<object>(buffer, model, ref pos);
+		ser.Serialize<object>(buffer, ref pos, model);
 
 		buffer = buffer[0..pos];
 		Console.WriteLine(Convert.ToHexString(buffer));
@@ -937,7 +937,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 			var listTypeId = (ListTypeId)(i);
 			var typeId = (TypeId)(TypeId.ListTypeFrom - i);
 			int pos = 0;
-			ser.Serialize(buffer, (long)typeId, ref pos);
+			ser.Serialize(buffer, ref pos, (long)typeId);
 			Assert.That(pos).IsEqualTo(1).GetAwaiter().GetResult();
 			Console.WriteLine($"{i,2} {listTypeId,12} <--> {(int)typeId,3} 0z{buffer[0],2:X2} {typeId,12}"); // z - for ZigZag
 			Assert.That(typeId.ToString()).Contains(listTypeId.ToString()).GetAwaiter().GetResult();
@@ -961,7 +961,7 @@ internal class BinarySerializationListDictionaryTests : SbxBaseTest
 
 		var data = new List<uint> { 1, 2, 3 };
 
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -985,7 +985,7 @@ internal class BinarySerializationListDictionaryTests : SbxBaseTest
 
 		var data = new List<string> { "One", "Two", "Three" };
 
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -1009,7 +1009,7 @@ internal class BinarySerializationListDictionaryTests : SbxBaseTest
 
 		var data = new List<string> { "Three", "", "Three" };
 
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -1038,7 +1038,7 @@ internal class BinarySerializationListDictionaryTests : SbxBaseTest
 			{ "Key3", "Value3" }
 		};
 
-		ser.Serialize(buffer, data, ref pos);
+		ser.Serialize(buffer, ref pos, data);
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -1060,7 +1060,7 @@ internal class BinarySerializationListDictionaryTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
 
-		ser.Serialize(buffer, "п", ref pos);
+		ser.Serialize(buffer, ref pos, "п");
 
 		buffer = buffer[0..pos];
 		HexDump(buffer);
@@ -1090,7 +1090,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SbxSerializer();
 		int pos = 0;
-		ser.Serialize(buffer, i, ref pos);
+		ser.Serialize(buffer, ref pos, i);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
@@ -1111,7 +1111,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10];
 		var ser = new SbxSerializer();
 		int pos = 0;
-		ser.Serialize(buffer, i, ref pos);
+		ser.Serialize(buffer, ref pos, i);
 		Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 		var pos2 = 0;
 		var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
@@ -1129,7 +1129,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		for (uint i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
-			ser.Serialize(buffer, i, ref pos);
+			ser.Serialize(buffer, ref pos, i);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
@@ -1146,7 +1146,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		for (ulong i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
-			ser.Serialize(buffer, i, ref pos);
+			ser.Serialize(buffer, ref pos, i);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeUnsigned(buffer, ref pos2);
@@ -1163,7 +1163,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		for (uint? i = 0; i < ushort.MaxValue; i++)
 		{
 			int pos = 0;
-			ser.Serialize(buffer, (ulong?)i, ref pos);
+			ser.Serialize(buffer, ref pos, (ulong?)i);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
@@ -1172,7 +1172,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 		}
 		{
 			int pos = 0;
-			ser.Serialize(buffer, (ulong?)null, ref pos);
+			ser.Serialize(buffer, ref pos, (ulong?)null);
 			Assert.That(pos).IsLessThan(4).GetAwaiter().GetResult();
 			var pos2 = 0;
 			var deserialized = ser.DeserializeNullableUnsigned(buffer, ref pos2);
@@ -1192,7 +1192,7 @@ internal class BinarySerializationUnsignedTests : SbxBaseTest
 			int pos = 0;
 			// for (int i = 0; i < 1024; i++)
 			{
-				ser.Serialize(buffer, 777U, ref pos);
+				ser.Serialize(buffer, ref pos, 777U);
 			}
 		});
 		Console.WriteLine(ops);
@@ -1268,7 +1268,7 @@ public class BinarySerializationTests : SbxBaseTest
 		// Act
 		Span<byte> buffer = stackalloc byte[10240];
 		int pos = 0;
-		ser.Serialize<object>(buffer, testData, ref pos);
+		ser.Serialize<object>(buffer, ref pos, testData);
 		buffer = buffer[..pos];
 
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
@@ -1300,7 +1300,7 @@ public class BinarySerializationTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10240];
 		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
-		ser.Serialize(buffer, testData, ref pos);
+		ser.Serialize(buffer, ref pos, testData);
 		buffer = buffer[..pos];
 
 		// var hex = Convert.ToHexString(buffer.Slice(0, pos).ToArray());
@@ -1335,7 +1335,7 @@ public class BinarySerializationTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10240];
 		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
-		ser.Serialize(in buffer, data, ref pos);
+		ser.Serialize(in buffer, ref pos, data);
 		// buffer = buffer[..pos];
 
 		// Assert
@@ -1373,7 +1373,7 @@ public class BinarySerializationTests : SbxBaseTest
 		Span<byte> buffer = stackalloc byte[10240];
 		ReadOnlySpan<byte> rbuffer = buffer;
 		int pos = 0;
-		ser.Serialize<TransportOperation>(buffer, data, ref pos);
+		ser.Serialize<TransportOperation>(buffer, ref pos, data);
 		buffer = buffer[..pos];
 
 		// Assert
@@ -1408,7 +1408,7 @@ public class BinarySerializationSchemaEvolutionTests : SbxBaseTest
 			OldName = "Test",
 		};
 
-		_ser.Serialize(_buffer, item, ref pos);
+		_ser.Serialize(_buffer, ref pos, item);
 		var hex = _buffer.Hex(0, pos);
 
 		Console.WriteLine(hex);
