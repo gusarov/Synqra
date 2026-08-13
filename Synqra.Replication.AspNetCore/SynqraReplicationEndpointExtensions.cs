@@ -97,20 +97,18 @@ public static class SynqraReplicationEndpointExtensions
 				}
 			}
 
-			// Serializes one event as a tagged Event frame: [1 tag byte][SBX NewEvent1 payload]. The
-			// payload is written at offset 1 so the tag can prefix it without a second copy.
+			// Serializes one event as an SBX TransportOperation — no tag byte, the polymorphic model
+			// layer discriminates it from the subscription-control messages.
 			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev)
 			{
-				var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(frameBuffer, 1, frameBuffer.Length - 1));
-				frameBuffer[0] = (byte)ReplicationFrameTag.Event;
-				await target.SendAsync(new ArraySegment<byte>(frameBuffer, 0, payload.Count + 1), networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+				await target.SendOperationAsync(networkSerializationService, new NewEvent1 { Event = ev }, frameBuffer, ctx.RequestAborted);
 			}
 
 			#region HELLO — from client
 			// 8 bytes magic + 16 bytes the client's own "last event id it already received from a
 			// server" cursor (Guid.Empty means "never synced, send me everything") — see
 			// EventReplicationState.LastEventIdFromServer's remarks — plus the HELLO "ws-method":
-			//   byte[24] kind: 0 = NoAutoSubscription, 1 = UserDefaultMainStream, 2 = SubscribeTo.
+			//   byte[24] kind: see ReplicationHelloKind (0 is reserved/invalid).
 			//   For kind 2 the next 16 bytes are the stream id to subscribe to (total 41 bytes).
 			// A legacy 24-byte HELLO omits the kind and is treated as UserDefaultMainStream.
 			var helloBytes = await ReceiveFullMessageAsync(socket, ctx.RequestAborted);
@@ -180,7 +178,7 @@ public static class SynqraReplicationEndpointExtensions
 
 				// Auto-ack the HELLO with the authoritative active set, so the client can immediately
 				// tell whether the server's default matched what it expected (see SubscriptionState).
-				await socket.SendSubscriptionStateAsync(socketScope.Active, networkSerializationService.IsTextOrBinary, ctx.RequestAborted);
+				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState1 { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
@@ -227,22 +225,18 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					continue;
 				}
-				var frameTag = (ReplicationFrameTag)messageBytes[0];
+				var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
 
-				// Subscribe / Unsubscribe control frames: [tag][16-byte stream id]. Mutate this
-				// connection's active set (under the broadcast gate so the fan-out loop never races it),
-				// replay the newly-subscribed stream's backlog, then ack the resulting active set.
-				if (frameTag is ReplicationFrameTag.Subscribe or ReplicationFrameTag.Unsubscribe)
+				// Subscribe / Unsubscribe control messages. Mutate this connection's active set (under
+				// the broadcast gate so the fan-out loop never races it), replay the newly-subscribed
+				// stream's backlog, then ack the resulting active set.
+				if (operation is Subscribe1 or Unsubscribe1)
 				{
-					if (messageBytes.Length != 17)
-					{
-						throw new InvalidOperationException($"Malformed {frameTag} frame: {messageBytes.Length} bytes (expected 17).");
-					}
-					var target = new Guid(messageBytes.AsSpan(1, 16));
+					var target = operation is Subscribe1 sub ? sub.StreamId : ((Unsubscribe1)operation).StreamId;
 					await broadcastGate.WaitAsync(ctx.RequestAborted);
 					try
 					{
-						if (frameTag is ReplicationFrameTag.Subscribe)
+						if (operation is Subscribe1)
 						{
 							// Authorize against the ceiling: unscoped host admits any stream, scoped host
 							// only its grantable set. A rejected target leaves the active set unchanged —
@@ -275,7 +269,7 @@ public static class SynqraReplicationEndpointExtensions
 						{
 							socketScope.Active.Remove(target);
 						}
-						await socket.SendSubscriptionStateAsync(socketScope.Active, networkSerializationService.IsTextOrBinary, ctx.RequestAborted);
+						await socket.SendOperationAsync(networkSerializationService, new SubscriptionState1 { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 					}
 					finally
 					{
@@ -284,14 +278,9 @@ public static class SynqraReplicationEndpointExtensions
 					continue;
 				}
 
-				if (frameTag is not ReplicationFrameTag.Event)
-				{
-					throw new NotSupportedException($"Unsupported replication frame tag: {frameTag}.");
-				}
-				var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes.AsSpan(1));
 				if (operation is not NewEvent1 newEvent1)
 				{
-					throw new NotSupportedException($"Unsupported transport operation: {operation.GetType()}.");
+					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
 				if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
 				{

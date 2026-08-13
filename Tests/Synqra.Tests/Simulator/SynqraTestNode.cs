@@ -424,9 +424,8 @@ internal class SynqraTestNode
 						await foreach (var ev in backlogStorage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 						{
 							knownEvents.TryAdd(ev.EventId, null);
-							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(backlogBuffer, 1, backlogBuffer.Length - 1));
-							backlogBuffer[0] = (byte)ReplicationFrameTag.Event;
-							await socket.SendAsync(new ArraySegment<byte>(backlogBuffer, 0, payload.Count + 1), networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(backlogBuffer));
+							await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 						}
 					}
 					finally
@@ -449,15 +448,13 @@ internal class SynqraTestNode
 						{
 							break;
 						}
-						// Post-HELLO frames carry a 1-byte channel tag (Event/Subscribe/Unsubscribe/
-						// SubscriptionState). This single-stream simulator only acts on Event frames;
-						// client-driven Subscribe/Unsubscribe control frames are accepted and ignored.
-						var frameTag = (ReplicationFrameTag)messageBytes[0];
-						if (frameTag is ReplicationFrameTag.Subscribe or ReplicationFrameTag.Unsubscribe)
+						// Post-HELLO frames are SBX TransportOperations. This single-stream simulator only
+						// acts on NewEvent1; client-driven subscription control is accepted and ignored.
+						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
+						if (operation is Subscribe1 or Unsubscribe1)
 						{
 							continue;
 						}
-						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes.AsSpan(1));
 
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is NewEvent1 newEvent1)
@@ -479,9 +476,8 @@ internal class SynqraTestNode
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try
 								{
-									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(buffer, 1, buffer.Length - 1));
-									buffer[0] = (byte)ReplicationFrameTag.Event;
-									var taggedFrame = new ArraySegment<byte>(buffer, 0, payload.Count + 1);
+									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(buffer));
+									var taggedFrame = payload;
 									foreach (var item in _sockets)
 									{
 										if (item != socket)

@@ -10,19 +10,29 @@ namespace Synqra;
 /// <see cref="Synqra.Replication.AspNetCore"/>'s endpoint). Whatever the choice, the master replies
 /// with an authoritative subscription-state ack so the client can detect an unexpected default.
 /// </summary>
+/// <summary>
+/// The HELLO "ws-method". This one <em>is</em> a raw wire byte rather than an SBX message, and
+/// legitimately so: HELLO carries the magic that negotiates the serializer, so it is parsed before any
+/// serializer is agreed on. Everything after HELLO is a proper <see cref="TransportOperation"/>.
+/// </summary>
 public enum ReplicationHelloKind : byte
 {
+	/// <summary>Not a kind — the reserved zero, so an absent/zeroed kind byte is rejected loudly instead
+	/// of silently selecting whichever mode happened to sit at 0. Note the config default is
+	/// <see cref="UserDefaultMainStream"/>, so a zero here would otherwise disagree with it.</summary>
+	Unknown = 0,
+
 	/// <summary>Hello_NoAutoSubscription — start subscribed to nothing (not even the own stream) until
 	/// the client issues its own Subscribe frames. For UIs that drive their own per-view subscriptions.</summary>
-	NoAutoSubscription = 0,
+	NoAutoSubscription = 1,
 
 	/// <summary>Hello_Subscribed_UserDefaultMainStream — start subscribed to just the user's own default
 	/// main stream. The simple "give me my data" default.</summary>
-	UserDefaultMainStream = 1,
+	UserDefaultMainStream = 2,
 
 	/// <summary>Hello_SubscribeTo — start subscribed to one specific stream named in the HELLO (see
 	/// <see cref="EventReplicationConfig.InitialSubscribeStreamId"/>), if the host ceiling authorizes it.</summary>
-	SubscribeTo = 2,
+	SubscribeTo = 3,
 }
 
 public class EventReplicationConfig

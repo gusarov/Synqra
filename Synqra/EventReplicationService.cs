@@ -44,17 +44,17 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
-		=> SendStreamControlAsync(ReplicationFrameTag.Subscribe, streamId, ct);
+		=> SendOperationAsync(new Subscribe1 { StreamId = streamId }, ct);
 
 	/// <inheritdoc />
 	public Task UnsubscribeAsync(Guid streamId, CancellationToken ct = default)
-		=> SendStreamControlAsync(ReplicationFrameTag.Unsubscribe, streamId, ct);
+		=> SendOperationAsync(new Unsubscribe1 { StreamId = streamId }, ct);
 
-	private async Task SendStreamControlAsync(ReplicationFrameTag tag, Guid streamId, CancellationToken ct)
+	private async Task SendOperationAsync(TransportOperation operation, CancellationToken ct)
 	{
 		var socket = _wsConnection ?? throw new InvalidOperationException("Not connected — cannot change subscriptions before the replication client has connected.");
 		using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
-		await socket.SendStreamControlFrameAsync(tag, streamId, _networkSerializationService.IsTextOrBinary, linked.Token);
+		await socket.SendOperationAsync(_networkSerializationService, operation, linked.Token);
 	}
 
 	public EventReplicationService(
@@ -191,28 +191,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					IsOnline = false;
 					break;
 				}
-				var frameTag = (ReplicationFrameTag)bytes[0];
-				if (frameTag == ReplicationFrameTag.SubscriptionState)
-				{
-					// Master's authoritative snapshot of the streams this connection is now subscribed
-					// to (N*16 bytes after the tag). Lets the client detect an unexpected default and
-					// drive its own UI off the confirmed set. Sent after HELLO and every sub/unsub.
-					var count = (bytes.Length - 1) / 16;
-					var streams = new Guid[count];
-					for (var i = 0; i < count; i++)
-					{
-						streams[i] = new Guid(bytes.AsSpan(1 + (i * 16), 16));
-					}
-					_activeStreams = streams;
-					continue;
-				}
-				if (frameTag != ReplicationFrameTag.Event)
-				{
-					throw new NotSupportedException($"Unsupported replication frame tag: {frameTag}.");
-				}
-				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes.AsSpan(1));
+				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
 				switch (operation)
 				{
+					case SubscriptionState1 state:
+						// Master's authoritative snapshot of the streams this connection is now
+						// subscribed to. Lets the client detect an unexpected default and drive its
+						// own UI off the confirmed set. Sent after HELLO and every sub/unsub.
+						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
+						break;
 					case NewEvent1 ne1:
 						await _storage.AppendAsync(ne1.Event);
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ne1.Event}");
@@ -235,7 +222,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						EventsReceived?.Invoke();
 						break;
 					default:
-						throw new NotSupportedException();
+						throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
 			}
 		}
@@ -302,19 +289,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 				var inv = new NewEvent1() { Event = ev };
 
-				//var bytes = JsonSerializer.SerializeToUtf8Bytes<TransportOperation>(inv, AppJsonContext.Default.Options);
-
 				var pool = ArrayPool<byte>.Shared;
 				var bytes = pool.Rent(DefaultFrameSize);
-				// var span = new Span<byte>(bytes);
 				try
 				{
-					// [1 tag byte][SBX payload] — payload written at offset 1 so the Event tag prefixes
-					// it without a second copy. Matches the server's framing (ReplicationFrameTag).
-					var serialized = _networkSerializationService.Serialize<TransportOperation>(inv, new ArraySegment<byte>(bytes, 1, bytes.Length - 1));
-					bytes[0] = (byte)ReplicationFrameTag.Event;
 					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
-					await wsConnection.SendAsync(new ArraySegment<byte>(bytes, 0, serialized.Count + 1), _networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+					await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
 				}
 				finally
 				{

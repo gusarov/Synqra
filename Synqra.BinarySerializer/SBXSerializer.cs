@@ -250,6 +250,9 @@ public class SbxSerializer : ISbxSerializer
 		Map(-75, typeof(AddLinkCommand));
 		Map(-76, typeof(RemoveLinkCommand));
 		Map(-77, typeof(DeleteObjectCommand));
+		Map(-78, typeof(Subscribe1));
+		Map(-79, typeof(Unsubscribe1));
+		Map(-80, typeof(SubscriptionState1));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
