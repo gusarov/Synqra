@@ -40,9 +40,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	public IReadOnlyCollection<Guid> ActiveStreams => _activeStreams;
 
 	/// <inheritdoc />
-	public event Action? SubscriptionChanged;
-
-	/// <inheritdoc />
 	public event Action? EventsReceived;
 
 	/// <inheritdoc />
@@ -207,7 +204,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						streams[i] = new Guid(bytes.AsSpan(1 + (i * 16), 16));
 					}
 					_activeStreams = streams;
-					SubscriptionChanged?.Invoke();
 					continue;
 				}
 				if (frameTag != ReplicationFrameTag.Event)
