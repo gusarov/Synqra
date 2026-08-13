@@ -9,11 +9,10 @@ public interface IEventReplicationService
 	/// The streams this connection is currently subscribed to, as last confirmed by the master's
 	/// subscription-state ack (sent after HELLO and every Subscribe/Unsubscribe). A client can compare
 	/// this against what it asked for to detect an unexpected server default. Empty until the first ack.
+	/// A plain polled property — poll it after a Subscribe/Unsubscribe to confirm it took (matches how
+	/// <see cref="IsOnline"/> is consumed); no change notification is raised.
 	/// </summary>
 	IReadOnlyCollection<Guid> ActiveStreams { get; }
-
-	/// <summary>Raised when the master confirms a change to <see cref="ActiveStreams"/>.</summary>
-	event Action? SubscriptionChanged;
 
 	/// <summary>
 	/// Asks the master to start delivering a stream this connection is authorized to read (its own
