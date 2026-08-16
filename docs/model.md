@@ -236,7 +236,10 @@ live / `9` = dying (object & link vocabularies being retired); family `C` comman
 | `9300` | `Link` | dying | link base |
 | `8A00` | `Item` | live | File-store envelope — **provisional family A** |
 | `9A01` | `TransportOperation` | prov | **provisional family A** |
-| `9A02` | `NewEvent1` | prov | **provisional family A** |
+| `9A02` | `EventEnvelope` | prov | carries one event either direction — **provisional family A** |
+| `9A03` | `SubscribeRequest` | prov | client → master, refusable — **provisional family A** |
+| `9A04` | `UnsubscribeRequest` | prov | client → master, refusable — **provisional family A** |
+| `9A05` | `SubscriptionState` | prov | master → client, authoritative set — **provisional family A** |
 
 ## 9. Storage & projections
 

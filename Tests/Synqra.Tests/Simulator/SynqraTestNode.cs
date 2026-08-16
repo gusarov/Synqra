@@ -1,4 +1,4 @@
-﻿#if NETFRAMEWORK
+#if NETFRAMEWORK
 #else
 using Microsoft.AspNetCore.Builder;
 #endif
@@ -424,7 +424,7 @@ internal class SynqraTestNode
 						await foreach (var ev in backlogStorage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
 						{
 							knownEvents.TryAdd(ev.EventId, null);
-							var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(backlogBuffer));
+							var payload = networkSerializationService.Serialize<TransportOperation>(new EventEnvelope { Event = ev }, new ArraySegment<byte>(backlogBuffer));
 							await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 						}
 					}
@@ -449,26 +449,26 @@ internal class SynqraTestNode
 							break;
 						}
 						// Post-HELLO frames are SBX TransportOperations. This single-stream simulator only
-						// acts on NewEvent1; client-driven subscription control is accepted and ignored.
+						// acts on EventEnvelope; client-driven subscription control is accepted and ignored.
 						var operation = networkSerializationService.Deserialize<TransportOperation>(messageBytes);
-						if (operation is Subscribe1 or Unsubscribe1)
+						if (operation is SubscribeRequest or UnsubscribeRequest)
 						{
 							continue;
 						}
 
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
-						if (operation is NewEvent1 newEvent1)
+						if (operation is EventEnvelope eventEnvelope)
 						{
-							if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
+							if (!knownEvents.TryAdd(eventEnvelope.Event.EventId, null))
 							{
 								// already known, ignore
 								continue;
 							}
-							EmergencyLog.Default.Message($"Master Received: {newEvent1.Event}{Environment.NewLine}{JsonSerializer.Serialize(newEvent1.Event, AppJsonContext.Default.Options)}");
+							EmergencyLog.Default.Message($"Master Received: {eventEnvelope.Event}{Environment.NewLine}{JsonSerializer.Serialize(eventEnvelope.Event, AppJsonContext.Default.Options)}");
 							await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
 							try
 							{
-								var ev = newEvent1.Event;
+								var ev = eventEnvelope.Event;
 								// ev.MasterSeq
 								await ev.AcceptAsync(storeCtx, null);
 								var storage = app.Services.GetRequiredService<IAppendStorage<Event, Guid>>();
@@ -476,7 +476,7 @@ internal class SynqraTestNode
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try
 								{
-									var payload = networkSerializationService.Serialize<TransportOperation>(new NewEvent1 { Event = ev }, new ArraySegment<byte>(buffer));
+									var payload = networkSerializationService.Serialize<TransportOperation>(new EventEnvelope { Event = ev }, new ArraySegment<byte>(buffer));
 									var taggedFrame = payload;
 									foreach (var item in _sockets)
 									{

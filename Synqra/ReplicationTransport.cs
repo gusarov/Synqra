@@ -5,8 +5,8 @@ namespace Synqra;
 
 /// <summary>
 /// Sends one <see cref="TransportOperation"/> over a replication socket. Every post-HELLO frame —
-/// domain events (<see cref="NewEvent1"/>) and subscription control (<see cref="Subscribe1"/>,
-/// <see cref="Unsubscribe1"/>, <see cref="SubscriptionState1"/>) alike — is just an SBX-serialized
+/// domain events (<see cref="EventEnvelope"/>) and subscription control (<see cref="SubscribeRequest"/>,
+/// <see cref="UnsubscribeRequest"/>, <see cref="SubscriptionState"/>) alike — is just an SBX-serialized
 /// <see cref="TransportOperation"/>. The polymorphic model layer already discriminates them, so there
 /// is no hand-rolled tag byte and no framing layer to keep in sync at both ends: adding a new control
 /// message is a new subclass, not a new wire constant plus a parser on each side.

@@ -187,7 +187,7 @@ public class JsonSerializationTests
 			EventId   = new Guid("C0DE0000-0000-8000-900C-000000000100"),
 			Data      = cmd,
 		};
-		var operation = new NewEvent1
+		var operation = new EventEnvelope
 		{
 			Event = @event,
 		};
@@ -205,7 +205,7 @@ public class JsonSerializationTests
 			Console.WriteLine(json2.NormalizeNewLines());
 			await Assert.That(json2.NormalizeNewLines()).IsEqualTo($$"""
 	{
-		"_t": "NewEvent1",
+		"_t": "EventEnvelope",
 		"Event": {
 			"_t": "CommandCreatedEvent",
 			"Data": {
