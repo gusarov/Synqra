@@ -101,7 +101,7 @@ public static class SynqraReplicationEndpointExtensions
 			// layer discriminates it from the subscription-control messages.
 			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev)
 			{
-				await target.SendOperationAsync(networkSerializationService, new NewEvent1 { Event = ev }, frameBuffer, ctx.RequestAborted);
+				await target.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev }, frameBuffer, ctx.RequestAborted);
 			}
 
 			#region HELLO — from client
@@ -178,7 +178,7 @@ public static class SynqraReplicationEndpointExtensions
 
 				// Auto-ack the HELLO with the authoritative active set, so the client can immediately
 				// tell whether the server's default matched what it expected (see SubscriptionState).
-				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState1 { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
+				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
@@ -230,13 +230,13 @@ public static class SynqraReplicationEndpointExtensions
 				// Subscribe / Unsubscribe control messages. Mutate this connection's active set (under
 				// the broadcast gate so the fan-out loop never races it), replay the newly-subscribed
 				// stream's backlog, then ack the resulting active set.
-				if (operation is Subscribe1 or Unsubscribe1)
+				if (operation is SubscribeRequest or UnsubscribeRequest)
 				{
-					var target = operation is Subscribe1 sub ? sub.StreamId : ((Unsubscribe1)operation).StreamId;
+					var target = operation is SubscribeRequest sub ? sub.StreamId : ((UnsubscribeRequest)operation).StreamId;
 					await broadcastGate.WaitAsync(ctx.RequestAborted);
 					try
 					{
-						if (operation is Subscribe1)
+						if (operation is SubscribeRequest)
 						{
 							// Authorize against the ceiling: unscoped host admits any stream, scoped host
 							// only its grantable set. A rejected target leaves the active set unchanged —
@@ -269,7 +269,7 @@ public static class SynqraReplicationEndpointExtensions
 						{
 							socketScope.Active.Remove(target);
 						}
-						await socket.SendOperationAsync(networkSerializationService, new SubscriptionState1 { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
+						await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 					}
 					finally
 					{
@@ -278,11 +278,11 @@ public static class SynqraReplicationEndpointExtensions
 					continue;
 				}
 
-				if (operation is not NewEvent1 newEvent1)
+				if (operation is not EventEnvelope eventEnvelope)
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
-				if (!knownEvents.TryAdd(newEvent1.Event.EventId, null))
+				if (!knownEvents.TryAdd(eventEnvelope.Event.EventId, null))
 				{
 					continue; // already applied/broadcast — e.g. an echo from this same client
 				}
@@ -290,7 +290,7 @@ public static class SynqraReplicationEndpointExtensions
 				await broadcastGate.WaitAsync(ctx.RequestAborted);
 				try
 				{
-					var ev = newEvent1.Event;
+					var ev = eventEnvelope.Event;
 					// The event's stream is set authoritatively from THIS connection's authorized
 					// stream — never trusted from the wire (Event.StreamId is not even on the SBX
 					// wire format; it arrives default). This both stamps _sid correctly on the

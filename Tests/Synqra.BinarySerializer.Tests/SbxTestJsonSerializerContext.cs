@@ -45,7 +45,7 @@ namespace Synqra.BinarySerializer.Tests;
 [JsonSerializable(typeof(SampleSealedModel))]
 
 [JsonSerializable(typeof(Synqra.TransportOperation))]
-[JsonSerializable(typeof(Synqra.NewEvent1))]
+[JsonSerializable(typeof(Synqra.EventEnvelope))]
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
 [JsonSerializable(typeof(Synqra.ComponentAddedEvent))]

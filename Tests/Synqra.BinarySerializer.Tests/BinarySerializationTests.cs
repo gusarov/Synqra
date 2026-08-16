@@ -1,4 +1,4 @@
-﻿using Microsoft.Testing.Platform.Extensions.Messages;
+using Microsoft.Testing.Platform.Extensions.Messages;
 using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Binding;
@@ -784,7 +784,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 		yield return () => SP(() => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A"));
 
 		// Prod
-		yield return () => SP(() => (70, new NewEvent1
+		yield return () => SP(() => (70, new EventEnvelope
 		{
 			Event = new CommandCreatedEvent
 			{
@@ -814,7 +814,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 			},
 		}, "7B6D00008101000000000000001E5461736B310002"));
 
-		yield return () => SP(() => (71, new NewEvent1
+		yield return () => SP(() => (71, new EventEnvelope
 		{
 			// EventId Guid
 			// CommandId Guid
@@ -853,7 +853,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 			},
 		}, "7B6D04DFEFAAFC5C30602AD9FD1BF8000104DCEFAAFC5CB2B1C5AB90B83B0002810104DCEFAAFC5CB2B1C5AB90B83B0002009849FAB0BD8BB7A456DE154556290012BDC5A48A7ABE8DF9580C63FBC206001304DBEFAAFC5CDB216DF966E2C9F33D00001E5461736B310002"));
 
-		yield return () => SP(() => (72, new NewEvent1
+		yield return () => SP(() => (72, new EventEnvelope
 		{
 			Event = new ObjectPropertyChangedEvent
 			{
@@ -1354,7 +1354,7 @@ public class BinarySerializationTests : SbxBaseTest
 	{
 		// Arrange
 		var ser = new SbxSerializer();
-		var data = new NewEvent1
+		var data = new EventEnvelope
 		{
 			Event = new ComponentAddedEvent
 			{
@@ -1366,7 +1366,7 @@ public class BinarySerializationTests : SbxBaseTest
 			},
 		};
 		ser.Map(1, 2025.785, typeof(TransportOperation));
-		ser.Map(2, 2025.785, typeof(NewEvent1));
+		ser.Map(2, 2025.785, typeof(EventEnvelope));
 		ser.Map(3, 2026.405, typeof(ComponentAddedEvent));
 
 		// Act
@@ -1379,7 +1379,7 @@ public class BinarySerializationTests : SbxBaseTest
 		// Assert
 		HexDump(buffer);
 		pos = 0;
-		var de = (NewEvent1)ser.Deserialize<TransportOperation>(in rbuffer, ref pos);
+		var de = (EventEnvelope)ser.Deserialize<TransportOperation>(in rbuffer, ref pos);
 		var te = (ComponentAddedEvent)de.Event;
 		var te2 = (ComponentAddedEvent)data.Event;
 		Assert.That(te.EventId).IsEqualTo(te2.EventId).GetAwaiter().GetResult();

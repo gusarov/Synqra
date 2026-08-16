@@ -234,7 +234,7 @@ public class SbxSerializer : ISbxSerializer
 		Map(-58, typeof(ObjectPropertyChangedEvent));
 		Map(-59, typeof(ChangeObjectPropertyCommand));
 		// -60 (CreateObjectCommand) / -61 (ObjectCreatedEvent) retired — objects collapsed into root components.
-		Map(-62, typeof(NewEvent1));
+		Map(-62, typeof(EventEnvelope));
 		Map(-63, typeof(TransportOperation));
 		// Map(-64, typeof(RESERVED)); // THIS IS LOWEST 1 BYTE VARINT
 		Map(-65, typeof(AddComponentCommand));
@@ -250,9 +250,9 @@ public class SbxSerializer : ISbxSerializer
 		Map(-75, typeof(AddLinkCommand));
 		Map(-76, typeof(RemoveLinkCommand));
 		Map(-77, typeof(DeleteObjectCommand));
-		Map(-78, typeof(Subscribe1));
-		Map(-79, typeof(Unsubscribe1));
-		Map(-80, typeof(SubscriptionState1));
+		Map(-78, typeof(SubscribeRequest));
+		Map(-79, typeof(UnsubscribeRequest));
+		Map(-80, typeof(SubscriptionState));
 	}
 
 	SbxSerializer? _spanshotPrimitives;

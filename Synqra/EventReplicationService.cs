@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -44,11 +44,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
-		=> SendOperationAsync(new Subscribe1 { StreamId = streamId }, ct);
+		=> SendOperationAsync(new SubscribeRequest { StreamId = streamId }, ct);
 
 	/// <inheritdoc />
 	public Task UnsubscribeAsync(Guid streamId, CancellationToken ct = default)
-		=> SendOperationAsync(new Unsubscribe1 { StreamId = streamId }, ct);
+		=> SendOperationAsync(new UnsubscribeRequest { StreamId = streamId }, ct);
 
 	private async Task SendOperationAsync(TransportOperation operation, CancellationToken ct)
 	{
@@ -194,31 +194,31 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
 				switch (operation)
 				{
-					case SubscriptionState1 state:
+					case SubscriptionState state:
 						// Master's authoritative snapshot of the streams this connection is now
 						// subscribed to. Lets the client detect an unexpected default and drive its
 						// own UI off the confirmed set. Sent after HELLO and every sub/unsub.
 						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
 						break;
-					case NewEvent1 ne1:
-						await _storage.AppendAsync(ne1.Event);
-						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ne1.Event}");
+					case EventEnvelope envelope:
+						await _storage.AppendAsync(envelope.Event);
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {envelope.Event}");
 						// Transport-only: dedup so the outgoing loop never echoes a server event back,
 						// then notify the projection owner to fold in the delta via the keeper. The
 						// event is already durably stored, so a missed/awaited-late notification is
 						// harmless — the owner also catches up on next use through the provider.
 						lock (_skipSet)
 						{
-							if (_skipSet.Add(ne1.Event.EventId))
+							if (_skipSet.Add(envelope.Event.EventId))
 							{
-								_skipList.AddLast(ne1.Event.EventId);
+								_skipList.AddLast(envelope.Event.EventId);
 							}
 						}
 						// Tracks how far this client's backlog catch-up has progressed —
 						// applies to both a genuine live event and one the server resent as
 						// backlog (see the HELLO region above); mirrors LastEventIdFromMe's
 						// own bookkeeping for outgoing events.
-						_eventReplicationState.LastEventIdFromServer = ne1.Event.EventId;
+						_eventReplicationState.LastEventIdFromServer = envelope.Event.EventId;
 						EventsReceived?.Invoke();
 						break;
 					default:
@@ -285,9 +285,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_skipList.AddLast(ev.EventId);
 					}
 				}
-				// await _connection.InvokeAsync("NewEvent1", ev);
+				// await _connection.InvokeAsync("EventEnvelope", ev);
 
-				var inv = new NewEvent1() { Event = ev };
+				var inv = new EventEnvelope() { Event = ev };
 
 				var pool = ArrayPool<byte>.Shared;
 				var bytes = pool.Rent(DefaultFrameSize);
