@@ -174,13 +174,14 @@ public abstract class AppendStorageTests : BaseTest
 	{
 		var storage = Get<Event>();
 
-		// Only the command id uses the 0x100 spacing (its derived events fill the low byte); the
-		// wrapper/domain EventId is command+1 (same 900C sub-range). Other fields get small tails.
+		// Only the command id uses the 0x100 spacing (its derived events fill the low node byte); the
+		// derived EventId keeps that node +1 but carries the event's own class (9C01 command → 9E01
+		// event). Other fields get small tails.
 		var item1 = new ComponentAddedEvent
 		{
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-000000000011"),
-			CommandId    = new Guid("C0DE0000-0000-8000-900C-000000000100"),
-			EventId      = new Guid("C0DE0000-0000-8000-900C-000000000101"),
+			CommandId    = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-000000000101"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000001"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
 		};
@@ -189,8 +190,8 @@ public abstract class AppendStorageTests : BaseTest
 		var item2 = new ComponentAddedEvent
 		{
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-000000000021"),
-			CommandId    = new Guid("C0DE0000-0000-8000-900C-000000000200"),
-			EventId      = new Guid("C0DE0000-0000-8000-900C-000000000201"),
+			CommandId    = new Guid("C0DE0000-0000-8000-9C01-000000000200"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-000000000201"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000002"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9F02-000000000000"),
 		};
@@ -245,8 +246,8 @@ public abstract class AppendStorageTests : BaseTest
 		var ev = new ComponentAddedEvent
 		{
 			CollectionId = Ids.CreateCollectionId(),
-			CommandId = Ids.CreateCommandId(),
-			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId = Ids.CreateCommandId<AddComponentCommand>(),
+			EventId = new Guid("C0DE0000-0000-8000-9E01-000000000100"),
 			TargetId = Ids.CreateComponentId(),
 			TargetTypeId = Ids.CreateComponentId(),
 			StreamId = Ids.CreateStreamId(),
@@ -278,8 +279,8 @@ public abstract class AppendStorageTests : BaseTest
 		var ev = new ComponentAddedEvent
 		{
 			CollectionId = Ids.CreateCollectionId(),
-			CommandId = Ids.CreateCommandId(),
-			EventId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId = Ids.CreateCommandId<AddComponentCommand>(),
+			EventId = new Guid("C0DE0000-0000-8000-9E01-000000000100"),
 			TargetId = Ids.CreateComponentId(),
 			TargetTypeId = Ids.CreateComponentId(),
 			StreamId = Ids.CreateStreamId(),
@@ -293,8 +294,8 @@ public abstract class AppendStorageTests : BaseTest
 		var ev2 = new ComponentAddedEvent
 		{
 			CollectionId = Ids.CreateCollectionId(),
-			CommandId = Ids.CreateCommandId(),
-			EventId = new Guid("C0DE0000-0000-8000-900C-000000000200"),
+			CommandId = Ids.CreateCommandId<AddComponentCommand>(),
+			EventId = new Guid("C0DE0000-0000-8000-9E01-000000000200"),
 			TargetId = Ids.CreateComponentId(),
 			TargetTypeId = Ids.CreateComponentId(),
 			StreamId = Ids.CreateStreamId(),
@@ -584,14 +585,15 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	[Test]
 	public async Task Should_store_polimorfic_as_jsonl()
 	{
-		// Internal-test well-known guids (see docs/model.md §8): CommandId 900C, its derived event
-		// 900C+1; the root-component type is a class-self-reference in the F class-space (9F04-…000, node
-		// all-zero) and its instance is 9001-…103 (Component kind).
+		// Internal-test well-known guids (see docs/model.md §8): an AddComponentCommand instance 9C01-…100
+		// and its derived ComponentAddedEvent 9E01-…101 — same node +1, but the event carries its own
+		// class. The root-component *type* is 9F04-…000 (family F, all-zero node) and its instance is
+		// 9001-…103 (family 001).
 		var ev = new ComponentAddedEvent
 		{
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000101"),
-			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
-			EventId         = new Guid("C0DE0000-0000-8000-900C-000000000101"),
+			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
+			EventId         = new Guid("C0DE0000-0000-8000-9E01-000000000101"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000103"),
 			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F04-000000000000"),
 			ComponentTypeId = new Guid("C0DE0000-0000-8000-9F04-000000000000"),
@@ -631,7 +633,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
 			EventId = Ids.CreateComponentId(),
-			CommandId = Ids.CreateCommandId(),
+			CommandId = Ids.CreateCommandId<DeleteComponentCommand>(),
 			TargetId = targetId1,
 			TargetTypeId = targetType1,
 			CollectionId = collection1,
@@ -641,7 +643,7 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 		await _storage.AppendAsync(new ComponentDeletedEvent
 		{
 			EventId = Ids.CreateComponentId(),
-			CommandId = Ids.CreateCommandId(),
+			CommandId = Ids.CreateCommandId<DeleteComponentCommand>(),
 			TargetId = targetId2,
 			TargetTypeId = targetType2,
 			CollectionId = collection2,

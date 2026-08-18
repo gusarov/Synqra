@@ -34,8 +34,8 @@ public class MongoEventClassMapsTests
 	{
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B2"),
-			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B3"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000B2"),
+			CommandId    = new Guid("C0DE0000-0000-8000-9C01-0000000000B3"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9FB5-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000B6"),
@@ -69,8 +69,8 @@ public class MongoEventClassMapsTests
 		// is dropped by the native BSON serializer.
 		var ev = new ComponentAddedEvent
 		{
-			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000B8"),
-			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000B9"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000B8"),
+			CommandId    = new Guid("C0DE0000-0000-8000-9C01-0000000000B9"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000BA"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9FBB-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000BC"),
@@ -94,8 +94,8 @@ public class MongoEventClassMapsTests
 		// still carry it for every single event, just to record the absence of a value.
 		var ev = new ComponentAddedEvent
 		{
-			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000BE"),
-			CommandId    = new Guid("C0DE0000-0000-8000-900C-0000000000BF"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000BE"),
+			CommandId    = new Guid("C0DE0000-0000-8000-9C01-0000000000BF"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000C0"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-9FC1-000000000000"),
 			CollectionId = new Guid("C0DE0000-0000-8000-9002-0000000000C2"),
@@ -121,8 +121,8 @@ public class MongoEventClassMapsTests
 		var targetId = new Guid("C0DE0000-0000-8000-9001-0000000000C5");
 		var ev = new LinkAddedEvent
 		{
-			EventId    = new Guid("C0DE0000-0000-8000-900C-0000000000C6"),
-			CommandId  = new Guid("C0DE0000-0000-8000-900C-0000000000C7"),
+			EventId    = new Guid("C0DE0000-0000-8000-9E03-0000000000C6"),
+			CommandId  = new Guid("C0DE0000-0000-8000-9C03-0000000000C7"),
 			LinkTypeId = new Guid("C0DE0000-0000-8000-9FC8-000000000000"),
 			LinkId     = linkId,
 			SourceId   = sourceId,
@@ -155,7 +155,7 @@ public class MongoEventClassMapsTests
 		// event id, so dedup / idempotent inserts and ordered replay work.
 		var ev = new ObjectPropertyChangedEvent
 		{
-			EventId      = new Guid("C0DE0000-0000-8000-900C-0000000000BD"),
+			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000BD"),
 			CommandId    = Guid.Empty,
 			TargetId     = Guid.Empty,
 			TargetTypeId = Guid.Empty,

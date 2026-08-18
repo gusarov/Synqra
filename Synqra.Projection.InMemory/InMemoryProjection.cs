@@ -439,7 +439,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			if (cmd.CommandId == default)
 			{
-				cmd.CommandId = _ids.CreateCommandId();
+				cmd.CommandId = _ids.CreateCommandId(SynqraIdProviderExtensions.DeclaredTypeId(cmd.GetType()));
 			}
 			if (cmd.StreamId == default)
 			{
@@ -571,7 +571,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var created = new CommandCreatedEvent
 		{
-			EventId = _ids.CreateEventId(cmd.CommandId, 0),
+			EventId = _ids.CreateEventId<CommandCreatedEvent>(cmd.CommandId, 0),
 			Data = cmd,
 			CommandId = cmd.CommandId,
 			StreamId = cmd.StreamId,
@@ -609,7 +609,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
 
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<ObjectPropertyChangedEvent>(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -646,7 +646,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<ComponentAddedEvent>(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -664,7 +664,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<ComponentPropertyChangedEvent>(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -684,7 +684,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
 			CollectionId = cmd.CollectionId,
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<ComponentDeletedEvent>(cmd.CommandId, 1),
 			TargetTypeId = cmd.TargetTypeId,
 			TargetId = cmd.TargetId,
 
@@ -702,7 +702,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<LinkAddedEvent>(cmd.CommandId, 1),
 			LinkTypeId = cmd.LinkTypeId,
 			LinkId = cmd.LinkId,
 			SourceId = cmd.SourceId,
@@ -718,7 +718,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			StreamId = cmd.StreamId,
 			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId(cmd.CommandId, 1),
+			EventId = _ids.CreateEventId<LinkRemovedEvent>(cmd.CommandId, 1),
 			LinkId = cmd.LinkId,
 		});
 		return Task.CompletedTask;

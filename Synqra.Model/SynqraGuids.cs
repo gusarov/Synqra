@@ -19,28 +19,37 @@ public static class SynqraGuids
 	 * - Anyone can follow same principles by computing SHA256("<projectname>") for their own project
 	 * - The previous approach used a random signature (2A21B27D). The hash approach is better because it is reproducible and verifiable.
 	 * - The 8 nibbles at positions 13 and 17 satisfy UUIDv8 version (0b1000) and variant (0b10xx) per RFC 9562
-	 * - Group 4 is an env-variant nibble plus a 12-bit class field: C0DEyyyy-yyyy-8xxx-vCCC-xxxxxxxxxxxx
-	 *   - Byte 8 high nibble (v): RFC 9562 variant bits 0b10 + 2 env bits → 8 = prod/manual,
-	 *     9 = hardcoded-test, A = auto-test (minted by DeterministicSynqraIdProvider), B reserved
-	 *   - The class is 12 bits (byte 8 low nibble + byte 9, 3 hex chars), allowing 4096 classes per project
+	 * - Group 4 is a stage nibble plus a 12-bit class field: C0DEyyyy-yyyy-8xxx-sFnn-xxxxxxxxxxxx
+	 *   - Byte 8 high nibble (s): RFC 9562 variant bits 0b10 + 2 free bits carrying the allocation
+	 *     STAGE → 8 = committed, 9 = staging (hand-written, not yet firm), A = auto-generated
+	 *     (minted by DeterministicSynqraIdProvider), B reserved. Each stage has its OWN registry:
+	 *     a code taken in stage 9 is not reserved in stage 8, and promoting an id from 9 to 8 does
+	 *     not carry its number across.
+	 *   - The class is 12 bits (byte 8 low nibble + byte 9): a FAMILY nibble (F) plus a family-local
+	 *     code (nn), allowing 4096 classes per project
 	 * - The trailing 48 bits (xxxxxxxxxxxx) are the node: a per-class instance counter
 	 *
 	 * Group 4 is used two ways, told apart by the node:
-	 *   - Node all-zero → the value is a TYPE id, and CCC is a type code whose first nibble groups
-	 *     a family: C = command types, E = event types, F = plain domain/user model types
-	 *     (anything that is neither a command nor an event), A = infra. Within a family, nn = 00 is
-	 *     that family's abstract base (8C00 Command, 8E00 Event), 0E/0F are other shared bases, and
-	 *     01+ are concrete types. F is the highest nibble on purpose: it keeps a type id visually
-	 *     clear of the low 00x instance classes (8005 = stream instance vs 8F05 = a model type).
+	 *   - Node all-zero → the value is a TYPE id. Type families: C = command types, E = event types,
+	 *     A = envelopes/messages, F = plain domain model types (anything that is neither a command
+	 *     nor an event). Within a family, nn = 00 is that family's abstract base (8C00 Command,
+	 *     8E00 Event), 0E/0F are other shared bases, and 01+ are concrete types. F is the highest
+	 *     nibble on purpose: it keeps a type id visually clear of the low instance families
+	 *     (8005 = stream instance vs 8F05 = a model type).
 	 *     See "Reserved built-in type ids" in docs/model.md.
-	 *   - Node non-zero → the value is a well-known INSTANCE, and CCC names its class (below)
+	 *   - Node non-zero → the value is a well-known INSTANCE, and the class names what it is (below).
+	 *     The class inside an instance id is a readability hint only: type resolution always goes
+	 *     through an explicit type-id field, never through an instance id.
 	 *
-	 * Well-known instance classes:
+	 * Well-known instance families:
 	 *   - 0x000: Singleton — one-off reserved values (e.g. SynqraTypeNamespaceId, node 1)
 	 *   - 0x005: Stream — the mandatory security boundary; node is an instance counter
-	 *   - 0x00C: Command — space command ids by 0x100 (…000100, …000200) so the low byte holds
-	 *     their derived events: a derived event is Derive(CommandId, ordinal) and therefore
-	 *     inherits the command's class. There is deliberately NO 0x00E event instance class.
+	 *   - 0x00C: Command — space command ids by 0x100 (…000100, …000200) so the low node byte holds
+	 *     their derived events.
+	 *   - 0x00E: Event — never allocated independently. An event instance id is always
+	 *     GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal): it keeps the command's
+	 *     stage and node lineage but carries the EVENT's own family-local code, so a derived event
+	 *     reads as an event rather than as its command.
 	 *   - Retired: 0x002 (collection) and 0x003 (link). Do not re-allocate — existing test
 	 *     fixtures still use them.
 	 *   - Historical note: 0x00C originally meant Stream (the hex "C" came from its first name,

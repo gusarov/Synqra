@@ -68,8 +68,7 @@ public static class TypeMetadataProviderExtensions
 				Guid typeId = sma?.SynqraTypeId ?? GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName); // it is not a secret, so for type identification SHA1 is totally fine
 				if (typeId.GetVersion() == 5 && type.Namespace?.ToLowerInvariant().Contains("test") == false && type.Namespace.StartsWith("Synqra."))
 				{
-					throw new Exception("Built-in types must have ");
-					Console.WriteLine();
+					throw new Exception($"Built-in type {type.FullName} must declare an explicit [SynqraModel(id)] — see docs/model.md §8; a derived v5 id is opaque and would leak into every persisted event of that type");
 				}
 				slot = new TypeMetadata
 				{

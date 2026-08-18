@@ -13,7 +13,7 @@ public class SynqraModelAttributeTests : BaseTest
 		var provider = ServiceProvider.GetRequiredService<ITypeMetadataProvider>();
 		var metadata = provider.GetTypeMetadata(typeof(ExplicitTypeIdModel));
 
-		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("C0DE0000-0000-8000-9041-000000000000"));
+		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("C0DE0000-0000-8000-9F41-000000000000"));
 	}
 
 	[Test]
@@ -24,14 +24,16 @@ public class SynqraModelAttributeTests : BaseTest
 		var provider = ServiceProvider.GetRequiredService<ITypeMetadataProvider>();
 		// Resolving by the FORMER id still returns the type, now carrying its CURRENT id —
 		// this is how a type's id can be changed without orphaning already-persisted data.
-		var metadata = provider.GetTypeMetadata(new Guid("C0DE0000-0000-8000-9040-000000000000"));
+		var metadata = provider.GetTypeMetadata(new Guid("C0DE0000-0000-8000-9F40-000000000000"));
 
 		await Assert.That(metadata.Type).IsEqualTo(typeof(ExplicitTypeIdModel));
-		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("C0DE0000-0000-8000-9041-000000000000"));
+		await Assert.That(metadata.TypeId).IsEqualTo(new Guid("C0DE0000-0000-8000-9F41-000000000000"));
 	}
 
-	[SynqraModel("C0DE0000-0000-8000-9041-000000000000")] // 9041 where 9 means test, 41 means exact this test model class (unique per class and above any potential 640 production type codes from 8 space)
-	[SynqraLegacyTypeId("C0DE0000-0000-8000-9040-000000000000", "2026-07-19", "test: former id (9040) must still resolve after change to 9041")] // a former id (e.g. 9040 before the change to 9041) — still resolves
+	// 9F41: stage 9 (staging/hand-written), family F (a plain domain model — neither a command nor an
+	// event), local code 41. The node is all-zero because the id names a *type*, not an instance.
+	[SynqraModel("C0DE0000-0000-8000-9F41-000000000000")]
+	[SynqraLegacyTypeId("C0DE0000-0000-8000-9F40-000000000000", "2026-07-19", "test: former id (9F40) must still resolve after change to 9F41")]
 	private sealed class ExplicitTypeIdModel
 	{
 	}
