@@ -5,15 +5,12 @@ using System.Text.Json.Serialization;
 namespace Synqra;
 
 /// <summary>
-/// What a replication client asks the master to start pushing right after HELLO — the "ws-method"
-/// encoded as the HELLO kind byte (see <see cref="EventReplicationService"/> /
-/// <see cref="Synqra.Replication.AspNetCore"/>'s endpoint). Whatever the choice, the master replies
-/// with an authoritative subscription-state ack so the client can detect an unexpected default.
-/// </summary>
-/// <summary>
-/// The HELLO "ws-method". This one <em>is</em> a raw wire byte rather than an SBX message, and
-/// legitimately so: HELLO carries the magic that negotiates the serializer, so it is parsed before any
-/// serializer is agreed on. Everything after HELLO is a proper <see cref="TransportOperation"/>.
+/// What a replication client asks the master to start pushing right after HELLO — the "ws-method".
+/// This one <em>is</em> a raw wire byte rather than an SBX message, and legitimately so: HELLO carries
+/// the magic that negotiates the serializer, so it is parsed before any serializer is agreed on.
+/// Everything after HELLO is a proper <see cref="TransportOperation"/>. Whatever the choice, the master
+/// replies with an authoritative <see cref="SubscriptionState"/> ack so the client can detect an
+/// unexpected default.
 /// </summary>
 public enum ReplicationHelloKind : byte
 {
