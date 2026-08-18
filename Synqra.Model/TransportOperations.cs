@@ -7,7 +7,7 @@ namespace Synqra;
 [JsonDerivedType(typeof(SubscribeRequest), "SubscribeRequest")]
 [JsonDerivedType(typeof(UnsubscribeRequest), "UnsubscribeRequest")]
 [JsonDerivedType(typeof(SubscriptionState), "SubscriptionState")]
-[SynqraModel("C0DEADD0-1032-8000-9A01-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A00-000000000000")] // family A = envelope/message (permanent); local code 00 = the family's abstract base, matching 8C00 Command / 8E00 Event; mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2025.791, "1")]
 public abstract partial class TransportOperation
 {

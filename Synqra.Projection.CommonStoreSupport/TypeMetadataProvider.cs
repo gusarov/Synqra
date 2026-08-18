@@ -66,7 +66,15 @@ public static class TypeMetadataProviderExtensions
 					.Distinct()
 					.ToArray();
 				Guid typeId = sma?.SynqraTypeId ?? GuidExtensions.CreateVersion5(SynqraGuids.SynqraTypeNamespaceId, type.FullName); // it is not a secret, so for type identification SHA1 is totally fine
-				if (typeId.GetVersion() == 5 && type.Namespace?.ToLowerInvariant().Contains("test") == false && type.Namespace.StartsWith("Synqra."))
+				// Namespace "Synqra" itself, not just "Synqra.*": ObjectDeletedEvent lives in the bare
+				// namespace and escaped this guard for exactly that reason. Interfaces are exempt — an
+				// interface is never the runtime type of an instance, so its id never reaches a `_t`.
+				var ns = type.Namespace;
+				var isBuiltIn = !type.IsInterface
+					&& (ns == "Synqra" || true == ns?.StartsWith("Synqra."))
+					&& ns.ToLowerInvariant().Contains("test") == false
+				;
+				if (typeId.GetVersion() == 5 && isBuiltIn)
 				{
 					throw new Exception($"Built-in type {type.FullName} must declare an explicit [SynqraModel(id)] — see docs/model.md §8; a derived v5 id is opaque and would leak into every persisted event of that type");
 				}
