@@ -413,15 +413,20 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `8E02` | `ComponentPropertyChangedEvent` | live | ↔ `8C02` |
 | `8E03` | `ComponentDeletedEvent` | live | ↔ `8C03` |
 | `9E01` | `ObjectPropertyChangedEvent` | dying | ↔ `9C01` |
+| `9E02` | `ObjectDeletedEvent` | dying | ↔ `9C02`; had no id at all until 2026-08-18 — carries a `[SynqraLegacyTypeId]` for the v5 id it resolved to |
 | `9E03` | `LinkAddedEvent` | dying | ↔ `9C03` |
 | `9E04` | `LinkRemovedEvent` | dying | ↔ `9C04` |
 | `9300` | `Link` | dying | link base |
 | `8A00` | `Item` | live | File-store envelope |
-| `9A01` | `TransportOperation` | staging | wire base |
+| `9A00` | `TransportOperation` | staging | wire base — local code `00`, matching `8C00`/`8E00` |
 | `9A02` | `EventEnvelope` | staging | carries one event either direction |
 | `9A03` | `SubscribeRequest` | staging | client → master, refusable |
 | `9A04` | `UnsubscribeRequest` | staging | client → master, refusable |
 | `9A05` | `SubscriptionState` | staging | master → client, authoritative set |
+
+`9A01` is **free**: it was `TransportOperation`'s slot before the abstract base moved to the family's
+conventional `00`. The concretes were deliberately left where they are rather than compacted, so the
+gap is expected.
 
 > **Open question — promote the `9A0x` transport ids.** Family `A` is their permanent home; only the
 > registry bit is unsettled. They are production types still sitting in **staging**. Moving them to the
@@ -429,11 +434,12 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 > transport messages whose peers deploy together, so the window is now. Per §8.10 they would need fresh
 > committed local codes (`8A00` is `Item`); a promotion does not carry the number across.
 
-> **Open question — the `9Cxx`/`9Exx` "dying" built-ins.** `ObjectPropertyChangedEvent`, `LinkAddedEvent`
-> and `LinkRemovedEvent` are shipped, persisted types sitting in the *staging* registry, which is now
-> load-bearing: their generated instances derive as `B…` rather than `A…`. They are on the way out with
-> the object/link vocabulary, so they are left alone; re-allocating them into the committed registry
-> would change persisted identity and needs `[SynqraLegacyTypeId]` aliases.
+> **Open question — the `9Cxx`/`9Exx` "dying" built-ins.** `ObjectPropertyChangedEvent`,
+> `ObjectDeletedEvent`, `LinkAddedEvent` and `LinkRemovedEvent` are shipped, persisted types sitting in
+> the *staging* registry, which is now load-bearing: their generated instances derive as `B…` rather
+> than `A…`. They are on the way out with the object/link vocabulary, so they are left alone;
+> re-allocating them into the committed registry would change persisted identity and needs
+> `[SynqraLegacyTypeId]` aliases.
 
 ### 8.12 Legacy and retired
 
@@ -452,10 +458,11 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 - **Changing a type's id** after data exists requires keeping the previous id as
   `[SynqraLegacyTypeId(oldId, when, why)]` so persisted events still resolve. A brand-new type has no
   history and MUST NOT be given one.
-- **Known gap:** `ObjectDeletedEvent` (namespace exactly `Synqra`) carries no `[SynqraModel]` id at
-  all, so it falls back to a v5 derived id. It escapes the built-in guard because that guard tests
-  `Namespace.StartsWith("Synqra.")` — with the dot. Assigning it an id now would change persisted
-  identity, so it is left as-is and recorded here.
+- **Closed gap:** `ObjectDeletedEvent` (namespace exactly `Synqra`) carried no `[SynqraModel]` id at
+  all and fell back to a v5 derived id, because the built-in guard tested
+  `Namespace.StartsWith("Synqra.")` — with the dot, so the bare namespace slipped through. The guard now
+  also matches `Synqra` exactly, and the type has an explicit `9E02` plus a `[SynqraLegacyTypeId]`
+  pinning `73117f2b-0223-5059-b1af-3a79facde03c`, the id it used to resolve to.
 - **This revision is the baseline.** Committed (`8`) allocations are firm from here; staging (`9`) is
   the working registry; `A`/`B` are their generated projections. No compatibility aliases were added
   for earlier drafts of this convention.
