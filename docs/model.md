@@ -336,8 +336,14 @@ byte for the events it expands into; an **event** instance node is always *deriv
 ### 8.9 Synqra profile — event-id derivation
 
 Events are **derived, not random**: each event a command expands to gets
-`GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal)`. This makes the command→event
+`SynqraIdDerivation.DeriveEventId(commandId, eventTypeId, ordinal)`. This makes the command→event
 expansion reproducible across nodes and replays (core.md §8) with no clock and no shared counter.
+
+The three layers are kept apart deliberately, weakest dependency first: `GuidExtensions` implements
+only RFC 9562 and is meant to ship standalone; `CodeGuidExtensions` reads and composes the CODE v8
+bits (`IsStructuredId`, `GetAllocationMode`, `GetSemanticClass`, `WithAllocation`, `AdvanceNode`) and
+knows nothing about commands or events; `SynqraIdDerivation` sits beside `ISynqraIdProvider` and is
+the only one that speaks the domain.
 
 - **Opaque command id (production, v7).** There is nowhere to put a semantic class, so derivation is
   exactly `Derive(commandId, ordinal)` — the command's v7 with its low bytes incremented. The derived

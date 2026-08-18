@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -61,7 +61,7 @@ public static class SynqraGuids
 	 *     is retired vocabulary now that Components use that word for IComponentContainer.
 	 *
 	 * Family E is never allocated independently. An event instance id is always
-	 * GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal): it inherits the command's
+	 * SynqraIdDerivation.DeriveEventId(commandId, eventTypeId, ordinal): it inherits the command's
 	 * company/scope prefix and node lineage, takes its registry bit and family-local code from the
 	 * EVENT TYPE, and sets the generated bit — so a committed event type 8E03 derives AE03 and a
 	 * staging one 9E15 derives BE15. Family 0 is also the home of retired family F, which used to be

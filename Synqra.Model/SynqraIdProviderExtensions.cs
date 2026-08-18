@@ -25,9 +25,17 @@ public static class SynqraIdProviderExtensions
 	/// <paramref name="commandId"/> expands to. Naming the event type here is what lets a structured
 	/// command id yield an event id carrying the <i>event's</i> class rather than the command's — and
 	/// what keeps two different events of one command distinguishable.
+	/// <para>
+	/// The derivation itself is provider-independent, so this goes straight to the static
+	/// <see cref="SynqraIdDerivation.DeriveEventId"/>; <paramref name="ids"/> is kept only to preserve the
+	/// extension-method call shape at the hundreds of existing call sites.
+	/// </para>
 	/// </summary>
 	public static Guid CreateEventId<TEvent>(this ISynqraIdProvider ids, Guid commandId, int ordinal) where TEvent : Event
-		=> (ids ?? throw new ArgumentNullException(nameof(ids))).CreateEventId(commandId, DeclaredTypeId(typeof(TEvent)), ordinal);
+	{
+		_ = ids ?? throw new ArgumentNullException(nameof(ids));
+		return SynqraIdDerivation.DeriveEventId(commandId, DeclaredTypeId(typeof(TEvent)), ordinal);
+	}
 
 	/// <summary>
 	/// The id a type declares through <see cref="SynqraModelAttribute"/>, or <see cref="Guid.Empty"/> when
