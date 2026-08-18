@@ -725,7 +725,8 @@ public static class GuidExtensions
 
 	/// <summary>
 	/// True when <paramref name="guid"/> is a <b>structured</b> Synqra id: the <c>C0DE</c> magic prefix
-	/// plus RFC 9562 version 8, i.e. an application-defined layout whose group-4 carries a stage nibble
+	/// plus RFC 9562 version 8, i.e. an application-defined layout whose group-4 carries an allocation
+	/// mode nibble
 	/// and a 12-bit semantic class (model.md §8). Opaque ids — v7 data, v5 derived type ids, v4 tokens,
 	/// and unrelated v8 hashes such as <see cref="CreateVersion5"/>'s siblings — are not structured, so
 	/// callers must not read a class out of them.
@@ -749,42 +750,74 @@ public static class GuidExtensions
 	}
 
 	/// <summary>
-	/// The stage (allocation domain) nibble of a structured id — <c>8</c> committed, <c>9</c> staging /
-	/// hand-written fixture, <c>A</c> auto-generated test. It is the RFC variant nibble's two free low
-	/// bits, so it never changes the id's validity.
+	/// The allocation mode of a structured id — the RFC 9562 variant nibble, whose two free low bits are
+	/// <b>orthogonal</b>: <see cref="AllocationMode.Staging"/> selects the semantic registry and
+	/// <see cref="AllocationMode.Generated"/> the provenance. It is never a flat four-value enum; see
+	/// <see cref="AllocationMode"/> and model.md §8.
 	/// </summary>
-	public static unsafe byte GetStructuredStage(this Guid guid)
+	public static unsafe AllocationMode GetAllocationMode(this Guid guid)
 	{
 		byte* b = (byte*)&guid;
-		return (byte)(b[8] >> 4);
+		return (AllocationMode)(b[8] >> 4);
 	}
 
+	/// <summary>True when the id belongs to the committed (normative, firm) semantic registry.</summary>
+	public static bool IsCommitted(this Guid guid) => (guid.GetAllocationMode() & AllocationMode.Staging) == 0;
+
+	/// <summary>True when the id belongs to the staging (working, still-mutable) semantic registry.</summary>
+	public static bool IsStaging(this Guid guid) => (guid.GetAllocationMode() & AllocationMode.Staging) != 0;
+
+	/// <summary>True when the id was minted by a generator rather than hand-allocated in a registry.</summary>
+	public static bool IsGenerated(this Guid guid) => (guid.GetAllocationMode() & AllocationMode.Generated) != 0;
+
+	/// <summary>True when the id was pinned by hand in a registry rather than generated.</summary>
+	public static bool IsPinned(this Guid guid) => (guid.GetAllocationMode() & AllocationMode.Generated) == 0;
+
 	/// <summary>
-	/// The 12-bit semantic class of a structured id: the family nibble (high 4 bits) plus the
-	/// family-local code (low 8 bits). For a type id this is the type's own code; for an instance id it
-	/// is the code of the type it instantiates.
+	/// The 12-bit semantic class <c>Fnn</c> of a structured id: the semantic family <c>F</c> (high 4 bits)
+	/// plus the code <c>nn</c> allocated inside that family <i>and</i> registry (low 8 bits). For a type id
+	/// this is the type's own class; for an instance id it is the class of the type it instantiates.
+	/// <para>
+	/// The class alone does not identify a type — semantic identity is <c>registry + Fnn</c>, because the
+	/// committed and staging registries allocate codes independently.
+	/// </para>
 	/// </summary>
-	public static unsafe ushort GetStructuredClass(this Guid guid)
+	public static unsafe ushort GetSemanticClass(this Guid guid)
 	{
 		byte* b = (byte*)&guid;
 		return (ushort)(((b[8] & 0x0F) << 8) | b[9]);
 	}
 
+	/// <summary>The semantic family nibble <c>F</c> of <see cref="GetSemanticClass"/>.</summary>
+	public static unsafe byte GetSemanticFamily(this Guid guid)
+	{
+		byte* b = (byte*)&guid;
+		return (byte)(b[8] & 0x0F);
+	}
+
+	/// <summary>The family-local semantic code <c>nn</c> of <see cref="GetSemanticClass"/>.</summary>
+	public static unsafe byte GetSemanticCode(this Guid guid)
+	{
+		byte* b = (byte*)&guid;
+		return b[9];
+	}
+
 	/// <summary>
 	/// Deterministically derives the id of the <paramref name="ordinal"/>-th event a command expands to,
-	/// carrying the <i>event's</i> semantic type rather than the command's.
+	/// carrying the <i>event's</i> semantic allocation rather than the command's.
 	/// <para>
 	/// The byte-level derivation legitimately differs by UUID version. When the command id is opaque
-	/// (production: a v7 client id) there is nowhere to put a class, so this is exactly
+	/// (production: a v7 client id) there is nowhere to put a semantic class, so this is exactly
 	/// <see cref="Derive(Guid, int)"/> — production event ids are bit-for-bit unchanged. When the command
-	/// id is a <b>structured</b> <c>C0DE</c> v8 id it has a class field, and leaving the command's own
-	/// <c>Cxx</c> there would label every derived event as a command; so the event's own <c>Exx</c> class
-	/// (read from <paramref name="eventTypeId"/>) replaces it, the command's stage is kept, and only the
-	/// 48-bit node advances by <paramref name="ordinal"/> — the class can never absorb a carry.
+	/// id is a <b>structured</b> <c>C0DE</c> v8 id the result is composed from three sources (model.md §8):
+	/// the command instance supplies the company/scope prefix and the base node, the event <i>type</i>
+	/// supplies the registry bit and the semantic class <c>Enn</c>, and this derivation supplies the
+	/// <see cref="AllocationMode.Generated"/> bit. Only the 48-bit node advances by
+	/// <paramref name="ordinal"/>, so a carry can never reach the mode or class.
 	/// </para>
 	/// <para>
-	/// The class inside an <i>instance</i> id is a human-readability hint only: type resolution always
-	/// goes through the event's explicit type-id field, never through its instance id.
+	/// A structured command whose event type is <i>not</i> structured throws: emitting the command's own
+	/// <c>Cnn</c> as if it were the event's class would be a false semantic claim.
 	/// </para>
 	/// </summary>
 	public static unsafe Guid DeriveEventId(Guid commandId, Guid eventTypeId, int ordinal)
@@ -793,13 +826,24 @@ public static class GuidExtensions
 		{
 			throw new ArgumentOutOfRangeException(nameof(ordinal));
 		}
-		if (!commandId.IsStructuredId() || !eventTypeId.IsStructuredId())
+		if (!commandId.IsStructuredId())
 		{
 			return Derive(commandId, ordinal);
 		}
-		var eventClass = eventTypeId.GetStructuredClass();
+		if (!eventTypeId.IsStructuredId())
+		{
+			throw new ArgumentException(
+				$"A structured command id ({commandId}) cannot derive a structured event id from an unstructured event type id ({eventTypeId}): the result would carry the command's own semantic class."
+				, nameof(eventTypeId)
+			);
+		}
+		// registry bit from the event type, generated bit from this derivation; the command instance's
+		// own mode is deliberately not consulted (model.md §8: generated projection preserves the
+		// semantic allocation of the type, not of the thing it was derived from).
+		var mode = AllocationMode.Variant | AllocationMode.Generated | (eventTypeId.GetAllocationMode() & AllocationMode.Staging);
+		var eventClass = eventTypeId.GetSemanticClass();
 		byte* b = (byte*)&commandId;
-		b[8] = (byte)((b[8] & 0xF0) | ((eventClass >> 8) & 0x0F)); // keep the command instance's stage, take the event's family
+		b[8] = (byte)(((byte)mode << 4) | ((eventClass >> 8) & 0x0F));
 		b[9] = (byte)eventClass;
 		ulong node = 0;
 		for (int i = 10; i < 16; i++)

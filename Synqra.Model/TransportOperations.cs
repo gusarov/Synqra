@@ -7,7 +7,7 @@ namespace Synqra;
 [JsonDerivedType(typeof(SubscribeRequest), "SubscribeRequest")]
 [JsonDerivedType(typeof(UnsubscribeRequest), "UnsubscribeRequest")]
 [JsonDerivedType(typeof(SubscriptionState), "SubscriptionState")]
-[SynqraModel("C0DEADD0-1032-8000-9A01-000000000000")] // family A = envelope/message (permanent); stage 9 = staging, this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A01-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2025.791, "1")]
 public abstract partial class TransportOperation
 {
@@ -19,7 +19,7 @@ public abstract partial class TransportOperation
 /// stream's backlog. Everything about routing is decided from the event's own StreamId plus the
 /// connection's active subscription set, never from the envelope.
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-9A02-000000000000")] // family A = envelope/message (permanent); stage 9 = staging, this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A02-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2025.785, "1 Event Event")]
 public partial class EventEnvelope : TransportOperation
 {
@@ -37,7 +37,7 @@ public partial class EventEnvelope : TransportOperation
 /// <see cref="SubscriptionState"/>; a rejected request simply leaves the active set unchanged,
 /// which that answer reveals.
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-9A03-000000000000")] // family A = envelope/message (permanent); stage 9 = staging, this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A03-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2026.616, "1 StreamId Guid")]
 public partial class SubscribeRequest : TransportOperation
 {
@@ -47,7 +47,7 @@ public partial class SubscribeRequest : TransportOperation
 }
 
 /// <summary>Client → master: "stop delivering this stream to me". Answered with a <see cref="SubscriptionState"/>.</summary>
-[SynqraModel("C0DEADD0-1032-8000-9A04-000000000000")] // family A = envelope/message (permanent); stage 9 = staging, this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A04-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2026.616, "1 StreamId Guid")]
 public partial class UnsubscribeRequest : TransportOperation
 {
@@ -62,7 +62,7 @@ public partial class UnsubscribeRequest : TransportOperation
 /// <see cref="UnsubscribeRequest"/>, so a client can compare it against what it asked for and detect an
 /// unexpected server default or a rejected request.
 /// </summary>
-[SynqraModel("C0DEADD0-1032-8000-9A05-000000000000")] // family A = envelope/message (permanent); stage 9 = staging, this id is not committed yet
+[SynqraModel("C0DEADD0-1032-8000-9A05-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2026.616, "1 Streams IList<Guid>")]
 public partial class SubscriptionState : TransportOperation
 {

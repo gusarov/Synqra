@@ -24,26 +24,26 @@ public interface ISynqraIdProvider
 	/// </summary>
 	Guid CreateCommandId(Guid commandTypeId);
 
-	/// <summary>A container / stream id (instance class <c>005</c>).</summary>
+	/// <summary>A container / stream id (semantic class <c>005</c> — family <c>0</c>, code <c>05</c>).</summary>
 	Guid CreateStreamId();
 
-	/// <summary>An entity / root-component id (instance class <c>001</c>).</summary>
+	/// <summary>An entity / root-component id (semantic class <c>001</c> — family <c>0</c>, code <c>01</c>).</summary>
 	Guid CreateComponentId();
 
-	/// <summary>A collection id (instance class <c>002</c>). Reserved: collections are being retired, kept
+	/// <summary>A collection id (semantic class <c>002</c>). Reserved: collections are being retired, kept
 	/// documented/compliant while still in the codebase.</summary>
 	Guid CreateCollectionId();
 
-	/// <summary>A link id (instance class <c>003</c>). Reserved: links are being folded into components, kept
+	/// <summary>A link id (semantic class <c>003</c>). Reserved: links are being folded into components, kept
 	/// documented/compliant while still in the codebase.</summary>
 	Guid CreateLinkId();
 
 	/// <summary>
 	/// The id of the <paramref name="ordinal"/>-th event a command expands to. Delegates to
 	/// <see cref="GuidExtensions.DeriveEventId"/>: opaque (v7) command ids advance by
-	/// <paramref name="ordinal"/> unchanged, while a structured command id additionally takes the
-	/// <c>Exx</c> class of <paramref name="eventTypeId"/> so each derived event names its own event type
-	/// even when one command expands to several different ones.
+	/// <paramref name="ordinal"/> unchanged, while a structured command id composes a generated id from
+	/// the event type's registry and <c>Enn</c> semantic class, so each derived event names its own event
+	/// type even when one command expands to several different ones.
 	/// </summary>
 	Guid CreateEventId(Guid commandId, Guid eventTypeId, int ordinal);
 }
@@ -66,9 +66,11 @@ public sealed class SynqraIdProvider : ISynqraIdProvider
 }
 
 /// <summary>
-/// Test <see cref="ISynqraIdProvider"/> — predictable, per-class monotonic <b>A</b>-stage ids
-/// (<c>C0DE0000-0000-8000-A{class}-{counter}</c>, see docs/model.md §8) so ids minted by production
-/// code under test read cleanly in logs and assertions. Registered by the test host in place of
+/// Test <see cref="ISynqraIdProvider"/> — predictable, per-class monotonic <b>generated</b> ids
+/// (<c>C0DE0000-0000-8000-{mode}{class}-{counter}</c>, see docs/model.md §8) so ids minted by production
+/// code under test read cleanly in logs and assertions. The mode keeps the semantic registry of the type
+/// being instantiated and only sets <see cref="AllocationMode.Generated"/>: a committed type yields an
+/// <c>A</c> instance, a staging type a <c>B</c> one. Registered by the test host in place of
 /// <see cref="SynqraIdProvider"/>; being a DI singleton it is shared across background-service threads
 /// and WAF hosts.
 /// </summary>
@@ -80,30 +82,41 @@ public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 	// classes, but a single striding counter also keeps their nodes distinct and chronologically readable.
 	long _command, _stream, _component, _collection, _link;
 
-	public Guid CreateCommandId(Guid commandTypeId) => New(ClassOf(commandTypeId, family: 0xC), ref _command, 0x100);
-	public Guid CreateStreamId() => New(0x005, ref _stream, 1);
-	public Guid CreateComponentId() => New(0x001, ref _component, 1);
-	public Guid CreateCollectionId() => New(0x002, ref _collection, 1);
-	public Guid CreateLinkId() => New(0x003, ref _link, 1);
+	public Guid CreateCommandId(Guid commandTypeId) => New(ModeOf(commandTypeId), ClassOf(commandTypeId, family: 0xC), ref _command, 0x100);
+	public Guid CreateStreamId() => New(AllocationMode.CommittedGenerated, 0x005, ref _stream, 1);
+	public Guid CreateComponentId() => New(AllocationMode.CommittedGenerated, 0x001, ref _component, 1);
+	public Guid CreateCollectionId() => New(AllocationMode.CommittedGenerated, 0x002, ref _collection, 1);
+	public Guid CreateLinkId() => New(AllocationMode.CommittedGenerated, 0x003, ref _link, 1);
 	public Guid CreateEventId(Guid commandId, Guid eventTypeId, int ordinal) => GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal);
 
 	/// <summary>
-	/// The class an instance of <paramref name="typeId"/> should carry. A structured type id already owns
-	/// a family + code, so it is taken verbatim. A type with no structured id (a consumer type whose
-	/// <c>[SynqraModel]</c> is parameterless, so its id is a v5 hash) has no registered code; one is
+	/// The mode a generated instance of <paramref name="typeId"/> must carry: the type's own semantic
+	/// registry, plus <see cref="AllocationMode.Generated"/>. A type with no structured id has no registry
+	/// of its own, so its synthesised class is treated as a committed allocation.
+	/// </summary>
+	static AllocationMode ModeOf(Guid typeId) =>
+		AllocationMode.Variant
+		| AllocationMode.Generated
+		| (typeId.IsStructuredId() ? typeId.GetAllocationMode() & AllocationMode.Staging : 0)
+		;
+
+	/// <summary>
+	/// The semantic class an instance of <paramref name="typeId"/> should carry. A structured type id
+	/// already owns a family + code, so it is taken verbatim. A type with no structured id (a consumer type
+	/// whose <c>[SynqraModel]</c> is parameterless, so its id is a v5 hash) has no allocated code; one is
 	/// synthesised from the hash into the high half <c>0x80..0xFF</c> — stable across runs, never
-	/// <c>00</c> (which would read as the family's base type), and visibly "unregistered" at a glance.
+	/// <c>00</c> (which would read as the family's base type), and visibly "unallocated" at a glance.
 	/// </summary>
 	static unsafe ushort ClassOf(Guid typeId, int family)
 	{
 		if (typeId.IsStructuredId())
 		{
-			return typeId.GetStructuredClass();
+			return typeId.GetSemanticClass();
 		}
 		byte* b = (byte*)&typeId;
 		return (ushort)((family << 8) | (b[15] | 0x80));
 	}
 
-	static Guid New(ushort @class, ref long counter, long step) =>
-		new Guid($"C0DE0000-0000-8000-A{@class:X3}-{Interlocked.Add(ref counter, step):X12}");
+	static Guid New(AllocationMode mode, ushort @class, ref long counter, long step) =>
+		new Guid($"C0DE0000-0000-8000-{(byte)mode:X1}{@class:X3}-{Interlocked.Add(ref counter, step):X12}");
 }

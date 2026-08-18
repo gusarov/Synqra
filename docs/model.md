@@ -138,11 +138,11 @@ by the call site's convenience.
 |---|---|---|---|---|
 | **opaque instance** | **v7** | every runtime instance — entities, components, commands, events | `ISynqraIdProvider` (production) | no — time-ordered only |
 | **derived type id** | **v5** | a `[SynqraModel]` type with no explicit id | `TypeMetadataProvider` (SHA-1 over `type.FullName`) | no |
-| **structured id** | **v8** `C0DE…` | well-known constants, and test fixtures | hand-written, or `DeterministicSynqraIdProvider` under test | **yes** — carries stage + class |
+| **structured id** | **v8** `C0DE…` | well-known constants, and test fixtures | hand-written, or `DeterministicSynqraIdProvider` under test | **yes** — carries an allocation mode + a semantic class |
 
 A structured id is the only shape with meaning inside it. The other two are opaque by design and
 callers MUST NOT try to read structure out of them — use `Guid.IsStructuredId()` before reading a
-stage or a class.
+mode or a class.
 
 ### 8.2 v7 — instance ids
 
@@ -152,32 +152,36 @@ stage or a class.
   `CreateCommandId`, …). Call sites MUST take the provider from DI; there is no ambient static
   factory. `SynqraIdProvider.Default` exists only for the rare non-DI construction path.
 - Command ids are minted **spaced by `0x100`**, reserving the low node byte for the events that
-  command expands into (§8.7).
+  command expands into (§8.9).
 
 ### 8.3 v5 — derived type ids
 
 A `[SynqraModel]` type that declares no explicit id gets `CreateVersion5(SynqraTypeNamespaceId,
 type.FullName)` — a SHA-1 hash, opaque and high-entropy.
 
-- **`SynqraTypeNamespaceId`** = `C0DEADD0-1032-8000-8000-000000000001` (a family-`0` singleton, node
+- **`SynqraTypeNamespaceId`** = `C0DEADD0-1032-8000-8000-000000000001` (family `0` code `00`, node
   `1`). It is the fixed salt, and a **persisted contract**: derived type ids are written into stored
   events as the `_t` discriminator, so once data exists it MUST NOT change.
 - It was migrated once from the legacy random salt `BAD8F923-FA74-4CA0-9AA3-70BB874ACC76`. Consumer
   types persisted under the old salt carry `[SynqraLegacyTypeId(oldId, when, why)]` aliases so their
   existing events still resolve.
 - Because a derived id is unreadable and appears in *every* event of that type, authors SHOULD give a
-  type an explicit structured id instead (§8.6). Built-in Synqra types all do.
+  type an explicit structured id instead (§8.8). Built-in Synqra types all do.
 
 ### 8.4 v8 `C0DE…` — the structured layout
 
 Authoritative source: `Synqra.Model/SynqraGuids.cs`.
 
+This subsection and §8.5–§8.7 describe **CODE v8** itself — a portable convention that any company can
+adopt. What the individual families and codes *mean* is a per-adopter profile; Synqra's own profile
+starts at §8.8.
+
 ```
-C0DE yyyy-yyyy 8prs  s F nn  iiiiiiiiiiii
-│    │         │     │ │ │   └── node
-│    │         │     │ │ └────── family-local code   (8 bits)
-│    │         │     │ └──────── family              (4 bits)  ┐ together the
-│    │         │     └────────── stage               (4 bits)  ┘ 12-bit class
+C0DE yyyy-yyyy 8prs  m F nn  iiiiiiiiiiii
+│    │         │     │ │ │   └── node                (48 bits)
+│    │         │     │ │ └────── semantic code       (8 bits)  ┐ together the
+│    │         │     │ └──────── semantic family     (4 bits)  ┘ 12-bit semantic class
+│    │         │     └────────── allocation mode     (4 bits)
 │    │         └──────────────── version 8 + project + space
 │    └────────────────────────── company hash
 └─────────────────────────────── magic prefix
@@ -193,115 +197,201 @@ C0DE yyyy-yyyy 8prs  s F nn  iiiiiiiiiiii
   `8000`. The project/space boundary is deliberately unspecified: within its own company hash each
   company splits these three nibbles as it needs and owns avoiding its own collisions. A company that
   outgrows the region takes a new company hash.
-- **`s` (stage)** — the RFC **variant** nibble. Its top 2 bits are fixed at `10`, so it ranges
-  `8`/`9`/`A`/`B`; the two free low bits carry the **allocation stage** (§8.8). This is the only place
-  in the id where the RFC leaves bits free — never the version.
-- **`F nn` (class)** — 12 bits: a **family** nibble plus a **family-local code**. See §8.6.
-- **`iiii…` (node)** — 48 bits. Its zero-ness is what separates a type from an instance (§8.5).
+- **`m` (allocation mode)** — the RFC **variant** nibble. Its top 2 bits are fixed at `10`, so it
+  ranges `8`/`9`/`A`/`B`; the two free low bits are two independent dimensions (§8.5). This is the only
+  place in the id where the RFC leaves bits free — never the version.
+- **`F nn` (semantic class)** — 12 bits: a **family** nibble plus a **family-local code** (§8.6).
+- **`iiii…` (node)** — 48 bits. Its zero-ness is what separates a type from an instance (§8.7).
+
+**Read group-4 as `m` `F` `nn`.** `8005` is mode `8`, family `0`, code `05` — *not* "family 5". Low
+values like `001` and `005` are codes inside family `0`, never families of their own.
 
 **Neither a structured instance nor a structured type id is ever minted at runtime in production** —
 production instances are v7 and production type ids are v5 or hand-written constants. Structured ids
 are therefore only ever well-known constants, test fixtures, and `DeterministicSynqraIdProvider`
 output.
 
-### 8.5 Type ids vs instance ids
+### 8.5 Allocation mode `m` — a 2×2 matrix, not a flat enum
+
+RFC 9562 fixes the variant nibble's top bit and leaves **two free bits**. Those two bits encode two
+**orthogonal** dimensions — never a four-value enum:
+
+|  | pinned / manual | generated |
+|---|---|---|
+| **committed** registry | `8` | `A` |
+| **staging** registry | `9` | `B` |
+
+```
+8 = 1000    9 = 1001    A = 1010    B = 1011
+       ^^          ^^          ^^          ^^
+       ││          ││          ││          ││
+       │└─ staging bit (registry)
+       └── generated bit (provenance)
+```
+
+- **registry bit** — which **semantic registry** the family-local code was allocated in. The committed
+  and staging registries are **independent**: `8C02` and `9C02` share a class value but need not
+  describe the same thing.
+- **generated bit** — **provenance only**: was this id pinned by hand in a registry, or minted by a
+  provider? It never changes semantic identity.
+
+The two invariants that follow, and the one line to remember:
+
+> **The generated bit preserves semantic identity; the staging bit changes the registry.**
+
+- `8C02 ↔ AC02` and `9C17 ↔ BC17` are the *same* semantic allocation seen as a pinned type and as a
+  generated instance. `A` is the generated form of `8`; `B` is the generated form of `9`.
+- `9 → 8` is **promotion**, not a bit flip: a fresh allocation in the other registry, which may land on
+  a different local code (§8.10).
+
+| mode | `AllocationMode` | meaning |
+|---|---|---|
+| `8` | `CommittedPinned` | a firm, normative constant; changing it breaks persisted data |
+| `9` | `StagingPinned` | hand-pinned but still mutable — fixtures, designs in flight |
+| `A` | `CommittedGenerated` | minted by a provider, projecting a committed allocation |
+| `B` | `StagingGenerated` | minted by a provider, projecting a staging allocation |
+
+In code the raw nibble is the `[Flags] AllocationMode` enum (`Variant | Staging | Generated`), paired
+with bit-level helpers so nothing has to pretend `8`/`9`/`A`/`B` are unrelated values:
+`Guid.GetAllocationMode()`, `.IsCommitted()`, `.IsStaging()`, `.IsGenerated()`, `.IsPinned()`.
+
+### 8.6 Semantic class `Fnn`
+
+**`Fnn` is the 12-bit semantic class carried by a structured id.**
+
+```
+F nn
+│ └── code allocated inside that family and registry (8 bits)
+└──── semantic family                                (4 bits)
+```
+
+Semantic interpretation is therefore **`registry + Fnn`** — the mode's registry bit selects which
+registry the code was allocated in, while the generated bit contributes nothing to meaning. Helpers:
+`Guid.GetSemanticClass()` (12 bits), `.GetSemanticFamily()`, `.GetSemanticCode()`.
+
+Worked examples (families are Synqra-profile, §8.8):
+
+| id group-4 | mode | family | code | reads as |
+|---|---|---|---|---|
+| `8005` | committed + pinned | `0` default | `05` | the well-known stream constant |
+| `9A15` | staging + pinned | `A` message | `15` | a staging transport type |
+| `AA04` | committed + generated | `A` message | `04` | a generated instance of committed message type `04` |
+| `BE15` | staging + generated | `E` event | `15` | a generated instance of staging event type `15` |
+| `AC02` | committed + generated | `C` command | `02` | a generated instance of committed command type `02` |
+
+### 8.7 Type ids vs instance ids
 
 The **node** is the discriminator, and it is normative:
 
 | node | the id names | example |
 |---|---|---|
-| **all-zero** | a **type** | `…-8F05-000000000000` — a domain model type |
+| **all-zero** | a **type** | `…-8C01-000000000000` — a command type |
 | **non-zero** | one **instance** | `…-8005-000000000001` — stream #1 |
 
 - A type id MUST have an all-zero node. An instance id MUST NOT.
-- The family nibble tells you *which kind of thing*; the node tells you *type or instance*. `8005`
-  and `8F05` share the local code `05` and mean entirely different things.
-- The class inside an **instance** id is a **human-readability hint only**. Type resolution always
-  goes through an explicit type-id field (`TargetTypeId`, `ComponentTypeId`, the `_t` discriminator) —
-  never through an instance id. This matters because stage registries are independent (§8.8), so the
-  same class code can appear under two stages for two different types; that ambiguity is harmless
+- The semantic class inside an **instance** id is a **human-readability hint only**. Type resolution
+  always goes through an explicit type-id field (`TargetTypeId`, `ComponentTypeId`, the `_t`
+  discriminator) — never through an instance id. This matters because the registries are independent,
+  so the same class value can appear in both for two different types; that ambiguity is harmless
   precisely because nothing resolves a type from an instance id.
 
-### 8.6 Family registry
+---
+
+*Everything below is the **Synqra profile** of CODE v8: what the families and codes mean here.*
+
+### 8.8 Synqra profile — semantic families
 
 The family nibble is a **semantic grouping, not an inheritance root**. Where a family does have an
 abstract base type, that base takes local code `00`, intermediate shared bases take `0E`/`0F`, and
 concretes take `01`+.
 
-**Instance families** (node is a non-zero counter):
-
-| family | names | node | note |
-|---|---|---|---|
-| `0` | **singleton** | counter | a well-known one-off value — neither an instance of a model type nor a type. e.g. `SynqraTypeNamespaceId` (node `1`). |
-| `1` | **component** | instance counter | entity / component instances |
-| `2` | collection | instance counter | **retired** — do not re-allocate; existing fixtures still use it |
-| `3` | link | instance counter | **retired** — links fold into components |
-| `5` | container / **stream** | instance counter | moved here from `C` when that code was reassigned to command |
-| `C` | **command** | counter **spaced by `0x100`** | the low node byte is reserved for its derived events |
-| `E` | **event** | node inherited from its command | an event instance id is always *derived* (§8.7), never allocated independently |
-
-**Type families** (node all-zero, mandatory):
-
 | family | holds |
 |---|---|
-| `C` | **command** types |
-| `E` | **event** types |
+| `0` | **default / unqualified** — standalone well-known values and plain domain models |
 | `A` | **envelopes / messages** — storage and wire envelopes |
-| `3` | **link** types — retiring with the link vocabulary |
-| `F` | **domain models** — anything that is neither a command nor an event |
+| `C` | **commands** |
+| `E` | **events** |
 
-`F` is the highest nibble on purpose: it keeps a domain type visually clear of the low instance
-families. A consumer type (a Quotaly feature model, a test model) belongs in `F`.
+There is no generic-model family: a domain model type lives in family `0`. (An earlier draft used `F`
+for that; it is dropped, and all `F` allocations were migrated into family `0`.)
 
-### 8.7 Event-id derivation
+Family `0` is a single code space shared by well-known values, core instance kinds and model types —
+the node (§8.7) says which of those an id is:
+
+| code | names | note |
+|---|---|---|
+| `00` | **no semantic type** — a standalone well-known value | e.g. `SynqraTypeNamespaceId` (node `1`) |
+| `01` | component / entity | instance counter |
+| `02` | collection | **retired** — do not re-allocate |
+| `03` | link | **retired** — links fold into components |
+| `05` | container / **stream** | instance counter |
+| `0C` | — | **never allocate.** `00C` is family `0` code `0C`, not "a command"; commands are family `C` |
+| `40`+ | staging-registry test model types | |
+| `80`–`FF` | synthesised by `DeterministicSynqraIdProvider` for a type that has no allocated code | visibly "unallocated" |
+
+Instances in the other families: a **command** instance node is spaced by `0x100`, reserving its low
+byte for the events it expands into; an **event** instance node is always *derived* from its command
+(§8.9), never allocated independently.
+
+### 8.9 Synqra profile — event-id derivation
 
 Events are **derived, not random**: each event a command expands to gets
 `GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal)`. This makes the command→event
 expansion reproducible across nodes and replays (core.md §8) with no clock and no shared counter.
 
-- **Opaque command id (production, v7).** There is nowhere to put a class, so derivation is exactly
-  `Derive(commandId, ordinal)` — the command's v7 with its low bytes incremented. The derived id stays
-  a time-ordered v7 sorting adjacent to its command, and `Derive(cmd, 0) == cmd`. **Production event
-  ids are bit-for-bit unchanged by the structured rules below.**
-- **Structured command id (`C0DE` v8).** The id *does* have a class field, and leaving the command's
-  own `Cnn` there would label every derived event as a command. So:
-  - the **event's own `Enn` class** (read from `eventTypeId`) replaces the command's class,
-  - the command's **stage is kept**,
-  - only the **48-bit node** advances by `ordinal`, so a carry can never reach the class.
-  - Consequently `DeriveEventId(cmd, evType, 0) != cmd` for a structured id — the ordinal-0 wrapper
-    now names its own event type (`8E0E` `CommandCreatedEvent`) instead of aliasing the command.
-- If the event type has no structured id of its own, derivation degrades to plain `Derive` rather than
-  inventing a class.
-- Node overflow is an error, not a wrap: `DeriveEventId` throws rather than let the node carry.
+- **Opaque command id (production, v7).** There is nowhere to put a semantic class, so derivation is
+  exactly `Derive(commandId, ordinal)` — the command's v7 with its low bytes incremented. The derived
+  id stays a time-ordered v7 sorting adjacent to its command, and `Derive(cmd, 0) == cmd`. **Production
+  event ids are bit-for-bit unchanged by the structured rules below.**
+- **Structured command id (`C0DE` v8).** The result is composed from three sources:
+
+  | field | taken from |
+  |---|---|
+  | company hash, project/space, base node | the **command instance** |
+  | registry bit, semantic family, semantic code | the **event type** |
+  | generated bit | the **derivation** itself |
+
+  So a committed event type `8E03` yields `AE03`, and a staging event type `9E15` yields `BE15` —
+  never `9E03`, and never the command's own `Cnn`. The command instance's own mode is deliberately
+  **not** consulted: a staging-pinned command still derives a committed-generated event from a
+  committed event type.
+- Only the **48-bit node** advances by `ordinal`, so a carry can never reach the mode or the class.
+  Node overflow is an error, not a wrap.
+- Consequently `DeriveEventId(cmd, evType, 0) != cmd` for a structured id — the ordinal-0 wrapper names
+  its own event type (`8E0E` `CommandCreatedEvent`) instead of aliasing the command.
+- A structured command whose **event type has no structured id** is an **error**, not a fallback:
+  emitting the command's own `Cnn` as the event's class would be a false semantic claim.
 
 Because the node advances and the class is replaced, fixtures MUST space command ids by `0x100`
-(`…-9C01-…000100`, `…-9C01-…000200`) so a command's events fill its low byte without colliding with
-the next command: `…-9E0E-…000100` (wrapper, ordinal 0), `…-9E01-…000101`, `…-9E01-…000102`, …
+(`…-AC01-…000100`, `…-AC01-…000200`) so a command's events fill its low byte without colliding with
+the next command: `…-AE0E-…000100` (wrapper, ordinal 0), `…-AE01-…000101`, `…-AE01-…000102`, …
 
-### 8.8 Stages (the variant nibble)
+Under test, `DeterministicSynqraIdProvider` mints generated ids with a per-class counter, keeping the
+registry of the type being instantiated: a committed type yields `A…`, a staging type `B…`. It never
+mints a family-less generic id.
 
-The stage says **how firm an allocation is**, not what environment it runs in:
+### 8.10 Promotion between registries
 
-| stage | meaning |
-|---|---|
-| `8` | **committed** — a real production constant; changing it breaks persisted data |
-| `9` | **staging** — hand-written and pinned, but not yet a committed allocation (test fixtures, types still settling) |
-| `A` | **auto-generated** — minted during a test run by `DeterministicSynqraIdProvider` |
-| `B` | reserved |
+A staging type that settles is **re-allocated** into the committed registry. Promotion changes the
+registry bit *and may change the local code*, because the two registries number independently:
 
-- Each stage has its **own registry**. A stage-`9` code is NOT reserved in stage `8`, and promoting a
-  type from `9` to `8` does NOT entitle it to the same local code.
-- Fixed test guids MUST stay RFC-valid — never the all-zero `00000000-0000-0000-0000-…` (version 0 is
-  not a legal UUID). Use the internal structured form `C0DE0000-0000-8000-9Fnn-…`.
-- Under test, `DeterministicSynqraIdProvider` mints stage-`A` ids with a per-class counter, so
-  production code under test still produces clean, stable, readable ids. It never mints a family-less
-  generic id.
+```
+before:                        after:
+  9A15  pinned staging type      8A04  pinned committed type
+  BA15  generated instance       AA04  generated instance
+```
 
-### 8.9 Reserved built-in type ids (registry)
+- `9A15 → 8A04` — promotion. There is no entitlement to `8A15`; the committed allocator picks the next
+  free committed code.
+- `8A04 ↔ AA04` and `9A15 ↔ BA15` — the same allocation, pinned vs generated. These pairings are
+  guaranteed; the promotion arrow is not.
+- Retired committed allocations are not re-used.
+
+### 8.11 Reserved built-in type ids (registry)
 
 Every built-in Synqra type carries an explicit `[SynqraModel("C0DEADD0-1032-8000-<g4>-000000000000")]`:
 company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + default project/space, node
-all-zero = the type itself. Group-4 `<g4>` = `<stage><family><nn>`.
+all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 **A command and the event it emits share `nn`** (e.g. `8C01` `AddComponentCommand` → `8E01`
 `ComponentAddedEvent`). Keep this table in sync when adding a built-in type.
 
@@ -334,20 +424,31 @@ all-zero = the type itself. Group-4 `<g4>` = `<stage><family><nn>`.
 | `9A05` | `SubscriptionState` | staging | master → client, authoritative set |
 
 > **Open question — promote the `9A0x` transport ids.** Family `A` is their permanent home; only the
-> stage nibble is unsettled. They are production types still sitting in **staging**. Moving them to
-> stage `8` is cheap only while no long-lived data carries them — these are ephemeral transport
-> messages whose peers deploy together, so the window is now. Per §8.8 they would need fresh stage-`8`
-> local codes (`8A00` is `Item`); a promotion does not carry the number across.
+> registry bit is unsettled. They are production types still sitting in **staging**. Moving them to the
+> committed registry is cheap only while no long-lived data carries them — these are ephemeral
+> transport messages whose peers deploy together, so the window is now. Per §8.10 they would need fresh
+> committed local codes (`8A00` is `Item`); a promotion does not carry the number across.
 
-### 8.10 Legacy and retired
+> **Open question — the `9Cxx`/`9Exx` "dying" built-ins.** `ObjectPropertyChangedEvent`, `LinkAddedEvent`
+> and `LinkRemovedEvent` are shipped, persisted types sitting in the *staging* registry, which is now
+> load-bearing: their generated instances derive as `B…` rather than `A…`. They are on the way out with
+> the object/link vocabulary, so they are left alone; re-allocating them into the committed registry
+> would change persisted identity and needs `[SynqraLegacyTypeId]` aliases.
+
+### 8.12 Legacy and retired
 
 - **Retired: the default/root stream reservation.** A stream id is mandatory and has no default.
 - **Retired: the MasterId scheme** (term/sequence/collection ordering). There is no master election
   and no monotonic cluster clock.
-- **Retired instance families `2` (collection) and `3` (link).** Existing fixtures still carry them;
+- **Retired: family `F`** as the generic-model bucket. Domain models live in family `0`; the former
+  `F` allocations were migrated, and `F` MUST NOT be re-introduced as a family.
+- **Retired family-`0` codes `02` (collection) and `03` (link).** Existing fixtures still carry them;
   they MUST NOT be re-allocated.
-- **`E` is never an instance family for independently-allocated ids.** An event instance id is always
-  derived from its command (§8.7).
+- **`00C` is not a command.** It is family `0` code `0C` — a generic "some command" instance class that
+  briefly existed and MUST NOT return. Commands are family `C`, and a command instance carries the
+  `Cnn` of the concrete command type it is.
+- **`E` is never a family for independently-allocated instance ids.** An event instance id is always
+  derived from its command (§8.9).
 - **Changing a type's id** after data exists requires keeping the previous id as
   `[SynqraLegacyTypeId(oldId, when, why)]` so persisted events still resolve. A brand-new type has no
   history and MUST NOT be given one.
@@ -355,6 +456,9 @@ all-zero = the type itself. Group-4 `<g4>` = `<stage><family><nn>`.
   all, so it falls back to a v5 derived id. It escapes the built-in guard because that guard tests
   `Namespace.StartsWith("Synqra.")` — with the dot. Assigning it an id now would change persisted
   identity, so it is left as-is and recorded here.
+- **This revision is the baseline.** Committed (`8`) allocations are firm from here; staging (`9`) is
+  the working registry; `A`/`B` are their generated projections. No compatibility aliases were added
+  for earlier drafts of this convention.
 
 ## 9. Storage & projections
 

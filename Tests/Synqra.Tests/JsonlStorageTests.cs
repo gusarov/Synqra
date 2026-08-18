@@ -183,7 +183,7 @@ public abstract class AppendStorageTests : BaseTest
 			CommandId    = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			EventId      = new Guid("C0DE0000-0000-8000-9E01-000000000101"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000001"),
-			TargetTypeId = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9040-000000000000"),
 		};
 		await storage.AppendAsync(item1);
 
@@ -193,7 +193,7 @@ public abstract class AppendStorageTests : BaseTest
 			CommandId    = new Guid("C0DE0000-0000-8000-9C01-000000000200"),
 			EventId      = new Guid("C0DE0000-0000-8000-9E01-000000000201"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-000000000002"),
-			TargetTypeId = new Guid("C0DE0000-0000-8000-9F02-000000000000"),
+			TargetTypeId = new Guid("C0DE0000-0000-8000-9041-000000000000"),
 		};
 		await storage.AppendAsync(item2);
 
@@ -587,16 +587,16 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	{
 		// Internal-test well-known guids (see docs/model.md §8): an AddComponentCommand instance 9C01-…100
 		// and its derived ComponentAddedEvent 9E01-…101 — same node +1, but the event carries its own
-		// class. The root-component *type* is 9F04-…000 (family F, all-zero node) and its instance is
-		// 9001-…103 (family 001).
+		// semantic class. The root-component *type* is 9042-…000 (family 0 code 42, all-zero node) and its
+		// instance is 9001-…103 (family 0 code 01).
 		var ev = new ComponentAddedEvent
 		{
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000101"),
 			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			EventId         = new Guid("C0DE0000-0000-8000-9E01-000000000101"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000103"),
-			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F04-000000000000"),
-			ComponentTypeId = new Guid("C0DE0000-0000-8000-9F04-000000000000"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9042-000000000000"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9042-000000000000"),
 			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000103"),
 		};
 		await _storage.AppendAsync(ev);
@@ -619,15 +619,15 @@ public class EventsJsonlStorageTests : JsonAppendStorageTests<Event, Guid>
 	public async Task Should_round_trip_scalar_only_events_through_jsonl()
 	{
 		var targetId1      = new Guid("C0DE0000-0000-8000-9001-0000000000A1");
-		var targetType1    = new Guid("C0DE0000-0000-8000-9FA2-000000000000");
+		var targetType1    = new Guid("C0DE0000-0000-8000-90A2-000000000000");
 		var collection1    = new Guid("C0DE0000-0000-8000-9002-0000000000A3");
-		var componentType1 = new Guid("C0DE0000-0000-8000-9FA4-000000000000");
+		var componentType1 = new Guid("C0DE0000-0000-8000-90A4-000000000000");
 		var componentId1   = new Guid("C0DE0000-0000-8000-9001-0000000000A5");
 
 		var targetId2      = new Guid("C0DE0000-0000-8000-9001-0000000000A6");
-		var targetType2    = new Guid("C0DE0000-0000-8000-9FA7-000000000000");
+		var targetType2    = new Guid("C0DE0000-0000-8000-90A7-000000000000");
 		var collection2    = new Guid("C0DE0000-0000-8000-9002-0000000000A8");
-		var componentType2 = new Guid("C0DE0000-0000-8000-9FA9-000000000000");
+		var componentType2 = new Guid("C0DE0000-0000-8000-90A9-000000000000");
 		var componentId2   = new Guid("C0DE0000-0000-8000-9001-0000000000AA");
 
 		await _storage.AppendAsync(new ComponentDeletedEvent

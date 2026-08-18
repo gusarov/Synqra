@@ -72,24 +72,25 @@ public class JsonSerializationTests
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		// Internal-test well-known guids (C0DE prefix, 0000 hash = internal; see docs/model.md §8). Group-3
-		// 8000 = version 8 (fixed) + project 0. Group-4 = stage nibble (RFC 10xx free bits: 8 = committed,
-		// 9 = staging/hand-written, A = auto-generated test — so 9 here) + a 12-bit class made of a family
-		// nibble and a family-local code. Instance families: 001 component, 002 collection, 005 stream.
-		// Type families: C commands, E events, F domain models — a type always has an all-zero node, an
-		// instance never does. So 9C01 = an AddComponentCommand instance, 9E01 = a ComponentAddedEvent
-		// instance, 9001-…003 = a component instance, and 9F01-…000 = the SampleTaskModel *type*.
+		// 8000 = version 8 (fixed) + project 0. Group-4 reads m/F/nn: an allocation-mode nibble (RFC 10xx
+		// free bits — 8 committed+pinned, 9 staging+pinned, A committed+generated, B staging+generated; 9
+		// here, these are hand-pinned fixtures) plus a 12-bit semantic class of a family nibble and a
+		// family-local code. Families: 0 default/unqualified (code 01 component, 02 collection, 05 stream,
+		// 40+ test model types), C commands, E events. A type always has an all-zero node, an instance
+		// never does. So 9C01 = an AddComponentCommand instance, 9001-…003 = a component instance, and
+		// 9040-…000 = the SampleTaskModel *type*.
 		// Readable stand-ins — real type ids are v5/v8 hashes, real instances are v7, neither a C0DE value.
 		// Commands are spaced by 0x100 so their derived events fit the low node byte without colliding with
-		// the next command; the CommandCreatedEvent wrapper is ordinal 0, and because the derivation swaps
-		// in the event's own class it lands on 9E0E-…100 rather than reusing the command id.
+		// the next command; the CommandCreatedEvent wrapper is ordinal 0, and because derivation takes the
+		// event type's own registry and class it lands on AE0E-…100 rather than reusing the command id.
 		var cmd = new AddComponentCommand
 		{
 			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9040-000000000000"),
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000003"),
-			ComponentTypeId = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9040-000000000000"),
 			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000003"),
 			Data            = new SampleTaskModel
 			{
@@ -170,10 +171,10 @@ public class JsonSerializationTests
 		{
 			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-9040-000000000000"),
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
 			TargetId        = new Guid("C0DE0000-0000-8000-9001-000000000003"),
-			ComponentTypeId = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-9040-000000000000"),
 			ComponentId     = new Guid("C0DE0000-0000-8000-9001-000000000003"),
 			Data            = new SampleTaskModel
 			{
