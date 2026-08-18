@@ -72,18 +72,19 @@ public class JsonSerializationTests
 	{
 		var subject = "Test Subject " + Guid.NewGuid().ToString("N");
 		// Internal-test well-known guids (C0DE prefix, 0000 hash = internal; see docs/model.md §8). Group-3
-		// 8000 = version 8 (fixed) + project 0. Group-4 = variant nibble (RFC 10xx free bits: 8=prod, 9=test —
-		// so 9 here) + 12-bit class: 900C=command, 9005=container/stream, 9001=class 001 Component (a component
-		// *instance* — TargetId/ComponentId, 9001-…003). An all-zero node is a class-self-reference (the type
-		// itself); a concrete/user type lives in the F class-space (the low 00x codes are reserved for the
-		// built-in kinds), so TargetTypeId/ComponentTypeId here are 9F01-…000 (the SampleTaskModel type).
-		// Readable stand-ins — real type ids are v8 hashes, real instances are v7, neither a C0DE value.
-		// Commands are spaced by 0x100 so their derived events (Derive(CommandId, ordinal) = CommandId +
-		// ordinal) fit in the low byte without colliding with the next command; the CommandCreatedEvent
-		// wrapper is ordinal 0, so its EventId == the command id (same 800C space, not a separate event class).
+		// 8000 = version 8 (fixed) + project 0. Group-4 = stage nibble (RFC 10xx free bits: 8 = committed,
+		// 9 = staging/hand-written, A = auto-generated test — so 9 here) + a 12-bit class made of a family
+		// nibble and a family-local code. Instance families: 001 component, 002 collection, 005 stream.
+		// Type families: C commands, E events, F domain models — a type always has an all-zero node, an
+		// instance never does. So 9C01 = an AddComponentCommand instance, 9E01 = a ComponentAddedEvent
+		// instance, 9001-…003 = a component instance, and 9F01-…000 = the SampleTaskModel *type*.
+		// Readable stand-ins — real type ids are v5/v8 hashes, real instances are v7, neither a C0DE value.
+		// Commands are spaced by 0x100 so their derived events fit the low node byte without colliding with
+		// the next command; the CommandCreatedEvent wrapper is ordinal 0, and because the derivation swaps
+		// in the event's own class it lands on 9E0E-…100 rather than reusing the command id.
 		var cmd = new AddComponentCommand
 		{
-			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
 			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
@@ -97,9 +98,9 @@ public class JsonSerializationTests
 		};
 		var obj = new CommandCreatedEvent
 		{
-			CommandId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId  = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			EventId   = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			EventId   = new Guid("C0DE0000-0000-8000-9E0E-000000000100"),
 			Data      = cmd,
 		};
 		async Task Check(JsonSerializerOptions ctx)
@@ -167,7 +168,7 @@ public class JsonSerializationTests
 		// 9F01-…000 (the SampleTaskModel type) — readable stand-ins (real type ids are v8 hashes, instances are v7).
 		var cmd = new AddComponentCommand
 		{
-			CommandId       = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId       = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId        = new Guid("C0DE0000-0000-8000-9005-000000000001"),
 			TargetTypeId    = new Guid("C0DE0000-0000-8000-9F01-000000000000"),
 			CollectionId    = new Guid("C0DE0000-0000-8000-9002-000000000002"),
@@ -182,9 +183,9 @@ public class JsonSerializationTests
 		};
 		var @event = new CommandCreatedEvent
 		{
-			CommandId = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			CommandId = new Guid("C0DE0000-0000-8000-9C01-000000000100"),
 			StreamId  = new Guid("C0DE0000-0000-8000-9005-000000000001"),
-			EventId   = new Guid("C0DE0000-0000-8000-900C-000000000100"),
+			EventId   = new Guid("C0DE0000-0000-8000-9E0E-000000000100"),
 			Data      = cmd,
 		};
 		var operation = new EventEnvelope

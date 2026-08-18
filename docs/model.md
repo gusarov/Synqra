@@ -127,133 +127,185 @@ homomorphic world-hash over the reachable set, snapshot/compaction horizon. When
 alive-set must stay *explicit* (tombstone transitions), never inferred from lazy reachability —
 that is the only form that marries with real-time world-hashing (see Historical §H).
 
-## 8. Ids (v7 data, v8 system)
+## 8. Ids
 
-- **v7 GUIDs** for all data (entities, components, links) — monotonic, totally ordered (undirected
-  `min` folding relies on this order).
-- **Event ids are derived, not random.** Each event a command expands to gets `Derive(CommandId,
-  ordinal)` — the command's client-generated v7 id with its low random bits incremented by a small
-  per-command ordinal (the wrapper `CommandCreatedEvent` = ordinal 0, domain events start at 1).
-  This makes the command→event expansion reproducible across nodes and replays (core.md §8) with no
-  clock or shared counter, and the derived id stays a time-ordered v7 that sorts adjacent to its
-  command. (Modelled on the Todo predecessor's id layout: a reserved low-bytes counter region +
-  increment.)
-- **v8 `C0DE…` GUIDs** for well-known/system ids (RFC 9562, application-defined layout — authoritative
-  source `Synqra.Model/SynqraGuids.cs`). The version nibble structurally marks "system/well-known" vs
-  v7 data. Layout `C0DE yyyy-yyyy 8prs vCCC iiii…` — group-3 `8prs` = version + **project** + **space**;
-  group-4 `vCCC` = **env**-variant + a full 3-nibble **class** (project/space were moved into group-3 so
-  the class owns all of group-4's tail):
-  - **`C0DE`** — magic prefix (hex-readable "CODE"); marks a custom/system UUID at a glance.
-  - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
-    (`synqra` → `ADD0 1032`). All-zero here = **internal** (framework/infrastructure, no external
-    company); a non-zero hash = an external company.
-  - **`8`** — RFC 9562 **version**, fixed at `8` (v8 = `1000`). This nibble is *not* free; it is the
-    version field and must stay `8`.
-  - **`prs`** — **project** + **space** (group-3's 3 low nibbles). `project = 0` = the company's main
-    affairs / core project (e.g. Synqra itself); `space` sub-partitions within a project. Both `0` for the
-    default/internal project+space (so group-3 reads `8000`). The **project/space boundary is intentionally
-    left unspecified** — how these nibbles divide between project and space is a *company-wide* allocation:
-    within its own company-hash space each company splits them as it needs (more projects, or more space per
-    project) and owns the responsibility of avoiding its own collisions. A company that outgrows the whole
-    region simply takes a new company hash.
-  - **`v` (env / variant nibble)** — RFC **variant**: its top 2 bits are fixed at `10`, so it ranges
-    `8`/`9`/`a`/`b`. Its **2 free low bits are the environment / id-origin mode** (this is where the `10xx`
-    freedom lives — the *variant*, never the version):
-    - **`8`** = **prod / manual** — a real production id, or a manually-authored well-known id.
-    - **`9`** = **test / unittest** — a **hardcoded** test guid, hand-written and pinned (predictable).
-    - **`A`** = **test auto-incremented** — minted by the test guid generator during a run
-      (`TestGuids.NewAuto()` → `C0DE0000-0000-8000-A000-{n}`, a process-wide monotonic counter).
-    - **`B`** = reserved.
-  - **`CCC`** — 12-bit **class** (up to 4096). Read it as **category + specifier**: the *first* nibble is
-    the **category**, the remaining two are a counter within it. Category `0` means the id names an
-    **instance**; any other category means it names a **type**. See the class-code registry below.
-  - trailing bytes — the **node**. It is what tells the two apart: an **all-zero node means the id is a
-    type**; a non-zero node means it identifies one well-known **instance**. So `…-8005-…0001` is
-    stream #1 (an instance) while `…-8F05-000000000000` is a model type — same `05`, different category
-    nibble, different meaning.
-  - **Neither shape is ever minted at runtime.** In production an instance id is plain **v7** and a
-    `[SynqraModel]` type with no explicit id gets a **v5** (SHA-1) hash under `SynqraTypeNamespaceId`
-    (`TypeMetadataProvider`) — neither is a `C0DE` value. Hand-written `C0DE` ids are therefore only ever
-    well-known constants and test fixtures.
-- **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
-  a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8000-9CCC-…` (`C0DE` magic
-  prefix, zero company-hash `0000-0000` = internal, group-3 `8000` = **version 8 / project 0**,
-  variant nibble `9` = **test**): `…-9001-…0003` = a class `001` **Component** instance, `…-900C-…` commands,
-  `…-9005-…` containers/stream ids. A **type** flips the category nibble away from `0` and zeroes the node —
-  e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003` component instances it types.
-  (Prod flips the variant nibble to `8`: `…-8F01-…` etc.)
-- **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
-  same class as the command — see the event-id bullet above), a command's derived events live in the
-  command's own id space. So **space command ids by `0x100`** in fixtures
-  (`…-800C-…000100`, `…-800C-…000200`) to reserve the low byte for their events: the wrapper
-  `CommandCreatedEvent` is ordinal 0 (`…000100`), domain events are `…000101`, `…000102`, … There is
-  no separate `800E` event class for these instance ids — a derived event inherits its command's class.
-  The all-zero **instance** tail (`…-000000000000`) is reserved.
-- **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
-  The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
-  election or monotonic cluster clock.
-- **`SynqraTypeNamespaceId`** — the object-type namespace, itself a class `000` **singleton** (node `1`):
-  `C0DEADD0-1032-8000-8000-000000000001`. It is the fixed salt fed to `CreateVersion5(namespace,
-  type.FullName)` for any `[SynqraModel]` type that has no explicit id. It is a persisted contract
-  (derived type ids are written into stored events), so once data exists it must not change. It was
-  migrated once from the legacy random salt `BAD8F923-FA74-4CA0-9AA3-70BB874ACC76`; consumer types
-  that were persisted under the old salt carry `[SynqraLegacyTypeId(oldId, when, why)]` aliases so
-  their existing events still resolve.
+### 8.1 The three mechanisms at a glance
 
-### Class codes (`CCC`) (registry)
+Synqra mints exactly three shapes of GUID. Which one applies is decided by *what the id names*, never
+by the call site's convenience.
 
-`CCC` is **category + specifier**. The first nibble is the category; it decides whether the id names an
-instance or a type, and the node confirms it (non-zero = instance, all-zero = type). Keep both tables in
-sync when reserving a code.
+| shape | version | used for | minted by | readable? |
+|---|---|---|---|---|
+| **opaque instance** | **v7** | every runtime instance — entities, components, commands, events | `ISynqraIdProvider` (production) | no — time-ordered only |
+| **derived type id** | **v5** | a `[SynqraModel]` type with no explicit id | `TypeMetadataProvider` (SHA-1 over `type.FullName`) | no |
+| **structured id** | **v8** `C0DE…` | well-known constants, and test fixtures | hand-written, or `DeterministicSynqraIdProvider` under test | **yes** — carries stage + class |
 
-**Category `0` — instance classes** (node is a non-zero counter):
+A structured id is the only shape with meaning inside it. The other two are opaque by design and
+callers MUST NOT try to read structure out of them — use `Guid.IsStructuredId()` before reading a
+stage or a class.
 
-| `CCC` | class | node / instance tail | note |
-|---|---|---|---|
-| `000` | **singleton** | counter of singletons | a well-known one-off value — neither an instance of a model type nor a type. e.g. `SynqraTypeNamespaceId` = `…-8000-000000000001` (node `1`). All-zero node reserved. |
-| `001` | **component** | instance counter | entity / component instances |
-| `002` | collection | instance counter | **retired** — do not re-allocate; existing fixtures still use it |
-| `003` | link | instance counter | **retired** — links fold into components; do not re-allocate |
-| `005` | container / **stream** | instance counter | moved here from `00C` when that code was reassigned to command |
-| `00C` | **command** | instance counter, **spaced by `0x100`** | the low byte is reserved for the command's derived events, which inherit its class |
-| `00E` | — | — | **deliberately never allocated**: a derived event's instance id lives in its command's class, so an event *instance* class must not exist |
+### 8.2 v7 — instance ids
 
-**Categories `A`/`C`/`E`/`F` — type codes** (node **all-zero**, mandatory):
+- **v7 GUIDs for all data** (entities, components, links) — monotonic and totally ordered, which the
+  undirected `min` folding relies on.
+- Production instance ids come from `ISynqraIdProvider` (`CreateComponentId`, `CreateStreamId`,
+  `CreateCommandId`, …). Call sites MUST take the provider from DI; there is no ambient static
+  factory. `SynqraIdProvider.Default` exists only for the rare non-DI construction path.
+- Command ids are minted **spaced by `0x100`**, reserving the low node byte for the events that
+  command expands into (§8.7).
 
-| category | holds | members |
+### 8.3 v5 — derived type ids
+
+A `[SynqraModel]` type that declares no explicit id gets `CreateVersion5(SynqraTypeNamespaceId,
+type.FullName)` — a SHA-1 hash, opaque and high-entropy.
+
+- **`SynqraTypeNamespaceId`** = `C0DEADD0-1032-8000-8000-000000000001` (a family-`0` singleton, node
+  `1`). It is the fixed salt, and a **persisted contract**: derived type ids are written into stored
+  events as the `_t` discriminator, so once data exists it MUST NOT change.
+- It was migrated once from the legacy random salt `BAD8F923-FA74-4CA0-9AA3-70BB874ACC76`. Consumer
+  types persisted under the old salt carry `[SynqraLegacyTypeId(oldId, when, why)]` aliases so their
+  existing events still resolve.
+- Because a derived id is unreadable and appears in *every* event of that type, authors SHOULD give a
+  type an explicit structured id instead (§8.6). Built-in Synqra types all do.
+
+### 8.4 v8 `C0DE…` — the structured layout
+
+Authoritative source: `Synqra.Model/SynqraGuids.cs`.
+
+```
+C0DE yyyy-yyyy 8prs  s F nn  iiiiiiiiiiii
+│    │         │     │ │ │   └── node
+│    │         │     │ │ └────── family-local code   (8 bits)
+│    │         │     │ └──────── family              (4 bits)  ┐ together the
+│    │         │     └────────── stage               (4 bits)  ┘ 12-bit class
+│    │         └──────────────── version 8 + project + space
+│    └────────────────────────── company hash
+└─────────────────────────────── magic prefix
+```
+
+- **`C0DE`** — magic prefix (hex-readable "CODE"); marks a structured id at a glance. A v8 GUID
+  *without* this prefix is an unrelated hash and MUST NOT be parsed as structured.
+- **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
+  (`synqra` → `ADD0 1032`, `quotaly` → `7F1D 6199`). All-zero = **internal** (framework
+  infrastructure and Synqra's own test fixtures, no external company).
+- **`8`** — RFC 9562 **version**, fixed at `8`. This nibble is the version field and MUST stay `8`.
+- **`prs`** — **project** + **space**. Both `0` for the default project and space, so group-3 reads
+  `8000`. The project/space boundary is deliberately unspecified: within its own company hash each
+  company splits these three nibbles as it needs and owns avoiding its own collisions. A company that
+  outgrows the region takes a new company hash.
+- **`s` (stage)** — the RFC **variant** nibble. Its top 2 bits are fixed at `10`, so it ranges
+  `8`/`9`/`A`/`B`; the two free low bits carry the **allocation stage** (§8.8). This is the only place
+  in the id where the RFC leaves bits free — never the version.
+- **`F nn` (class)** — 12 bits: a **family** nibble plus a **family-local code**. See §8.6.
+- **`iiii…` (node)** — 48 bits. Its zero-ness is what separates a type from an instance (§8.5).
+
+**Neither a structured instance nor a structured type id is ever minted at runtime in production** —
+production instances are v7 and production type ids are v5 or hand-written constants. Structured ids
+are therefore only ever well-known constants, test fixtures, and `DeterministicSynqraIdProvider`
+output.
+
+### 8.5 Type ids vs instance ids
+
+The **node** is the discriminator, and it is normative:
+
+| node | the id names | example |
 |---|---|---|
-| `C` | **command** types | `8C00` `Command` (base) · `8C0F` `SingleObjectCommand` (shared base) · `8C01`–`8C03` concretes |
-| `E` | **event** types | `8E00` `Event` (base) · `8E0E` `CommandCreatedEvent` · `8E0F` `SingleObjectEvent` (shared base) · `8E01`–`8E03` concretes |
-| `A` | **envelopes / messages** | `8A00` `Item` (storage envelope) · `9A01`–`9A05` `TransportOperation` + wire messages |
-| `3` | **link** types | `9300` `Link` (base) — retiring with the link vocabulary |
-| `F` | **domain models** — anything that is neither a command nor an event | `8F01`+ (consumer model types) |
+| **all-zero** | a **type** | `…-8F05-000000000000` — a domain model type |
+| **non-zero** | one **instance** | `…-8005-000000000001` — stream #1 |
 
-The category is a **semantic grouping, not an inheritance root**: `F` members share only an interface (and
-not all of them), and `A` holds two unrelated envelope roots. Where a category *does* have an abstract base
-type, that base takes specifier `00`, intermediate shared bases take `0E`/`0F`, and concrete types take
-`01`+. `F` is the highest nibble on purpose — it keeps a type id visually clear of the `0` instance
-classes (`8005` = stream instance vs `8F05` = a model type).
+- A type id MUST have an all-zero node. An instance id MUST NOT.
+- The family nibble tells you *which kind of thing*; the node tells you *type or instance*. `8005`
+  and `8F05` share the local code `05` and mean entirely different things.
+- The class inside an **instance** id is a **human-readability hint only**. Type resolution always
+  goes through an explicit type-id field (`TargetTypeId`, `ComponentTypeId`, the `_t` discriminator) —
+  never through an instance id. This matters because stage registries are independent (§8.8), so the
+  same class code can appear under two stages for two different types; that ambiguity is harmless
+  precisely because nothing resolves a type from an instance id.
 
-> **Known exception.** `C0DE0000-0000-8000-9040-…` / `-9041-…` (`SynqraModelAttributeTests`) are *type*
-> ids sitting in category `0` under an older flat-numbering scheme. They predate the category split and
-> are the only ids that violate the rule above.
+### 8.6 Family registry
 
-### Reserved built-in type ids (registry)
+The family nibble is a **semantic grouping, not an inheritance root**. Where a family does have an
+abstract base type, that base takes local code `00`, intermediate shared bases take `0E`/`0F`, and
+concretes take `01`+.
+
+**Instance families** (node is a non-zero counter):
+
+| family | names | node | note |
+|---|---|---|---|
+| `0` | **singleton** | counter | a well-known one-off value — neither an instance of a model type nor a type. e.g. `SynqraTypeNamespaceId` (node `1`). |
+| `1` | **component** | instance counter | entity / component instances |
+| `2` | collection | instance counter | **retired** — do not re-allocate; existing fixtures still use it |
+| `3` | link | instance counter | **retired** — links fold into components |
+| `5` | container / **stream** | instance counter | moved here from `C` when that code was reassigned to command |
+| `C` | **command** | counter **spaced by `0x100`** | the low node byte is reserved for its derived events |
+| `E` | **event** | node inherited from its command | an event instance id is always *derived* (§8.7), never allocated independently |
+
+**Type families** (node all-zero, mandatory):
+
+| family | holds |
+|---|---|
+| `C` | **command** types |
+| `E` | **event** types |
+| `A` | **envelopes / messages** — storage and wire envelopes |
+| `3` | **link** types — retiring with the link vocabulary |
+| `F` | **domain models** — anything that is neither a command nor an event |
+
+`F` is the highest nibble on purpose: it keeps a domain type visually clear of the low instance
+families. A consumer type (a Quotaly feature model, a test model) belongs in `F`.
+
+### 8.7 Event-id derivation
+
+Events are **derived, not random**: each event a command expands to gets
+`GuidExtensions.DeriveEventId(commandId, eventTypeId, ordinal)`. This makes the command→event
+expansion reproducible across nodes and replays (core.md §8) with no clock and no shared counter.
+
+- **Opaque command id (production, v7).** There is nowhere to put a class, so derivation is exactly
+  `Derive(commandId, ordinal)` — the command's v7 with its low bytes incremented. The derived id stays
+  a time-ordered v7 sorting adjacent to its command, and `Derive(cmd, 0) == cmd`. **Production event
+  ids are bit-for-bit unchanged by the structured rules below.**
+- **Structured command id (`C0DE` v8).** The id *does* have a class field, and leaving the command's
+  own `Cnn` there would label every derived event as a command. So:
+  - the **event's own `Enn` class** (read from `eventTypeId`) replaces the command's class,
+  - the command's **stage is kept**,
+  - only the **48-bit node** advances by `ordinal`, so a carry can never reach the class.
+  - Consequently `DeriveEventId(cmd, evType, 0) != cmd` for a structured id — the ordinal-0 wrapper
+    now names its own event type (`8E0E` `CommandCreatedEvent`) instead of aliasing the command.
+- If the event type has no structured id of its own, derivation degrades to plain `Derive` rather than
+  inventing a class.
+- Node overflow is an error, not a wrap: `DeriveEventId` throws rather than let the node carry.
+
+Because the node advances and the class is replaced, fixtures MUST space command ids by `0x100`
+(`…-9C01-…000100`, `…-9C01-…000200`) so a command's events fill its low byte without colliding with
+the next command: `…-9E0E-…000100` (wrapper, ordinal 0), `…-9E01-…000101`, `…-9E01-…000102`, …
+
+### 8.8 Stages (the variant nibble)
+
+The stage says **how firm an allocation is**, not what environment it runs in:
+
+| stage | meaning |
+|---|---|
+| `8` | **committed** — a real production constant; changing it breaks persisted data |
+| `9` | **staging** — hand-written and pinned, but not yet a committed allocation (test fixtures, types still settling) |
+| `A` | **auto-generated** — minted during a test run by `DeterministicSynqraIdProvider` |
+| `B` | reserved |
+
+- Each stage has its **own registry**. A stage-`9` code is NOT reserved in stage `8`, and promoting a
+  type from `9` to `8` does NOT entitle it to the same local code.
+- Fixed test guids MUST stay RFC-valid — never the all-zero `00000000-0000-0000-0000-…` (version 0 is
+  not a legal UUID). Use the internal structured form `C0DE0000-0000-8000-9Fnn-…`.
+- Under test, `DeterministicSynqraIdProvider` mints stage-`A` ids with a per-class counter, so
+  production code under test still produces clean, stable, readable ids. It never mints a family-less
+  generic id.
+
+### 8.9 Reserved built-in type ids (registry)
 
 Every built-in Synqra type carries an explicit `[SynqraModel("C0DEADD0-1032-8000-<g4>-000000000000")]`:
 company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + default project/space, node
-`000000000000` = the type itself. Group-4 `<g4>` = `<env><category><nn>` — category `C` command · `E` event ·
-`3` link · `A` envelope/message *(provisional home)*; `nn` = type number (`00` = the category's base type,
-`0E`/`0F` = abstract shared bases, `01`+ = concretes).
+all-zero = the type itself. Group-4 `<g4>` = `<stage><family><nn>`.
 **A command and the event it emits share `nn`** (e.g. `8C01` `AddComponentCommand` → `8E01`
 `ComponentAddedEvent`). Keep this table in sync when adding a built-in type.
 
-> **Note — the `env` column below overloads the variant nibble.** Per the variant spec above, `9` means
-> *hardcoded-test*. This table instead uses `9` for two other things: **dying** (`9C0x`, `9E0x`, `9300` —
-> the retiring object/link vocabulary) and **provisional** (`9A0x` — production transport types parked in
-> test space). Three meanings for one nibble; see the open question at the end of this section.
-
-| g4 | type | env | note |
+| g4 | type | state | note |
 |---|---|---|---|
 | `8C00` | `Command` | live | command base |
 | `8C0F` | `SingleObjectCommand` | live | abstract shared base |
@@ -266,7 +318,7 @@ company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + defaul
 | `9C04` | `RemoveLinkCommand` | dying | ↔ `9E04` |
 | `8E00` | `Event` | live | event base |
 | `8E0F` | `SingleObjectEvent` | live | abstract shared base |
-| `8E0E` | `CommandCreatedEvent` | live | framework wrapper (not command-correlated) |
+| `8E0E` | `CommandCreatedEvent` | live | framework wrapper, ordinal 0 of every command |
 | `8E01` | `ComponentAddedEvent` | live | ↔ `8C01` |
 | `8E02` | `ComponentPropertyChangedEvent` | live | ↔ `8C02` |
 | `8E03` | `ComponentDeletedEvent` | live | ↔ `8C03` |
@@ -274,19 +326,35 @@ company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + defaul
 | `9E03` | `LinkAddedEvent` | dying | ↔ `9C03` |
 | `9E04` | `LinkRemovedEvent` | dying | ↔ `9C04` |
 | `9300` | `Link` | dying | link base |
-| `8A00` | `Item` | live | File-store envelope — **provisional category A** |
-| `9A01` | `TransportOperation` | prov | **provisional category A** |
-| `9A02` | `EventEnvelope` | prov | carries one event either direction — **provisional category A** |
-| `9A03` | `SubscribeRequest` | prov | client → master, refusable — **provisional category A** |
-| `9A04` | `UnsubscribeRequest` | prov | client → master, refusable — **provisional category A** |
-| `9A05` | `SubscriptionState` | prov | master → client, authoritative set — **provisional category A** |
+| `8A00` | `Item` | live | File-store envelope |
+| `9A01` | `TransportOperation` | staging | wire base |
+| `9A02` | `EventEnvelope` | staging | carries one event either direction |
+| `9A03` | `SubscribeRequest` | staging | client → master, refusable |
+| `9A04` | `UnsubscribeRequest` | staging | client → master, refusable |
+| `9A05` | `SubscriptionState` | staging | master → client, authoritative set |
 
-> **Open question — promote the `9A0x` transport ids.** `TransportOperation` and the four wire messages
-> are *production* types living in the `9` (test) variant, self-labelled `PROVISIONAL placement` in
-> `TransportOperations.cs`. They should move to the `8` variant. `8A00` is already taken by `Item`, so
-> either they take `8A01`–`8A05` alongside it, or envelopes split into two categories (storage vs wire).
-> Changing a `[SynqraModel]` id after data exists needs `[SynqraLegacyTypeId]` — but these are ephemeral
-> transport messages whose peers deploy together, so the window to move them cheaply is now.
+> **Open question — promote the `9A0x` transport ids.** Family `A` is their permanent home; only the
+> stage nibble is unsettled. They are production types still sitting in **staging**. Moving them to
+> stage `8` is cheap only while no long-lived data carries them — these are ephemeral transport
+> messages whose peers deploy together, so the window is now. Per §8.8 they would need fresh stage-`8`
+> local codes (`8A00` is `Item`); a promotion does not carry the number across.
+
+### 8.10 Legacy and retired
+
+- **Retired: the default/root stream reservation.** A stream id is mandatory and has no default.
+- **Retired: the MasterId scheme** (term/sequence/collection ordering). There is no master election
+  and no monotonic cluster clock.
+- **Retired instance families `2` (collection) and `3` (link).** Existing fixtures still carry them;
+  they MUST NOT be re-allocated.
+- **`E` is never an instance family for independently-allocated ids.** An event instance id is always
+  derived from its command (§8.7).
+- **Changing a type's id** after data exists requires keeping the previous id as
+  `[SynqraLegacyTypeId(oldId, when, why)]` so persisted events still resolve. A brand-new type has no
+  history and MUST NOT be given one.
+- **Known gap:** `ObjectDeletedEvent` (namespace exactly `Synqra`) carries no `[SynqraModel]` id at
+  all, so it falls back to a v5 derived id. It escapes the built-in guard because that guard tests
+  `Namespace.StartsWith("Synqra.")` — with the dot. Assigning it an id now would change persisted
+  identity, so it is left as-is and recorded here.
 
 ## 9. Storage & projections
 

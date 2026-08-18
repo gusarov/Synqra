@@ -723,6 +723,102 @@ public static class GuidExtensions
 		return commandId;
 	}
 
+	/// <summary>
+	/// True when <paramref name="guid"/> is a <b>structured</b> Synqra id: the <c>C0DE</c> magic prefix
+	/// plus RFC 9562 version 8, i.e. an application-defined layout whose group-4 carries a stage nibble
+	/// and a 12-bit semantic class (model.md §8). Opaque ids — v7 data, v5 derived type ids, v4 tokens,
+	/// and unrelated v8 hashes such as <see cref="CreateVersion5"/>'s siblings — are not structured, so
+	/// callers must not read a class out of them.
+	/// </summary>
+	public static unsafe bool IsStructuredId(this Guid guid)
+	{
+		if (guid == Guid.Empty)
+		{
+			return false;
+		}
+		if (guid.GetVariant() != 1 || guid.GetVersion() != 8)
+		{
+			return false;
+		}
+		byte* b = (byte*)&guid;
+		// group 1 is stored in native order, so the C0DE magic lands in bytes 3,2 on little-endian
+		return BitConverter.IsLittleEndian
+			? b[3] == 0xC0 && b[2] == 0xDE
+			: b[0] == 0xC0 && b[1] == 0xDE
+			;
+	}
+
+	/// <summary>
+	/// The stage (allocation domain) nibble of a structured id — <c>8</c> committed, <c>9</c> staging /
+	/// hand-written fixture, <c>A</c> auto-generated test. It is the RFC variant nibble's two free low
+	/// bits, so it never changes the id's validity.
+	/// </summary>
+	public static unsafe byte GetStructuredStage(this Guid guid)
+	{
+		byte* b = (byte*)&guid;
+		return (byte)(b[8] >> 4);
+	}
+
+	/// <summary>
+	/// The 12-bit semantic class of a structured id: the family nibble (high 4 bits) plus the
+	/// family-local code (low 8 bits). For a type id this is the type's own code; for an instance id it
+	/// is the code of the type it instantiates.
+	/// </summary>
+	public static unsafe ushort GetStructuredClass(this Guid guid)
+	{
+		byte* b = (byte*)&guid;
+		return (ushort)(((b[8] & 0x0F) << 8) | b[9]);
+	}
+
+	/// <summary>
+	/// Deterministically derives the id of the <paramref name="ordinal"/>-th event a command expands to,
+	/// carrying the <i>event's</i> semantic type rather than the command's.
+	/// <para>
+	/// The byte-level derivation legitimately differs by UUID version. When the command id is opaque
+	/// (production: a v7 client id) there is nowhere to put a class, so this is exactly
+	/// <see cref="Derive(Guid, int)"/> — production event ids are bit-for-bit unchanged. When the command
+	/// id is a <b>structured</b> <c>C0DE</c> v8 id it has a class field, and leaving the command's own
+	/// <c>Cxx</c> there would label every derived event as a command; so the event's own <c>Exx</c> class
+	/// (read from <paramref name="eventTypeId"/>) replaces it, the command's stage is kept, and only the
+	/// 48-bit node advances by <paramref name="ordinal"/> — the class can never absorb a carry.
+	/// </para>
+	/// <para>
+	/// The class inside an <i>instance</i> id is a human-readability hint only: type resolution always
+	/// goes through the event's explicit type-id field, never through its instance id.
+	/// </para>
+	/// </summary>
+	public static unsafe Guid DeriveEventId(Guid commandId, Guid eventTypeId, int ordinal)
+	{
+		if (ordinal < 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(ordinal));
+		}
+		if (!commandId.IsStructuredId() || !eventTypeId.IsStructuredId())
+		{
+			return Derive(commandId, ordinal);
+		}
+		var eventClass = eventTypeId.GetStructuredClass();
+		byte* b = (byte*)&commandId;
+		b[8] = (byte)((b[8] & 0xF0) | ((eventClass >> 8) & 0x0F)); // keep the command instance's stage, take the event's family
+		b[9] = (byte)eventClass;
+		ulong node = 0;
+		for (int i = 10; i < 16; i++)
+		{
+			node = (node << 8) | b[i];
+		}
+		node += (ulong)ordinal;
+		if (node > 0xFFFFFFFFFFFFUL)
+		{
+			throw new ArgumentOutOfRangeException(nameof(ordinal), "Derived event node overflows the 48-bit instance space");
+		}
+		for (int i = 15; i >= 10; i--)
+		{
+			b[i] = (byte)node;
+			node >>= 8;
+		}
+		return commandId;
+	}
+
 	public static Guid Create(int version)
 	{
 		switch (version)
