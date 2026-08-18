@@ -164,27 +164,24 @@ that is the only form that marries with real-time world-hashing (see Historical 
     - **`A`** = **test auto-incremented** — minted by the test guid generator during a run
       (`TestGuids.NewAuto()` → `C0DE0000-0000-8000-A000-{n}`, a process-wide monotonic counter).
     - **`B`** = reserved.
-  - **`CCC`** — 12-bit **class** (up to 4096). By definitional precedence (schema layer takes the lower
-    number): `000` **Type** (object-type/schema layer), `001` **Component** (entity/component
-    instances), `002` **collection** *(reserved — being retired, kept documented/compliant while still
-    present)*, `003` **link** *(reserved — links fold into components, kept documented/compliant while
-    still present)*, `005` container/stream, `00C` command, `00E` event; `000` **Type** is the
-    class-of-class root. In production a concrete **type** id is a v8 hash under `SynqraTypeNamespaceId`
-    and an **instance** id is v7 data — neither is a well-known `C0DE` value, so these appear as readable
-    stand-ins in fixtures.
-  - trailing bytes — instance / counter. **An all-zero node is a class-self-reference** — the class/type
-    itself, never a real instance. The reserved low `00x` codes (`001` Component, `002` collection, `003`
-    link, `005` stream, `00C` command) are the built-in **kinds**; a concrete/user **type** id therefore
-    lives in the **`F` class-space** with an all-zero node (`…-9Fxx-000000000000`), keeping it clear of the
-    reserved kind codes — e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003`
-    Component *instances* it types. `…-9000-000000000000` (node-zero `000`) is the class-of-class root.
+  - **`CCC`** — 12-bit **class** (up to 4096). Read it as **category + specifier**: the *first* nibble is
+    the **category**, the remaining two are a counter within it. Category `0` means the id names an
+    **instance**; any other category means it names a **type**. See the class-code registry below.
+  - trailing bytes — the **node**. It is what tells the two apart: an **all-zero node means the id is a
+    type**; a non-zero node means it identifies one well-known **instance**. So `…-8005-…0001` is
+    stream #1 (an instance) while `…-8F05-000000000000` is a model type — same `05`, different category
+    nibble, different meaning.
+  - **Neither shape is ever minted at runtime.** In production an instance id is plain **v7** and a
+    `[SynqraModel]` type with no explicit id gets a **v5** (SHA-1) hash under `SynqraTypeNamespaceId`
+    (`TypeMetadataProvider`) — neither is a `C0DE` value. Hand-written `C0DE` ids are therefore only ever
+    well-known constants and test fixtures.
 - **Fixed test guids stay RFC-valid** — never the all-zero `00000000-0000-0000-0000-…` (version 0, not
   a legal UUID). Use the internal-test well-known form `C0DE0000-0000-8000-9CCC-…` (`C0DE` magic
   prefix, zero company-hash `0000-0000` = internal, group-3 `8000` = **version 8 / project 0**,
   variant nibble `9` = **test**): `…-9001-…0003` = a class `001` **Component** instance, `…-900C-…` commands,
-  `…-9005-…` containers/stream ids. A concrete **type** is a class-self-reference in the **`F` class-space** —
-  e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003` component instances it types;
-  `…-9000-000000000000` is the class-of-class root. (Prod flips the variant nibble to `8`: `…-8F01-…` etc.)
+  `…-9005-…` containers/stream ids. A **type** flips the category nibble away from `0` and zeroes the node —
+  e.g. `…-9F01-000000000000` is a model type, distinct from the `…-9001-…0003` component instances it types.
+  (Prod flips the variant nibble to `8`: `…-8F01-…` etc.)
 - **Because events are `Derive(CommandId, ordinal)`** (CommandId + a small ordinal in the low bytes,
   same class as the command — see the event-id bullet above), a command's derived events live in the
   command's own id space. So **space command ids by `0x100`** in fixtures
@@ -195,7 +192,7 @@ that is the only form that marries with real-time world-hashing (see Historical 
 - **Retired:** the default/root **stream** reservation — a stream id is mandatory and has no default.
   The **MasterId** scheme (term/sequence/collection ordering) is not used — there is no master
   election or monotonic cluster clock.
-- **`SynqraTypeNamespaceId`** — the object-type namespace (class `000`, node `1`):
+- **`SynqraTypeNamespaceId`** — the object-type namespace, itself a class `000` **singleton** (node `1`):
   `C0DEADD0-1032-8000-8000-000000000001`. It is the fixed salt fed to `CreateVersion5(namespace,
   type.FullName)` for any `[SynqraModel]` type that has no explicit id. It is a persisted contract
   (derived type ids are written into stored events), so once data exists it must not change. It was
@@ -203,15 +200,58 @@ that is the only form that marries with real-time world-hashing (see Historical 
   that were persisted under the old salt carry `[SynqraLegacyTypeId(oldId, when, why)]` aliases so
   their existing events still resolve.
 
+### Class codes (`CCC`) (registry)
+
+`CCC` is **category + specifier**. The first nibble is the category; it decides whether the id names an
+instance or a type, and the node confirms it (non-zero = instance, all-zero = type). Keep both tables in
+sync when reserving a code.
+
+**Category `0` — instance classes** (node is a non-zero counter):
+
+| `CCC` | class | node / instance tail | note |
+|---|---|---|---|
+| `000` | **singleton** | counter of singletons | a well-known one-off value — neither an instance of a model type nor a type. e.g. `SynqraTypeNamespaceId` = `…-8000-000000000001` (node `1`). All-zero node reserved. |
+| `001` | **component** | instance counter | entity / component instances |
+| `002` | collection | instance counter | **retired** — do not re-allocate; existing fixtures still use it |
+| `003` | link | instance counter | **retired** — links fold into components; do not re-allocate |
+| `005` | container / **stream** | instance counter | moved here from `00C` when that code was reassigned to command |
+| `00C` | **command** | instance counter, **spaced by `0x100`** | the low byte is reserved for the command's derived events, which inherit its class |
+| `00E` | — | — | **deliberately never allocated**: a derived event's instance id lives in its command's class, so an event *instance* class must not exist |
+
+**Categories `A`/`C`/`E`/`F` — type codes** (node **all-zero**, mandatory):
+
+| category | holds | members |
+|---|---|---|
+| `C` | **command** types | `8C00` `Command` (base) · `8C0F` `SingleObjectCommand` (shared base) · `8C01`–`8C03` concretes |
+| `E` | **event** types | `8E00` `Event` (base) · `8E0E` `CommandCreatedEvent` · `8E0F` `SingleObjectEvent` (shared base) · `8E01`–`8E03` concretes |
+| `A` | **envelopes / messages** | `8A00` `Item` (storage envelope) · `9A01`–`9A05` `TransportOperation` + wire messages |
+| `3` | **link** types | `9300` `Link` (base) — retiring with the link vocabulary |
+| `F` | **domain models** — anything that is neither a command nor an event | `8F01`+ (consumer model types) |
+
+The category is a **semantic grouping, not an inheritance root**: `F` members share only an interface (and
+not all of them), and `A` holds two unrelated envelope roots. Where a category *does* have an abstract base
+type, that base takes specifier `00`, intermediate shared bases take `0E`/`0F`, and concrete types take
+`01`+. `F` is the highest nibble on purpose — it keeps a type id visually clear of the `0` instance
+classes (`8005` = stream instance vs `8F05` = a model type).
+
+> **Known exception.** `C0DE0000-0000-8000-9040-…` / `-9041-…` (`SynqraModelAttributeTests`) are *type*
+> ids sitting in category `0` under an older flat-numbering scheme. They predate the category split and
+> are the only ids that violate the rule above.
+
 ### Reserved built-in type ids (registry)
 
 Every built-in Synqra type carries an explicit `[SynqraModel("C0DEADD0-1032-8000-<g4>-000000000000")]`:
 company hash `ADD0 1032` = `SHA256('synqra')[:4B]`, group-3 `8000` = v8 + default project/space, node
-`000000000000` = the type itself (class-self-reference). Group-4 `<g4>` = `<env><family><nn>` — env `8` =
-live / `9` = dying (object & link vocabularies being retired); family `C` command · `E` event · `3` link ·
-`A` infra *(provisional home)*; `nn` = type number (`00` = the kind base, `0F` = an abstract shared base).
+`000000000000` = the type itself. Group-4 `<g4>` = `<env><category><nn>` — category `C` command · `E` event ·
+`3` link · `A` envelope/message *(provisional home)*; `nn` = type number (`00` = the category's base type,
+`0E`/`0F` = abstract shared bases, `01`+ = concretes).
 **A command and the event it emits share `nn`** (e.g. `8C01` `AddComponentCommand` → `8E01`
 `ComponentAddedEvent`). Keep this table in sync when adding a built-in type.
+
+> **Note — the `env` column below overloads the variant nibble.** Per the variant spec above, `9` means
+> *hardcoded-test*. This table instead uses `9` for two other things: **dying** (`9C0x`, `9E0x`, `9300` —
+> the retiring object/link vocabulary) and **provisional** (`9A0x` — production transport types parked in
+> test space). Three meanings for one nibble; see the open question at the end of this section.
 
 | g4 | type | env | note |
 |---|---|---|---|
@@ -234,12 +274,19 @@ live / `9` = dying (object & link vocabularies being retired); family `C` comman
 | `9E03` | `LinkAddedEvent` | dying | ↔ `9C03` |
 | `9E04` | `LinkRemovedEvent` | dying | ↔ `9C04` |
 | `9300` | `Link` | dying | link base |
-| `8A00` | `Item` | live | File-store envelope — **provisional family A** |
-| `9A01` | `TransportOperation` | prov | **provisional family A** |
-| `9A02` | `EventEnvelope` | prov | carries one event either direction — **provisional family A** |
-| `9A03` | `SubscribeRequest` | prov | client → master, refusable — **provisional family A** |
-| `9A04` | `UnsubscribeRequest` | prov | client → master, refusable — **provisional family A** |
-| `9A05` | `SubscriptionState` | prov | master → client, authoritative set — **provisional family A** |
+| `8A00` | `Item` | live | File-store envelope — **provisional category A** |
+| `9A01` | `TransportOperation` | prov | **provisional category A** |
+| `9A02` | `EventEnvelope` | prov | carries one event either direction — **provisional category A** |
+| `9A03` | `SubscribeRequest` | prov | client → master, refusable — **provisional category A** |
+| `9A04` | `UnsubscribeRequest` | prov | client → master, refusable — **provisional category A** |
+| `9A05` | `SubscriptionState` | prov | master → client, authoritative set — **provisional category A** |
+
+> **Open question — promote the `9A0x` transport ids.** `TransportOperation` and the four wire messages
+> are *production* types living in the `9` (test) variant, self-labelled `PROVISIONAL placement` in
+> `TransportOperations.cs`. They should move to the `8` variant. `8A00` is already taken by `Item`, so
+> either they take `8A01`–`8A05` alongside it, or envelopes split into two categories (storage vs wire).
+> Changing a `[SynqraModel]` id after data exists needs `[SynqraLegacyTypeId]` — but these are ephemeral
+> transport messages whose peers deploy together, so the window to move them cheaply is now.
 
 ## 9. Storage & projections
 

@@ -19,27 +19,38 @@ public static class SynqraGuids
 	 * - Anyone can follow same principles by computing SHA256("<projectname>") for their own project
 	 * - The previous approach used a random signature (2A21B27D). The hash approach is better because it is reproducible and verifiable.
 	 * - The 8 nibbles at positions 13 and 17 satisfy UUIDv8 version (0b1000) and variant (0b10xx) per RFC 9562
-	 * - A "class" field (CCC) categorizes UUID types within the project: C0DEyyyy-yyyy-8xxx-8CCC-xxxxxxxxxxxx
-	 *   - The class is 12 bits (1.5 bytes, 3 hex chars), allowing up to 4096 classes per project
-	 *   - Byte 8: variant (0b10) + 2 fixed zero bits + top 4 bits of class → always starts with hex 8
-	 *   - Byte 9: bottom 8 bits of class
-	 * - The remaining xxx and xxxxxxxxxxxx bits are available for sub-versioning, counters, or identifiers
-	 * - The sub-version 0 (xxx=000) is for constant guids. It should be guaranteed that there will be no guids of that version with dynamic parts.
-	 * - The other sub-versions are reserved.
-	 * - The remaining bits are available for customization or counters.
+	 * - Group 4 is an env-variant nibble plus a 12-bit class field: C0DEyyyy-yyyy-8xxx-vCCC-xxxxxxxxxxxx
+	 *   - Byte 8 high nibble (v): RFC 9562 variant bits 0b10 + 2 env bits → 8 = prod/manual,
+	 *     9 = hardcoded-test, A = auto-test (minted by DeterministicSynqraIdProvider), B reserved
+	 *   - The class is 12 bits (byte 8 low nibble + byte 9, 3 hex chars), allowing 4096 classes per project
+	 * - The trailing 48 bits (xxxxxxxxxxxx) are the node: a per-class instance counter
 	 *
-	 * Well-known classes:
-	 *   - 0x000: Object type namespace (generic object; no type-specific knowledge from the ID)
-	 *   - 0x00C: Stream (historical: the hex digit "C" comes from this class's original name,
-	 *     ContainerId — kept for the byte value only; "container" itself is retired vocabulary now
-	 *     that Components legitimately use that word for something unrelated, IComponentContainer.
-	 *     Stream and node are the two concepts that exist; the first class allocated in Synqra)
+	 * Group 4 is used two ways, told apart by the node:
+	 *   - Node all-zero → the value is a TYPE id, and CCC is a type code whose first nibble groups
+	 *     a family: C = command types, E = event types, F = plain domain/user model types
+	 *     (anything that is neither a command nor an event), A = infra. Within a family, nn = 00 is
+	 *     that family's abstract base (8C00 Command, 8E00 Event), 0E/0F are other shared bases, and
+	 *     01+ are concrete types. F is the highest nibble on purpose: it keeps a type id visually
+	 *     clear of the low 00x instance classes (8005 = stream instance vs 8F05 = a model type).
+	 *     See "Reserved built-in type ids" in docs/model.md.
+	 *   - Node non-zero → the value is a well-known INSTANCE, and CCC names its class (below)
+	 *
+	 * Well-known instance classes:
+	 *   - 0x000: Singleton — one-off reserved values (e.g. SynqraTypeNamespaceId, node 1)
+	 *   - 0x005: Stream — the mandatory security boundary; node is an instance counter
+	 *   - 0x00C: Command — space command ids by 0x100 (…000100, …000200) so the low byte holds
+	 *     their derived events: a derived event is Derive(CommandId, ordinal) and therefore
+	 *     inherits the command's class. There is deliberately NO 0x00E event instance class.
+	 *   - Retired: 0x002 (collection) and 0x003 (link). Do not re-allocate — existing test
+	 *     fixtures still use them.
+	 *   - Historical note: 0x00C originally meant Stream (the hex "C" came from its first name,
+	 *     ContainerId). Stream moved to 0x005 when 0x00C was reassigned to Command; "container"
+	 *     is retired vocabulary now that Components use that word for IComponentContainer.
 	 *
 	 * Reserved UUIDs:
 	 *   - C0DE0000-0000-8000-8000-000000000000 is a reserved UUID to identify principles behind custom UUIDs (vendor-neutral)
 	 *   - C0DEADD0-1032-8000-8000-000000000000 is a reserved synqra-zero UUID to identify "the Synqra UUID reservations table and principles document". Sha256('synqra')[..4] = ADD01032
 	 *   - C0DEADD0-1032-8000-8000-000000000001 is the Synqra object-type namespace (class 000, node 1) — the fixed salt for derived (v5) type ids. See SynqraTypeNamespaceId.
-	 *   - C0DEADD0-1032-8000-800C-000000000000 is a reserved synqra GUID for root/default stream id (before stream id is fully supported in a system, it is a reserved field and requires reserved value to avoid zeros validation)
 	 *
 	 * For Synqra: SHA256("synqra") → first 4 bytes → ADD01032
 	 * To compute: pwsh -c "$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes('synqra'));($h[0..3]|%{$_.ToString('X2')})-join''"
