@@ -9,8 +9,8 @@ internal class DeterministicEventIds
 	public async Task Should_be_deterministic()
 	{
 		var cmd = GuidExtensions.CreateVersion7();
-		await Assert.That(GuidExtensions.Derive(cmd, 1)).IsEqualTo(GuidExtensions.Derive(cmd, 1));
-		await Assert.That(GuidExtensions.Derive(cmd, 2)).IsEqualTo(GuidExtensions.Derive(cmd, 2));
+		await Assert.That(SynqraIdDerivation.Derive(cmd, 1)).IsEqualTo(SynqraIdDerivation.Derive(cmd, 1));
+		await Assert.That(SynqraIdDerivation.Derive(cmd, 2)).IsEqualTo(SynqraIdDerivation.Derive(cmd, 2));
 	}
 
 	[Test]
@@ -18,7 +18,7 @@ internal class DeterministicEventIds
 	{
 		var cmd = GuidExtensions.CreateVersion7();
 		Console.WriteLine(cmd);
-		Console.WriteLine(GuidExtensions.Derive(cmd, 1));
+		Console.WriteLine(SynqraIdDerivation.Derive(cmd, 1));
 	}
 
 	[Test]
@@ -26,7 +26,7 @@ internal class DeterministicEventIds
 	{
 		var cmd = GuidExtensions.CreateVersion7();
 		var copy = cmd;
-		GuidExtensions.Derive(cmd, 5);
+		SynqraIdDerivation.Derive(cmd, 5);
 		await Assert.That(cmd).IsEqualTo(copy);
 	}
 
@@ -34,7 +34,7 @@ internal class DeterministicEventIds
 	public async Task Should_stay_a_valid_v7_and_keep_the_command_timestamp()
 	{
 		var cmd = GuidExtensions.CreateVersion7();
-		var ev = GuidExtensions.Derive(cmd, 1);
+		var ev = SynqraIdDerivation.Derive(cmd, 1);
 		await Assert.That(ev.GetVersion()).IsEqualTo(7);
 		await Assert.That(ev.GetVariant()).IsEqualTo(1);
 		await Assert.That(ev.GetTimestamp()).IsEqualTo(cmd.GetTimestamp());
@@ -44,9 +44,9 @@ internal class DeterministicEventIds
 	public async Task Should_sort_after_the_command_and_in_ordinal_order()
 	{
 		var cmd = GuidExtensions.CreateVersion7();
-		var e0 = GuidExtensions.Derive(cmd, 0);
-		var e1 = GuidExtensions.Derive(cmd, 1);
-		var e2 = GuidExtensions.Derive(cmd, 2);
+		var e0 = SynqraIdDerivation.Derive(cmd, 0);
+		var e1 = SynqraIdDerivation.Derive(cmd, 1);
+		var e2 = SynqraIdDerivation.Derive(cmd, 2);
 		await Assert.That(e0).IsEqualTo(cmd); // ordinal 0 == the command id itself
 		await Assert.That(e1.CompareTo(e0)).IsEqualTo(1);
 		await Assert.That(e2.CompareTo(e1)).IsEqualTo(1);
@@ -56,7 +56,7 @@ internal class DeterministicEventIds
 	public async Task Should_reject_a_negative_ordinal()
 	{
 		var cmd = GuidExtensions.CreateVersion7();
-		await Assert.That(() => { _ = GuidExtensions.Derive(cmd, -1); }).Throws<ArgumentOutOfRangeException>();
+		await Assert.That(() => { _ = SynqraIdDerivation.Derive(cmd, -1); }).Throws<ArgumentOutOfRangeException>();
 	}
 
 	// ---- structured (C0DE v8) allocation mode -------------------------------------------------
@@ -137,11 +137,11 @@ internal class DeterministicEventIds
 	public async Task Should_take_the_registry_from_the_event_type_and_set_the_generated_bit()
 	{
 		// committed event type -> committed+generated instance (A), never the command's own mode
-		var ev = GuidExtensions.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
+		var ev = SynqraIdDerivation.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
 		await Assert.That(ev).IsEqualTo(new Guid("C0DE0000-0000-8000-AE01-000000000101"));
 
 		// staging event type -> staging+generated instance (B)
-		var staged = GuidExtensions.DeriveEventId(StructuredCommand, StagingEventType, 1);
+		var staged = SynqraIdDerivation.DeriveEventId(StructuredCommand, StagingEventType, 1);
 		await Assert.That(staged).IsEqualTo(new Guid("C0DE0000-0000-8000-BE15-000000000101"));
 	}
 
@@ -151,15 +151,15 @@ internal class DeterministicEventIds
 		// the same node under a staging-pinned command still yields a committed+generated event id,
 		// because the registry comes from the event type and the provenance from the derivation
 		var stagingPinnedCommand = new Guid("C0DE0000-0000-8000-9C01-000000000100");
-		var ev = GuidExtensions.DeriveEventId(stagingPinnedCommand, ComponentAddedType, 1);
+		var ev = SynqraIdDerivation.DeriveEventId(stagingPinnedCommand, ComponentAddedType, 1);
 		await Assert.That(ev).IsEqualTo(new Guid("C0DE0000-0000-8000-AE01-000000000101"));
 	}
 
 	[Test]
 	public async Task Should_distinguish_two_event_types_of_one_command()
 	{
-		var wrapper = GuidExtensions.DeriveEventId(StructuredCommand, CommandCreatedType, 0);
-		var domain = GuidExtensions.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
+		var wrapper = SynqraIdDerivation.DeriveEventId(StructuredCommand, CommandCreatedType, 0);
+		var domain = SynqraIdDerivation.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
 		await Assert.That(wrapper).IsEqualTo(new Guid("C0DE0000-0000-8000-AE0E-000000000100"));
 		await Assert.That(domain).IsEqualTo(new Guid("C0DE0000-0000-8000-AE01-000000000101"));
 		await Assert.That(wrapper).IsNotEqualTo(domain);
@@ -170,8 +170,8 @@ internal class DeterministicEventIds
 	[Test]
 	public async Task Should_keep_two_events_of_the_same_type_apart_by_ordinal()
 	{
-		var first = GuidExtensions.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
-		var second = GuidExtensions.DeriveEventId(StructuredCommand, ComponentAddedType, 2);
+		var first = SynqraIdDerivation.DeriveEventId(StructuredCommand, ComponentAddedType, 1);
+		var second = SynqraIdDerivation.DeriveEventId(StructuredCommand, ComponentAddedType, 2);
 		await Assert.That(second.CompareTo(first)).IsEqualTo(1);
 		await Assert.That(second).IsEqualTo(new Guid("C0DE0000-0000-8000-AE01-000000000102"));
 	}
@@ -181,10 +181,10 @@ internal class DeterministicEventIds
 	{
 		var v7 = GuidExtensions.CreateVersion7();
 		// production: the command id is opaque, so there is no class to carry and nothing changes
-		await Assert.That(GuidExtensions.DeriveEventId(v7, ComponentAddedType, 1)).IsEqualTo(GuidExtensions.Derive(v7, 1));
+		await Assert.That(SynqraIdDerivation.DeriveEventId(v7, ComponentAddedType, 1)).IsEqualTo(SynqraIdDerivation.Derive(v7, 1));
 		// an opaque event type is fine too, as long as the command id is opaque as well
 		var derivedTypeId = GuidExtensions.CreateVersion5(new Guid("C0DEADD0-1032-8000-8000-000000000001"), "Some.Consumer.Event");
-		await Assert.That(GuidExtensions.DeriveEventId(v7, derivedTypeId, 1)).IsEqualTo(GuidExtensions.Derive(v7, 1));
+		await Assert.That(SynqraIdDerivation.DeriveEventId(v7, derivedTypeId, 1)).IsEqualTo(SynqraIdDerivation.Derive(v7, 1));
 	}
 
 	[Test]
@@ -192,7 +192,7 @@ internal class DeterministicEventIds
 	{
 		// falling back here would leave the command's own Cnn in the event id — a false semantic claim
 		var derivedTypeId = GuidExtensions.CreateVersion5(new Guid("C0DEADD0-1032-8000-8000-000000000001"), "Some.Consumer.Event");
-		await Assert.That(() => { _ = GuidExtensions.DeriveEventId(StructuredCommand, derivedTypeId, 1); })
+		await Assert.That(() => { _ = SynqraIdDerivation.DeriveEventId(StructuredCommand, derivedTypeId, 1); })
 			.Throws<ArgumentException>();
 	}
 
@@ -201,7 +201,7 @@ internal class DeterministicEventIds
 	{
 		var cmd = StructuredCommand;
 		var type = ComponentAddedType;
-		GuidExtensions.DeriveEventId(cmd, type, 3);
+		SynqraIdDerivation.DeriveEventId(cmd, type, 3);
 		await Assert.That(cmd).IsEqualTo(StructuredCommand);
 		await Assert.That(type).IsEqualTo(ComponentAddedType);
 	}
@@ -209,7 +209,7 @@ internal class DeterministicEventIds
 	[Test]
 	public async Task Should_reject_a_negative_ordinal_when_structured()
 	{
-		await Assert.That(() => { _ = GuidExtensions.DeriveEventId(StructuredCommand, ComponentAddedType, -1); })
+		await Assert.That(() => { _ = SynqraIdDerivation.DeriveEventId(StructuredCommand, ComponentAddedType, -1); })
 			.Throws<ArgumentOutOfRangeException>();
 	}
 
@@ -217,7 +217,7 @@ internal class DeterministicEventIds
 	public async Task Should_refuse_to_let_the_node_overflow_into_the_class()
 	{
 		var atTheBrim = new Guid("C0DE0000-0000-8000-AC01-FFFFFFFFFFFF");
-		await Assert.That(() => { _ = GuidExtensions.DeriveEventId(atTheBrim, ComponentAddedType, 1); })
+		await Assert.That(() => { _ = SynqraIdDerivation.DeriveEventId(atTheBrim, ComponentAddedType, 1); })
 			.Throws<ArgumentOutOfRangeException>();
 	}
 }
