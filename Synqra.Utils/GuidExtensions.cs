@@ -36,6 +36,12 @@ public static class GuidExtensions
 		// For v7 monotonicy
 		private long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
 
+		// Whether we've ever seen this clock deliver sub-millisecond resolution. Starts pessimistic (false):
+		// browsers/WASM clamp DateTime.UtcNow to whole ms (Spectre), and so do some hosts, leaving `ticks % 10000`
+		// stuck at 0 — there we seed the sub-ms field from entropy. The first call whose `ticks % 10000 != 0`
+		// latches this true, and from then on we pack the real 100ns fraction and never add randomness again.
+		internal bool _subMsClock;
+
 		/// <summary>
 		/// 
 		/// </summary>
@@ -233,19 +239,28 @@ public static class GuidExtensions
 			var g = Guid.NewGuid(); // extremely optimized — supplies rand_b and the sub-ms seed below
 			byte* bytes = (byte*)&g;
 
-			// Sub-ms field seed. DateTime.UtcNow is millisecond-granular on some hosts (Linux/containers),
-			// so `ticks % 10000` was 0 there and every id read "…-7000-…". Seed the 12-bit sub-ms field from
-			// entropy instead (top bit cleared so the monotonic bump below keeps headroom to increment within
-			// a ms). GetTimestamp is unaffected — v7 reads only the millisecond bits from groups 1-2, never
-			// this field — and ordering stays monotonic via the counter loop, now by generation order rather
-			// than the (frequently-unavailable) sub-ms clock. Source bytes 0-1 are overwritten below.
+			// Entropy seed for the 12-bit sub-ms field, used only on coarse clocks (sliced from the guid we already
+			// need for rand_b, so free). Masking to 0x7FF caps it at 2047, guaranteeing >=2048 monotonic increments
+			// of headroom within the ms before omniStamp borrows from the next one. Source bytes 0-1 overwritten below.
 			ushort subMsSeed = (ushort)(*(ushort*)bytes & 0x07FF);
 
 			ticks -= UnixEpochTicks;
 
-			// Omni Stamp is a combo of ms<<12 & the sub-ms seed
-			long omniStamp = ((ticks / 10000) << 12) | subMsSeed;
+			long rem = ticks % 10000;
+			if (rem != 0)
+			{
+				_subMsClock = true; // latch: this clock has sub-ms resolution, so trust it and stop seeding entropy
+			}
 
+			// Sub-ms field: the real 100ns fraction once we've seen the clock provide it; entropy until then so ids
+			// aren't a constant "…-7000-…". Never mixed, so a real clock keeps clean monotonic time.
+			long subMs = _subMsClock ? (rem >> 2) : subMsSeed;
+
+			// Omni Stamp is a combo of ms<<12 & the sub-ms part
+			long omniStamp = ((ticks / 10000) << 12) | subMs;
+
+			// Bump is a single step (= previous + 1), never a catch-up loop; the while only re-runs the CAS under
+			// real thread contention (so exactly once on single-threaded WASM).
 			while (true)
 			{
 				var previousOmniStamp = _prevOmniStamp;
