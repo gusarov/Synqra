@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -17,13 +18,23 @@ namespace Synqra;
 /// </summary>
 public sealed class ComponentsCollection : IComponentsCollection
 {
-	readonly List<IComponent> _components = new();
-	readonly Dictionary<Type, IComponent> _unique = new();
+	// Both structures are concurrent, so every read — enumerate, GetUniqueComponent, Contains, Count —
+	// is lock-free and copies nothing. Components are attached by event-apply on a background thread
+	// while request threads read the same node, and insertion order is preserved because callers do
+	// reason about the order components were attached in.
+	readonly ConcurrentAppendList<IComponent> _components = new ConcurrentAppendList<IComponent>();
+	readonly ConcurrentDictionary<Type, IComponent> _unique = new();
+
+	// Writers only. The uniqueness check and the mutation that follows it must be one step, and a
+	// component can fill several unique slots at once, so the all-or-nothing claim of that slot set
+	// cannot be expressed as a single ConcurrentDictionary operation. Readers never take this.
+	readonly object _writeGate = new object();
 
 	public int Count => _components.Count;
 	public bool IsReadOnly => false;
 
 	public IEnumerator<IComponent> GetEnumerator() => _components.GetEnumerator();
+
 	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
 	public IComponent? GetUniqueComponent(Type uniqueComponentType)
@@ -48,10 +59,13 @@ public sealed class ComponentsCollection : IComponentsCollection
 	public bool TryAdd(IComponent component)
 	{
 		if (component is null) throw new ArgumentNullException(nameof(component));
-		if (!CanAddCore(component.GetType(), out var uniqueSlots)) return false;
-		foreach (var slot in uniqueSlots) _unique[slot] = component;
-		_components.Add(component);
-		return true;
+		lock (_writeGate)
+		{
+			if (!CanAddCore(component.GetType(), out var uniqueSlots)) return false;
+			foreach (var slot in uniqueSlots) _unique[slot] = component;
+			_components.Add(component);
+			return true;
+		}
 	}
 
 	// Base ComponentsCollection has no command channel — both Remove and
@@ -61,17 +75,18 @@ public sealed class ComponentsCollection : IComponentsCollection
 
 	public bool BypassRemove(IComponent component)
 	{
-		var index = _components.IndexOf(component);
-		if (index < 0) return false;
-		_components.RemoveAt(index);
-		foreach (var slot in EnumerateUniqueSlots(component.GetType()).ToList())
+		lock (_writeGate)
 		{
-			if (_unique.TryGetValue(slot, out var existing) && existing == component)
+			if (!_components.Remove(component)) return false;
+			foreach (var slot in EnumerateUniqueSlots(component.GetType()))
 			{
-				_unique.Remove(slot);
+				if (_unique.TryGetValue(slot, out var existing) && existing == component)
+				{
+					_unique.TryRemove(slot, out _);
+				}
 			}
+			return true;
 		}
-		return true;
 	}
 
 	// The Clear / Contains / CopyTo members of ICollection<T> are intentionally
