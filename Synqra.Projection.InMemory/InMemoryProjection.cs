@@ -70,7 +70,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	// object lifecycle. See plans/links.md.
 	private readonly ConcurrentDictionary<Guid, Link> _linksById = new();
 	private readonly ConcurrentDictionary<LinkKey, Link> _linksByKey = new();
-	private readonly ConcurrentDictionary<Guid, List<Link>> _linksByNode = new();
+	// The outer ConcurrentDictionary only ever made the *lookup* safe — the values were plain lists that
+	// LinkAdded/LinkRemoved mutated while LinksAt/LinksBetween read them. Append-ordered concurrent
+	// lists instead, so navigation enumerates safely without copying and link order is still the order
+	// links were added (nav collections are user-visible, e.g. a node's children).
+	private readonly ConcurrentDictionary<Guid, ConcurrentAppendList<Link>> _linksByNode = new();
 
 	public bool IsOnline => _eventReplicationService?.IsOnline ?? false;
 
@@ -789,10 +793,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link already exists between the same endpoints.");
 		}
 		_linksById[link.LinkId] = link;
-		_linksByNode.GetOrAdd(link.SourceId, _ => new List<Link>()).Add(link);
+		_linksByNode.GetOrAdd(link.SourceId, _ => new ConcurrentAppendList<Link>()).Add(link);
 		if (link.TargetId != link.SourceId)
 		{
-			_linksByNode.GetOrAdd(link.TargetId, _ => new List<Link>()).Add(link);
+			_linksByNode.GetOrAdd(link.TargetId, _ => new ConcurrentAppendList<Link>()).Add(link);
 		}
 
 		if (link is IBindableModel bindable && bindable.Store is null)
@@ -812,13 +816,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			return Task.CompletedTask; // already gone — idempotent
 		}
 		_linksByKey.TryRemove(link.StructuralKey, out _);
-		if (_linksByNode.TryGetValue(link.SourceId, out var fromList))
+		if (_linksByNode.TryGetValue(link.SourceId, out var fromLinks))
 		{
-			fromList.Remove(link);
+			fromLinks.Remove(link);
 		}
-		if (link.TargetId != link.SourceId && _linksByNode.TryGetValue(link.TargetId, out var toList))
+		if (link.TargetId != link.SourceId && _linksByNode.TryGetValue(link.TargetId, out var toLinks))
 		{
-			toList.Remove(link);
+			toLinks.Remove(link);
 		}
 
 		NotifyLinkChanged(link, LinkEnd.Source);
@@ -842,23 +846,37 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
 	{
-		if (!_linksByNode.TryGetValue(nodeId, out var list))
+		if (!_linksByNode.TryGetValue(nodeId, out var links))
 		{
 			return Array.Empty<Link>();
 		}
-		return list.Where(l => linkType.IsInstanceOfType(l) && IncidentAt(l, nodeId, end)).ToArray();
+		var result = new List<Link>();
+		foreach (var l in links)
+		{
+			if (linkType.IsInstanceOfType(l) && IncidentAt(l, nodeId, end))
+			{
+				result.Add(l);
+			}
+		}
+		return result;
 	}
 
 	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
 	{
-		if (!_linksByNode.TryGetValue(a, out var list))
+		if (!_linksByNode.TryGetValue(a, out var links))
 		{
 			return Array.Empty<Link>();
 		}
-		return list
-			.Where(l => linkType.IsInstanceOfType(l)
+		var result = new List<Link>();
+		foreach (var l in links)
+		{
+			if (linkType.IsInstanceOfType(l)
 				&& ((l.SourceId == a && l.TargetId == b) || (l.SourceId == b && l.TargetId == a)))
-			.ToArray();
+			{
+				result.Add(l);
+			}
+		}
+		return result;
 	}
 
 	bool ILinkIndex.TryGetByKey(LinkKey key, out Link? link) => _linksByKey.TryGetValue(key, out link);

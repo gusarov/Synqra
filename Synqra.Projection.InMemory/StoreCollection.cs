@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -31,7 +32,13 @@ internal abstract class InMemoryStoreCollection : StoreCollection, ISynqraCollec
 internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T> : InMemoryStoreCollection, ISynqraCollection<T>, IReadOnlyList<T>
 	where T : class
 {
-	private readonly List<T> _list = new List<T>();
+	// A store is a process-wide singleton per stream, so a hosted service writing on a timer beside a
+	// request thread reading is the ordinary case, not an exotic one. A bare List<T> made that an
+	// InvalidOperationException ("Collection was modified; enumeration operation may not execute")
+	// waiting to happen. ConcurrentAppendList keeps insertion order — which is load-bearing, callers
+	// do reach for "the last one added" — while letting readers enumerate without copying or blocking.
+	private readonly ConcurrentAppendList<T> _items = new ConcurrentAppendList<T>();
+
 
 	public override Type Type => typeof(T);
 	/*
@@ -39,7 +46,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 	protected override ICollection ICollection => _list;
 	*/
 
-	public int Count => _list.Count;
+	public int Count => _items.Count;
 
 	InMemoryProjection _store;
 
@@ -70,7 +77,10 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 	}
 #endif
 
-	T IReadOnlyList<T>.this[int index] => _list[index];
+	// Positional access is O(n) now that the backing store is append-ordered rather than an array.
+	// Kept working rather than removed because IReadOnlyList<T> is part of the public shape; nothing
+	// in the solution indexes a store collection positionally.
+	T IReadOnlyList<T>.this[int index] => _items.ElementAt(index);
 
 	/*
 	T ISynqraCollection<T>.this[int index]
@@ -126,7 +136,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 	// Client request - generate command
 	private int Add(T item)
 	{
-		var o = _list.Count;
+		var o = _items.Count;
 
 		// var dataJson = _jsonSerializerOptions == null ? null : JsonSerializer.Serialize(item, _jsonSerializerOptions);
 		// var data = _jsonSerializerOptions == null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson, _jsonSerializerOptions);
@@ -154,7 +164,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		{
 			task.GetAwaiter().GetResult();
 		}
-		var n = _list.Count;
+		var n = _items.Count;
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}
 
@@ -169,7 +179,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 			// Store.GetAttachedData(item, g.Id, null, GetMode.GetOrCreate);
 		}
 		// Store.GetId(item, this, GetMode.GetOrCreate); // Ensure it is attached
-		_list.Add(typedItem);
+		_items.Add(typedItem);
 	}
 
 	internal override void RemoveByEvent(object item)
@@ -178,7 +188,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		{
 			throw new ArgumentException($"Item must be of type {typeof(T).Name}", nameof(item));
 		}
-		_list.Remove(typedItem);
+		_items.Remove(typedItem);
 	}
 
 	#endregion
@@ -235,37 +245,26 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 #if ICOLLECTION
 	void ICollection.CopyTo(Array array, int arrayIndex)
 	{
-		if (array.Length < _list.Count + arrayIndex)
+		foreach (var item in _items)
 		{
-			throw new ArgumentException("Array is too small to copy the collection.", nameof(array));
-		}
-		for (int i = 0, m = Count; i < m; i++)
-		{
-			array.SetValue(_list[i], arrayIndex + i);
+			if (arrayIndex >= array.Length)
+			{
+				throw new ArgumentException("Array is too small to copy the collection.", nameof(array));
+			}
+			array.SetValue(item, arrayIndex++);
 		}
 	}
 #endif
 	void ICollection<T>.CopyTo(T[] array, int arrayIndex)
 	{
-		if (array.Length < _list.Count + arrayIndex)
-		{
-			throw new ArgumentException("Array is too small to copy the collection.", nameof(array));
-		}
-		for (int i = 0, m = Count; i < m; i++)
-		{
-			array[arrayIndex + i] = _list[i];
-		}
+		_items.CopyTo(array, arrayIndex);
 	}
 
-	IEnumerator<T> IEnumerable<T>.GetEnumerator()
-	{
-		return _list.GetEnumerator();
-	}
+	// Enumerates the live collection: ConcurrentQueue's enumerator walks segments in place, so this
+	// neither copies the store nor blocks a concurrent writer.
+	IEnumerator<T> IEnumerable<T>.GetEnumerator() => _items.GetEnumerator();
 
-	IEnumerator IEnumerable.GetEnumerator()
-	{
-		return _list.GetEnumerator();
-	}
+	IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
 
 	public override IEnumerator GetEnumerator()
 	{
