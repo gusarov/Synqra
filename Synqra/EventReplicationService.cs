@@ -254,8 +254,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		#endregion
 
-		var myEnumerable = _storage.GetAllAsync(from: _eventReplicationState.LastEventIdFromMe);
-		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
 		{
 			await _autoResetEvent.WaitAsync();
@@ -264,10 +262,19 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			{
 				break;
 			}
-			// get new events from storage and send them to server
-			while (await myEnumerator.MoveNextAsync())
+			// A fresh pass per signal: a drained async iterator (the blob/IndexedDb store's) never
+			// yields again, so a single long-lived enumerator stopped sending after the first burst.
+			// Read from the start and skip past the cursor, as the keeper does: `from` is not a uniform
+			// range bound across backends.
+			var sentUpTo = _eventReplicationState.LastEventIdFromMe;
+			var reached = sentUpTo == default;
+			await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
 			{
-				var ev = myEnumerator.Current;
+				if (!reached)
+				{
+					reached = ev.EventId == sentUpTo;
+					continue;
+				}
 				// Single-stream connection: skip events belonging to any other stream that shares this
 				// local multitenant store (e.g. the primary stream's events when this connection only
 				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
