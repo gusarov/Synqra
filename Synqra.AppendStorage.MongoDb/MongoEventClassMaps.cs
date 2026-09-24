@@ -216,7 +216,16 @@ public static class MongoEventClassMaps
 	/// <c>MongoProjection.ToDocument</c> — since that path has no class-map member to scope a
 	/// convention to, and the driver's own ambient default rejects any type it doesn't recognize.
 	/// </summary>
-	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(static _ => true);
+	/// <para>
+	/// Carries its own <see cref="GuidRepresentation.Standard"/>: an <see cref="ObjectSerializer"/> writes a
+	/// boxed <see cref="Guid"/> (e.g. a Guid property's OldValue/NewValue) with its own representation, not
+	/// the member's or the registry's, and the driver default refuses to write it.
+	/// </para>
+	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(
+		  BsonSerializer.LookupDiscriminatorConvention(typeof(object))
+		, GuidRepresentation.Standard
+		, static _ => true
+		);
 
 	/// <summary>Shared, member-scoped <see cref="GuidRepresentation.Standard"/> serializer — see <see cref="RegisterSynqraConventions"/>.</summary>
 	static readonly IBsonSerializer ScopedStandardGuidSerializer = new GuidSerializer(GuidRepresentation.Standard);
