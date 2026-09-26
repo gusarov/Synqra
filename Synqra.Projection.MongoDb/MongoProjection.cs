@@ -27,7 +27,7 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// binary layout.
 /// </para>
 /// <para>
-/// <b>Tracking is per-process, not pre-warmed.</b> <see cref="GetId"/>, <see cref="ResolveObject"/>,
+/// <b>Tracking is per-process, not pre-warmed; an event addressing an untracked entity loads it on demand.</b> <see cref="GetId"/>, <see cref="ResolveObject"/>,
 /// component mutation, and (for links) endpoint navigation only see objects this projection instance has
 /// already touched (created, or loaded via enumerating a <see cref="GetCollection{T}"/>) — there is no
 /// startup replay that pre-populates the tracking cache. This is an existing, deliberate limitation (see
@@ -298,6 +298,32 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
 
+	/// <summary>
+	/// An event may address an entity this process has not touched yet (it was created before a
+	/// restart): load its document, components included, and track it, instead of rejecting the event.
+	/// </summary>
+	bool TryGetOrLoad(Guid id, Guid typeId, Guid collectionId, out object model)
+	{
+		if (TryGetTracked(id, out model))
+		{
+			return true;
+		}
+		if (id == default || typeId == default)
+		{
+			return false;
+		}
+		var type = TypeMetadataProvider.GetTypeMetadata(typeId).Type;
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+		var doc = _database.GetCollection<BsonDocument>(type.Name).Find(filter).FirstOrDefault();
+		if (doc is null)
+		{
+			return false;
+		}
+		model = FromDocument(doc);
+		AttachWithId(model, id, collectionId);
+		return true;
+	}
+
 	internal IMongoCollection<BsonDocument> MongoCollectionFor(Type type, string collectionName)
 		=> _database.GetCollection<BsonDocument>(MongoCollectionName(type, collectionName));
 
@@ -515,7 +541,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		if (!TryGetTracked(ev.TargetId, out var model))
+		if (!TryGetOrLoad(ev.TargetId, ev.TargetTypeId, ev.CollectionId, out var model))
 		{
 			throw new InvalidOperationException($"Cannot apply a property change to unknown object {ev.TargetId}.");
 		}
@@ -558,7 +584,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			return Task.CompletedTask;
 		}
 
-		var container = ResolveContainer(ev.TargetId);
+		var container = ResolveContainer(ev);
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
@@ -597,7 +623,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		TryGetTracked(ev.TargetId, out var trackedModel);
+		TryGetOrLoad(ev.TargetId, ev.TargetTypeId, ev.CollectionId, out var trackedModel);
 		var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
 		ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
 
@@ -630,7 +656,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			return Task.CompletedTask;
 		}
 
-		var container = ResolveContainer(ev.TargetId);
+		var container = ResolveContainer(ev);
 		var component = container.ResolveComponent(ev, TypeMetadataProvider);
 
 		// BypassRemove rather than Remove: when the container is wrapped in
@@ -727,10 +753,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	// ---------------------------------------------------------------- Component apply helpers
 
-	IComponentContainer ResolveContainer(Guid targetId)
+	IComponentContainer ResolveContainer(SingleObjectEvent ev)
 	{
-		TryGetTracked(targetId, out var model);
-		return ComponentApplyHelpers.ResolveContainer(model, targetId);
+		TryGetOrLoad(ev.TargetId, ev.TargetTypeId, ev.CollectionId, out var model);
+		return ComponentApplyHelpers.ResolveContainer(model, ev.TargetId);
 	}
 
 	const string ComponentsMongoCollectionName = "Components";
@@ -802,7 +828,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
+			var componentId = doc["ComponentId"].AsBsonBinaryData.ToGuid(GuidRepresentation.Standard);
 			var component = (IComponent)FromDocument(doc, EntityIdField, "ComponentId");
+			// Events address a component by id; without its persisted one, a later edit could not find it.
+			if (component is IBindableComponent identified)
+			{
+				identified.SetComponentId(componentId);
+			}
 
 			if (!container.Components.TryAdd(component))
 			{
