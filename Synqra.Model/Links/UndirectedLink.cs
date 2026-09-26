@@ -11,5 +11,5 @@ public abstract class UndirectedLink<TSource, TTarget> : Link<TSource, TTarget>
 	where TTarget : class
 {
 	[System.Text.Json.Serialization.JsonIgnore]
-	public override LinkKey StructuralKey => LinkKey.Undirected(GetType(), SourceId, TargetId);
+	public override LinkKey StructuralKey => LinkKey.Undirected(GetType(), SourceId, TargetId, KeyQualifier);
 }

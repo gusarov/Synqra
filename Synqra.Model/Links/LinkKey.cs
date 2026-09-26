@@ -12,12 +12,14 @@ public readonly struct LinkKey : System.IEquatable<LinkKey>
 	readonly System.Type _linkType;
 	readonly System.Guid _x;
 	readonly System.Guid _y;
+	readonly System.Guid _qualifier;
 
-	LinkKey(System.Type linkType, System.Guid x, System.Guid y)
+	LinkKey(System.Type linkType, System.Guid x, System.Guid y, System.Guid qualifier)
 	{
 		_linkType = linkType;
 		_x = x;
 		_y = y;
+		_qualifier = qualifier;
 	}
 
 	/// <summary>
@@ -31,14 +33,17 @@ public readonly struct LinkKey : System.IEquatable<LinkKey>
 	public System.Guid X => _x;
 	public System.Guid Y => _y;
 
+	/// <summary>Tells apart links of one type between the same endpoints (e.g. a link's own kind); empty when there is none.</summary>
+	public System.Guid Qualifier => _qualifier;
+
 	/// <summary>A→B differs from B→A.</summary>
-	public static LinkKey Directed(System.Type linkType, System.Guid source, System.Guid target) => new(linkType, source, target);
+	public static LinkKey Directed(System.Type linkType, System.Guid source, System.Guid target, System.Guid qualifier = default) => new(linkType, source, target, qualifier);
 
 	/// <summary>{A,B} == {B,A} — endpoints are folded into canonical order so the key is symmetric.</summary>
-	public static LinkKey Undirected(System.Type linkType, System.Guid a, System.Guid b)
-		=> a.CompareTo(b) <= 0 ? new(linkType, a, b) : new(linkType, b, a);
+	public static LinkKey Undirected(System.Type linkType, System.Guid a, System.Guid b, System.Guid qualifier = default)
+		=> a.CompareTo(b) <= 0 ? new(linkType, a, b, qualifier) : new(linkType, b, a, qualifier);
 
-	public bool Equals(LinkKey other) => _linkType == other._linkType && _x == other._x && _y == other._y;
+	public bool Equals(LinkKey other) => _linkType == other._linkType && _x == other._x && _y == other._y && _qualifier == other._qualifier;
 	public override bool Equals(object? obj) => obj is LinkKey other && Equals(other);
 
 	public override int GetHashCode()
@@ -48,6 +53,7 @@ public readonly struct LinkKey : System.IEquatable<LinkKey>
 			var hash = _linkType?.GetHashCode() ?? 0;
 			hash = (hash * 397) ^ _x.GetHashCode();
 			hash = (hash * 397) ^ _y.GetHashCode();
+			hash = (hash * 397) ^ _qualifier.GetHashCode();
 			return hash;
 		}
 	}

@@ -914,7 +914,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
-			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
+			// StructuralKey depends on SourceId/TargetId/type and the link's own qualifier fields, all on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
 			// for the actual match, which is what callers keep and navigate from.
 			var candidate = (Link)FromDocument(doc);

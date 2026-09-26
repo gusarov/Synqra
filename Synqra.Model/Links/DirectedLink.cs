@@ -11,5 +11,5 @@ public abstract class DirectedLink<TSource, TTarget> : Link<TSource, TTarget>
 	where TTarget : class
 {
 	[System.Text.Json.Serialization.JsonIgnore]
-	public override LinkKey StructuralKey => LinkKey.Directed(GetType(), SourceId, TargetId);
+	public override LinkKey StructuralKey => LinkKey.Directed(GetType(), SourceId, TargetId, KeyQualifier);
 }
