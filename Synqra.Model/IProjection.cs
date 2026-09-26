@@ -103,7 +103,7 @@ public interface ITypeMetadataProvider
 	void RegisterType(Type type);
 
 	/// <summary>Every registered type, so a storage can prepare to read any of them back.</summary>
-	IEnumerable<TypeMetadata> KnownTypes => [];
+	IEnumerable<TypeMetadata> KnownTypes { get; }
 }
 
 public class TypeMetadata
