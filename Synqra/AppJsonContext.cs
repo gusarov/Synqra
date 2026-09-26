@@ -36,6 +36,16 @@ namespace Synqra;
 [JsonSerializable(typeof(UInt32))]
 [JsonSerializable(typeof(Int64))]
 [JsonSerializable(typeof(UInt64))]
+// A property change carries its value as object; every scalar a model may hold must be listed, or
+// serializing that change (the network sender verifies each frame through this context) throws.
+[JsonSerializable(typeof(Single))]
+[JsonSerializable(typeof(Double))]
+[JsonSerializable(typeof(Decimal))]
+[JsonSerializable(typeof(Boolean))]
+[JsonSerializable(typeof(Char))]
+[JsonSerializable(typeof(DateTime))]
+[JsonSerializable(typeof(DateTimeOffset))]
+[JsonSerializable(typeof(TimeSpan))]
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(object))]
 [JsonSerializable(typeof(TransportOperation))]
