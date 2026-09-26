@@ -127,6 +127,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		_database = database ?? throw new ArgumentNullException(nameof(database));
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
+		MongoEventClassMaps.RegisterModelTypes(typeMetadataProvider);
 		_eventStorage = eventStorage;
 		_jsonSerializerOptions = jsonSerializerOptions ?? throw new ArgumentException("MongoProjection requires JsonSerializerOptions to materialize documents.", nameof(jsonSerializerOptions));
 		_serviceProvider = serviceProvider;

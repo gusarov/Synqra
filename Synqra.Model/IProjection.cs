@@ -101,6 +101,9 @@ public interface ITypeMetadataProvider
 	TypeMetadata GetTypeMetadata(Guid typeId);
 	TypeMetadata GetTypeMetadata(Type type);
 	void RegisterType(Type type);
+
+	/// <summary>Every registered type, so a storage can prepare to read any of them back.</summary>
+	IEnumerable<TypeMetadata> KnownTypes => [];
 }
 
 public class TypeMetadata

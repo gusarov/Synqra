@@ -30,6 +30,20 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	public async Task Should_know_every_built_in_command_before_the_first_read()
+	{
+		// A fresh process reads a stored CommandCreatedEvent before writing any command of that type.
+		var commands = typeof(Command).Assembly.GetTypes()
+			.Where(t => typeof(Command).IsAssignableFrom(t) && !t.IsAbstract && !t.ContainsGenericParameters)
+			.ToList();
+		await Assert.That(commands).Contains(typeof(AddLinkCommand));
+		foreach (var command in commands)
+		{
+			await Assert.That(BsonClassMap.IsClassMapRegistered(command)).IsTrue();
+		}
+	}
+
+	[Test]
 	public async Task Should_round_trip_ObjectPropertyChangedEvent_via_native_bson()
 	{
 		var ev = new ObjectPropertyChangedEvent

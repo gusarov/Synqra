@@ -94,6 +94,8 @@ public static class TypeMetadataProviderExtensions
 			}
 		}
 
+		public IEnumerable<TypeMetadata> KnownTypes => [.. _typeMetadataByType.Values];
+
 		public TypeMetadata GetTypeMetadata(Type type)
 		{
 			if (_typeMetadataByType.TryGetValue(type ?? throw new ArgumentNullException(nameof(type)), out var metadata))

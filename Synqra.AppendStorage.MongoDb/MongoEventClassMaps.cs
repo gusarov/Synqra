@@ -131,9 +131,56 @@ public static class MongoEventClassMaps
 			RegisterDerived<LinkAddedEvent>("LinkAddedEvent", cm =>
 				cm.GetMemberMap(e => e.Data).SetSerializer(new LinkDataSerializer()));
 
+			// CommandCreatedEvent.Data is read back by its _t only if the command's class map exists
+			// before the first read; otherwise a fresh process falls back to the abstract Command.
+			foreach (var command in typeof(Command).Assembly.GetTypes().Where(t => true
+				&& typeof(Command).IsAssignableFrom(t)
+				&& !t.IsAbstract
+				&& !t.ContainsGenericParameters
+			))
+			{
+				BsonClassMap.LookupClassMap(command);
+			}
+
 			_registered = true;
 		}
 	}
+
+	/// <summary>
+	/// A document's <c>_t</c> resolves only to a type whose class map exists, and one is otherwise made
+	/// only when that type is first written. A fresh process reading the log before writing a given
+	/// component or link type would fail, so every registered model type is class-mapped up front.
+	/// </summary>
+	public static void RegisterModelTypes(ITypeMetadataProvider? types)
+	{
+		if (types is null)
+		{
+			return;
+		}
+		Register();
+		var mappable = types.KnownTypes
+			.Select(m => m.Type)
+			.Where(t => t is { IsClass: true, IsAbstract: false, ContainsGenericParameters: false })
+			.Distinct()
+			.ToList();
+		// Two model types sharing a discriminator would make every read of it ambiguous; those stay
+		// mapped on first write, as before, and the model should give one of them its own [BsonDiscriminator].
+		var ambiguous = mappable
+			.GroupBy(Discriminator)
+			.Where(g => g.Count() > 1)
+			.SelectMany(g => g)
+			.ToHashSet();
+		foreach (var type in mappable.Where(t => !ambiguous.Contains(t)))
+		{
+			BsonClassMap.LookupClassMap(type);
+		}
+	}
+
+	static string Discriminator(Type type)
+		=> type.GetCustomAttributes(typeof(MongoDB.Bson.Serialization.Attributes.BsonDiscriminatorAttribute), inherit: false)
+			.OfType<MongoDB.Bson.Serialization.Attributes.BsonDiscriminatorAttribute>()
+			.FirstOrDefault()?.Discriminator
+			?? type.Name;
 
 	/// <summary>
 	/// Registers conventions applied to <em>any</em> class map BSON builds for Synqra's own
