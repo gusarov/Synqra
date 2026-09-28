@@ -261,9 +261,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					ComponentTypeId = __store.TypeMetadataProvider.GetTypeMetadata(GetType()).TypeId,
 					ComponentId = __store.GetId(this)"
 				: "";
-			string submissionOptionsArg = isComponent
-				? ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__containerId) }"
-				: ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = __store.GetLastEventId(__store.GetId(this)) }";
+			// One read of the target's last applied event id serves both the persisted BaseEventId and the request-side precondition.
+			string baseEventIdExpr        = isComponent ? "__store.GetLastEventId(__containerId)" : "__store.GetLastEventId(__store.GetId(this))";
+			string submissionOptionsArg   = ", new global::Synqra.CommandSubmissionOptions { ExpectedLastEventId = baseEventId }";
 
 			bool isSealed = classData.Data.IsSealed;
 			var virtualKeyword = isSealed ? "" : " virtual";
@@ -644,6 +644,7 @@ $$"""
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
+				var baseEventId = {{baseEventIdExpr}};
 				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
 				{
 					CollectionId = {{collectionIdExpr}},
@@ -654,7 +655,8 @@ $$"""
 
 					PropertyName = nameof({{pro.Identifier}}),
 					OldValue = oldValue,
-					NewValue = value{{componentExtraFields}}
+					NewValue = value,
+					BaseEventId = baseEventId{{componentExtraFields}}
 				}{{submissionOptionsArg}});
 				if (!OperatingSystem.IsBrowser())
 				{

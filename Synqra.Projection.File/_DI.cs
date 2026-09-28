@@ -695,6 +695,7 @@ public static class FileSynqraExtensions
 				TargetId = cmd.TargetId,
 				OldValue = cmd.OldValue,
 				NewValue = cmd.NewValue,
+				BaseEventId = cmd.BaseEventId,
 				PropertyName = cmd.PropertyName,
 			};
 			ctx.Events.Add(ev);
@@ -744,6 +745,7 @@ public static class FileSynqraExtensions
 				PropertyName = cmd.PropertyName,
 				OldValue = cmd.OldValue,
 				NewValue = cmd.NewValue,
+				BaseEventId = cmd.BaseEventId,
 			});
 			return Task.CompletedTask;
 		}

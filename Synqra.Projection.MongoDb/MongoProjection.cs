@@ -406,6 +406,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			PropertyName = cmd.PropertyName,
 			OldValue = cmd.OldValue,
 			NewValue = cmd.NewValue,
+			BaseEventId = cmd.BaseEventId,
 		});
 		return Task.CompletedTask;
 	}
@@ -456,6 +457,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			PropertyName = cmd.PropertyName,
 			OldValue = cmd.OldValue,
 			NewValue = cmd.NewValue,
+			BaseEventId = cmd.BaseEventId,
 		});
 		return Task.CompletedTask;
 	}

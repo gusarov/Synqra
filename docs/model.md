@@ -487,6 +487,68 @@ gap is expected.
 
 ---
 
+## 10. Values — concurrent writes, merge, conflict
+
+> **Status:** design. Built today: the **base** is recorded on every property change (10.1). Not
+> built: per-property slots, competitors, the `[Merge]` policy (10.2–10.4). The base is captured now
+> because it lives in the log and cannot be reconstructed later; the rest can be added when the
+> substrate settles and a two-writer scenario exists.
+
+### 10.1 Every property write records what the writer saw
+
+- `ChangeObjectPropertyCommand` / `ChangeComponentPropertyCommand` and their events carry
+  **`BaseEventId`**: the target's last applied event id at the moment the writer issued the change.
+  The generated setter reads it once and uses it for both the persisted base and the request-side
+  `ExpectedLastEventId` precondition. `Guid.Empty` means *unknown* — manual commands, and history
+  written before the field existed — and is folded as sequential.
+- This is the three-way-merge input (base / mine / theirs) expressed as a point in history rather
+  than a value, so it is immune to ABA and to two writers coincidentally sharing an old value.
+- Today's granularity is the **target** (object / container), not the property. It is a superset
+  signal: it can say "concurrent with *something* on this target", not yet "concurrent on *this*
+  property".
+
+### 10.2 The fold never fails; last sequenced wins; nothing is lost
+
+- Applying an event must always succeed and give the same result on every replica regardless of
+  arrival order (core.md §6). A conflict is therefore a **state**, never an apply-time error.
+- Per stored property, a slot `{ Value, LastEventId, Competitors? }` where `Competitors` is null
+  unless concurrent writes exist (zero cost in the common case):
+  - `ev.BaseEventId == slot.LastEventId` → **sequential**: replace, clear competitors. This is also
+    how a conflict resolves — anyone who has seen the shown value and writes again clears it,
+    including re-saving the same value.
+  - otherwise → **concurrent**: the new value still becomes the shown value (deterministic: stream
+    order), and the displaced value is appended to `Competitors`.
+- Two concurrent writes of the **same** value converge without a conflict.
+- `LastEventId` moves from the target to the property when slots land, which is what makes the
+  check per-property.
+
+### 10.3 Consumer surface
+
+- The shown value is the property itself — existing consumers see no behaviour change.
+- Per property, a generated typed accessor (`{Name}State`) exposes `IsConflicted`, `LastEventId`
+  and the typed competitors; the projection raises `PropertyChanged` for it alongside the property,
+  so a binding can show a badge and clear it.
+- Resolution is an ordinary write. The UI's "keep 5 / keep 7" is a setter call whose base covers
+  both.
+
+### 10.4 Policy per property
+
+- `[Merge(MergePolicy.Competitors)]` — default: track and surface (nothing is silently lost).
+- `[Merge(MergePolicy.LastWriter)]` — plain field, no slot: for values nobody should be asked about
+  (last opened, layout positions) and for bulk-import types where 24 bytes/property matters.
+- `[Merge(MergePolicy.Counter)]` — later: intent-based merge (`+= n`), which is why the command log
+  keeps intent rather than only the resulting value.
+
+### 10.5 Names are a namespace problem, not a value problem
+
+- A **name** collision (`Report` vs `report`, or two `Report`) is an invariant of the *containing
+  scope*, checked on the command path against one canonical key (`CaseFold(NFC(name))`) and, on
+  the event path, folded into a per-scope bucket that may temporarily hold more than one entry.
+  Same shape as 10.2 — reject at intent time, never at fold time, surface until a person renames or
+  merges — but keyed by scope, not by property.
+
+---
+
 ## Historical / superseded ideas
 
 Kept so older decisions stay documented and are not re-litigated. **None of the following is

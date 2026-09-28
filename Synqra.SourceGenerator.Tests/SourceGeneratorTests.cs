@@ -135,8 +135,12 @@ public sealed partial class SomeModel
 
 		Assert.That(generated, Does.Contain("global::Synqra.CommandSubmissionOptions"),
 			"Generated setter must emit a CommandSubmissionOptions argument unconditionally.");
-		Assert.That(generated, Does.Contain("ExpectedLastEventId = __store.GetLastEventId"),
-			"Generated setter must reference the current last event id of the target.");
+		Assert.That(generated, Does.Contain("var baseEventId = __store.GetLastEventId"),
+			"Generated setter must read the current last event id of the target once.");
+		Assert.That(generated, Does.Contain("ExpectedLastEventId = baseEventId"),
+			"The request-side precondition must be that same id.");
+		Assert.That(generated, Does.Contain("BaseEventId = baseEventId"),
+			"The persisted command must carry that same id, so the event log records what the writer saw.");
 		Assert.That(generated, Does.Not.Contain("ExpectedTargetVersion"),
 			"The numeric-version field is gone; only event-id-based precondition remains.");
 		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
