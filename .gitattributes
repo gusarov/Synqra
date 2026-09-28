@@ -59,3 +59,8 @@ Dockerfile text eol=lf
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# tsc (Microsoft.TypeScript.MSBuild) emits LF on every Debug build; check its committed output out as LF too,
+# or autocrlf turns it into CRLF and every build leaves it "modified".
+**/wwwroot/*.js text eol=lf
+**/wwwroot/*.js.map text eol=lf
