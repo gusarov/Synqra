@@ -1,6 +1,7 @@
 ﻿using Synqra.Tests.TestHelpers;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using TUnit.Assertions.Extensions;
@@ -298,6 +299,44 @@ public class GuidExtensionsTests3 : BaseTest
 		var timestamp = guid.GetTimestamp();
 		Console.WriteLine(timestamp);
 		await Assert.That((DateTime.UtcNow - timestamp).TotalSeconds).IsLessThan(1);
+	}
+
+	[Test]
+	public async Task V7_subms_source_follows_clock_resolution()
+	{
+		// The sub-ms field source is never mixed:
+		//  - a clock we've seen deliver sub-ms -> the pure 100ns fraction (whole-ms input packs 0 -> group3 "7000"),
+		//    no entropy per call, so real clocks keep clean monotonic time;
+		//  - a clock only ever seen at whole-ms (browsers/WASM clamp for Spectre) -> entropy, so ids aren't "7000".
+		var wholeMs = new DateTime(2026, 7, 20, 12, 0, 0, DateTimeKind.Utc);
+		static string Group3(Guid g) => g.ToString().Split('-')[2];
+
+		// sub-ms-latched: whole-ms input -> exact 0 sub-ms, no randomness bleeds in
+		await Assert.That(Group3(new GuidExtensions.Generator { _subMsClock = true }.CreateVersion7(wholeMs))).IsEqualTo("7000");
+
+		// coarse (never latched): entropy fills the field -> varied, never the "7000" bug
+		// (a fresh Generator per iteration isolates the entropy seed from the monotonic counter loop)
+		var groups = Enumerable.Range(0, 32)
+			.Select(_ => Group3(new GuidExtensions.Generator().CreateVersion7(wholeMs)))
+			.ToList();
+		await Assert.That(groups.Distinct().Count()).IsGreaterThan(1);
+		await Assert.That(groups.All(g => g == "7000")).IsFalse();
+
+		// latching: a generator starts pessimistic, flips true the first time it sees sub-ms, and never flips back
+		var gen = new GuidExtensions.Generator();
+		await Assert.That(gen._subMsClock).IsFalse();
+		gen.CreateVersion7(wholeMs.AddTicks(5000)); // ticks % 10000 == 5000 -> real sub-ms
+		await Assert.That(gen._subMsClock).IsTrue();
+		gen.CreateVersion7(wholeMs);                // back to whole ms — must NOT reintroduce entropy
+		await Assert.That(gen._subMsClock).IsTrue();
+
+		// version/variant preserved either way, and GetTimestamp still recovers the millisecond (never reads sub-ms)
+		foreach (var g in new[] { new GuidExtensions.Generator { _subMsClock = true }.CreateVersion7(wholeMs), new GuidExtensions.Generator().CreateVersion7(wholeMs) })
+		{
+			await Assert.That(g.GetVersion()).IsEqualTo(7);
+			await Assert.That(g.GetVariant()).IsEqualTo(1);
+			await Assert.That(g.GetTimestamp()).IsEqualTo(wholeMs);
+		}
 	}
 
 	[Test]

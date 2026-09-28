@@ -1,0 +1,52 @@
+@page "/guid-v7"
+@using System.Linq
+@using Synqra
+
+<PageTitle>v7 GUID sub-ms proof</PageTitle>
+
+@* Browser-level guard for the v7 sub-ms fix. In a browser DateTime.UtcNow is clamped to whole
+   milliseconds (Spectre), so `ticks % 10000 == 0`. Each id below is minted from a *fresh* generator,
+   so every one is the "first of its millisecond" (monotonic counter at 0). Without the entropy
+   fallback in GuidExtensions the sub-ms field is 0 for all of them and every id collapses to
+   group3 "7000" — which is exactly what the Playwright test asserts must NOT happen. *@
+
+<h1 data-testid="guid-v7-page">v7 GUID sub-ms proof</h1>
+<div data-testid="guid-v7-env">@(OperatingSystem.IsBrowser() ? "Browser/WASM" : "native")</div>
+
+<button data-testid="guid-v7-generate" @onclick="Generate">Generate</button>
+
+@if (_generated)
+{
+	<div>count: <b data-testid="guid-v7-count">@_guids.Count</b></div>
+	<div>distinct group3: <b data-testid="guid-v7-distinct-group3">@_distinctGroup3</b></div>
+	<div>all 7000: <b data-testid="guid-v7-all-7000">@(_allSeven ? "true" : "false")</b></div>
+	<ul>
+		@foreach (var g in _guids)
+		{
+			<li data-testid="guid-v7-item"><code>@g</code></li>
+		}
+	</ul>
+}
+
+@code {
+	private readonly List<Guid> _guids = new();
+	private bool _generated;
+	private int _distinctGroup3;
+	private bool _allSeven;
+
+	private static string Group3(Guid g) => g.ToString().Split('-')[2];
+
+	private void Generate()
+	{
+		_guids.Clear();
+		for (int i = 0; i < 16; i++)
+		{
+			// fresh generator => each id is the first of its millisecond (counter at 0)
+			_guids.Add(new GuidExtensions.Generator().CreateVersion7());
+		}
+
+		_distinctGroup3 = _guids.Select(Group3).Distinct().Count();
+		_allSeven = _guids.All(g => Group3(g) == "7000");
+		_generated = true;
+	}
+}
