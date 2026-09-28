@@ -620,6 +620,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			PropertyName = cmd.PropertyName,
 			OldValue = cmd.OldValue,
 			NewValue = cmd.NewValue,
+			BaseEventId = cmd.BaseEventId,
 
 			// Data = cmd.Data,
 			// DataString = cmd.DataJson, // if json is cached here, let's use it to save on serialization
@@ -677,6 +678,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			PropertyName = cmd.PropertyName,
 			OldValue = cmd.OldValue,
 			NewValue = cmd.NewValue,
+			BaseEventId = cmd.BaseEventId,
 		});
 		return Task.CompletedTask;
 	}

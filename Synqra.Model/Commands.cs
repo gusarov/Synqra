@@ -86,6 +86,7 @@ public class DeleteObjectCommand : Command
 [Schema(2025.793, "1 PropertyName string OldValue object? NewValue object? TargetTypeId Guid CollectionId Guid TargetId Guid Target object? CommandId Guid ContainerId Guid")]
 [Schema(2025.794, "1 CommandId Guid ContainerId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2026.198, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.740, "1 CommandId Guid StreamId Guid TargetTypeId Guid CollectionId Guid TargetId Guid PropertyName string OldValue object? NewValue object? BaseEventId Guid")]
 public partial class ChangeObjectPropertyCommand : SingleObjectCommand
 {
 	public required partial string PropertyName { get; set; }
@@ -93,6 +94,9 @@ public partial class ChangeObjectPropertyCommand : SingleObjectCommand
 	public partial object? OldValue { get; set; }
 
 	public partial object? NewValue { get; set; }
+
+	// The target's last applied event id as the writer saw it; Guid.Empty = unknown (manual command / pre-base history).
+	public partial Guid BaseEventId { get; set; }
 
 	public ChangeObjectPropertyCommand()
 	{
