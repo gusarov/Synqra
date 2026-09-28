@@ -71,6 +71,7 @@ public static class MongoAppendStorageExtensions
 
 		services.TryAddKeyedSingleton<IMongoCollection<T>>("Synqra.AppendStorage", (sp, key) =>
 		{
+			MongoEventClassMaps.RegisterModelTypes(sp.GetService<ITypeMetadataProvider>());
 			var options = sp.GetRequiredService<IOptions<MongoAppendStorageOptions>>().Value;
 			var url = new MongoUrl(options.ConnectionString);
 			var client = new MongoClient(options.ConnectionString);
@@ -147,6 +148,7 @@ public static class MongoAppendStorageExtensions
 
 		services.AddKeyedSingleton<IMongoCollection<T>>(serviceKey, (sp, key) =>
 		{
+			MongoEventClassMaps.RegisterModelTypes(sp.GetService<ITypeMetadataProvider>());
 			var url = new MongoUrl(connectionString);
 			var client = new MongoClient(connectionString);
 			var db = client.GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);

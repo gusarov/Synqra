@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Synqra;
 
 /// <summary>
@@ -35,9 +37,11 @@ public abstract partial class Link : IIdentifiable<Guid>
 	Guid IIdentifiable<Guid>.Id => LinkId;
 
 	/// <summary>Declared type of the source endpoint.</summary>
+	[JsonIgnore]
 	public abstract System.Type SourceType { get; }
 
 	/// <summary>Declared type of the target endpoint.</summary>
+	[JsonIgnore]
 	public abstract System.Type TargetType { get; }
 
 	/// <summary>
@@ -45,7 +49,15 @@ public abstract partial class Link : IIdentifiable<Guid>
 	/// endpoints in order (A→B ≠ B→A); <see cref="UndirectedLink{TSource, TTarget}"/> folds them
 	/// symmetrically ({A,B} == {B,A}).
 	/// </summary>
+	[JsonIgnore]
 	public abstract LinkKey StructuralKey { get; }
+
+	/// <summary>
+	/// Part of <see cref="StructuralKey"/>: two links of one type between the same endpoints are the same
+	/// link unless this differs. A link type whose instances carry a kind returns it here.
+	/// </summary>
+	[JsonIgnore]
+	protected virtual Guid KeyQualifier => Guid.Empty;
 
 	/// <summary>Resolve an endpoint id to its model object through the attached store, or null.</summary>
 	protected object? ResolveEndpoint(Guid id)

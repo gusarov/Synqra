@@ -17,7 +17,10 @@ public abstract class Link<TSource, TTarget> : Link
 	where TSource : class
 	where TTarget : class
 {
+	// Runtime-only: a Type does not serialize, and the link persists as its scalar id columns.
+	[JsonIgnore]
 	public override System.Type SourceType => typeof(TSource);
+	[JsonIgnore]
 	public override System.Type TargetType => typeof(TTarget);
 
 	/// <summary>The object at the link's source end, resolved through the store. Setting it records the source identity.</summary>

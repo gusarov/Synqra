@@ -38,6 +38,16 @@ public interface IReplayProjection : IObjectStore, IProjection
 }
 
 /// <summary>
+/// A projection that remembers every event it has applied. Log order is event-id order, not arrival
+/// order: a backlog that lands behind a local write, or another client's concurrent edit, can sort
+/// before the <see cref="IReplayProjection.Cursor"/>. The keeper uses this to fold such late events in.
+/// </summary>
+public interface IAppliedEventSet
+{
+    bool HasApplied(Guid eventId);
+}
+
+/// <summary>
 /// A per-stream event reader/writer. The log knows which stream it is (<see cref="StreamId"/>), so a
 /// misrouted append is caught here rather than silently folded into the wrong projection.
 /// </summary>

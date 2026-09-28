@@ -219,6 +219,18 @@ public sealed class ProjectionKeeper : IProjectionKeeper
 		)
 	{
 		var log = _logProvider.GetEventLog(projection.StreamId);
+		if (till is null && projection.Cursor != default && projection is IAppliedEventSet applied)
+		{
+			// Warm catch-up: fold in whatever is not applied yet, wherever its id sorts (see IAppliedEventSet).
+			await foreach (var ev in log.ReadFrom(cancellationToken: cancellationToken))
+			{
+				if (!applied.HasApplied(ev.EventId))
+				{
+					await projection.ApplyAsync(ev, isReplay, cancellationToken);
+				}
+			}
+			return;
+		}
 		await foreach (var ev in log.ReadFrom(afterEventId: projection.Cursor, till: till, cancellationToken))
 		{
 			await projection.ApplyAsync(ev, isReplay, cancellationToken);

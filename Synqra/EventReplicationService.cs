@@ -33,6 +33,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	public bool IsOnline { get => _isOnline; private set => _isOnline = value; }
 
 	private Task? _readerTask;
+	private readonly ILogger<EventReplicationService>? _logger;
 	private ClientWebSocket? _wsConnection;
 	private volatile IReadOnlyCollection<Guid> _activeStreams = Array.Empty<Guid>();
 
@@ -64,8 +65,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		, INetworkSerializationService networkSerializationService
 		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
+		, ILogger<EventReplicationService>? logger = null
 		)
 	{
+		_logger = logger;
 		_storage = storage;
 		_eventReplicationState = eventReplicationState;
 		_networkSerializationService = networkSerializationService;
@@ -74,6 +77,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 
 	HashSet<Guid> _skipSet = new HashSet<Guid>();
+	// Events that came from the server: already there, so the outbound loop must not echo them back.
+	readonly HashSet<Guid> _fromServer = new HashSet<Guid>();
 	LinkedList<Guid> _skipList = new LinkedList<Guid>();
 
 	static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
@@ -201,6 +206,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
 						break;
 					case EventEnvelope envelope:
+						// Recorded before the append, so the outbound loop can never see it unmarked.
+						lock (_fromServer)
+						{
+							_fromServer.Add(envelope.Event.EventId);
+						}
 						await _storage.AppendAsync(envelope.Event);
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {envelope.Event}");
 						// Transport-only: dedup so the outgoing loop never echoes a server event back,
@@ -254,8 +264,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		#endregion
 
-		var myEnumerable = _storage.GetAllAsync(from: _eventReplicationState.LastEventIdFromMe);
-		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
 		{
 			await _autoResetEvent.WaitAsync();
@@ -264,44 +272,75 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			{
 				break;
 			}
-			// get new events from storage and send them to server
-			while (await myEnumerator.MoveNextAsync())
+			try
 			{
-				var ev = myEnumerator.Current;
-				// Single-stream connection: skip events belonging to any other stream that shares this
-				// local multitenant store (e.g. the primary stream's events when this connection only
-				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
-				// they are never re-examined, and they are never sent to — and mis-stamped by — the
-				// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
-				if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
+				// A fresh pass per signal: a drained async iterator (the blob/IndexedDb store's) never
+				// yields again, so a single long-lived enumerator stopped sending after the first burst.
+				// Read from the start and skip past the cursor, as the keeper does: `from` is not a uniform
+				// range bound across backends.
+				var sentUpTo = _eventReplicationState.LastEventIdFromMe;
+				var reached = sentUpTo == default;
+				await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
 				{
-					_eventReplicationState.LastEventIdFromMe = ev.EventId;
-					continue;
-				}
-				lock (_skipSet)
-				{
-					if (_skipSet.Add(ev.EventId))
+					if (!reached)
 					{
-						_skipList.AddLast(ev.EventId);
+						reached = ev.EventId == sentUpTo;
+						continue;
 					}
-				}
-				// await _connection.InvokeAsync("EventEnvelope", ev);
+					// Single-stream connection: skip events belonging to any other stream that shares this
+					// local multitenant store (e.g. the primary stream's events when this connection only
+					// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
+					// they are never re-examined, and they are never sent to — and mis-stamped by — the
+					// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
+					if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
+					{
+						_eventReplicationState.LastEventIdFromMe = ev.EventId;
+						continue;
+					}
+					bool fromServer;
+					lock (_fromServer)
+					{
+						fromServer = _fromServer.Contains(ev.EventId);
+					}
+					if (fromServer)
+					{
+						// Echoing a fresh device's whole received history delayed its first own edit by
+						// the time the server took to re-apply every one of them.
+						_eventReplicationState.LastEventIdFromMe = ev.EventId;
+						continue;
+					}
+					lock (_skipSet)
+					{
+						if (_skipSet.Add(ev.EventId))
+						{
+							_skipList.AddLast(ev.EventId);
+						}
+					}
+					// await _connection.InvokeAsync("EventEnvelope", ev);
 
-				var inv = new EventEnvelope() { Event = ev };
+					var inv = new EventEnvelope() { Event = ev };
 
-				var pool = ArrayPool<byte>.Shared;
-				var bytes = pool.Rent(DefaultFrameSize);
-				try
-				{
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
-					await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
-				}
-				finally
-				{
-					pool.Return(bytes);
-				}
+					var pool = ArrayPool<byte>.Shared;
+					var bytes = pool.Rent(DefaultFrameSize);
+					try
+					{
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+						await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
+					}
+					finally
+					{
+						pool.Return(bytes);
+					}
 
-				_eventReplicationState.LastEventIdFromMe = ev.EventId;
+					_eventReplicationState.LastEventIdFromMe = ev.EventId;
+				}
+			}
+			catch (Exception ex) when (!_cts.IsCancellationRequested)
+			{
+				// Nothing observes this background loop: an unhandled failure used to end uploading for
+				// the rest of the page's life, silently. The cursor stops at the last event sent, so the
+				// next signal retries from there.
+				_logger?.LogError(ex, "Synqra replication: sending local events failed; retrying on the next change");
 			}
 			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
 
@@ -350,6 +389,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			_skipSet.Clear();
 			_skipList.Clear();
+		}
+		lock (_fromServer)
+		{
+			_fromServer.Clear();
 		}
 		_eventReplicationState.LastEventIdFromServer = default;
 		if (_storage is IClearableAppendStorage clearable)

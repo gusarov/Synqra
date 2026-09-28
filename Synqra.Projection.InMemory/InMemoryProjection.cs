@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection, IAppliedEventSet
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -143,6 +143,16 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public string? ProjectionStatus { get; set; }
 
 	public Guid Cursor { get; private set; }
+
+	private readonly HashSet<Guid> _applied = new();
+
+	public bool HasApplied(Guid eventId)
+	{
+		lock (_applied)
+		{
+			return _applied.Contains(eventId);
+		}
+	}
 
 	/// <summary>
 	/// Apply one event, advancing <see cref="Cursor"/> (in <see cref="AfterVisitAsync(Event, EventVisitorContext)"/>).
@@ -763,6 +773,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				$"Event stream {ev.StreamId} does not match projection stream {StreamId} — misrouted event {ev.EventId}.");
 		}
 		Cursor = ev.EventId;
+		lock (_applied)
+		{
+			_applied.Add(ev.EventId);
+		}
 		return Task.CompletedTask;
 	}
 

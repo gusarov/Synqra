@@ -120,6 +120,23 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_M12_round_trip_a_guid_boxed_in_an_object_value()
+	{
+		// A Guid property change carries its value as object (Old/NewValue); the driver's default
+		// ObjectSerializer refuses to write a Guid without an explicit representation.
+		var storage = Storage();
+		var value = Guid.NewGuid();
+		var ev = Change(GuidExtensions.CreateVersion7(), "unused");
+		ev.NewValue = value;
+		await storage.AppendAsync(ev);
+
+		Reopen();
+		var items = Storage().GetAllAsync().ToBlockingEnumerable().ToArray();
+		await Assert.That(items.Length).IsEqualTo(1);
+		await Assert.That(((ObjectPropertyChangedEvent)items[0]).NewValue).IsEqualTo(value);
+	}
+
+	[Test]
 	public async Task Should_M11_replay_in_id_order()
 	{
 		var storage = Storage();
