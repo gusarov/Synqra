@@ -55,16 +55,7 @@ public static class TypeMetadataProviderExtensions
 			}
 		}
 
-		public IReadOnlyCollection<TypeMetadata> RegisteredTypes
-		{
-			get
-			{
-				lock (_typeMetadataByType)
-				{
-					return _typeMetadataByType.Values.ToArray();
-				}
-			}
-		}
+		public IReadOnlyCollection<TypeMetadata> RegisteredTypes => _typeMetadataByType.Values; // live view, no copy
 
 		public void RegisterType(Type type)
 		{

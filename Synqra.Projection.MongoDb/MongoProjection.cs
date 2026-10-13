@@ -860,9 +860,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		}
 	}
 
-	// A facet carries the ComponentId addressing column (CreateComponent); a root never does. That absence is
-	// the root marker — a plain, indexable predicate, unlike a field-to-field $expr on _id == _eid.
-	internal FilterDefinition<BsonDocument> RootsOnlyFilter => Builders<BsonDocument>.Filter.Exists("ComponentId", false);
+	// A root owns itself: _id == _eid (docs/model.md §2). Only applied on single-document lookups (ResolveObject),
+	// where the _id index already narrows to one document. Type-scoped enumeration needs no marker: "_t" is
+	// the concrete type, and a type is either a root type or a facet type.
+	internal FilterDefinition<BsonDocument> RootsOnlyFilter => new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray { "$_id", "$" + EntityIdField }));
 
 	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid": the **entity id** — the
 	// id of the thing this component belongs to (its IComponentContainer today; the ECS entity under
@@ -881,30 +882,30 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// map and always stamps a <c>_t</c> discriminator, and reading back resolves the concrete type
 	/// from <c>_t</c> alone via <see cref="FromDocument"/>. So the stored document needs no separate
 	/// type-id column — the <c>_t</c> discriminator doubles as the type filter, mirroring how
-	/// links are stored. The remaining (owner, type, id) addressing matches how
-	/// <see cref="ComponentApplyHelpers.ResolveComponent"/> addresses a component on the live, in-memory
-	/// side of this same apply path — with the type filtered via <c>_t</c> so a unique component
-	/// (<c>ComponentId == Guid.Empty</c>) is still distinguished from a peer of another type.
-	/// <paramref name="containerId"/> is the id of the <see cref="IComponentContainer"/> this component
-	/// is attached to (matching that concept's name everywhere else in Synqra) — stored under
-	/// <see cref="EntityIdField"/>, not a literal "ContainerId"/"Container" column, per that field's
-	/// own remark.
+	/// links are stored. A facet's <c>_id</c> IS its component id (docs/model.md §2: every component has a
+	/// first-class <c>_id</c> in the unified id space), so addressing is <c>_id</c> + stream;
+	/// <paramref name="containerId"/> (<see cref="EntityIdField"/>) and <paramref name="componentType"/>
+	/// (<c>_t</c>) stay in the filter as a consistency guard.
 	/// </summary>
 	FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
 			StreamFilter(),
+			Builders<BsonDocument>.Filter.Eq("_id", componentId),
 			Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId),
-			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
-			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId));
+			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name));
 
 	// Create path only (facet add); a later property change is a field-level SetField on this document.
 	void CreateComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
 		// Explicit serializer, not ambient lookup — see ToDocument's own remarks.
+		if (componentId == Guid.Empty)
+		{
+			throw new InvalidOperationException($"A '{component.GetType().Name}' facet on {containerId} has no component id; every component is persisted under its own _id.");
+		}
 		var doc = component.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
+		doc["_id"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[EntityIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
-		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
 		Components.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
@@ -928,9 +929,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
 		foreach (var doc in Components.Find(loadFilter).ToList())
 		{
-			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent) —
-			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
-			var component = (IComponent)FromDocument(doc, "ComponentId");
+			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent).
+			var component = (IComponent)FromDocument(doc);
+			// The component id is generated hidden state, not a serialized member — restore it from _id.
+			if (component is IBindableComponent identified)
+			{
+				identified.SetComponentId(doc["_id"].AsGuid);
+			}
 
 			if (!container.Components.TryAdd(component))
 			{
