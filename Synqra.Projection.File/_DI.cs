@@ -148,7 +148,9 @@ public static class FileSynqraExtensions
 		{
 			Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(type);
 			var metadata = TypeMetadataProvider.GetTypeMetadata(type);
+#pragma warning disable CS0618 // named-collection plumbing until the CollectionId wire-format PR
 			var collectionId = metadata.GetCollectionId(collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
+#pragma warning restore CS0618
 
 			return GetCollection(type, collectionId);
 		}
@@ -162,7 +164,9 @@ public static class FileSynqraExtensions
 		{
 			Synqra.Projection.LinkApplyHelpers.GuardNotLinkType(typeof(T));
 			var metadata = TypeMetadataProvider.GetTypeMetadata(typeof(T));
+#pragma warning disable CS0618 // named-collection plumbing until the CollectionId wire-format PR
 			var collectionId = metadata.GetCollectionId(collectionName);
+#pragma warning restore CS0618
 			return GetCollection<T>(collectionId);
 		}
 
@@ -861,7 +865,7 @@ public static class FileSynqraExtensions
 			await _appendStores.ItemAppendStorage.AppendAsync(new Item
 			{
 				StreamId = ev.StreamId,
-				CollectionId = _typeMetadataProvider.GetTypeMetadata(typeof(Command)).GetCollectionId(""),
+				CollectionId = _typeMetadataProvider.GetTypeMetadata(typeof(Command)).CollectionId,
 				ObjectId = ev.CommandId,
 				Blob = ev.Data,
 			});

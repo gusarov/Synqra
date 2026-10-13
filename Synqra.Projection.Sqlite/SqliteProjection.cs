@@ -301,7 +301,9 @@ public class SqliteStore : IObjectStore
 
 	Guid GetCollectionId(Type rootType, string collectionName)
 	{
+#pragma warning disable CS0618 // named-collection plumbing until the CollectionId wire-format PR
 		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(collectionName ?? throw new ArgumentNullException(nameof(collectionName)));
+#pragma warning restore CS0618
 	}
 
 	public Guid GetId(object model)

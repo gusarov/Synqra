@@ -582,7 +582,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 				StreamId = _streamId,
 				TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).TypeId,
 				TargetId = store.GetId(node),
-				CollectionId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).GetCollectionId(""),
+				CollectionId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode)).CollectionId,
 				ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
 				ComponentId = Guid.Empty,
 				Data = new TestUniqueComponent { Subject = "second" },

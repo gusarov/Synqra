@@ -367,7 +367,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	Guid GetCollectionId(Type rootType, string? name = null)
 	{
+#pragma warning disable CS0618 // named-collection plumbing until the CollectionId wire-format PR
 		return TypeMetadataProvider.GetTypeMetadata(rootType).GetCollectionId(name);
+#pragma warning restore CS0618
 	}
 
 	public Guid StreamId { get; }
@@ -801,7 +803,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
 		}
 
 		NotifyLinkChanged(link, LinkEnd.Source);
