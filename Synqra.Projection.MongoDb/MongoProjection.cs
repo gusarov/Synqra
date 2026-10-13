@@ -642,6 +642,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// Track + persist it as a self-owned document in the shared Components collection.
 			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
+			// Race: another caller may materialize this same id concurrently — the collection enumerator or
+			// ResolveObject on a re-delivered add (the document already exists then). AttachWithId registers
+			// id -> instance atomically and hands back whichever instance won; using that one for the write
+			// keeps the tracked instance and the stored document the same object. On a first add nothing can
+			// race (no document to load yet), so the winner is ev.Data itself.
 			rootModel = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
 			CreateRoot(ev.TargetId, rootModel);
 			MarkApplied(ev.TargetId, ev.EventId);
