@@ -1,7 +1,8 @@
-#if NET10_0_OR_GREATER
+﻿#if NET10_0_OR_GREATER
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -104,6 +105,48 @@ internal class ReplicationEndpointIsolationTests : BaseTest
 
 		await Task.Delay(LeakGraceMs);
 		await Assert.That(nodeD.StoreContext.GetCollection<SampleTaskModel>()).HasCount(0);
+	}
+
+	[Test]
+	public async Task Server_side_write_is_pushed_to_its_own_stream_only()
+	{
+		var streamA = Guid.NewGuid();
+		var streamB = Guid.NewGuid();
+
+		var master = new SynqraTestNode(Guid.NewGuid(), builder => { }, masterHost: true, useRealEndpoint: true);
+		await master.Started;
+		var nodeA = new SynqraTestNode(streamA, builder => { }) { Port = master.Port };
+		var nodeB = new SynqraTestNode(streamB, builder => { }) { Port = master.Port };
+		await nodeA.Started;
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeA);
+		await WaitForOnlineAsync(nodeB);
+
+		// A write that never crossed a socket (a REST call): the master's projection reports what it committed.
+		var metadata = nodeA.StoreContext.TypeMetadataProvider.GetTypeMetadata(typeof(SampleTaskModel));
+		var id = Guid.CreateVersion7();
+		var projection = (FakeProjection)master.Host.Services.GetRequiredService<IProjection>();
+		projection.RaiseCommitted(
+		[
+			new ComponentAddedEvent
+			{
+				StreamId = streamA,
+				EventId = Guid.CreateVersion7(),
+				CommandId = Guid.CreateVersion7(),
+				TargetTypeId = metadata.TypeId,
+				CollectionId = metadata.GetCollectionId(""),
+				TargetId = id,
+				ComponentTypeId = metadata.TypeId,
+				ComponentId = id,
+				Data = new SampleTaskModel { Subject = "written over REST" },
+			},
+		]);
+
+		var aGot = await WaitForCountAsync(nodeA, 1, PropagationTimeoutMs);
+		await Assert.That(aGot).IsTrue();
+		await Assert.That(nodeA.StoreContext.GetCollection<SampleTaskModel>().First().Subject).IsEqualTo("written over REST");
+		await Task.Delay(LeakGraceMs);
+		await Assert.That(nodeB.StoreContext.GetCollection<SampleTaskModel>()).HasCount(0);
 	}
 
 	static async Task<bool> MasterHasAnyEventAsync(SynqraTestNode master)

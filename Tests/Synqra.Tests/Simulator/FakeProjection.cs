@@ -1,4 +1,4 @@
-#if NET10_0_OR_GREATER
+﻿#if NET10_0_OR_GREATER
 using System.Threading.Tasks;
 
 namespace Synqra.Tests.Simulator;
@@ -8,10 +8,15 @@ namespace Synqra.Tests.Simulator;
 /// replication endpoint resolves an <see cref="IProjection"/> from DI and calls Accept on every
 /// inbound event before it appends and broadcasts; the stream-isolation e2e test only cares about
 /// who receives which event over the socket, not about projected state, so the master host registers
-/// this instead of a real stream-aware projection. Every method is a completed no-op.
+/// this instead of a real stream-aware projection. Every method is a completed no-op. A test raises
+/// <see cref="EventsCommitted"/> itself to stand for a server-side write.
 /// </summary>
-internal sealed class FakeProjection : IProjection
+internal sealed class FakeProjection : IProjection, ICommittedEventSource
 {
+	public event Action<IReadOnlyList<Event>>? EventsCommitted;
+
+	public void RaiseCommitted(IReadOnlyList<Event> events) => EventsCommitted?.Invoke(events);
+
 	// IEventVisitor<EventVisitorContext>
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
@@ -34,5 +39,6 @@ internal sealed class FakeProjection : IProjection
 	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+	public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 }
 #endif

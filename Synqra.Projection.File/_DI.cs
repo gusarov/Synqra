@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
@@ -768,6 +768,7 @@ public static class FileSynqraExtensions
 		}
 		public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => throw new NotSupportedException("BatchCommand is not supported by the File projection.");
 
 		public async Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 		{

@@ -408,6 +408,7 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `8C01` | `AddComponentCommand` | live | ↔ `8E01` |
 | `8C02` | `ChangeComponentPropertyCommand` | live | ↔ `8E02` |
 | `8C03` | `DeleteComponentCommand` | live | ↔ `8E03` |
+| `8C04` | `BatchCommand` | live | no paired event: its effect is its children's events; server-side only, never persisted or sent |
 | `9C01` | `ChangeObjectPropertyCommand` | dying | ↔ `9E01` |
 | `9C02` | `DeleteObjectCommand` | dying | (no paired event) |
 | `9C03` | `AddLinkCommand` | dying | ↔ `9E03` |
@@ -478,6 +479,23 @@ gap is expected.
 - **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _eid, …,
   Target? }`. Root components (`_id == _eid`) are the entities; other components hang off `_eid`;
   links carry `Target`. No per-type object collections; no separate `Links` collection.
+- **Version on the root document.** The Mongo projection stores `_lev`, the id of the last event applied to an
+  object or any of its components, on the object's root document, so `GetLastEventId` (an object's version) survives
+  a restart and optimistic concurrency (`CommandSubmissionOptions.ExpectedLastEventId`) works across processes: the
+  Mongo projection compares the expectation against the document's `_lev`, re-read inside its submit gate, not
+  against the version it last saw. The root write carries `_lev` itself (one write). Both the Mongo and the in-memory
+  projection check the precondition under the same per-instance gate as the write; what remains open is the gap
+  between Mongo's re-read and its write (a conditional write on `_lev` would close it).
+- **Committed events.** A projection that applies a locally submitted command raises `ICommittedEventSource.EventsCommitted`
+  with the domain events it stored. The server-side replication endpoint uses it to push writes that did not arrive
+  over a socket (REST, background jobs) to every subscribed client.
+- **Batches.** `BatchCommand` applies several commands as one: it is validated in full against a scratch in-memory
+  projection rebuilt from the stream's log, so later commands see earlier ones and any refusal leaves the real
+  projection and the log untouched; then the produced events are applied and stored together. Children address
+  targets by id and keep their own `CommandCreatedEvent`s. A projection without an event log, and the Sqlite and
+  File projections, refuse batches explicitly. Cost: the log is multitenant with no per-stream range read, so the
+  scratch rebuild scans the whole log per batch, under the submit gate; a per-stream read in the storage (or an
+  overlay on the live projection) is the known next step.
 - **Projections are derived and rebuildable** (core.md §4). Different backends may differ in
   physical layout; the event log is the invariant.
 - **A property change is a field-level update; `ReplaceOne` only creates documents.** On Mongo a

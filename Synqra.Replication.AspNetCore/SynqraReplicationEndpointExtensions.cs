@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
@@ -56,7 +56,91 @@ public static class SynqraReplicationEndpointExtensions
 		// gives both the routing tags and O(1) removal on disconnect.
 		var sockets = new ConcurrentDictionary<WebSocket, SocketScope>();
 		var broadcastGate = new SemaphoreSlim(1, 1);
-		var knownEvents = new ConcurrentDictionary<Guid, object?>();
+		// Bounded: a long-running host sees every committed event through here, so an unbounded set would grow forever.
+		var knownEvents = new RecentEventIds(capacity: 100_000);
+
+		// Writes that never crossed a socket (a REST call, a background job) are pushed too: the
+		// projection reports what each locally submitted command committed, and one ordered queue fans
+		// those events out to every subscribed socket. Socket-borne events are applied directly and
+		// never raised here, and knownEvents dedups anything seen twice.
+		var committedSource = (serviceKey is null
+			? app.Services.GetService<IProjection>()
+			: app.Services.GetKeyedService<IProjection>(serviceKey)) as ICommittedEventSource;
+		if (committedSource is not null)
+		{
+			var pushLogger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Endpoint");
+			var queue = System.Threading.Channels.Channel.CreateUnbounded<Event>(new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, });
+			Action<IReadOnlyList<Event>> enqueue = events =>
+			{
+				foreach (var ev in events)
+				{
+					queue.Writer.TryWrite(ev);
+				}
+			};
+			committedSource.EventsCommitted += enqueue;
+			var lifetime = app.Lifetime.ApplicationStopping;
+			// The projection is a singleton that can outlive this endpoint: stop feeding the queue on shutdown.
+			lifetime.Register(() =>
+			{
+				committedSource.EventsCommitted -= enqueue;
+				queue.Writer.TryComplete();
+			});
+			_ = Task.Run(async () =>
+			{
+				var networkSerializationService = app.Services.GetRequiredService<INetworkSerializationService>();
+				var buffer = new byte[EventReplicationService.DefaultFrameSize];
+				try
+				{
+					await foreach (var ev in queue.Reader.ReadAllAsync(lifetime))
+					{
+						if (!knownEvents.TryAdd(ev.EventId))
+						{
+							continue;
+						}
+						// One event's failure must not end the push for every event after it.
+						try
+						{
+							await BroadcastAsync(ev);
+						}
+						catch (Exception ex) when (ex is not OperationCanceledException)
+						{
+							pushLogger?.LogError(ex, "Synqra replication: pushing committed event {EventId} failed; the push loop continues.", ev.EventId);
+						}
+					}
+				}
+				catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+				{
+					// host shutting down
+				}
+
+				async Task BroadcastAsync(Event ev)
+				{
+					await broadcastGate.WaitAsync(lifetime);
+					try
+					{
+						foreach (var (peer, peerScope) in sockets)
+						{
+							if (peer.State != WebSocketState.Open || !ReplicationStreamScope.Admits(ev.StreamId, peerScope.WritableStream, peerScope.Active))
+							{
+								continue;
+							}
+							try
+							{
+								await peer.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev }, buffer, lifetime);
+							}
+							catch (Exception sendEx) when (sendEx is not OperationCanceledException)
+							{
+								pushLogger?.LogDebug(sendEx, "Synqra replication: pushing committed event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
+							}
+						}
+					}
+					finally
+					{
+						broadcastGate.Release();
+					}
+				}
+			});
+		}
 
 		app.Map(path, async ctx =>
 		{
@@ -196,7 +280,7 @@ public static class SynqraReplicationEndpointExtensions
 						{
 							continue;
 						}
-						knownEvents.TryAdd(ev.EventId, null);
+						knownEvents.TryAdd(ev.EventId);
 						await SendEventFrameAsync(socket, backlogBuffer, ev);
 					}
 				}
@@ -255,7 +339,7 @@ public static class SynqraReplicationEndpointExtensions
 										{
 											continue;
 										}
-										knownEvents.TryAdd(ev.EventId, null);
+										knownEvents.TryAdd(ev.EventId);
 										await SendEventFrameAsync(socket, subBuffer, ev);
 									}
 								}
@@ -282,7 +366,7 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
-				if (!knownEvents.TryAdd(eventEnvelope.Event.EventId, null))
+				if (!knownEvents.TryAdd(eventEnvelope.Event.EventId))
 				{
 					continue; // already applied/broadcast — e.g. an echo from this same client
 				}
