@@ -170,6 +170,13 @@ T t) }`). A private helper that happens not to touch instance state is still an 
 Rationale: statics are hidden global state, untestable, and bypass DI; keeping the rule absolute
 is what keeps it maintainable. Pre-existing statics are not a licence to add more.
 
+### Methods are verbs, accessors are properties
+
+A method name must be a verb phrase. A noun-named parameterless accessor (`Components()`, `Database()`,
+`StreamFilter()`) is banned — make it a property. A noun with parameters gets a verb prefix:
+`BuildRootFilter(id)`, `FindRootDocument(id)`, `CreateProjection()`, `OpenDatabase()`. Applies to test
+helpers as much as production code.
+
 ## Testing Notes
 
 - Tests use **TUnit**, not xUnit/NUnit.
