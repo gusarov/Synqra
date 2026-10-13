@@ -192,11 +192,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	}
 
 	/// <summary>
-	/// Resolves a tracked instance by id, or null. Tracked-only — see the type-level remarks. Now that
-	/// every root lives in the one shared Components collection a Mongo fallback by <c>_id</c> would be
-	/// a single query; it is deliberately not added yet so tracking semantics change in their own step.
-	/// A caller that needs an id resolved after a restart must first load it into tracking, e.g. by
-	/// enumerating <see cref="GetCollection{T}"/> for its type — exactly what <see cref="GetId"/> already requires.
+	/// Resolves a tracked entity by id, or null. Tracked-only — see the type-level remarks. Every root
+	/// component now lives in the one shared Components collection, so a Mongo lookup by <c>_id</c>
+	/// would be a single query; not implemented. A caller that needs an id resolved after a restart
+	/// must first load it into tracking, e.g. by enumerating <see cref="GetCollection{T}"/> for its
+	/// type — exactly what <see cref="GetId"/> already requires.
 	/// </summary>
 	public object? ResolveObject(Guid id) => id == default ? null : (TryGetTracked(id, out var model) ? model : null);
 
@@ -591,7 +591,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
 		}
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(Components, RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
+		SetField(Components, RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}");
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
