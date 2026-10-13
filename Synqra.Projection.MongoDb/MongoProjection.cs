@@ -410,7 +410,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		Components.ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
-	void DeleteRoot(Guid id) => Components.DeleteOne(RootFilter(id));
+	// One statement drops the entity: its root (_eid == _id) and every facet hanging off _eid. Same
+	// observable result as the in-memory projection, where facets live on the removed instance.
+	void DeleteEntity(Guid id)
+		=> Components.DeleteMany(Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, id)));
 
 	/// <summary>
 	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
@@ -712,9 +715,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root entity single-delete: drop its document + tracking. Cascade of facet components /
-			// incident links is Phase 4.
-			DeleteRoot(ev.TargetId);
+			// Root delete: the entity and its facets go in one DeleteMany by _eid; incident links are
+			// not cascaded yet (they live in Links, keyed by Source/Target).
+			DeleteEntity(ev.TargetId);
 			if (_byId.TryRemove(ev.TargetId, out var rootModel))
 			{
 				_byModel.Remove(rootModel);
