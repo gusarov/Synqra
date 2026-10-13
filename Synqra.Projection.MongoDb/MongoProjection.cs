@@ -211,13 +211,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			return null;
 		}
 		var model = FromDocument(doc);
-		// Two callers racing for the same id: the first to attach wins, the other instance is dropped.
-		if (TryGetTracked(id, out tracked))
-		{
-			return tracked;
-		}
-		AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).GetCollectionId(""));
-		return model;
+		return AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).GetCollectionId("")); // winner-takes-all on a race
 	}
 
 	public Guid GetLastEventId(Guid targetId)
@@ -291,7 +285,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		return id;
 	}
 
-	internal void AttachWithId(object model, Guid id, Guid collectionId)
+	/// <summary>
+	/// Tracks <paramref name="model"/> under <paramref name="id"/> and returns the instance that owns that
+	/// id. Winner-takes-all: the id → instance registration is a single atomic <c>GetOrAdd</c>, so two
+	/// callers materializing the same id concurrently both get the one that registered first and the
+	/// other instance is never attached, bound, or hydrated. Callers must use the returned instance.
+	/// </summary>
+	internal object AttachWithId(object model, Guid id, Guid collectionId)
 	{
 		if (_byModel.TryGetValue(model, out var existing))
 		{
@@ -299,10 +299,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			{
 				throw new InvalidOperationException($"Object already attached with a different id ({existing.Id} != {id}).");
 			}
-			return;
+			return model;
+		}
+		var winner = _byId.GetOrAdd(id, model);
+		if (!ReferenceEquals(winner, model))
+		{
+			return winner;
 		}
 		_byModel.Add(model, new TrackedObject { Id = id, CollectionId = collectionId });
-		_byId[id] = model;
 		if (model is IBindableModel bindable && bindable.Store is null)
 		{
 			bindable.Attach(this, collectionId);
@@ -316,6 +320,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			LoadComponentsInto(container, id, collectionId);
 		}
+		return model;
 	}
 
 	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
@@ -634,7 +639,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// Track + persist it as a self-owned document in the shared Components collection.
 			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
-			AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
+			rootModel = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
 			CreateRoot(ev.TargetId, rootModel);
 			MarkApplied(ev.TargetId, ev.EventId);
 			return Task.CompletedTask;

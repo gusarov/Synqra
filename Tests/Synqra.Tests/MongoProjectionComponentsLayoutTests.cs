@@ -116,6 +116,32 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_resolve_one_instance_per_id_under_concurrent_resolution()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "shared" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+		var id = store.GetId(node);
+		node.Components.Add(new TestUniqueComponent { Subject = "facet" });
+
+		// A projection that has never seen the entity: every caller below materializes from Mongo.
+		var other = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database());
+		var results = new object?[32];
+		Parallel.For(0, results.Length, i =>
+		{
+			using (SynqraStreamContext.Enter(_streamId))
+			{
+				results[i] = other.ResolveObject(id);
+			}
+		});
+
+		await Assert.That(results[0]).IsNotNull();
+		await Assert.That(results.All(r => ReferenceEquals(r, results[0]))).IsTrue();
+		// The winner was hydrated exactly once: one facet, not one per losing attach attempt.
+		await Assert.That(((TestGeneratedContainerNode)results[0]!).Components.Count).IsEqualTo(1);
+	}
+
+	[Test]
 	public async Task Should_delete_only_the_roots_own_document()
 	{
 		var store = Store;
