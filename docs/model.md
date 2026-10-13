@@ -483,7 +483,7 @@ gap is expected.
 - **A property change is a field-level update; `ReplaceOne` only creates documents.** On Mongo a
   `*PropertyChangedEvent` becomes `UpdateOne({_id|component filter, _sid}, {$set: {field: value}})`
   with the element name and serializer taken from the type's class map, so the write needs no
-  materialized instance (an untracked object is updated by id + stream, and never silently created:
+  materialized instance (an untracked entity is updated by id + stream, and never silently created:
   no match throws). Whole-document writes happen exactly once, at root / facet / link creation.
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
