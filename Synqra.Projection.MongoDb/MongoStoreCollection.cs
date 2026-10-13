@@ -97,8 +97,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 				yield return (T)existing;
 				continue;
 			}
-			var model = (T)_projection.FromDocument(doc);
-			_projection.AttachWithId(model, id, CollectionId);
+			var model = (T)_projection.AttachWithId(_projection.FromDocument(doc), id, CollectionId); // winner-takes-all on a race
 			yield return model;
 		}
 	}
