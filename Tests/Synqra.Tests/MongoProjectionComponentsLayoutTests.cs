@@ -165,6 +165,32 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_store_a_facet_under_its_own_component_id_and_restore_it_on_reload()
+	{
+		var store = Store;
+		var node = new TestGeneratedContainerNode { Name = "n" };
+		store.GetCollection<TestGeneratedContainerNode>().Add(node);
+		var id = store.GetId(node);
+		var facet = new TestUniqueComponent { Subject = "first" };
+		node.Components.Add(facet);
+		var facetId = ((IIdentifiable<Guid>)facet).Id;
+
+		var doc = Components().Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single();
+		await Assert.That(doc["_eid"].AsGuid).IsEqualTo(id);
+		await Assert.That(doc.Contains("ComponentId")).IsFalse();
+
+		Restart();
+
+		// A reloaded facet keeps its id, so a later change is addressable.
+		var store2 = Store;
+		var reloaded = (TestGeneratedContainerNode)store2.ResolveObject(id)!;
+		var reloadedFacet = (TestUniqueComponent)reloaded.Components.Single();
+		await Assert.That(((IIdentifiable<Guid>)reloadedFacet).Id).IsEqualTo(facetId);
+		reloadedFacet.Subject = "second";
+		await Assert.That(Components().Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single()["Subject"].AsString).IsEqualTo("second");
+	}
+
+	[Test]
 	public async Task Should_refuse_a_named_collection()
 	{
 		var store = Store;

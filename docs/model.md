@@ -485,9 +485,10 @@ gap is expected.
   with the element name and serializer taken from the type's class map, so the write needs no
   materialized instance (an untracked entity is updated by id + stream, and never silently created:
   no match throws). Whole-document writes happen exactly once, at root / facet / link creation.
-- **Mongo layout details.** A root is the document without a `ComponentId` column (facets carry
-  it as their addressing column); that absence is the indexable root marker. `GetCollection<T>()`
-  matches `_t` against every registered type assignable to `T`. Indexes `(_sid, _t)` and
+- **Mongo layout details.** A facet's `_id` is its component id, exactly like a root's `_id` is
+  the entity id — no extra id column. `GetCollection<T>()` matches `_t` against every registered
+  type assignable to `T`; no root marker is needed there since a type is either a root type or a
+  facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)` and
   `(_sid, _eid)` are ensured on first use. Named collections are refused (`NotSupportedException`)
   — the layout has no column for them and collections are retired (§2).
 - **Tracking is per-process and lazy.** An entity becomes tracked when created, enumerated, or

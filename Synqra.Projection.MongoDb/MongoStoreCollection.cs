@@ -57,12 +57,27 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	// value fresh rather than trust what got baked in at construction.
 	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
 
-	// This stream's roots of T or any registered subtype of T ("_t" is the actual type) — facets and
-	// other types share the same physical collection.
+	// Discriminators of T and every registered subtype ("_t" is the actual type). Recomputed only when the
+	// registry has grown since last time; the registry only ever grows.
+	string[] _discriminators = [];
+	int _discriminatorsFor = -1;
+
+	string[] Discriminators()
+	{
+		var registered = _projection.TypeMetadataProvider.RegisteredTypes;
+		if (registered.Count != _discriminatorsFor)
+		{
+			_discriminators = registered.Where(m => typeof(T).IsAssignableFrom(m.Type)).Select(m => m.Type.Name).ToArray();
+			_discriminatorsFor = registered.Count;
+		}
+		return _discriminators;
+	}
+
+	// This stream's roots of T or any registered subtype — facets and other types share the same physical
+	// collection, and a type is either a root type or a facet type, so "_t" alone selects roots.
 	FilterDefinition<BsonDocument> RootsFilter => Builders<BsonDocument>.Filter.And(
 		StreamFilter(),
-		Builders<BsonDocument>.Filter.In("_t", _projection.TypeMetadataProvider.RegisteredTypes.Where(m => typeof(T).IsAssignableFrom(m.Type)).Select(m => m.Type.Name)),
-		_projection.RootsOnlyFilter);
+		Builders<BsonDocument>.Filter.In("_t", Discriminators()));
 
 	public int Count => (int)_projection.Components.CountDocuments(RootsFilter);
 
