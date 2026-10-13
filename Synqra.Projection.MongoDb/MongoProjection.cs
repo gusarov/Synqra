@@ -29,18 +29,16 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// binary layout.
 /// </para>
 /// <para>
-/// <b>Tracking is per-process, not pre-warmed.</b> <see cref="GetId"/>, <see cref="ResolveObject"/>,
-/// component mutation, and (for links) endpoint navigation only see objects this projection instance has
-/// already touched (created, or loaded via enumerating a <see cref="GetCollection{T}"/>) — there is no
-/// startup replay that pre-populates the tracking cache. This is an existing, deliberate limitation that
-/// components and links below intentionally match rather than work around, so behaviour stays consistent
-/// across everything this projection materializes. Two things deliberately do NOT depend on tracking:
-/// link <i>queries</i> (<see cref="ILinkIndex"/>), which always hit Mongo directly since adjacency lookups
-/// need to work regardless of what this process has touched; and <i>property changes</i>
+/// <b>Tracking is per-process and lazy.</b> There is no startup replay: an entity is tracked once this
+/// instance has created it, enumerated it through <see cref="GetCollection{T}"/>, or resolved it by id
+/// through <see cref="ResolveObject"/>, which loads an untracked root from Mongo on demand (so link
+/// navigation and facet events work for any entity in the stream, not only ones already touched).
+/// <see cref="GetId"/> is the one tracked-only call: it maps a live instance back to its id. Link
+/// <i>queries</i> (<see cref="ILinkIndex"/>) always hit Mongo directly, and <i>property changes</i>
 /// (<see cref="VisitAsync(ObjectPropertyChangedEvent, EventVisitorContext)"/> /
-/// <see cref="VisitAsync(ComponentPropertyChangedEvent, EventVisitorContext)"/>), which are field-level
+/// <see cref="VisitAsync(ComponentPropertyChangedEvent, EventVisitorContext)"/>) are field-level
 /// <c>$set</c> writes addressed by id + stream (see <see cref="SetField"/>) — a tracked instance is kept in
-/// sync when there is one, but the durable write never requires the object to be materialized in RAM.
+/// sync when there is one, but neither ever requires the entity to be materialized in RAM.
 /// </para>
 /// </summary>
 public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
@@ -192,13 +190,35 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	}
 
 	/// <summary>
-	/// Resolves a tracked entity by id, or null. Tracked-only — see the type-level remarks. Every root
-	/// component now lives in the one shared Components collection, so a Mongo lookup by <c>_id</c>
-	/// would be a single query; not implemented. A caller that needs an id resolved after a restart
-	/// must first load it into tracking, e.g. by enumerating <see cref="GetCollection{T}"/> for its
-	/// type — exactly what <see cref="GetId"/> already requires.
+	/// Resolves an entity by id: the tracked instance if this process already holds it, otherwise its
+	/// root component loaded from Mongo (one query on the shared Components collection by <c>_id</c> +
+	/// stream) and attached, so the same instance comes back on every later call. Null when no such
+	/// root exists in this stream. Roots only — a facet or link id is not an entity.
 	/// </summary>
-	public object? ResolveObject(Guid id) => id == default ? null : (TryGetTracked(id, out var model) ? model : null);
+	public object? ResolveObject(Guid id)
+	{
+		if (id == default)
+		{
+			return null;
+		}
+		if (TryGetTracked(id, out var tracked))
+		{
+			return tracked;
+		}
+		var doc = Components.Find(Builders<BsonDocument>.Filter.And(RootFilter(id), RootsOnlyFilter)).FirstOrDefault();
+		if (doc is null)
+		{
+			return null;
+		}
+		var model = FromDocument(doc);
+		// Two callers racing for the same id: the first to attach wins, the other instance is dropped.
+		if (TryGetTracked(id, out tracked))
+		{
+			return tracked;
+		}
+		AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).GetCollectionId(""));
+		return model;
+	}
 
 	public Guid GetLastEventId(Guid targetId)
 		=> _byId.TryGetValue(targetId, out var model) && _byModel.TryGetValue(model, out var tracked)
@@ -795,11 +815,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	// ---------------------------------------------------------------- Component apply helpers
 
+	// ResolveObject, not TryGetTracked: a facet add/delete needs the live container (uniqueness / veto
+	// run against its Components collection), so an untracked container is loaded on demand.
 	IComponentContainer ResolveContainer(Guid targetId)
-	{
-		TryGetTracked(targetId, out var model);
-		return ComponentApplyHelpers.ResolveContainer(model, targetId);
-	}
+		=> ComponentApplyHelpers.ResolveContainer(ResolveObject(targetId), targetId);
 
 	const string ComponentsMongoCollectionName = "Components";
 
