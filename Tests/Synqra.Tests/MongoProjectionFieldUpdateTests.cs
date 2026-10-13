@@ -78,7 +78,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 			Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name))).Single();
 
 	/// <summary>Everything but one field, as raw BSON bytes — the "nothing else moved" oracle.</summary>
-	static byte[] BytesWithout(BsonDocument doc, string field)
+	byte[] BytesWithout(BsonDocument doc, string field)
 	{
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove(field);
