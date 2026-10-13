@@ -28,6 +28,9 @@ RUN cat > /usr/local/bin/withmongo <<'EOF' && chmod +x /usr/local/bin/withmongo
 #!/bin/sh
 set -eux
 mkdir -p /tmp/mdb
+# WiredTiger keeps a file per collection and index; at a 1024 soft limit mongod dies mid-suite (EMFILE).
+ulimit -n "$(ulimit -Hn)"
+echo "nofile soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
 mongod \
   --dbpath /tmp/mdb \
   --bind_ip 127.0.0.1 \
