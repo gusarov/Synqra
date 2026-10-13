@@ -164,17 +164,20 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	internal MongoStoreCollection GetCollection(Type type, string collectionName)
 	{
 		LinkApplyHelpers.GuardNotLinkType(type);
-		var collectionId = TypeMetadataProvider.GetTypeMetadata(type).GetCollectionId(collectionName ?? "");
+		if (!string.IsNullOrEmpty(collectionName))
+		{
+			// Named collections are retired (docs/model.md §2); the shared Components layout has no column for one.
+			throw new NotSupportedException($"Named collections are not supported by the Mongo projection ('{type.Name}', '{collectionName}'). Use the default collection.");
+		}
+		var collectionId = TypeMetadataProvider.GetTypeMetadata(type).GetCollectionId("");
 		lock (_collectionsGate)
 		{
 			if (_collections.TryGetValue(collectionId, out var existing))
 			{
 				return existing;
 			}
-			// Every root lives in the shared Components collection (see ComponentsMongoCollectionName);
-			// a named Synqra collection is only an in-memory grouping today, not a physical one.
 			var gtype = typeof(MongoStoreCollection<>).MakeGenericType(type);
-			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory, Components)!;
+			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory)!;
 			_collections[collectionId] = created;
 			return created;
 		}
@@ -285,12 +288,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		return id;
 	}
 
-	/// <summary>
-	/// Tracks <paramref name="model"/> under <paramref name="id"/> and returns the instance that owns that
-	/// id. Winner-takes-all: the id → instance registration is a single atomic <c>GetOrAdd</c>, so two
-	/// callers materializing the same id concurrently both get the one that registered first and the
-	/// other instance is never attached, bound, or hydrated. Callers must use the returned instance.
-	/// </summary>
+	/// <summary>Tracks <paramref name="model"/> under <paramref name="id"/> and returns the instance that owns
+	/// that id — callers must use the returned instance. Winner-takes-all; see docs/model.md §9 "attach race".</summary>
 	internal object AttachWithId(object model, Guid id, Guid collectionId)
 	{
 		if (_byModel.TryGetValue(model, out var existing))
@@ -301,26 +300,23 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			}
 			return model;
 		}
-		var winner = _byId.GetOrAdd(id, model);
-		if (!ReferenceEquals(winner, model))
-		{
-			return winner;
-		}
+		// Build the instance completely (bound + facets hydrated) BEFORE publishing it, so no one can
+		// observe a half-built winner. A loser is rolled back from _byModel and dropped.
 		_byModel.Add(model, new TrackedObject { Id = id, CollectionId = collectionId });
 		if (model is IBindableModel bindable && bindable.Store is null)
 		{
 			bindable.Attach(this, collectionId);
 		}
-		// A freshly-created container has nothing in the Components collection yet (the query just
-		// comes back empty) — this only does real work when re-attaching a container loaded from an
-		// existing document (MongoStoreCollection<T>'s enumerator), which is the only place a
-		// container's components need rehydrating from where they're actually persisted (see
-		// LoadComponentsInto's remarks on why that isn't the container's own document).
 		if (model is IComponentContainer container)
 		{
-			LoadComponentsInto(container, id, collectionId);
+			LoadComponentsInto(container, id, collectionId); // empty for a brand new container
 		}
-		return model;
+		var winner = _byId.GetOrAdd(id, model);
+		if (!ReferenceEquals(winner, model))
+		{
+			_byModel.Remove(model);
+		}
+		return winner;
 	}
 
 	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
@@ -835,10 +831,38 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
-	IMongoCollection<BsonDocument> Components => _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+	bool _indexesEnsured;
+	readonly object _indexesGate = new();
 
-	/// <summary>A root is the document that owns itself (<c>_id == _eid</c>) — the only marker that separates an entity's own data from its facets within the shared collection.</summary>
-	internal FilterDefinition<BsonDocument> RootsOnlyFilter => new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray { "$_id", "$" + EntityIdField }));
+	/// <summary>The one shared collection every root and facet lives in. First access ensures its indexes.</summary>
+	internal IMongoCollection<BsonDocument> Components
+	{
+		get
+		{
+			var collection = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+			if (!_indexesEnsured)
+			{
+				lock (_indexesGate)
+				{
+					if (!_indexesEnsured)
+					{
+						// (_sid, _t) serves enumeration / Count; (_sid, _eid) serves facet load, component filter, entity delete.
+						collection.Indexes.CreateMany(
+						[
+							new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField)),
+							new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(EntityIdField)),
+						]);
+						_indexesEnsured = true;
+					}
+				}
+			}
+			return collection;
+		}
+	}
+
+	// A facet carries the ComponentId addressing column (CreateComponent); a root never does. That absence is
+	// the root marker — a plain, indexable predicate, unlike a field-to-field $expr on _id == _eid.
+	internal FilterDefinition<BsonDocument> RootsOnlyFilter => Builders<BsonDocument>.Filter.Exists("ComponentId", false);
 
 	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid": the **entity id** — the
 	// id of the thing this component belongs to (its IComponentContainer today; the ECS entity under
@@ -876,19 +900,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// Create path only (facet add); a later property change is a field-level SetField on this document.
 	void CreateComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
-		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
 		// Explicit serializer, not ambient lookup — see ToDocument's own remarks.
 		var doc = component.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
 		doc[EntityIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc["ComponentId"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
-		componentsMongo.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
+		Components.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	void DeleteComponentDoc(Guid containerId, Guid componentTypeId, Guid componentId)
-		=> _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName)
-			.DeleteOne(ComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
+		=> Components.DeleteOne(ComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
 
 	/// <summary>
 	/// Re-attaches every persisted component onto a container as it's (re)loaded — called from
@@ -902,14 +924,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
-		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		// Ne(_id): the container's own root document carries _eid == _id too and is not one of its facets.
 		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
-		foreach (var doc in componentsMongo.Find(loadFilter).ToList())
+		foreach (var doc in Components.Find(loadFilter).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
-			var component = (IComponent)FromDocument(doc, EntityIdField, "ComponentId");
+			var component = (IComponent)FromDocument(doc, "ComponentId");
 
 			if (!container.Components.TryAdd(component))
 			{

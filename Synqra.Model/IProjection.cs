@@ -101,6 +101,8 @@ public interface ITypeMetadataProvider
 	TypeMetadata GetTypeMetadata(Guid typeId);
 	TypeMetadata GetTypeMetadata(Type type);
 	void RegisterType(Type type);
+	/// <summary>Snapshot of every registered type — e.g. to expand a base type into its registered subtypes' discriminators.</summary>
+	IReadOnlyCollection<TypeMetadata> RegisteredTypes { get; }
 }
 
 public class TypeMetadata

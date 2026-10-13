@@ -8,6 +8,7 @@ using Synqra.AppendStorage.MongoDb;
 using Synqra.BinarySerializer;
 using Synqra.Projection.MongoDb;
 using Synqra.Tests.SampleModels;
+
 using Synqra.Tests.TestHelpers;
 using TUnit.Assertions.Extensions;
 
@@ -37,12 +38,16 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 			typeof(DemoModel),
 			typeof(TestGeneratedContainerNode),
 			typeof(TestUniqueComponent),
+			typeof(TestShapeBase),
+			typeof(TestCircle),
 		]);
 		hostBuilder.Services.AddSbxSerializer(ser =>
 		{
 			ser.Map(102, 3000.0, typeof(DemoModel));
 			ser.Map(220, typeof(TestGeneratedContainerNode));
 			ser.Map(221, typeof(TestUniqueComponent));
+			ser.Map(231, typeof(TestShapeBase));
+			ser.Map(232, typeof(TestCircle));
 		});
 		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
 		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
@@ -127,18 +132,58 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		// A projection that has never seen the entity: every caller below materializes from Mongo.
 		var other = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database());
 		var results = new object?[32];
+		var idsSeen = new Guid[results.Length];
+		var facetsSeen = new int[results.Length];
 		Parallel.For(0, results.Length, i =>
 		{
 			using (SynqraStreamContext.Enter(_streamId))
 			{
-				results[i] = other.ResolveObject(id);
+				var resolved = (TestGeneratedContainerNode)other.ResolveObject(id)!;
+				results[i] = resolved;
+				// Observed INSIDE the race: the instance handed back must already be usable.
+				idsSeen[i] = other.GetId(resolved);
+				facetsSeen[i] = resolved.Components.Count;
 			}
 		});
 
-		await Assert.That(results[0]).IsNotNull();
 		await Assert.That(results.All(r => ReferenceEquals(r, results[0]))).IsTrue();
-		// The winner was hydrated exactly once: one facet, not one per losing attach attempt.
-		await Assert.That(((TestGeneratedContainerNode)results[0]!).Components.Count).IsEqualTo(1);
+		await Assert.That(idsSeen.All(x => x == id)).IsTrue();
+		await Assert.That(facetsSeen.All(x => x == 1)).IsTrue(); // bound and hydrated before anyone could see it, exactly once
+	}
+
+	[Test]
+	public async Task Should_enumerate_a_derived_root_through_its_base_collection()
+	{
+		var store = Store;
+		store.GetCollection<TestShapeBase>().Add(new TestCircle { Label = "c", Radius = 7 });
+		store.GetCollection<TestShapeBase>().Add(new TestShapeBase { Label = "b" });
+
+		// "_t" is the actual type; the base-typed collection must still see both.
+		await Assert.That(store.GetCollection<TestShapeBase>().Count).IsEqualTo(2);
+		await Assert.That(store.GetCollection<TestShapeBase>().OfType<TestCircle>().Single().Radius).IsEqualTo(7);
+		await Assert.That(store.GetCollection<TestCircle>().Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Should_refuse_a_named_collection()
+	{
+		var store = Store;
+		var ex = await Assert.ThrowsAsync(async () =>
+		{
+			store.GetCollection<DemoModel>("named");
+			await Task.CompletedTask;
+		});
+		await Assert.That(ex).IsTypeOf<NotSupportedException>();
+	}
+
+	[Test]
+	public async Task Should_have_indexes_on_the_shared_collection()
+	{
+		var store = Store;
+		store.GetCollection<DemoModel>().Add(new DemoModel { Name = "indexed" });
+		var keys = Components().Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
+		await Assert.That(keys).Contains("_sid,_t");
+		await Assert.That(keys).Contains("_sid,_eid");
 	}
 
 	[Test]
