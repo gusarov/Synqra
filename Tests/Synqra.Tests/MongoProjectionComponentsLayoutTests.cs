@@ -235,7 +235,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 			StreamId = _streamId,
 			TargetTypeId = metadata.TypeId,
 			TargetId = id,
-			CollectionId = metadata.GetCollectionId(""),
+			CollectionId = metadata.CollectionId,
 			ComponentTypeId = metadata.TypeId,
 			ComponentId = id,
 		});

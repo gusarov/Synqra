@@ -117,15 +117,25 @@ public class TypeMetadata
 
 	private Guid _defaultCollectionId;
 
+	// The one collection every root of this type lives in; same v5 derivation as GetCollectionId(""), so ids on the wire and in storage are unchanged
+	public Guid CollectionId
+	{
+		get
+		{
+			if (_defaultCollectionId == default)
+			{
+				_defaultCollectionId = GetCollectionIdInternal("");
+			}
+			return _defaultCollectionId;
+		}
+	}
+
+	[Obsolete("Named collections are retired; use CollectionId.")]
 	public Guid GetCollectionId(string name)
 	{
 		if ((name ?? throw new ArgumentNullException(nameof(name))) == "")
 		{
-			if (_defaultCollectionId == default)
-			{
-				_defaultCollectionId = GetCollectionIdInternal(name);
-			}
-			return _defaultCollectionId;
+			return CollectionId;
 		}
 		return GetCollectionIdInternal(name);
 	}

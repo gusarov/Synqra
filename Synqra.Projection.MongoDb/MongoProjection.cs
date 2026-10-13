@@ -169,7 +169,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// Named collections are retired (docs/model.md §2); the shared Components layout has no column for one.
 			throw new NotSupportedException($"Named collections are not supported by the Mongo projection ('{type.Name}', '{collectionName}'). Use the default collection.");
 		}
-		var collectionId = TypeMetadataProvider.GetTypeMetadata(type).GetCollectionId("");
+		var collectionId = TypeMetadataProvider.GetTypeMetadata(type).CollectionId;
 		lock (_collectionsGate)
 		{
 			if (_collections.TryGetValue(collectionId, out var existing))
@@ -214,7 +214,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			return null;
 		}
 		var model = FromDocument(doc);
-		return AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).GetCollectionId("")); // winner-takes-all on a race
+		return AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).CollectionId); // winner-takes-all on a race
 	}
 
 	public Guid GetLastEventId(Guid targetId)
@@ -770,7 +770,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).GetCollectionId(""));
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
 		}
 		return Task.CompletedTask;
 	}
@@ -935,7 +935,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var link = (Link)FromDocument(doc); // concrete type resolved from the "_t" discriminator
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(link.GetType()).GetCollectionId(""));
+			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(link.GetType()).CollectionId);
 		}
 		return link;
 	}
