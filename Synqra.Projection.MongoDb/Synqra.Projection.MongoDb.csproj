@@ -20,7 +20,6 @@
     <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\Synqra.Projection.CommonStoreSupport\Synqra.Projection.CommonStoreSupport.csproj" />
-    <ProjectReference Include="..\Synqra.Projection.InMemory\Synqra.Projection.InMemory.csproj" />
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 

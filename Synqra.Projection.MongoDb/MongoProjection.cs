@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -41,7 +42,7 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// sync when there is one, but neither ever requires the entity to be materialized in RAM.
 /// </para>
 /// </summary>
-public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
+public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICommittedEventSource
 {
 	static MongoProjection()
 	{
@@ -67,8 +68,21 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// word for something unrelated (IComponentContainer — the object a component is attached to).
 	// Stream and node are the two concepts that actually exist; "container" isn't a third one.
 	const string StreamIdField = "_sid";
+	/// <summary>The last event applied to an entity or any of its facets, on the root document, so a version survives a restart and is visible to every process.</summary>
+	const string LastEventIdField = "_lev";
+
+	/// <summary>
+	/// A link type matches every registered concrete link type assignable to it (itself included), as
+	/// the in-memory index's IsInstanceOfType does. Computed per query: the registry is additive.
+	/// </summary>
 	FilterDefinition<BsonDocument> BuildLinkTypeFilter(Type linkType)
-		=> Builders<BsonDocument>.Filter.Eq(DiscriminatorField, linkType.Name);
+		=> Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(linkType));
+
+	IEnumerable<string> ConcreteTypeNamesOf(Type baseType) => TypeMetadataProvider.Types
+		.Select(m => m.Type)
+		.Where(t => !t.IsAbstract && baseType.IsAssignableFrom(t))
+		.Select(t => t.Name)
+		.Distinct();
 
 	/// <summary>Every read/write below is scoped to this instance's <see cref="StreamId"/> — see
 	/// the property's own remarks for why.</summary>
@@ -208,13 +222,20 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			return tracked;
 		}
-		var doc = Components.Find(Builders<BsonDocument>.Filter.And(BuildRootFilter(id), RootsOnlyFilter)).FirstOrDefault();
-		if (doc is null)
-		{
-			return null;
-		}
+		var doc = FindDocument(Components, Builders<BsonDocument>.Filter.And(BuildRootFilter(id), RootsOnlyFilter));
+		return doc is null ? null : AttachLoaded(doc, id);
+	}
+
+	/// <summary>Tracks an entity read from its root document, restoring its persisted version. Winner-takes-all on a race.</summary>
+	internal object AttachLoaded(BsonDocument doc, Guid id)
+	{
 		var model = FromDocument(doc);
-		return AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).CollectionId); // winner-takes-all on a race
+		var winner = AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).CollectionId);
+		if (doc.TryGetValue(LastEventIdField, out var lev) && lev is BsonBinaryData binary && _byModel.TryGetValue(winner, out var tracked) && tracked.LastEventId == default)
+		{
+			tracked.LastEventId = binary.ToGuid(GuidRepresentation.Standard);
+		}
+		return winner;
 	}
 
 	public Guid GetLastEventId(Guid targetId)
@@ -244,39 +265,221 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			throw new InvalidOperationException(
 				$"Command stream {cmd.StreamId} does not match this store's stream {streamId} — refusing misrouted command {cmd.CommandId}.");
 		}
-		if (cmd is SingleObjectCommand soc && soc.TargetObject is not null)
-		{
-			var tracked = _byModel.GetValue(soc.TargetObject, _ => throw new InvalidOperationException("Target object is not attached."));
-			if (soc.TargetId == default)
-			{
-				soc.TargetId = tracked.Id;
-			}
-			if (soc.CollectionId == default)
-			{
-				soc.CollectionId = tracked.CollectionId;
-			}
-			var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId;
-			if (soc.TargetTypeId == default)
-			{
-				soc.TargetTypeId = typeId;
-			}
-		}
-		return ProcessCommandAsync(cmd);
+		ResolveTargetIds(cmd);
+		return SubmitSerializedAsync(cmd, options);
 	}
 
-	async Task ProcessCommandAsync(Command cmd)
+	/// <summary>Fills a command's target ids from its live TargetObject when the caller gave the instance, not the ids.</summary>
+	void ResolveTargetIds(Command cmd)
 	{
+		if (cmd is not SingleObjectCommand soc || soc.TargetObject is null)
+		{
+			return;
+		}
+		var tracked = _byModel.GetValue(soc.TargetObject, _ => throw new InvalidOperationException("Target object is not attached."));
+		if (soc.TargetId == default)
+		{
+			soc.TargetId = tracked.Id;
+		}
+		if (soc.CollectionId == default)
+		{
+			soc.CollectionId = tracked.CollectionId;
+		}
+		var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId;
+		if (soc.TargetTypeId == default)
+		{
+			soc.TargetTypeId = typeId;
+		}
+	}
+
+	// One write at a time per instance; writers from other processes are serialized by the
+	// transaction itself (a conflict is retried by the driver until it lands).
+	readonly SemaphoreSlim _submitGate = new(1, 1);
+
+	// The write in flight: its session (every document read and write inside the transaction goes
+	// through it, so later events see earlier ones), the instance updates to run after commit, and
+	// the entities it attached (evicted on abort: tracking is a cache of committed state).
+	sealed class WriteScope(IClientSessionHandle session)
+	{
+		public IClientSessionHandle Session { get; } = session;
+		public List<Action> AfterCommit { get; } = [];
+		public List<Guid> Attached { get; } = [];
+	}
+
+	WriteScope? _scope;
+
+	IClientSessionHandle? Session => _scope?.Session;
+
+	async Task SubmitSerializedAsync(Command cmd, CommandSubmissionOptions? options)
+	{
+		await _submitGate.WaitAsync();
+		try
+		{
+			await ProcessCommandAsync(cmd, options);
+		}
+		finally
+		{
+			_submitGate.Release();
+		}
+	}
+
+	/// <summary>
+	/// Every write is one transaction: the precondition check, the events' document writes and the
+	/// event-log append commit together or not at all. Tracked instances change only after commit,
+	/// so an in-process reader sees the write whole or not at all, and an abort has nothing to undo
+	/// but the entities the write attached. A batch is the same path with more events.
+	/// </summary>
+	async Task ProcessCommandAsync(Command cmd, CommandSubmissionOptions? options)
+	{
+		using var session = await _database.Client.StartSessionAsync();
+		var scope = new WriteScope(session);
 		var ctx = new CommandHandlerContext();
-		await cmd.AcceptAsync(this, ctx);
-		foreach (var ev in ctx.Events)
+		List<Event> committed;
+		_scope = scope;
+		try
 		{
-			await ev.AcceptAsync(this, null);
+			committed = await session.WithTransactionAsync(async (_, _) =>
+			{
+				ctx = new CommandHandlerContext();
+				scope.AfterCommit.Clear();
+				foreach (var id in scope.Attached)
+				{
+					Evict(id);
+				}
+				scope.Attached.Clear();
+				if (options is not null && options.ExpectedLastEventId != Guid.Empty && cmd is SingleObjectCommand precheck && precheck.TargetId != default)
+				{
+					RequireVersion(precheck.TargetId, options.ExpectedLastEventId);
+				}
+				await cmd.AcceptAsync(this, ctx);
+				foreach (var ev in ctx.Events)
+				{
+					await ev.AcceptAsync(this, null);
+				}
+				// Only domain events are durable; command events carry live CLR payloads we don't persist.
+				var events = ctx.Events.Where(e => e is not CommandCreatedEvent).ToList();
+				if (_eventStorage is IMongoSessionAppendStorage<Event> inTransaction && events.Count > 0)
+				{
+					await inTransaction.AppendBatchAsync(session, events);
+				}
+				return events;
+			});
 		}
-		if (_eventStorage is not null && ctx.Events.Count > 0)
+		catch
 		{
-			// Only domain events are durable — command events carry live CLR payloads we don't persist.
-			await _eventStorage.AppendBatchAsync(ctx.Events.Where(e => e is not CommandCreatedEvent).ToList());
+			foreach (var id in scope.Attached)
+			{
+				Evict(id);
+			}
+			throw;
 		}
+		finally
+		{
+			_scope = null;
+		}
+		if (_eventStorage is not null and not IMongoSessionAppendStorage<Event> && committed.Count > 0)
+		{
+			// A log on another store cannot join the transaction; it follows the committed documents.
+			await _eventStorage.AppendBatchAsync(committed);
+		}
+		foreach (var apply in scope.AfterCommit)
+		{
+			apply();
+		}
+		if (committed.Count > 0)
+		{
+			EventsCommitted?.Invoke(committed);
+		}
+	}
+
+	public event Action<IReadOnlyList<Event>>? EventsCommitted;
+
+	void Evict(Guid id)
+	{
+		if (_byId.TryRemove(id, out var model))
+		{
+			_byModel.Remove(model);
+		}
+	}
+
+	/// <summary>The entity's version as stored, read inside the transaction so another process's write is seen.</summary>
+	Guid ReadVersion(Guid id)
+	{
+		var doc = FindDocument(Components, BuildRootFilter(id), Builders<BsonDocument>.Projection.Include(LastEventIdField));
+		return doc is not null && doc.TryGetValue(LastEventIdField, out var lev) && lev is BsonBinaryData binary ? binary.ToGuid(GuidRepresentation.Standard) : Guid.Empty;
+	}
+
+	void RequireVersion(Guid id, Guid expected)
+	{
+		var actual = ReadVersion(id);
+		if (actual != expected)
+		{
+			throw new ConcurrencyException(id, expected, actual);
+		}
+	}
+
+	// ---------------------------------------------------------------- driver calls (through the session in flight)
+
+	internal List<BsonDocument> FindDocuments(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter)
+		=> (Session is { } session ? collection.Find(session, filter) : collection.Find(filter)).ToList();
+
+	BsonDocument? FindDocument(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, ProjectionDefinition<BsonDocument>? projection = null)
+	{
+		var find = Session is { } session ? collection.Find(session, filter) : collection.Find(filter);
+		return (projection is null ? find : find.Project(projection)).FirstOrDefault();
+	}
+
+	void ReplaceDocument(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, BsonDocument doc)
+	{
+		var options = new ReplaceOptions { IsUpsert = true };
+		if (Session is { } session)
+		{
+			collection.ReplaceOne(session, filter, doc, options);
+		}
+		else
+		{
+			collection.ReplaceOne(filter, doc, options);
+		}
+	}
+
+	UpdateResult UpdateDocument(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, UpdateDefinition<BsonDocument> update)
+	{
+		var options = new UpdateOptions { IsUpsert = false };
+		return Session is { } session ? collection.UpdateOne(session, filter, update, options) : collection.UpdateOne(filter, update, options);
+	}
+
+	void DeleteDocument(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter)
+	{
+		if (Session is { } session)
+		{
+			collection.DeleteOne(session, filter);
+		}
+		else
+		{
+			collection.DeleteOne(filter);
+		}
+	}
+
+	void DeleteDocuments(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter)
+	{
+		if (Session is { } session)
+		{
+			collection.DeleteMany(session, filter);
+		}
+		else
+		{
+			collection.DeleteMany(filter);
+		}
+	}
+
+	/// <summary>Runs after the transaction commits: the only moment a tracked instance changes.</summary>
+	void RunAfterCommit(Action apply)
+	{
+		if (_scope is null)
+		{
+			throw new InvalidOperationException("An event is being applied outside a write; every apply runs inside ProcessCommandAsync.");
+		}
+		_scope.AfterCommit.Add(apply);
 	}
 
 	// ---------------------------------------------------------------- tracking (internal)
@@ -355,6 +558,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		clone.Remove("_t");
 		clone.Remove(StreamIdField);
 		clone.Remove(EntityIdField); // projection bookkeeping on every document, root or facet
+		clone.Remove(LastEventIdField);
 		foreach (var field in addressingFields)
 		{
 			clone.Remove(field);
@@ -399,17 +603,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// Create path only: a root document is written whole exactly once (ComponentAddedEvent with
 	// ComponentId == TargetId). Every later property change is a field-level SetField.
 	// A root is self-owned: _id == _eid == entity id, in the same Components collection as its facets.
-	void CreateRoot(Guid id, object model)
+	void CreateRoot(Guid id, object model, Guid eventId)
 	{
 		var doc = ToDocument(model, id);
 		doc[EntityIdField] = new BsonBinaryData(id, GuidRepresentation.Standard);
-		Components.ReplaceOne(BuildRootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
+		doc[LastEventIdField] = new BsonBinaryData(eventId, GuidRepresentation.Standard);
+		ReplaceDocument(Components, BuildRootFilter(id), doc);
 	}
+
+	/// <summary>Stamps the entity's version after a facet or link write, which does not touch the root document.</summary>
+	void StampVersion(Guid id, Guid eventId)
+		=> UpdateDocument(Components, BuildRootFilter(id), Builders<BsonDocument>.Update.Set(LastEventIdField, new BsonBinaryData(eventId, GuidRepresentation.Standard)));
 
 	// One statement drops the entity: its root (_eid == _id) and every facet hanging off _eid. Same
 	// observable result as the in-memory projection, where facets live on the removed instance.
 	void DeleteEntity(Guid id)
-		=> Components.DeleteMany(Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq(EntityIdField, id)));
+		=> DeleteDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq(EntityIdField, id)));
 
 	/// <summary>
 	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
@@ -421,7 +630,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// does not exist (within this stream) is an inconsistency and throws rather than minting a partial
 	/// document out of a single field.
 	/// </summary>
-	void SetField(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, Type type, string propertyName, object? value, string what)
+	void SetField(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, Type type, string propertyName, object? value, string what, Guid stampVersion = default)
 	{
 		var classMap = BsonClassMap.LookupClassMap(type);
 		var memberMap = classMap.GetMemberMap(propertyName);
@@ -447,7 +656,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			update = Builders<BsonDocument>.Update.Set(memberMap.ElementName, SerializeMember(memberMap, CoerceValue(memberMap, value)));
 		}
 
-		var result = collection.UpdateOne(filter, update, new UpdateOptions { IsUpsert = false });
+		if (stampVersion != default)
+		{
+			update = update.Set(LastEventIdField, new BsonBinaryData(stampVersion, GuidRepresentation.Standard));
+		}
+		var result = UpdateDocument(collection, filter, update);
 		if (result.MatchedCount == 0)
 		{
 			throw new InvalidOperationException($"Cannot apply a property change to {what}: no document matched in stream {StreamId}.");
@@ -576,6 +789,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// Structural dedup happens during event apply (queried straight from Mongo, since link
 		// queries always hit Mongo directly — see the type-level remarks) — same pattern as
 		// AddComponentCommand's uniqueness check.
+		// The id is minted here, not at apply, so the persisted event carries it and every replica agrees.
+		if (cmd.LinkId == default)
+		{
+			cmd.LinkId = _ids.CreateLinkId();
+		}
 		ctx.Events.Add(new LinkAddedEvent
 		{
 			StreamId = cmd.StreamId,
@@ -588,6 +806,43 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			Data = cmd.Data,
 		});
 		return Task.CompletedTask;
+	}
+
+	/// <summary>
+	/// A batch is its children's events in the one transaction every write already runs in: later
+	/// children see earlier ones through the session, a refusal anywhere aborts the whole, and the
+	/// expectations are checked against the stored versions first.
+	/// </summary>
+	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
+	{
+		foreach (var expectation in cmd.Expectations)
+		{
+			if (expectation.ExpectedLastEventId != Guid.Empty)
+			{
+				RequireVersion(expectation.TargetId, expectation.ExpectedLastEventId);
+			}
+		}
+		foreach (var child in cmd.Commands)
+		{
+			if (child is BatchCommand)
+			{
+				throw new NotSupportedException("A batch cannot contain another batch.");
+			}
+			if (child.CommandId == default)
+			{
+				child.CommandId = _ids.CreateCommandId(SynqraIdProviderExtensions.DeclaredTypeId(child.GetType()));
+			}
+			if (child.StreamId == default)
+			{
+				child.StreamId = cmd.StreamId;
+			}
+			else if (child.StreamId != cmd.StreamId)
+			{
+				throw new InvalidOperationException($"Command {child.CommandId} of stream {child.StreamId} cannot run in a batch of stream {cmd.StreamId}.");
+			}
+			ResolveTargetIds(child);
+			await child.AcceptAsync(this, ctx);
+		}
 	}
 
 	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
@@ -609,14 +864,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		// The live instance is kept in sync when this process holds it; the durable write never needs it.
-		if (TryGetTracked(ev.TargetId, out var model))
-		{
-			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
-		}
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(Components, BuildRootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}");
-		MarkApplied(ev.TargetId, ev.EventId);
+		SetField(Components, BuildRootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}", ev.EventId);
+		RunAfterCommit(() =>
+		{
+			// The live instance is kept in sync when this process holds it; the durable write never needs it.
+			if (TryGetTracked(ev.TargetId, out var model))
+			{
+				ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
+			}
+			MarkApplied(ev.TargetId, ev.EventId);
+		});
 		return Task.CompletedTask;
 	}
 
@@ -643,72 +901,131 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// id -> instance atomically and hands back whichever instance won; using that one for the write
 			// keeps the tracked instance and the stored document the same object. On a first add nothing can
 			// race (no document to load yet), so the winner is ev.Data itself.
-			rootModel = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
-			CreateRoot(ev.TargetId, rootModel);
-			MarkApplied(ev.TargetId, ev.EventId);
+			var attached = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
+			if (ReferenceEquals(attached, rootModel) && !_scope!.Attached.Contains(ev.TargetId))
+			{
+				_scope.Attached.Add(ev.TargetId); // new to tracking: evicted if the transaction aborts
+			}
+			CreateRoot(ev.TargetId, attached, ev.EventId);
+			RunAfterCommit(() => MarkApplied(ev.TargetId, ev.EventId));
 			return Task.CompletedTask;
 		}
 
 		var container = ResolveContainer(ev.TargetId);
-
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
 
-		if (!container.Components.TryAdd(component))
+		// Uniqueness is decided on the stored facets, read through the session, so a facet added earlier
+		// in the same write counts; the live collection answers for vetoes and for what it already holds.
+		if (!container.Components.CanAddComponent(componentType) || HasUniqueFacet(ev.TargetId, componentType))
 		{
 			throw new InvalidOperationException(
-				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it during replay. The event stream is inconsistent.");
+				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it.");
 		}
-
-		// Wire up the container linkage so the component's generated property setters can build
-		// ChangeComponentPropertyCommands without the caller threading the container reference.
-		if (component is IBindableComponent bindableComponent)
-		{
-			bindableComponent.AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
-		}
-
-		// MongoProjection never replays (its documents ARE the durable state — see the type-level
-		// remarks), so every ComponentAddedEvent it applies is, by definition, an originating one.
-		if (component is IActivatableComponent activatable && _serviceProvider is not null)
-		{
-			activatable.Activate(new ComponentActivationContext
-			{
-				ServiceProvider = _serviceProvider,
-				Container = container,
-				ContainerId = ev.TargetId,
-				Component = component,
-				IsReplay = false,
-			});
-		}
-
 		CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
-		MarkApplied(ev.TargetId, ev.EventId);
+		StampVersion(ev.TargetId, ev.EventId);
+
+		RunAfterCommit(() =>
+		{
+			if (!container.Components.TryAdd(component))
+			{
+				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: the stored '{componentType.Name}' facet could not be attached to the live container {ev.TargetId} after commit.");
+			}
+			// Wire up the container linkage so the component's generated property setters can build
+			// ChangeComponentPropertyCommands without the caller threading the container reference.
+			if (component is IBindableComponent bindableComponent)
+			{
+				bindableComponent.AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
+			}
+			// MongoProjection never replays (its documents ARE the durable state — see the type-level
+			// remarks), so every ComponentAddedEvent it applies is, by definition, an originating one.
+			if (component is IActivatableComponent activatable && _serviceProvider is not null)
+			{
+				activatable.Activate(new ComponentActivationContext
+				{
+					ServiceProvider = _serviceProvider,
+					Container = container,
+					ContainerId = ev.TargetId,
+					Component = component,
+					IsReplay = false,
+				});
+			}
+			MarkApplied(ev.TargetId, ev.EventId);
+		});
 		return Task.CompletedTask;
+	}
+
+	/// <summary>Whether the entity already stores a facet filling one of the unique slots this type declares ([Component(IsUnique)] on it, a base or an interface).</summary>
+	bool HasUniqueFacet(Guid entityId, Type componentType)
+	{
+		foreach (var slot in UniqueSlotsOf(componentType))
+		{
+			var filter = Builders<BsonDocument>.Filter.And(
+				StreamFilter,
+				Builders<BsonDocument>.Filter.Eq(EntityIdField, entityId),
+				Builders<BsonDocument>.Filter.Ne("_id", entityId),
+				Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(slot)));
+			if (FindDocument(Components, filter, Builders<BsonDocument>.Projection.Include("_id")) is not null)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	IEnumerable<Type> UniqueSlotsOf(Type componentType)
+	{
+		var seen = new HashSet<Type>();
+		var pending = new Stack<Type>();
+		pending.Push(componentType);
+		while (pending.Count > 0)
+		{
+			var type = pending.Pop();
+			if (!seen.Add(type))
+			{
+				continue;
+			}
+			if (type.GetCustomAttribute<ComponentAttribute>(inherit: false) is { IsUnique: true })
+			{
+				yield return type;
+			}
+			if (type.BaseType is { } baseType && baseType != typeof(object))
+			{
+				pending.Push(baseType);
+			}
+			foreach (var contract in type.GetInterfaces())
+			{
+				pending.Push(contract);
+			}
+		}
 	}
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		// The live instance (root entity, or the facet on its tracked container) is kept in sync when
-		// this process holds it; the durable write below never needs it. A tracked container that
-		// lacks the facet is still an inconsistency and throws (ResolveTarget).
-		if (TryGetTracked(ev.TargetId, out var trackedModel))
-		{
-			var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
-			ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
-		}
-
 		// Durable persistence still forks: a root component is its entity's own document, a facet
 		// lives in the shared Components collection. Either way it is a single-field update.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		if (ev.ComponentId == ev.TargetId)
 		{
-			SetField(Components, BuildRootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
+			SetField(Components, BuildRootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}", ev.EventId);
 		}
 		else
 		{
 			SetField(Components, BuildComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
+			StampVersion(ev.TargetId, ev.EventId);
 		}
-		MarkApplied(ev.TargetId, ev.EventId);
+		RunAfterCommit(() =>
+		{
+			// The live instance (root entity, or the facet on its tracked container) is kept in sync when
+			// this process holds it; the durable write never needed it. A tracked container that lacks
+			// the facet is still an inconsistency and throws (ResolveTarget).
+			if (TryGetTracked(ev.TargetId, out var trackedModel))
+			{
+				var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
+				ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
+			}
+			MarkApplied(ev.TargetId, ev.EventId);
+		});
 		return Task.CompletedTask;
 	}
 
@@ -719,29 +1036,32 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// Root delete: the entity and its facets go in one DeleteMany by _eid; incident links are
 			// not cascaded yet (they live in Links, keyed by Source/Target).
 			DeleteEntity(ev.TargetId);
-			if (_byId.TryRemove(ev.TargetId, out var rootModel))
-			{
-				_byModel.Remove(rootModel);
-			}
-			MarkApplied(ev.TargetId, ev.EventId);
+			RunAfterCommit(() => Evict(ev.TargetId));
 			return Task.CompletedTask;
 		}
 
-		var container = ResolveContainer(ev.TargetId);
-		var component = container.ResolveComponent(ev, TypeMetadataProvider);
-
-		// BypassRemove rather than Remove: when the container is wrapped in
-		// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
-		// projection is APPLYING an event, so it must skip the command channel — otherwise it would
-		// generate a recursive delete command.
-		if (!container.Components.BypassRemove(component))
+		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var filter = BuildComponentFilter(ev.TargetId, componentType, ev.ComponentId);
+		if (FindDocument(Components, filter, Builders<BsonDocument>.Projection.Include("_id")) is null)
 		{
-			throw new InvalidOperationException(
-				$"ComponentDeletedEvent {ev.EventId}: component instance was located but the collection refused to remove it. The event stream is inconsistent.");
+			throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: no '{componentType.Name}' facet {ev.ComponentId} on {ev.TargetId} in stream {StreamId}.");
 		}
-
-		DeleteComponentDoc(ev.TargetId, ev.ComponentTypeId, ev.ComponentId);
-		MarkApplied(ev.TargetId, ev.EventId);
+		DeleteDocument(Components, filter);
+		StampVersion(ev.TargetId, ev.EventId);
+		RunAfterCommit(() =>
+		{
+			// BypassRemove rather than Remove: when the container is wrapped in
+			// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
+			// projection is APPLYING an event, so it must skip the command channel — otherwise it would
+			// generate a recursive delete command.
+			if (TryGetTracked(ev.TargetId, out var trackedModel) && trackedModel is IComponentContainer container
+				&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == ev.ComponentId) is { } component
+				&& !container.Components.BypassRemove(component))
+			{
+				throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: the live container refused to remove the deleted facet {ev.ComponentId}.");
+			}
+			MarkApplied(ev.TargetId, ev.EventId);
+		});
 		return Task.CompletedTask;
 	}
 
@@ -766,12 +1086,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// filter on, so no separate type column is written here.
 		var doc = ToDocument(link, link.LinkId);
 		var replaceFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), StreamFilter);
-		linksMongo.ReplaceOne(replaceFilter, doc, new ReplaceOptions { IsUpsert = true });
-
-		if (link is IBindableModel bindable && bindable.Store is null)
+		ReplaceDocument(linksMongo, replaceFilter, doc);
+		RunAfterCommit(() =>
 		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
-		}
+			if (link is IBindableModel bindable && bindable.Store is null)
+			{
+				bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
+			}
+		});
 		return Task.CompletedTask;
 	}
 
@@ -779,7 +1101,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter);
-		linksMongo.DeleteOne(deleteFilter); // no-op (idempotent) if already gone
+		DeleteDocument(linksMongo, deleteFilter); // no-op (idempotent) if already gone
 		return Task.CompletedTask;
 	}
 
@@ -804,7 +1126,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, typeIdFilter, endpointFilter)).ToList())
+		foreach (var doc in FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, typeIdFilter, endpointFilter)))
 		{
 			var candidateId = doc["_id"].AsGuid;
 			if (candidateId == excludeId)
@@ -882,11 +1204,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		doc["_id"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[EntityIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
-		Components.ReplaceOne(BuildComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
+		ReplaceDocument(Components, BuildComponentFilter(containerId, component.GetType(), componentId), doc);
 	}
-
-	void DeleteComponentDoc(Guid containerId, Guid componentTypeId, Guid componentId)
-		=> Components.DeleteOne(BuildComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
 
 	/// <summary>
 	/// Re-attaches every persisted component onto a container as it's (re)loaded — called from
@@ -902,7 +1221,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		// Exclude the container itself: its root document also has _eid == _id but is not one of its facets.
 		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
-		foreach (var doc in Components.Find(loadFilter).ToList())
+		foreach (var doc in FindDocuments(Components, loadFilter))
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent).
 			var component = (IComponent)FromDocument(doc);
@@ -945,7 +1264,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		get
 		{
 			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-			return linksMongo.Find(StreamFilter).ToList()
+			return FindDocuments(linksMongo, StreamFilter)
 				.Select(LoadLink)
 				.ToArray();
 		}
@@ -964,7 +1283,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", nodeId)),
 		};
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList()
+		return FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -975,7 +1294,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", a), Builders<BsonDocument>.Filter.Eq("TargetId", b)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", b), Builders<BsonDocument>.Filter.Eq("TargetId", a)));
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList()
+		return FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -988,7 +1307,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.X), Builders<BsonDocument>.Filter.Eq("TargetId", key.Y)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.Y), Builders<BsonDocument>.Filter.Eq("TargetId", key.X)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList())
+		foreach (var doc in FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)))
 		{
 			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
@@ -1008,7 +1327,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), StreamFilter);
-		var doc = linksMongo.Find(filter).FirstOrDefault();
+		var doc = FindDocument(linksMongo, filter);
 		if (doc is null)
 		{
 			link = null;

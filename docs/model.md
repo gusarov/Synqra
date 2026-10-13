@@ -479,23 +479,28 @@ gap is expected.
 - **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _eid, …,
   Target? }`. Root components (`_id == _eid`) are the entities; other components hang off `_eid`;
   links carry `Target`. No per-type object collections; no separate `Links` collection.
-- **Version on the root document.** The Mongo projection stores `_lev`, the id of the last event applied to an
-  object or any of its components, on the object's root document, so `GetLastEventId` (an object's version) survives
-  a restart and optimistic concurrency (`CommandSubmissionOptions.ExpectedLastEventId`) works across processes: the
-  Mongo projection compares the expectation against the document's `_lev`, re-read inside its submit gate, not
-  against the version it last saw. The root write carries `_lev` itself (one write). Both the Mongo and the in-memory
-  projection check the precondition under the same per-instance gate as the write; what remains open is the gap
-  between Mongo's re-read and its write (a conditional write on `_lev` would close it).
+- **Every Mongo write is one transaction.** A submit runs under the projection's per-instance gate and
+  inside one session: the version precondition, every document write the command's events produce, and the
+  event-log append (the Mongo log joins the session through `IMongoSessionAppendStorage`; a log on another store
+  is appended after commit). It commits whole or not at all. Tracked instances change only after commit, so an
+  in-process reader never sees half a write, and an abort evicts only the entities the write attached. Reads
+  inside the write go through the session, so an event sees what earlier events of the same write did. A conflict
+  with a writer in another process is retried by the driver (`WithTransaction`), never surfaced as an abort.
+- **Version on the root document.** `_lev`, the id of the last event applied to an entity or any of its facets,
+  is stamped on the root document by the same write (create, root `$set`, or a one-field stamp after a facet or
+  link write), so `GetLastEventId` survives a restart. A precondition (`CommandSubmissionOptions.ExpectedLastEventId`,
+  a batch's `Expectations`) is compared against the stored `_lev`, read inside the transaction, so a write from
+  another process is seen. The in-memory projection checks its precondition under its own submit gate.
 - **Committed events.** A projection that applies a locally submitted command raises `ICommittedEventSource.EventsCommitted`
   with the domain events it stored. The server-side replication endpoint uses it to push writes that did not arrive
   over a socket (REST, background jobs) to every subscribed client.
-- **Batches.** `BatchCommand` applies several commands as one: it is validated in full against a scratch in-memory
-  projection rebuilt from the stream's log, so later commands see earlier ones and any refusal leaves the real
-  projection and the log untouched; then the produced events are applied and stored together. Children address
-  targets by id and keep their own `CommandCreatedEvent`s. A projection without an event log, and the Sqlite and
-  File projections, refuse batches explicitly. Cost: the log is multitenant with no per-stream range read, so the
-  scratch rebuild scans the whole log per batch, under the submit gate; a per-stream read in the storage (or an
-  overlay on the live projection) is the known next step.
+- **Batches.** `BatchCommand` is its children's events in the one transaction every write already runs in:
+  the expectations are checked first, each child produces its events in order, later children see earlier
+  ones through the session (a facet added by child 1 counts for child 2's uniqueness check, an entity created by
+  child 1 is there for child 2), and a refusal anywhere aborts the whole. Children address targets by id or by
+  a tracked instance and keep their own `CommandCreatedEvent`s. Nothing is cloned and nothing is replayed. The
+  in-memory projection applies a batch in order under its gate and stores nothing on a refusal; its state is a
+  replica of the log. The Sqlite and File projections refuse batches explicitly.
 - **Projections are derived and rebuildable** (core.md §4). Different backends may differ in
   physical layout; the event log is the invariant.
 - **A property change is a field-level update; `ReplaceOne` only creates documents.** On Mongo a
