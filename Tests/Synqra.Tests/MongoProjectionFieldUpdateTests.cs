@@ -70,7 +70,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 	}
 
 	BsonDocument RootDocument<T>(Guid id)
-		=> Database().GetCollection<BsonDocument>(typeof(T).Name).Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
+		=> Database().GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
 
 	BsonDocument ComponentDocument<T>(Guid containerId)
 		=> Database().GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.And(
@@ -159,7 +159,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 			await other.SubmitCommandAsync(RootChange<DemoModel>(missingId, nameof(DemoModel.Name), "ghost")));
 
 		await Assert.That(ex).IsTypeOf<InvalidOperationException>();
-		var count = Database().GetCollection<BsonDocument>(nameof(DemoModel)).CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", missingId));
+		var count = Database().GetCollection<BsonDocument>("Components").CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", missingId));
 		await Assert.That(count).IsEqualTo(0L); // no partial document minted out of a single field
 	}
 
@@ -232,6 +232,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		var actual = RootDocument<TestFieldUpdateModel>(id);
 		actual.Remove("_id");
 		actual.Remove("_sid");
+		actual.Remove("_eid");
 		await Assert.That(actual.ToBson()).IsEquivalentTo(expected.ToBson());
 
 		// And it reads back through the projection's own deserializer as the same values.

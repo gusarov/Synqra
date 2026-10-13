@@ -27,9 +27,10 @@ internal abstract class MongoStoreCollection : StoreCollection
 }
 
 /// <summary>
-/// A Synqra collection backed by a MongoDB collection of documents. <c>Add</c> attaches the model and
-/// submits a <see cref="CreateObjectCommand"/>; enumeration queries the documents and materializes them
-/// into tracked model instances.
+/// A Synqra collection over the roots of one model type in the shared <c>Components</c> Mongo collection
+/// (<c>_t == T</c>, <c>_id == _eid</c>). <c>Add</c> attaches the model and submits an
+/// <see cref="AddComponentCommand"/>; enumeration queries the documents and materializes them into
+/// tracked model instances.
 /// </summary>
 internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCollection<T>
 	where T : class
@@ -59,7 +60,10 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	// value fresh rather than trust what got baked in at construction.
 	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
 
-	public int Count => (int)_mongo.CountDocuments(StreamFilter());
+	// This stream's roots of exactly this type — facets and other types share the same physical collection.
+	FilterDefinition<BsonDocument> RootsFilter() => Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name), _projection.RootsOnly());
+
+	public int Count => (int)_mongo.CountDocuments(RootsFilter());
 
 	bool ICollection<T>.IsReadOnly => false;
 
@@ -85,7 +89,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _mongo.Find(StreamFilter()).ToList())
+		foreach (var doc in _mongo.Find(RootsFilter()).ToList())
 		{
 			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))
