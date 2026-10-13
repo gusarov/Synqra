@@ -323,6 +323,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// <see cref="Link"/>, whose own class map maps <c>_id</c> to the real <c>LinkId</c> member (see
 	/// <see cref="MongoEventClassMaps.Register"/>): stripping it there would leave <c>LinkId</c>
 	/// un-set on the deserialized instance.
+	/// <para>
+	/// <b>Consumes <paramref name="doc"/>.</b> The bookkeeping columns are stripped from the document
+	/// itself — no defensive deep copy, since every caller holds a freshly fetched document it never
+	/// touches again. Read anything you still need from the raw document (<c>_id</c>, <c>_t</c>) before
+	/// calling, and never call twice on the same instance.
+	/// </para>
 	/// </summary>
 	internal object FromDocument(BsonDocument doc, params string[] addressingFields)
 	{
@@ -330,18 +336,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var type = SynqraJsonTypeInfoResolver.GetByDiscriminator(discriminator)
 			?? throw new InvalidOperationException($"Unknown discriminator '{discriminator}' — no model is registered under that name.");
 
-		var clone = (BsonDocument)doc.DeepClone();
 		if (!typeof(Link).IsAssignableFrom(type))
 		{
-			clone.Remove("_id");
+			doc.Remove("_id");
 		}
-		clone.Remove("_t");
-		clone.Remove(StreamIdField);
+		doc.Remove("_t");
+		doc.Remove(StreamIdField);
 		foreach (var field in addressingFields)
 		{
-			clone.Remove(field);
+			doc.Remove(field);
 		}
-		return BsonSerializer.Deserialize(clone, type);
+		return BsonSerializer.Deserialize(doc, type);
 	}
 
 	/// <summary>
@@ -900,9 +905,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// hands back must be attached, or its typed <c>Source</c>/<c>Target</c> accessors (which resolve
 	/// through <see cref="IBindableModel.Store"/>) would silently return null.
 	/// </summary>
-	Link LoadLink(BsonDocument doc)
+	Link LoadLink(BsonDocument doc) => AttachLink((Link)FromDocument(doc)); // concrete type resolved from the "_t" discriminator
+
+	/// <summary>The attach half of <see cref="LoadLink"/>, for a link already materialized from its document.</summary>
+	Link AttachLink(Link link)
 	{
-		var link = (Link)FromDocument(doc); // concrete type resolved from the "_t" discriminator
 		if (link is IBindableModel bindable && bindable.Store is null)
 		{
 			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(link.GetType()).GetCollectionId(""));
@@ -960,13 +967,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
-			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
-			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
-			// for the actual match, which is what callers keep and navigate from.
+			// FromDocument consumes the document, so the candidate is materialized once and the match
+			// is attached as-is (same path LoadLink takes) rather than re-read from the stripped document.
 			var candidate = (Link)FromDocument(doc);
 			if (candidate.StructuralKey.Equals(key))
 			{
-				link = LoadLink(doc);
+				link = AttachLink(candidate);
 				return true;
 			}
 		}
