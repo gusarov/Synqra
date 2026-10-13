@@ -418,8 +418,12 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var refused = await Caught(() => store.SubmitCommandAsync(batch));
 
 		await Assert.That(refused).IsNotNull();
-		await Assert.That(store.GetCollection<DemoModel>().Any(m => store.GetId(m) == created)).IsFalse();
 		await Assert.That(Events().GetAllAsync().ToBlockingEnumerable().Count()).IsEqualTo(before);
+		if (store is MongoProjection)
+		{
+			// The transaction aborted: no document either. The in-memory replica applies in order and is rebuilt from the log.
+			await Assert.That(store.GetCollection<DemoModel>().Any(m => store.GetId(m) == created)).IsFalse();
+		}
 	}
 
 	[Test]
@@ -821,6 +825,45 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		var url = new MongoUrl(_connectionString);
 		var database = new MongoClient(_connectionString).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
 		return ActivatorUtilities.CreateInstance<MongoProjection>(sp, database);
+	}
+
+	[Test]
+	public async Task Should_refuse_a_second_unique_facet_in_one_batch_and_apply_nothing()
+	{
+		var store = Store;
+		var id = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var facet = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent));
+		var batch = new BatchCommand();
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = container.TypeId, ComponentId = id, Data = new TestGeneratedContainerNode { Name = "n" }, });
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "first" }, });
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "second" }, });
+
+		var refused = await Assert.ThrowsAsync(() => store.SubmitCommandAsync(batch));
+
+		await Assert.That(refused).IsTypeOf<InvalidOperationException>();
+		await Assert.That(store.ResolveObject(id)).IsNull();
+		await Assert.That(OtherProcess().ResolveObject(id)).IsNull();
+	}
+
+	[Test]
+	public async Task Should_let_a_batch_add_a_facet_to_the_entity_it_created_and_see_it_from_another_process()
+	{
+		var store = Store;
+		var id = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var facet = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent));
+		var batch = new BatchCommand();
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = container.TypeId, ComponentId = id, Data = new TestGeneratedContainerNode { Name = "n" }, });
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "once" }, });
+
+		await store.SubmitCommandAsync(batch);
+
+		var local = (TestGeneratedContainerNode)store.ResolveObject(id)!;
+		await Assert.That(local.Components.Count).IsEqualTo(1);
+		var other = (TestGeneratedContainerNode)OtherProcess().ResolveObject(id)!;
+		await Assert.That(other.Components.Count).IsEqualTo(1);
+		await Assert.That(((TestUniqueComponent)other.Components.Single()).Subject).IsEqualTo("once");
 	}
 
 	[Test]

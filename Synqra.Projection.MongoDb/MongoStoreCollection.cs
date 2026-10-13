@@ -108,7 +108,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _projection.Components.Find(RootsFilter).ToList())
+		foreach (var doc in _projection.FindDocuments(_projection.Components, RootsFilter))
 		{
 			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))
@@ -116,8 +116,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 				yield return (T)existing;
 				continue;
 			}
-			var model = (T)_projection.AttachWithId(_projection.FromDocument(doc), id, CollectionId); // winner-takes-all on a race
-			yield return model;
+			yield return (T)_projection.AttachLoaded(doc, id);
 		}
 	}
 

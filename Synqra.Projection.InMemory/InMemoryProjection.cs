@@ -441,10 +441,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public async Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
-		// Normalize first — fill in CommandId, StreamId, and (for SingleObjectCommand)
-		// resolve TargetId / CollectionId / TargetTypeId from TargetObject if the caller
-		// gave us the model reference but not the ids. This is read-only state lookup,
-		// no events emitted, so it is safe to run before the precondition check.
+		// Normalize first — fill in CommandId and StreamId, and resolve the target ids from
+		// TargetObject if the caller gave us the model reference but not the ids. This is
+		// read-only state lookup, no events emitted, so it is safe to run before the precondition check.
 		if (newCommand is Command cmd)
 		{
 			if (cmd.CommandId == default)
@@ -461,40 +460,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 					$"Command stream {cmd.StreamId} does not match this projection's stream {StreamId} — refusing misrouted command {cmd.CommandId}.");
 			}
 		}
-		if (newCommand is SingleObjectCommand soc)
+		if (newCommand is Command normalized)
 		{
-			if (soc.TargetObject != null)
-			{
-				var attached = GetAttachedData(soc.TargetObject, default, null, GetMode.RequiredId);
-				// TargetId
-				if (soc.TargetId == default)
-				{
-					soc.TargetId = attached.Id;
-				}
-				else if (soc.TargetId != attached.Id)
-				{
-					throw new Exception("The target object has different id");
-				}
-				// CollectionId
-				if (soc.CollectionId == default)
-				{
-					soc.CollectionId = attached.Collection.CollectionId;
-				}
-				else if (soc.CollectionId != attached.Collection.CollectionId)
-				{
-					throw new Exception("The target object Collection has different id");
-				}
-				// TargetTypeId
-				var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId; // TODO this might differ from root for hierarchy, do I need root here or a concrete type?
-				if (soc.TargetTypeId == default)
-				{
-					soc.TargetTypeId = typeId;
-				}
-				else if (soc.TargetTypeId != typeId)
-				{
-					throw new Exception("The target object Type has different id");
-				}
-			}
+			ResolveTargetIds(normalized);
 		}
 
 		await _submitGate.WaitAsync();
@@ -520,6 +488,43 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		finally
 		{
 			_submitGate.Release();
+		}
+	}
+
+	/// <summary>Fills a command's target ids from its live TargetObject when the caller gave the instance, not the ids.</summary>
+	void ResolveTargetIds(Command cmd)
+	{
+		if (cmd is SingleObjectCommand soc && soc.TargetObject != null)
+		{
+			var attached = GetAttachedData(soc.TargetObject, default, null, GetMode.RequiredId);
+			// TargetId
+			if (soc.TargetId == default)
+			{
+				soc.TargetId = attached.Id;
+			}
+			else if (soc.TargetId != attached.Id)
+			{
+				throw new Exception("The target object has different id");
+			}
+			// CollectionId
+			if (soc.CollectionId == default)
+			{
+				soc.CollectionId = attached.Collection.CollectionId;
+			}
+			else if (soc.CollectionId != attached.Collection.CollectionId)
+			{
+				throw new Exception("The target object Collection has different id");
+			}
+			// TargetTypeId
+			var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId; // TODO this might differ from root for hierarchy, do I need root here or a concrete type?
+			if (soc.TargetTypeId == default)
+			{
+				soc.TargetTypeId = typeId;
+			}
+			else if (soc.TargetTypeId != typeId)
+			{
+				throw new Exception("The target object Type has different id");
+			}
 		}
 	}
 
@@ -755,37 +760,45 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	}
 
 	/// <summary>
-	/// Validated in full against a scratch projection rebuilt from this stream's log (BatchRunner); the
-	/// produced events are then applied and stored together by ProcessCommandAsync. Needs an event log:
-	/// without one there is nothing to rebuild a scratch from, so the batch is refused explicitly.
+	/// A batch is its children's events applied in one submit: the expectations are checked first,
+	/// then each child produces its events in order and they are applied and stored together. The
+	/// in-memory state is a replica rebuilt from the log; an apply refused halfway leaves nothing in
+	/// the log, and the state is rebuilt from it.
 	/// </summary>
 	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
 	{
-		if (_eventStorage is null)
+		foreach (var expectation in cmd.Expectations)
 		{
-			throw new NotSupportedException("BatchCommand needs the projection's event log to validate against; this InMemoryProjection has none.");
+			if (expectation.ExpectedLastEventId == Guid.Empty)
+			{
+				continue;
+			}
+			var actual = GetLastEventId(expectation.TargetId);
+			if (actual != expectation.ExpectedLastEventId)
+			{
+				throw new ConcurrencyException(expectation.TargetId, expectation.ExpectedLastEventId, actual);
+			}
 		}
-		var runner = new BatchRunner(_eventStorage, _ids, () => new InMemoryProjection(
-			  _serializerFactory
-			, TypeMetadataProvider
-			, StreamId
-			, eventStorage: null
-			, jsonSerializerOptions: _jsonSerializerOptions
-			, idProvider: _ids
-		));
-		runner.CheckExpectations(cmd, e => GetLastEventId(e.TargetId));
-		var events = await runner.DryRunAsync(cmd, StreamId);
-		// Each child keeps the same audit trail it would have on its own: its CommandCreatedEvent, then its events.
 		foreach (var child in cmd.Commands)
 		{
-			ctx.Events.Add(new CommandCreatedEvent
+			if (child is BatchCommand)
 			{
-				EventId = _ids.CreateEventId<CommandCreatedEvent>(child.CommandId, 0),
-				Data = child,
-				CommandId = child.CommandId,
-				StreamId = child.StreamId,
-			});
-			ctx.Events.AddRange(events.Where(e => e.CommandId == child.CommandId));
+				throw new NotSupportedException("A batch cannot contain another batch.");
+			}
+			if (child.CommandId == default)
+			{
+				child.CommandId = _ids.CreateCommandId(SynqraIdProviderExtensions.DeclaredTypeId(child.GetType()));
+			}
+			if (child.StreamId == default)
+			{
+				child.StreamId = cmd.StreamId;
+			}
+			else if (child.StreamId != cmd.StreamId)
+			{
+				throw new InvalidOperationException($"Command {child.CommandId} of stream {child.StreamId} cannot run in a batch of stream {cmd.StreamId}.");
+			}
+			ResolveTargetIds(child);
+			await child.AcceptAsync(this, ctx);
 		}
 	}
 

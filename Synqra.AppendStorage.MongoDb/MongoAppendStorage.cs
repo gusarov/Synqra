@@ -23,7 +23,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// matching the "events are immutable facts" model.
 /// </para>
 /// </summary>
-public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
+public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IMongoSessionAppendStorage<T>
 	where T : class
 	where TKey : notnull
 {
@@ -49,6 +49,13 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 			// Same event id appended twice — events are immutable facts, so re-appending
 			// the same fact is a no-op rather than an error (idempotent writes).
 		}
+	}
+
+	/// <summary>Appends inside the caller's transaction. A duplicate here is a real error: it aborts the transaction, as any write error inside one does.</summary>
+	public Task AppendBatchAsync(IClientSessionHandle session, IEnumerable<T> items, CancellationToken cancellationToken = default)
+	{
+		var list = items as IReadOnlyList<T> ?? items.ToArray();
+		return list.Count == 0 ? Task.CompletedTask : _collection.InsertManyAsync(session, list, new InsertManyOptions { IsOrdered = true }, cancellationToken);
 	}
 
 	public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
