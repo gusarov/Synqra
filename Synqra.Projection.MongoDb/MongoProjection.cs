@@ -297,18 +297,21 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	readonly SemaphoreSlim _submitGate = new(1, 1);
 
 	// The write in flight: its session (every document read and write inside the transaction goes
-	// through it, so later events see earlier ones), the instance updates to run after commit, and
-	// the entities it attached (evicted on abort: tracking is a cache of committed state).
+	// through it, so later events see earlier ones), the instance updates to run after commit, the
+	// entities it attached (evicted on abort: tracking is a cache of committed state), and the
+	// entities whose creating command handed over a live instance (only those are attached).
 	sealed class WriteScope(IClientSessionHandle session)
 	{
 		public IClientSessionHandle Session { get; } = session;
 		public List<Action> AfterCommit { get; } = [];
 		public List<Guid> Attached { get; } = [];
+		public HashSet<Guid> Materialized { get; } = [];
 	}
 
-	WriteScope? _scope;
+	// Per async flow, so a reader or an inbound event on another flow never sees this write's session.
+	readonly AsyncLocal<WriteScope?> _scope = new();
 
-	IClientSessionHandle? Session => _scope?.Session;
+	IClientSessionHandle? Session => _scope.Value?.Session;
 
 	async Task SubmitSerializedAsync(Command cmd, CommandSubmissionOptions? options)
 	{
@@ -324,71 +327,112 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	}
 
 	/// <summary>
-	/// Every write is one transaction: the precondition check, the events' document writes and the
-	/// event-log append commit together or not at all. Tracked instances change only after commit,
-	/// so an in-process reader sees the write whole or not at all, and an abort has nothing to undo
-	/// but the entities the write attached. A batch is the same path with more events.
+	/// A submitted command is one write: the precondition check, the events' document writes and the
+	/// event-log append commit together or not at all. A batch is the same path with more events.
 	/// </summary>
 	async Task ProcessCommandAsync(Command cmd, CommandSubmissionOptions? options)
 	{
-		using var session = await _database.Client.StartSessionAsync();
-		var scope = new WriteScope(session);
-		var ctx = new CommandHandlerContext();
-		List<Event> committed;
-		_scope = scope;
-		try
+		var committed = await RunWriteAsync(async scope =>
 		{
-			committed = await session.WithTransactionAsync(async (_, _) =>
+			if (options is not null && options.ExpectedLastEventId != Guid.Empty && cmd is SingleObjectCommand precheck && precheck.TargetId != default)
 			{
-				ctx = new CommandHandlerContext();
-				scope.AfterCommit.Clear();
-				foreach (var id in scope.Attached)
-				{
-					Evict(id);
-				}
-				scope.Attached.Clear();
-				if (options is not null && options.ExpectedLastEventId != Guid.Empty && cmd is SingleObjectCommand precheck && precheck.TargetId != default)
-				{
-					RequireVersion(precheck.TargetId, options.ExpectedLastEventId);
-				}
-				await cmd.AcceptAsync(this, ctx);
-				foreach (var ev in ctx.Events)
-				{
-					await ev.AcceptAsync(this, null);
-				}
-				// Only domain events are durable; command events carry live CLR payloads we don't persist.
-				var events = ctx.Events.Where(e => e is not CommandCreatedEvent).ToList();
-				if (_eventStorage is IMongoSessionAppendStorage<Event> inTransaction && events.Count > 0)
-				{
-					await inTransaction.AppendBatchAsync(session, events);
-				}
-				return events;
-			});
-		}
-		catch
-		{
-			foreach (var id in scope.Attached)
-			{
-				Evict(id);
+				RequireVersion(precheck.TargetId, options.ExpectedLastEventId);
 			}
-			throw;
-		}
-		finally
-		{
-			_scope = null;
-		}
+			var ctx = new CommandHandlerContext();
+			await cmd.AcceptAsync(this, ctx);
+			foreach (var ev in ctx.Events)
+			{
+				await ev.AcceptAsync(this, null);
+			}
+			// Only domain events are durable; command events carry live CLR payloads we don't persist.
+			var events = ctx.Events.Where(e => e is not CommandCreatedEvent).ToList();
+			if (_eventStorage is IMongoSessionAppendStorage<Event> inTransaction && events.Count > 0)
+			{
+				await inTransaction.AppendBatchAsync(scope.Session, events);
+			}
+			return events;
+		});
 		if (_eventStorage is not null and not IMongoSessionAppendStorage<Event> && committed.Count > 0)
 		{
 			// A log on another store cannot join the transaction; it follows the committed documents.
 			await _eventStorage.AppendBatchAsync(committed);
 		}
+		if (committed.Count > 0)
+		{
+			EventsCommitted?.Invoke(committed);
+		}
+	}
+
+	/// <summary>
+	/// One write: a session and a transaction around <paramref name="body"/> (the driver retries it on a
+	/// transient conflict). Tracked instances change only after commit, so an in-process reader sees the
+	/// write whole or not at all; on abort the entities the write attached are evicted.
+	/// </summary>
+	async Task<T> RunWriteAsync<T>(Func<WriteScope, Task<T>> body)
+	{
+		using var session = await _database.Client.StartSessionAsync();
+		var scope = new WriteScope(session);
+		_scope.Value = scope;
+		var committed = false;
+		T result;
+		try
+		{
+			result = await session.WithTransactionAsync(async (_, _) =>
+			{
+				ResetWrite(scope); // a retried attempt starts from nothing
+				return await body(scope);
+			});
+			committed = true;
+		}
+		finally
+		{
+			_scope.Value = null;
+			if (!committed)
+			{
+				ResetWrite(scope);
+			}
+		}
 		foreach (var apply in scope.AfterCommit)
 		{
 			apply();
 		}
-		if (committed.Count > 0)
+		return result;
+	}
+
+	void ResetWrite(WriteScope scope)
+	{
+		foreach (var id in scope.Attached)
 		{
-			EventsCommitted?.Invoke(committed);
+			Evict(id);
+		}
+		scope.Attached.Clear();
+		scope.AfterCommit.Clear();
+		scope.Materialized.Clear();
+	}
+
+	/// <summary>
+	/// An event's writes: inside the write in flight, or, for an event applied from outside a submit
+	/// (one arriving from a replication peer), in a write of its own under the same gate.
+	/// </summary>
+	async Task ApplyInWriteAsync(Action apply)
+	{
+		if (_scope.Value is not null)
+		{
+			apply();
+			return;
+		}
+		await _submitGate.WaitAsync();
+		try
+		{
+			await RunWriteAsync(_ =>
+			{
+				apply();
+				return Task.FromResult(true);
+			});
+		}
+		finally
+		{
+			_submitGate.Release();
 		}
 	}
 
@@ -475,11 +519,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// <summary>Runs after the transaction commits: the only moment a tracked instance changes.</summary>
 	void RunAfterCommit(Action apply)
 	{
-		if (_scope is null)
-		{
-			throw new InvalidOperationException("An event is being applied outside a write; every apply runs inside ProcessCommandAsync.");
-		}
-		_scope.AfterCommit.Add(apply);
+		var scope = _scope.Value ?? throw new InvalidOperationException("An event is being applied outside a write; every apply runs inside ApplyInWriteAsync.");
+		scope.AfterCommit.Add(apply);
 	}
 
 	// ---------------------------------------------------------------- tracking (internal)
@@ -734,6 +775,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				bindable.SetComponentId(cmd.ComponentId);
 			}
 		}
+		if (cmd.TargetObject is not null && cmd.ComponentId == cmd.TargetId)
+		{
+			_scope.Value?.Materialized.Add(cmd.TargetId); // the caller holds this instance and expects it live
+		}
 		ctx.Events.Add(new ComponentAddedEvent
 		{
 			StreamId = cmd.StreamId,
@@ -862,8 +907,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task AfterVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
 
-	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
-	{
+	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyObjectPropertyChange(ev));
+
+	void ApplyObjectPropertyChange(ObjectPropertyChangedEvent ev)
+{
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
 		SetField(Components, BuildRootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}", ev.EventId);
 		RunAfterCommit(() =>
@@ -875,7 +922,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			MarkApplied(ev.TargetId, ev.EventId);
 		});
-		return Task.CompletedTask;
 	}
 
 	void MarkApplied(Guid targetId, Guid eventId)
@@ -888,33 +934,59 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
-	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx)
+	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyComponentAdd(ev));
+
+	void ApplyComponentAdd(ComponentAddedEvent ev)
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Phase 2 (ECS): self-owned ROOT COMPONENT = the entity's own data (_id == _eid == entityId).
-			// Track + persist it as a self-owned document in the shared Components collection.
+			// Phase 2 (ECS): self-owned ROOT COMPONENT = the entity's own data (_id == _eid == entityId),
+			// a self-owned document in the shared Components collection.
 			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
-			// Race: another caller may materialize this same id concurrently — the collection enumerator or
-			// ResolveObject on a re-delivered add (the document already exists then). AttachWithId registers
-			// id -> instance atomically and hands back whichever instance won; using that one for the write
-			// keeps the tracked instance and the stored document the same object. On a first add nothing can
-			// race (no document to load yet), so the winner is ev.Data itself.
-			var attached = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
-			if (ReferenceEquals(attached, rootModel) && !_scope!.Attached.Contains(ev.TargetId))
+			var tracked = TryGetTracked(ev.TargetId, out var trackedModel);
+			if (!tracked && !_scope.Value!.Materialized.Contains(ev.TargetId))
 			{
-				_scope.Attached.Add(ev.TargetId); // new to tracking: evicted if the transaction aborts
+				// Nobody here holds this entity (an id-only create, an event from a peer): write its document
+				// and track nothing. ResolveObject loads it on demand.
+				CreateRoot(ev.TargetId, ev.Data ?? Activator.CreateInstance(rootType)!, ev.EventId);
+				return;
+			}
+			object rootModel = ev.Data ?? (tracked ? trackedModel : Activator.CreateInstance(rootType)!);
+			// Race: another caller may materialize this same id concurrently (the collection enumerator or
+			// ResolveObject on a re-delivered add). AttachWithId registers id -> instance atomically and hands
+			// back whichever instance won; that one is written, so the tracked instance and the document agree.
+			var attached = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
+			if (ReferenceEquals(attached, rootModel) && !_scope.Value!.Attached.Contains(ev.TargetId))
+			{
+				_scope.Value.Attached.Add(ev.TargetId); // new to tracking: evicted if the transaction aborts
 			}
 			CreateRoot(ev.TargetId, attached, ev.EventId);
 			RunAfterCommit(() => MarkApplied(ev.TargetId, ev.EventId));
-			return Task.CompletedTask;
+			return;
 		}
 
-		var container = ResolveContainer(ev.TargetId);
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
 
+		if (!TryGetTracked(ev.TargetId, out var containerModel))
+		{
+			// Nobody here holds the entity: decide on the stored state, read through the session, and load
+			// nothing. Vetoes and activation belong to a live container, so they run only when one is tracked.
+			var exists = Builders<BsonDocument>.Filter.And(BuildRootFilter(ev.TargetId), RootsOnlyFilter);
+			if (FindDocument(Components, exists, Builders<BsonDocument>.Projection.Include("_id")) is null)
+			{
+				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: no entity {ev.TargetId} in stream {StreamId} to add a '{componentType.Name}' to.");
+			}
+			if (HasUniqueFacet(ev.TargetId, componentType))
+			{
+				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to {ev.TargetId}: a unique slot it fills is taken.");
+			}
+			CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
+			StampVersion(ev.TargetId, ev.EventId);
+			return;
+		}
+
+		var container = ComponentApplyHelpers.ResolveContainer(containerModel, ev.TargetId);
 		// Uniqueness is decided on the stored facets, read through the session, so a facet added earlier
 		// in the same write counts; the live collection answers for vetoes and for what it already holds.
 		if (!container.Components.CanAddComponent(componentType) || HasUniqueFacet(ev.TargetId, componentType))
@@ -952,7 +1024,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			MarkApplied(ev.TargetId, ev.EventId);
 		});
-		return Task.CompletedTask;
 	}
 
 	/// <summary>Whether the entity already stores a facet filling one of the unique slots this type declares ([Component(IsUnique)] on it, a base or an interface).</summary>
@@ -1000,8 +1071,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 	}
 
-	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
-	{
+	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyComponentPropertyChange(ev));
+
+	void ApplyComponentPropertyChange(ComponentPropertyChangedEvent ev)
+{
 		// Durable persistence still forks: a root component is its entity's own document, a facet
 		// lives in the shared Components collection. Either way it is a single-field update.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
@@ -1026,18 +1099,19 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			MarkApplied(ev.TargetId, ev.EventId);
 		});
-		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
-	{
+	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyComponentDelete(ev));
+
+	void ApplyComponentDelete(ComponentDeletedEvent ev)
+{
 		if (ev.ComponentId == ev.TargetId)
 		{
 			// Root delete: the entity and its facets go in one DeleteMany by _eid; incident links are
 			// not cascaded yet (they live in Links, keyed by Source/Target).
 			DeleteEntity(ev.TargetId);
 			RunAfterCommit(() => Evict(ev.TargetId));
-			return Task.CompletedTask;
+			return;
 		}
 
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
@@ -1062,11 +1136,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			MarkApplied(ev.TargetId, ev.EventId);
 		});
-		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx)
-	{
+	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkAdd(ev));
+
+	void ApplyLinkAdd(LinkAddedEvent ev)
+{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
 		link.LinkId = ev.LinkId == default ? _ids.CreateLinkId() : ev.LinkId;
@@ -1094,15 +1169,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
 			}
 		});
-		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
-	{
+	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkRemove(ev));
+
+	void ApplyLinkRemove(LinkRemovedEvent ev)
+{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter);
 		DeleteDocument(linksMongo, deleteFilter); // no-op (idempotent) if already gone
-		return Task.CompletedTask;
 	}
 
 	/// <summary>
@@ -1146,10 +1221,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	// ---------------------------------------------------------------- Component apply helpers
 
-	// ResolveObject, not TryGetTracked: a facet add/delete needs the live container (uniqueness / veto
-	// run against its Components collection), so an untracked container is loaded on demand.
-	IComponentContainer ResolveContainer(Guid targetId)
-		=> ComponentApplyHelpers.ResolveContainer(ResolveObject(targetId), targetId);
 
 	const string ComponentsMongoCollectionName = "Components";
 

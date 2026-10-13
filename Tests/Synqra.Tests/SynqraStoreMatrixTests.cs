@@ -827,6 +827,79 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		return ActivatorUtilities.CreateInstance<MongoProjection>(sp, database);
 	}
 
+	/// <summary>An id-only command, the way a REST call or a job sends it: no live instance handed over.</summary>
+	AddComponentCommand BuildCreateCommand(IObjectStore store, Guid id, string name)
+	{
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		return new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = container.TypeId, ComponentId = id, Data = new TestGeneratedContainerNode { Name = name }, };
+	}
+
+	AddComponentCommand BuildAddFacetCommand(IObjectStore store, Guid id, string subject)
+	{
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var facet = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent));
+		return new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = subject }, };
+	}
+
+	[Test]
+	public async Task Should_not_materialize_an_entity_created_by_id_until_it_is_resolved()
+	{
+		var store = (MongoProjection)Store;
+		var id = Guid.NewGuid();
+
+		await store.SubmitCommandAsync(BuildCreateCommand(store, id, "by id"));
+
+		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
+		var resolved = (TestGeneratedContainerNode)store.ResolveObject(id)!;
+		await Assert.That(resolved.Name).IsEqualTo("by id");
+		await Assert.That(store.TryGetTracked(id, out _)).IsTrue();
+	}
+
+	[Test]
+	public async Task Should_add_a_facet_to_an_untracked_entity_without_loading_it_and_keep_it_unique()
+	{
+		var store = (MongoProjection)Store;
+		var id = Guid.NewGuid();
+		await store.SubmitCommandAsync(BuildCreateCommand(store, id, "n"));
+
+		await store.SubmitCommandAsync(BuildAddFacetCommand(store, id, "first"));
+		var second = await Assert.ThrowsAsync(() => store.SubmitCommandAsync(BuildAddFacetCommand(store, id, "second")));
+
+		await Assert.That(second).IsTypeOf<InvalidOperationException>();
+		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
+		var other = (TestGeneratedContainerNode)OtherProcess().ResolveObject(id)!;
+		await Assert.That(((TestUniqueComponent)other.Components.Single()).Subject).IsEqualTo("first");
+	}
+
+	[Test]
+	public async Task Should_apply_an_event_from_a_peer_in_a_write_of_its_own()
+	{
+		// The replication endpoint applies a client's event straight through the visitor, outside any submit.
+		var store = (MongoProjection)Store;
+		var id = Guid.NewGuid();
+		await store.SubmitCommandAsync(BuildCreateCommand(store, id, "before"));
+		var metadata = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var ev = new ComponentPropertyChangedEvent
+		{
+			StreamId = _streamId,
+			EventId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			CollectionId = metadata.CollectionId,
+			TargetTypeId = metadata.TypeId,
+			TargetId = id,
+			ComponentTypeId = metadata.TypeId,
+			ComponentId = id,
+			PropertyName = nameof(TestGeneratedContainerNode.Name),
+			NewValue = "from a peer",
+		};
+
+		await ev.AcceptAsync<EventVisitorContext>(store, null!);
+
+		var reloaded = (TestGeneratedContainerNode)OtherProcess().ResolveObject(id)!;
+		await Assert.That(reloaded.Name).IsEqualTo("from a peer");
+		await Assert.That(store.ResolveObject(id) is TestGeneratedContainerNode { Name: "from a peer" }).IsTrue();
+	}
+
 	[Test]
 	public async Task Should_refuse_a_second_unique_facet_in_one_batch_and_apply_nothing()
 	{

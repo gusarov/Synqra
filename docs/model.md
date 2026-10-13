@@ -514,9 +514,20 @@ gap is expected.
   facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)` and
   `(_sid, _eid)` are created by the `components-indexes/1` storage upgrade at host startup. Named collections are refused (`NotSupportedException`)
   — the layout has no column for them and collections are retired (§2).
-- **Tracking is per-process and lazy.** An entity becomes tracked when created, enumerated, or
-  resolved by id (`ResolveObject` loads an untracked root from Mongo on demand). The attach race
-  is explained inline at `MongoProjection.AttachWithId`.
+- **Tracking is per-process and lazy; a write never needs it.** An entity becomes tracked when a
+  caller hands over a live instance to create it (`collection.Add`, i.e. the create command carries
+  `TargetObject`), when it is enumerated, or when it is resolved by id (`ResolveObject` loads it from
+  Mongo on demand). An id-only create (REST, a job, a batch child, an event from a peer) writes the
+  document and tracks nothing. Property changes, facet adds and deletes, entity deletes and link writes
+  go to the documents by id; a tracked instance is updated after commit. A facet add on an untracked
+  entity checks existence and uniqueness on the stored state; component vetoes and activation belong to
+  a live container, so they run only when the entity is tracked. The attach race is explained inline
+  at `MongoProjection.AttachWithId`.
+- **Events from a peer are a write of their own.** The replication endpoint applies a client's event
+  straight through the projection's visitor; outside a submit that event takes the gate and runs in its
+  own session and transaction (the endpoint appends the log and broadcasts itself).
+- **A computed `Id` is not stored.** A get-only `Id` on a model (e.g. `Id => Store.GetId(this)`) is
+  unmapped from the Mongo class map; the projection writes `_id` itself.
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain

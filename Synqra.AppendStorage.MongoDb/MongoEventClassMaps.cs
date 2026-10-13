@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Reflection;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
@@ -189,6 +190,7 @@ public static class MongoEventClassMaps
 			new JsonIgnoreConvention(),
 			new IgnoreIfNullConvention(true),
 			new GuidAndObjectSerializerConvention(),
+			new ComputedIdConvention(),
 		};
 		// Scoped to Synqra's own model ecosystem — NOT a blanket `_ => true`. That filter
 		// previously applied this pack to every class map in the process, including
@@ -240,6 +242,26 @@ public static class MongoEventClassMaps
 			else if (memberMap.MemberType == typeof(object))
 			{
 				memberMap.SetSerializer(ScopedOpenObjectSerializer);
+			}
+		}
+	}
+
+	/// <summary>
+	/// A get-only <c>Id</c> computed from the store (e.g. <c>Id => Store.GetId(this)</c>) is not stored
+	/// state: the projection writes <c>_id</c> itself. The driver's naming convention would still map it
+	/// as the document id and call the getter, which throws on a detached instance. Runs after the
+	/// driver has picked the id member.
+	/// </summary>
+	sealed class ComputedIdConvention : IPostProcessingConvention
+	{
+		public string Name => "Synqra.ComputedId";
+
+		public void PostProcess(BsonClassMap classMap)
+		{
+			if (classMap.IdMemberMap?.MemberInfo is PropertyInfo { SetMethod: null } computed && computed.DeclaringType == classMap.ClassType)
+			{
+				classMap.SetIdMember(null);
+				classMap.UnmapMember(computed);
 			}
 		}
 	}
