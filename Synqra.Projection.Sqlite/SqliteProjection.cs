@@ -356,6 +356,9 @@ public class SqliteProjection : IProjection
 		// SQLite projection is a stub; links are not yet wired here.
 	}
 
+	public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
+		=> throw new NotSupportedException("BatchCommand is not supported by SqliteProjection yet.");
+
 	public async Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
 	{
 	}

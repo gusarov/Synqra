@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
 using Synqra.Projection;
@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection, ICommittedEventSource
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -435,7 +435,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 #endif
 	}
 
-	public Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
+	// One command at a time: the precondition check, the dry run of a batch and the apply of the
+	// produced events happen under this gate, so nothing lands between a check and its write.
+	readonly SemaphoreSlim _submitGate = new(1, 1);
+
+	public async Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
 		// Normalize first — fill in CommandId, StreamId, and (for SingleObjectCommand)
 		// resolve TargetId / CollectionId / TargetTypeId from TargetObject if the caller
@@ -493,29 +497,44 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			}
 		}
 
-		// Optimistic concurrency precondition — runs AFTER normalization so the check
-		// sees the resolved TargetId, but BEFORE any event production so a rejected
-		// command leaves NO trace in the event stream.
-		// Guid.Empty means "I don't care" — same semantic as omitting the precondition.
-		if (options is not null
-			&& options.ExpectedLastEventId != Guid.Empty
-			&& newCommand is SingleObjectCommand precheckSoc
-			&& precheckSoc.TargetId != default)
+		await _submitGate.WaitAsync();
+		try
 		{
-			var actual = GetLastEventId(precheckSoc.TargetId);
-			if (actual != options.ExpectedLastEventId)
+			// Optimistic concurrency precondition — runs AFTER normalization so the check
+			// sees the resolved TargetId, but BEFORE any event production so a rejected
+			// command leaves NO trace in the event stream.
+			// Guid.Empty means "I don't care" — same semantic as omitting the precondition.
+			if (options is not null
+				&& options.ExpectedLastEventId != Guid.Empty
+				&& newCommand is SingleObjectCommand precheckSoc
+				&& precheckSoc.TargetId != default)
 			{
-				throw new ConcurrencyException(precheckSoc.TargetId, options.ExpectedLastEventId, actual);
+				var actual = GetLastEventId(precheckSoc.TargetId);
+				if (actual != options.ExpectedLastEventId)
+				{
+					throw new ConcurrencyException(precheckSoc.TargetId, options.ExpectedLastEventId, actual);
+				}
 			}
+			await ProcessCommandAsync(newCommand);
 		}
-
-		return ProcessCommandAsync(newCommand);
+		finally
+		{
+			_submitGate.Release();
+		}
 	}
 
 	// [UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
-		ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
+		_submitGate.Wait();
+		try
+		{
+			ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
+		}
+		finally
+		{
+			_submitGate.Release();
+		}
 	}
 
 	/// <summary>
@@ -559,7 +578,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
+		var committed = commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent).ToList();
+		if (committed.Count > 0)
+		{
+			EventsCommitted?.Invoke(committed);
+		}
 	}
+
+	public event Action<IReadOnlyList<Event>>? EventsCommitted;
 
 	public event EventHandler<EventArgs>? CommandProcessed;
 
@@ -575,6 +601,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
 	{
+		if (cmd is BatchCommand)
+		{
+			// A batch is never persisted itself; its children's events are its whole effect.
+			return Task.CompletedTask;
+		}
 		var created = new CommandCreatedEvent
 		{
 			EventId = _ids.CreateEventId<CommandCreatedEvent>(cmd.CommandId, 0),
@@ -704,6 +735,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		// Structural dedup happens during event apply (where the live link index lives) —
 		// same pattern as AddComponentCommand's uniqueness check.
+		// The id is minted here, not at apply, so the persisted event carries it and every replica agrees.
+		if (cmd.LinkId == default)
+		{
+			cmd.LinkId = _ids.CreateLinkId();
+		}
 		ctx.Events.Add(new LinkAddedEvent
 		{
 			StreamId = cmd.StreamId,
@@ -716,6 +752,41 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			Data = cmd.Data,
 		});
 		return Task.CompletedTask;
+	}
+
+	/// <summary>
+	/// Validated in full against a scratch projection rebuilt from this stream's log (BatchRunner); the
+	/// produced events are then applied and stored together by ProcessCommandAsync. Needs an event log:
+	/// without one there is nothing to rebuild a scratch from, so the batch is refused explicitly.
+	/// </summary>
+	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
+	{
+		if (_eventStorage is null)
+		{
+			throw new NotSupportedException("BatchCommand needs the projection's event log to validate against; this InMemoryProjection has none.");
+		}
+		var runner = new BatchRunner(_eventStorage, _ids, () => new InMemoryProjection(
+			  _serializerFactory
+			, TypeMetadataProvider
+			, StreamId
+			, eventStorage: null
+			, jsonSerializerOptions: _jsonSerializerOptions
+			, idProvider: _ids
+		));
+		runner.CheckExpectations(cmd, e => GetLastEventId(e.TargetId));
+		var events = await runner.DryRunAsync(cmd, StreamId);
+		// Each child keeps the same audit trail it would have on its own: its CommandCreatedEvent, then its events.
+		foreach (var child in cmd.Commands)
+		{
+			ctx.Events.Add(new CommandCreatedEvent
+			{
+				EventId = _ids.CreateEventId<CommandCreatedEvent>(child.CommandId, 0),
+				Data = child,
+				CommandId = child.CommandId,
+				StreamId = child.StreamId,
+			});
+			ctx.Events.AddRange(events.Where(e => e.CommandId == child.CommandId));
+		}
 	}
 
 	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)

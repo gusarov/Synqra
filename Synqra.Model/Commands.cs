@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -15,6 +15,7 @@ namespace Synqra;
 [JsonDerivedType(typeof(DeleteComponentCommand), "DeleteComponentCommand")]
 [JsonDerivedType(typeof(AddLinkCommand), "AddLinkCommand")]
 [JsonDerivedType(typeof(RemoveLinkCommand), "RemoveLinkCommand")]
+[JsonDerivedType(typeof(BatchCommand), "BatchCommand")]
 [SynqraModel("C0DEADD0-1032-8000-8C00-000000000000")] // command family C, type 00 = the base kind (node 0 = type ref)
 [Schema(2025.1, "")]
 [Schema(2025.791, "1")]

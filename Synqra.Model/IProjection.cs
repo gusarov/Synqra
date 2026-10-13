@@ -98,6 +98,9 @@ public interface IObjectStore
 
 public interface ITypeMetadataProvider
 {
+	/// <summary>Every registered type, once each (legacy ids are not listed separately). Lets a host serve a generic API over the model without compile-time knowledge of its types.</summary>
+	IReadOnlyCollection<TypeMetadata> Types { get; }
+
 	TypeMetadata GetTypeMetadata(Guid typeId);
 	TypeMetadata GetTypeMetadata(Type type);
 	void RegisterType(Type type);

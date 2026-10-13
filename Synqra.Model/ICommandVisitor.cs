@@ -1,4 +1,4 @@
-namespace Synqra;
+﻿namespace Synqra;
 
 public interface ICommandVisitor<T>
 {
@@ -14,6 +14,8 @@ public interface ICommandVisitor<T>
 
 	Task VisitAsync(AddLinkCommand cmd, T ctx);
 	Task VisitAsync(RemoveLinkCommand cmd, T ctx);
+
+	Task VisitAsync(BatchCommand cmd, T ctx);
 
 	/*
 	Task VisitAsync(MoveNode cmd, T ctx);

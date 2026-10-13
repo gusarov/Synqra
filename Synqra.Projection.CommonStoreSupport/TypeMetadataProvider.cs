@@ -46,9 +46,11 @@ public static class TypeMetadataProviderExtensions
 	{
 		private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
 		private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
+		private readonly System.Collections.ObjectModel.ReadOnlyDictionary<Type, TypeMetadata> _readOnlyByType;
 
 		public TypeMetadataProvider(IOptions<TypeMetadataProviderConfig> options)
 		{
+			_readOnlyByType = _typeMetadataByType.AsReadOnly();
 			foreach (var type in options.Value.Types ?? [])
 			{
 				RegisterType(type);
@@ -95,6 +97,8 @@ public static class TypeMetadataProviderExtensions
 				}
 			}
 		}
+
+		public IReadOnlyCollection<TypeMetadata> Types => _readOnlyByType.Values;
 
 		public TypeMetadata GetTypeMetadata(Type type)
 		{

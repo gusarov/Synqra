@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
@@ -20,6 +20,7 @@
     <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
     <ProjectReference Include="..\Synqra.Projection.CommonStoreSupport\Synqra.Projection.CommonStoreSupport.csproj" />
+    <ProjectReference Include="..\Synqra.Projection.InMemory\Synqra.Projection.InMemory.csproj" />
     <InternalsVisibleTo Include="Synqra.Tests" />
   </ItemGroup>
 

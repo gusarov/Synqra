@@ -107,6 +107,7 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(TaggedWith))]
 
 [JsonSerializable(typeof(TestGeneratedContainerNode))]
+[JsonSerializable(typeof(TestComponentNode))]
 [JsonSerializable(typeof(TestUniqueComponent))]
 [JsonSerializable(typeof(TestTaggingComponent))]
 [JsonSerializable(typeof(TestActivatableComponent))]
@@ -134,6 +135,7 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(FiledIn),
 		typeof(TaggedWith),
 		typeof(TestGeneratedContainerNode),
+		typeof(TestComponentNode),
 		typeof(TestUniqueComponent),
 		typeof(TestTaggingComponent),
 		typeof(TestActivatableComponent),
