@@ -176,7 +176,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			// Every root lives in the shared Components collection (see ComponentsMongoCollectionName);
 			// a named Synqra collection is only an in-memory grouping today, not a physical one.
 			var gtype = typeof(MongoStoreCollection<>).MakeGenericType(type);
-			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory, ComponentsCollection())!;
+			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory, Components)!;
 			_collections[collectionId] = created;
 			return created;
 		}
@@ -382,10 +382,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var doc = ToDocument(model, id);
 		doc[EntityIdField] = new BsonBinaryData(id, GuidRepresentation.Standard);
-		ComponentsCollection().ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
+		Components.ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
-	void DeleteRoot(Guid id) => ComponentsCollection().DeleteOne(RootFilter(id));
+	void DeleteRoot(Guid id) => Components.DeleteOne(RootFilter(id));
 
 	/// <summary>
 	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
@@ -591,7 +591,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
 		}
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(ComponentsCollection(), RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
+		SetField(Components, RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
@@ -673,11 +673,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		if (ev.ComponentId == ev.TargetId)
 		{
-			SetField(ComponentsCollection(), RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
+			SetField(Components, RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
 		}
 		else
 		{
-			SetField(ComponentsCollection(), ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
+			SetField(Components, ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
 		}
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
@@ -803,10 +803,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
-	IMongoCollection<BsonDocument> ComponentsCollection() => _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+	IMongoCollection<BsonDocument> Components => _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 
 	/// <summary>A root is the document that owns itself (<c>_id == _eid</c>) — the only marker that separates an entity's own data from its facets within the shared collection.</summary>
-	internal FilterDefinition<BsonDocument> RootsOnly() => new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray { "$_id", "$" + EntityIdField }));
+	internal FilterDefinition<BsonDocument> RootsOnlyFilter => new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray { "$_id", "$" + EntityIdField }));
 
 	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid": the **entity id** — the
 	// id of the thing this component belongs to (its IComponentContainer today; the ECS entity under

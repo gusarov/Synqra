@@ -61,9 +61,9 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
 
 	// This stream's roots of exactly this type — facets and other types share the same physical collection.
-	FilterDefinition<BsonDocument> RootsFilter() => Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name), _projection.RootsOnly());
+	FilterDefinition<BsonDocument> RootsFilter => Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name), _projection.RootsOnlyFilter);
 
-	public int Count => (int)_mongo.CountDocuments(RootsFilter());
+	public int Count => (int)_mongo.CountDocuments(RootsFilter);
 
 	bool ICollection<T>.IsReadOnly => false;
 
@@ -89,7 +89,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _mongo.Find(RootsFilter()).ToList())
+		foreach (var doc in _mongo.Find(RootsFilter).ToList())
 		{
 			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))
