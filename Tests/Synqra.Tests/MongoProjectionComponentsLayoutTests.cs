@@ -142,7 +142,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_delete_only_the_roots_own_document()
+	public async Task Should_delete_the_root_and_its_facets_together()
 	{
 		var store = Store;
 		var node = new TestGeneratedContainerNode { Name = "n" };
@@ -162,8 +162,8 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		});
 
 		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", id))).IsEqualTo(0L);
-		// Facet cascade is a later phase — the facet document is still there, addressed by its owner.
-		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_eid", id))).IsEqualTo(1L);
+		// One DeleteMany by _eid: the facet goes with its entity.
+		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_eid", id))).IsEqualTo(0L);
 		await Assert.That(store.GetCollection<TestGeneratedContainerNode>().Count).IsEqualTo(0);
 	}
 }
