@@ -479,13 +479,20 @@ gap is expected.
 - **One shared `Components` collection** per stream, `_sid`-scoped: `{ _id, _t, _sid, _eid, …,
   Target? }`. Root components (`_id == _eid`) are the entities; other components hang off `_eid`;
   links carry `Target`. No per-type object collections; no separate `Links` collection.
-- **Every Mongo write is one transaction.** A submit runs under the projection's per-instance gate and
-  inside one session: the version precondition, every document write the command's events produce, and the
-  event-log append (the Mongo log joins the session through `IMongoSessionAppendStorage`; a log on another store
-  is appended after commit). It commits whole or not at all. Tracked instances change only after commit, so an
-  in-process reader never sees half a write, and an abort evicts only the entities the write attached. Reads
-  inside the write go through the session, so an event sees what earlier events of the same write did. A conflict
-  with a writer in another process is retried by the driver (`WithTransaction`), never surfaced as an abort.
+- **Every Mongo write is one projection transaction, with the log written in the middle.** A submit runs
+  under the projection's per-instance gate and inside one session: first the version precondition and every
+  document write the command's events produce (this is the validation: a refusal writes nothing anywhere),
+  then the event-log append on the log's own store, then the projection commits. The event store and the
+  projection store may be different clusters (by design: different requirements), so the log never joins
+  the projection's transaction; appending before the commit makes the only possible gap a projection
+  *behind* its log (its final commit failed), never ahead of it, and behind is the repairable direction.
+  A retried attempt appends the same events again (ids derive from the command id); the log skips ids it
+  already has. The Mongo log appends a multi-event batch in its own transaction, so a batch lands in the
+  log whole or not at all; both clusters must therefore be replica sets. Tracked instances change only
+  after the projection commits, so an in-process reader never sees half a write, and an abort evicts only
+  the entities the write attached. Reads inside the write go through the session, so an event sees what
+  earlier events of the same write did. A conflict with a writer in another process is retried by the
+  driver (`WithTransaction`).
 - **Version on the root document.** `_lev`, the id of the last event applied to an entity or any of its facets,
   is stamped on the root document by the same write (create, root `$set`, or a one-field stamp after a facet or
   link write), so `GetLastEventId` survives a restart. A precondition (`CommandSubmissionOptions.ExpectedLastEventId`,
