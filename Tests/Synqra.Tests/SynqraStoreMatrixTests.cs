@@ -465,7 +465,7 @@ public sealed class Cobra_InMemory_Storage_With_Mongo_Store : Cobra_InMemoryEven
 // =====================================================================================
 // Components, materialized by the Mongo store: each component is persisted in its own shared
 // "Components" Mongo collection, addressed by (ContainerId, ComponentTypeId, ComponentId) — not
-// embedded in the container's own document (see MongoProjection.UpsertComponent's remarks on
+// embedded in the container's own document (see MongoProjection.CreateComponent's remarks on
 // why). CI provisions a real mongod (see Dockerfile's withmongo), so this runs there too — only
 // NotInParallel, since every Mongo-backed test in the suite shares that one mongod instance.
 // Kept as its own dedicated class rather than folded into the matrix above: components aren't
