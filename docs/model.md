@@ -489,7 +489,7 @@ gap is expected.
   the entity id — no extra id column. `GetCollection<T>()` matches `_t` against every registered
   type assignable to `T`; no root marker is needed there since a type is either a root type or a
   facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)` and
-  `(_sid, _eid)` are ensured on first use. Named collections are refused (`NotSupportedException`)
+  `(_sid, _eid)` are created by the `components-indexes/1` storage upgrade at host startup. Named collections are refused (`NotSupportedException`)
   — the layout has no column for them and collections are retired (§2).
 - **Tracking is per-process and lazy.** An entity becomes tracked when created, enumerated, or
   resolved by id (`ResolveObject` loads an untracked root from Mongo on demand). The attach race

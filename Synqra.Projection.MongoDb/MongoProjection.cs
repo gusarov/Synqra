@@ -831,34 +831,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
-	bool _indexesEnsured;
-	readonly object _indexesGate = new();
-
-	/// <summary>The one shared collection every root and facet lives in. First access ensures its indexes.</summary>
-	internal IMongoCollection<BsonDocument> Components
-	{
-		get
-		{
-			var collection = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-			if (!_indexesEnsured)
-			{
-				lock (_indexesGate)
-				{
-					if (!_indexesEnsured)
-					{
-						// (_sid, _t) serves enumeration / Count; (_sid, _eid) serves facet load, component filter, entity delete.
-						collection.Indexes.CreateMany(
-						[
-							new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField)),
-							new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(EntityIdField)),
-						]);
-						_indexesEnsured = true;
-					}
-				}
-			}
-			return collection;
-		}
-	}
+	/// <summary>The one shared collection every root and facet lives in. Its indexes are created by
+	/// <c>ComponentsIndexesUpgrade</c> at host startup, like every other storage upgrade.</summary>
+	internal IMongoCollection<BsonDocument> Components => _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 
 	// A root owns itself: _id == _eid (docs/model.md §2). Only applied on single-document lookups (ResolveObject),
 	// where the _id index already narrows to one document. Type-scoped enumeration needs no marker: "_t" is
