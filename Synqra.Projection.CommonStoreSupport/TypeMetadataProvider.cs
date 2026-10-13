@@ -55,6 +55,17 @@ public static class TypeMetadataProviderExtensions
 			}
 		}
 
+		public IReadOnlyCollection<TypeMetadata> RegisteredTypes
+		{
+			get
+			{
+				lock (_typeMetadataByType)
+				{
+					return _typeMetadataByType.Values.ToArray();
+				}
+			}
+		}
+
 		public void RegisterType(Type type)
 		{
 			ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);

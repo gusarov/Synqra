@@ -36,19 +36,16 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	where T : class
 {
 	readonly MongoProjection _projection;
-	readonly IMongoCollection<BsonDocument> _mongo;
 
 	public MongoStoreCollection(
 		  IObjectStore store
 		, Guid streamId
 		, Guid collectionId
 		, ISbxSerializerFactory serializerFactory
-		, IMongoCollection<BsonDocument> mongo
 		)
 		: base(store, streamId, collectionId, serializerFactory)
 	{
 		_projection = (MongoProjection)store;
-		_mongo = mongo;
 	}
 
 	public override Type Type => typeof(T);
@@ -60,10 +57,14 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	// value fresh rather than trust what got baked in at construction.
 	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
 
-	// This stream's roots of exactly this type — facets and other types share the same physical collection.
-	FilterDefinition<BsonDocument> RootsFilter => Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name), _projection.RootsOnlyFilter);
+	// This stream's roots of T or any registered subtype of T ("_t" is the actual type) — facets and
+	// other types share the same physical collection.
+	FilterDefinition<BsonDocument> RootsFilter => Builders<BsonDocument>.Filter.And(
+		StreamFilter(),
+		Builders<BsonDocument>.Filter.In("_t", _projection.TypeMetadataProvider.RegisteredTypes.Where(m => typeof(T).IsAssignableFrom(m.Type)).Select(m => m.Type.Name)),
+		_projection.RootsOnlyFilter);
 
-	public int Count => (int)_mongo.CountDocuments(RootsFilter);
+	public int Count => (int)_projection.Components.CountDocuments(RootsFilter);
 
 	bool ICollection<T>.IsReadOnly => false;
 
@@ -89,7 +90,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	IEnumerator<T> IEnumerable<T>.GetEnumerator()
 	{
-		foreach (var doc in _mongo.Find(RootsFilter).ToList())
+		foreach (var doc in _projection.Components.Find(RootsFilter).ToList())
 		{
 			var id = doc["_id"].AsGuid;
 			if (_projection.TryGetTracked(id, out var existing))

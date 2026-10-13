@@ -485,6 +485,14 @@ gap is expected.
   with the element name and serializer taken from the type's class map, so the write needs no
   materialized instance (an untracked entity is updated by id + stream, and never silently created:
   no match throws). Whole-document writes happen exactly once, at root / facet / link creation.
+- **Mongo layout details.** A root is the document without a `ComponentId` column (facets carry
+  it as their addressing column); that absence is the indexable root marker. `GetCollection<T>()`
+  matches `_t` against every registered type assignable to `T`. Indexes `(_sid, _t)` and
+  `(_sid, _eid)` are ensured on first use. Named collections are refused (`NotSupportedException`)
+  — the layout has no column for them and collections are retired (§2).
+- **Tracking is per-process and lazy.** An entity becomes tracked when created, enumerated, or
+  resolved by id (`ResolveObject` loads an untracked root from Mongo on demand). The attach race
+  is explained inline at `MongoProjection.AttachWithId`.
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain
