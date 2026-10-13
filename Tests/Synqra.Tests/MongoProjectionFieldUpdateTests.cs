@@ -137,7 +137,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		var id = store.GetId(model);
 
 		var other = UntrackedProjection();
-		await Assert.That(other.ResolveObject(id)).IsNull();
+		await Assert.That(other.GetLastEventId(id)).IsEqualTo(Guid.Empty); // tracked-only probe: nothing loaded
 
 		await other.SubmitCommandAsync(RootChange<DemoModel>(id, nameof(DemoModel.Name), "remote"));
 
@@ -145,7 +145,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		await Assert.That(doc["Name"].AsString).IsEqualTo("remote");
 		await Assert.That(doc["Prprpr"].AsString).IsEqualTo("keep");
 		await Assert.That(doc["_sid"].AsGuid).IsEqualTo(_streamId);
-		await Assert.That(other.ResolveObject(id)).IsNull(); // the write did not have to materialize it
+		await Assert.That(other.GetLastEventId(id)).IsEqualTo(Guid.Empty); // the write did not have to materialize it
 	}
 
 	[Test]

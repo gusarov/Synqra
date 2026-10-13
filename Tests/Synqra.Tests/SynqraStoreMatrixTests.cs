@@ -183,16 +183,11 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 
 	protected static async Task AssertGraph(IObjectStore store, (Guid parent, Guid child, Guid blocked, Guid related, Guid weighted) ids)
 	{
-		// Warm every node into the store's tracking cache up front. The in-memory projection has
-		// already replayed the whole log by this point, so this is a no-op there — but the Mongo
-		// projection intentionally never pre-warms (see MongoProjection's type-level remarks):
-		// ResolveObject only resolves a tracked instance, so any node a nav property might resolve
-		// (not just the ones this method names directly) must be loaded at least once first.
-		var nodes = store.GetCollection<TestGraphNode>().ToList();
-		TestGraphNode Get(Guid id) => nodes.First(n => store.GetId(n) == id);
-		var parent = Get(ids.parent);
-		var child = Get(ids.child);
-		var related = Get(ids.related);
+		// Resolved by id, nothing pre-enumerated: every store must resolve an entity (and whatever a nav
+		// property reaches from it) on demand, whether from replayed state or straight from its backend.
+		var parent = (TestGraphNode)store.ResolveObject(ids.parent)!;
+		var child = (TestGraphNode)store.ResolveObject(ids.child)!;
+		var related = (TestGraphNode)store.ResolveObject(ids.related)!;
 
 		// Directed primitive — navigable from both ends.
 		await Assert.That(parent.Children.Count).IsEqualTo(1);
@@ -349,6 +344,30 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		var store2 = ResolveStore();
 
 		await AssertGraph(store2, ids);
+	}
+
+	[Test]
+	public async Task Should_42_entity_resolves_by_id_after_restart_without_enumeration()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var child = AddNode(store, "child");
+		parent.Children.Add(child);
+		var parentId = store.GetId(parent);
+		var childId = store.GetId(child);
+
+		Restart();
+
+		var store2 = ResolveStore();
+		var child2 = (TestGraphNode?)store2.ResolveObject(childId);
+		await Assert.That(child2).IsNotNull();
+		await Assert.That(child2!.Name).IsEqualTo("child");
+		await Assert.That(store2.GetId(child2)).IsEqualTo(childId);
+		// The nav property pulls the parent in by id too — nothing was enumerated.
+		await Assert.That(child2.Parent).IsNotNull();
+		await Assert.That(store2.GetId(child2.Parent!)).IsEqualTo(parentId);
+		await Assert.That(ReferenceEquals(store2.ResolveObject(childId), child2)).IsTrue();
+		await Assert.That(store2.ResolveObject(Guid.NewGuid())).IsNull();
 	}
 
 	[Test]
