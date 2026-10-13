@@ -18,8 +18,9 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// <summary>
 /// A MongoDB-backed Synqra projection: it processes commands into events, appends those events to the
 /// durable event log (<see cref="IAppendStorage{Event, Guid}"/>), and materializes the resulting object
-/// state as documents in MongoDB — one collection per Synqra collection, one document per object keyed
-/// by the object's id (<c>_id</c>).
+/// state as documents in MongoDB — one shared <c>Components</c> collection per database, one document per
+/// component keyed by its id (<c>_id</c>); a root component (the entity's own data) is the document whose
+/// <c>_id == _eid</c>, a facet is any other document with <c>_eid</c> pointing at its owner.
 /// <para>
 /// Unlike the in-memory projection (which rebuilds RAM state by replaying the whole log on startup), the
 /// materialized read-model is itself durable, so a restarted projection serves current state straight
@@ -172,16 +173,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			{
 				return existing;
 			}
-			var mongo = _database.GetCollection<BsonDocument>(MongoCollectionName(type, collectionName));
+			// Every root lives in the shared Components collection (see ComponentsMongoCollectionName);
+			// a named Synqra collection is only an in-memory grouping today, not a physical one.
 			var gtype = typeof(MongoStoreCollection<>).MakeGenericType(type);
-			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory, mongo)!;
+			var created = (MongoStoreCollection)Activator.CreateInstance(gtype, this, StreamId, collectionId, _serializerFactory, ComponentsCollection())!;
 			_collections[collectionId] = created;
 			return created;
 		}
 	}
-
-	static string MongoCollectionName(Type type, string collectionName)
-		=> string.IsNullOrEmpty(collectionName) ? type.Name : $"{type.Name}_{collectionName}";
 
 	public Guid GetId(object model)
 	{
@@ -193,11 +192,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	}
 
 	/// <summary>
-	/// Resolves a tracked instance by id, or null. Tracked-only — see the type-level remarks on why
-	/// this projection does not fall back to a cross-collection Mongo lookup (there is no registry
-	/// mapping an arbitrary id to which per-type Mongo collection holds it). A caller that needs an
-	/// id resolved after a restart must first load it into tracking, e.g. by enumerating
-	/// <see cref="GetCollection{T}"/> for its type — exactly what <see cref="GetId"/> already requires.
+	/// Resolves a tracked instance by id, or null. Tracked-only — see the type-level remarks. Now that
+	/// every root lives in the one shared Components collection a Mongo fallback by <c>_id</c> would be
+	/// a single query; it is deliberately not added yet so tracking semantics change in their own step.
+	/// A caller that needs an id resolved after a restart must first load it into tracking, e.g. by
+	/// enumerating <see cref="GetCollection{T}"/> for its type — exactly what <see cref="GetId"/> already requires.
 	/// </summary>
 	public object? ResolveObject(Guid id) => id == default ? null : (TryGetTracked(id, out var model) ? model : null);
 
@@ -301,9 +300,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
 
-	internal IMongoCollection<BsonDocument> MongoCollectionFor(Type type, string collectionName)
-		=> _database.GetCollection<BsonDocument>(MongoCollectionName(type, collectionName));
-
 	/// <summary>
 	/// Rehydrates a stored document into its concrete model via the native MongoDB driver
 	/// serializer — no JSON round-trip. The concrete type is read from the document's own <c>_t</c>
@@ -337,6 +333,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		}
 		clone.Remove("_t");
 		clone.Remove(StreamIdField);
+		clone.Remove(EntityIdField); // projection bookkeeping on every document, root or facet
 		foreach (var field in addressingFields)
 		{
 			clone.Remove(field);
@@ -380,20 +377,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	// Create path only: a root document is written whole exactly once (ComponentAddedEvent with
 	// ComponentId == TargetId). Every later property change is a field-level SetField.
-	void CreateRoot(Guid targetTypeId, Guid id, object model)
+	// A root is self-owned: _id == _eid == entity id, in the same Components collection as its facets.
+	void CreateRoot(Guid id, object model)
 	{
-		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
-		var collection = _database.GetCollection<BsonDocument>(type.Name);
 		var doc = ToDocument(model, id);
-		collection.ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
+		doc[EntityIdField] = new BsonBinaryData(id, GuidRepresentation.Standard);
+		ComponentsCollection().ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
-	void DeleteRoot(Guid targetTypeId, Guid id)
-	{
-		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
-		var collection = _database.GetCollection<BsonDocument>(type.Name);
-		collection.DeleteOne(RootFilter(id));
-	}
+	void DeleteRoot(Guid id) => ComponentsCollection().DeleteOne(RootFilter(id));
 
 	/// <summary>
 	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
@@ -599,7 +591,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
 		}
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(_database.GetCollection<BsonDocument>(type.Name), RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
+		SetField(ComponentsCollection(), RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
@@ -619,12 +611,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		if (ev.ComponentId == ev.TargetId)
 		{
 			// Phase 2 (ECS): self-owned ROOT COMPONENT = the entity's own data (_id == _eid == entityId).
-			// Track + persist it via the object path (kept in its per-type Mongo collection for now — the
-			// physical collection-merge into Components is a later step).
+			// Track + persist it as a self-owned document in the shared Components collection.
 			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
 			AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
-			CreateRoot(ev.ComponentTypeId, ev.TargetId, rootModel);
+			CreateRoot(ev.TargetId, rootModel);
 			MarkApplied(ev.TargetId, ev.EventId);
 			return Task.CompletedTask;
 		}
@@ -682,11 +673,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		if (ev.ComponentId == ev.TargetId)
 		{
-			SetField(_database.GetCollection<BsonDocument>(componentType.Name), RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
+			SetField(ComponentsCollection(), RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
 		}
 		else
 		{
-			SetField(_database.GetCollection<BsonDocument>(ComponentsMongoCollectionName), ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
+			SetField(ComponentsCollection(), ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
 		}
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
@@ -698,7 +689,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			// Root entity single-delete: drop its document + tracking. Cascade of facet components /
 			// incident links is Phase 4.
-			DeleteRoot(ev.ComponentTypeId, ev.TargetId);
+			DeleteRoot(ev.TargetId);
 			if (_byId.TryRemove(ev.TargetId, out var rootModel))
 			{
 				_byModel.Remove(rootModel);
@@ -812,6 +803,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	const string ComponentsMongoCollectionName = "Components";
 
+	IMongoCollection<BsonDocument> ComponentsCollection() => _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
+
+	/// <summary>A root is the document that owns itself (<c>_id == _eid</c>) — the only marker that separates an entity's own data from its facets within the shared collection.</summary>
+	internal FilterDefinition<BsonDocument> RootsOnly() => new BsonDocument("$expr", new BsonDocument("$eq", new BsonArray { "$_id", "$" + EntityIdField }));
+
 	// Short, underscore-prefixed system column, matching "_id"/"_t"/"_sid": the **entity id** — the
 	// id of the thing this component belongs to (its IComponentContainer today; the ECS entity under
 	// the model substrate). Named "_eid" (entity id), not "_oid" — "OID" collides with the object
@@ -875,7 +871,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
-		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId));
+		// Ne(_id): the container's own root document carries _eid == _id too and is not one of its facets.
+		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
 		foreach (var doc in componentsMongo.Find(loadFilter).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent) —
