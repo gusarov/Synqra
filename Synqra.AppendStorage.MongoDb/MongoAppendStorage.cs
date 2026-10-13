@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 
 namespace Synqra.AppendStorage.MongoDb;
@@ -23,7 +24,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// matching the "events are immutable facts" model.
 /// </para>
 /// </summary>
-public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IMongoSessionAppendStorage<T>
+public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	where T : class
 	where TKey : notnull
 {
@@ -51,13 +52,11 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IMong
 		}
 	}
 
-	/// <summary>Appends inside the caller's transaction. A duplicate here is a real error: it aborts the transaction, as any write error inside one does.</summary>
-	public Task AppendBatchAsync(IClientSessionHandle session, IEnumerable<T> items, CancellationToken cancellationToken = default)
-	{
-		var list = items as IReadOnlyList<T> ?? items.ToArray();
-		return list.Count == 0 ? Task.CompletedTask : _collection.InsertManyAsync(session, list, new InsertManyOptions { IsOrdered = true }, cancellationToken);
-	}
-
+	/// <summary>
+	/// Appends a batch whole or not at all: one transaction on the log's own cluster (which must be a
+	/// replica set for batches). Idempotent: ids already stored are skipped, so appending the same
+	/// batch again (a caller's retried write) is a no-op. A single event needs no transaction.
+	/// </summary>
 	public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
 	{
 		var list = items as IReadOnlyList<T> ?? items.ToArray();
@@ -65,19 +64,31 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IMong
 		{
 			return;
 		}
-		try
+		if (list.Count == 1)
 		{
-			// IsOrdered = false: a duplicate in the middle of the batch must NOT stop the
-			// remaining new events from being inserted. With unordered inserts Mongo tries
-			// every document and reports the failures; we swallow duplicate-key errors
-			// (idempotent re-append) and rethrow anything else.
-			await _collection.InsertManyAsync(list, new InsertManyOptions { IsOrdered = false }, cancellationToken);
+			await AppendAsync(list[0], cancellationToken);
+			return;
 		}
-		catch (MongoBulkWriteException ex) when (ex.WriteErrors.All(e => e.Category == ServerErrorCategory.DuplicateKey))
+		using var session = await _collection.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
+		await session.WithTransactionAsync(async (s, ct) =>
 		{
-			// Every failure was a duplicate — the non-duplicate documents were still
-			// inserted (unordered), so this is a fully idempotent outcome.
-		}
+			var ids = list.Select(ReadKey).ToList();
+			var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
+			var missing = list.Where(item => !stored.Contains(ReadKey(item))).ToList();
+			if (missing.Count > 0)
+			{
+				await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
+			}
+			return missing.Count;
+		}, cancellationToken: cancellationToken);
+	}
+
+	/// <summary>The item's key, read through the member its class map maps to <c>_id</c> (see the key contract above).</summary>
+	TKey ReadKey(T item)
+	{
+		var idMember = BsonClassMap.LookupClassMap(item.GetType()).IdMemberMap
+			?? throw new InvalidOperationException($"{item.GetType().Name} has no member mapped to _id; the Mongo log needs one (see MongoEventClassMaps).");
+		return (TKey)idMember.Getter(item);
 	}
 
 	public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)

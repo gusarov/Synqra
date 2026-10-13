@@ -819,12 +819,69 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	}
 
 	/// <summary>A second projection over the same database: another process, as far as Mongo is concerned.</summary>
-	MongoProjection OtherProcess()
+	MongoProjection OtherProcess() => ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase());
+
+	IMongoDatabase OpenDatabase()
 	{
-		var sp = ServiceProvider;
 		var url = new MongoUrl(_connectionString);
-		var database = new MongoClient(_connectionString).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
-		return ActivatorUtilities.CreateInstance<MongoProjection>(sp, database);
+		return new MongoClient(_connectionString).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
+	}
+
+	/// <summary>An event log that refuses every append: stands for a log on another cluster that is down.</summary>
+	sealed class UnavailableLog : IAppendStorage<Event, Guid>
+	{
+		public Task AppendAsync(Event item, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
+		public Task AppendBatchAsync(IEnumerable<Event> items, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
+		public Task<Event> GetAsync(Guid key, CancellationToken cancellationToken = default) => throw new KeyNotFoundException(key.ToString());
+		public async IAsyncEnumerable<Event> GetAllAsync(Guid from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			await Task.CompletedTask;
+			yield break;
+		}
+		public void Dispose()
+		{
+		}
+		public ValueTask DisposeAsync() => default;
+	}
+
+	[Test]
+	public async Task Should_write_no_documents_when_the_event_log_refuses_the_append()
+	{
+		var projection = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase(), (IAppendStorage<Event, Guid>)new UnavailableLog());
+		var id = Guid.NewGuid();
+		using var _ = SynqraStreamContext.Enter(_streamId);
+
+		var refused = await Assert.ThrowsAsync(() => projection.SubmitCommandAsync(BuildCreateCommand(projection, id, "never stored")));
+
+		await Assert.That(refused).IsTypeOf<InvalidOperationException>();
+		await Assert.That(OtherProcess().ResolveObject(id)).IsNull();
+	}
+
+	[Test]
+	public async Task Should_append_a_batch_to_the_mongo_log_whole_and_only_once()
+	{
+		var log = ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+		var metadata = Store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var target = Guid.NewGuid();
+		var batch = Enumerable.Range(0, 3).Select(i => (Event)new ComponentPropertyChangedEvent
+		{
+			StreamId = _streamId,
+			EventId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			CollectionId = metadata.CollectionId,
+			TargetTypeId = metadata.TypeId,
+			TargetId = target,
+			ComponentTypeId = metadata.TypeId,
+			ComponentId = target,
+			PropertyName = nameof(TestGeneratedContainerNode.Name),
+			NewValue = $"v{i}",
+		}).ToList();
+
+		await log.AppendBatchAsync(batch);
+		await log.AppendBatchAsync(batch); // a retried write appends the same events again
+
+		var stored = log.GetAllAsync().ToBlockingEnumerable().OfType<ComponentPropertyChangedEvent>().Count(e => e.TargetId == target);
+		await Assert.That(stored).IsEqualTo(3);
 	}
 
 	/// <summary>An id-only command, the way a REST call or a job sends it: no live instance handed over.</summary>

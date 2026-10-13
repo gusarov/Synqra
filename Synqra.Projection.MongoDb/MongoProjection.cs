@@ -327,12 +327,16 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	}
 
 	/// <summary>
-	/// A submitted command is one write: the precondition check, the events' document writes and the
-	/// event-log append commit together or not at all. A batch is the same path with more events.
+	/// A submitted command is one write. Inside the projection's transaction: the precondition check and
+	/// the events' document writes (the validation), then the event-log append on the log's own store,
+	/// then the projection commits. The log may live on another cluster, so it cannot join this
+	/// transaction; appending before the commit means the only possible gap is a projection behind its
+	/// log (a failed final commit), never ahead of it. A retried attempt appends the same events again,
+	/// which the log ignores (same ids). A batch is the same path with more events.
 	/// </summary>
 	async Task ProcessCommandAsync(Command cmd, CommandSubmissionOptions? options)
 	{
-		var committed = await RunWriteAsync(async scope =>
+		var committed = await RunWriteAsync(async _ =>
 		{
 			if (options is not null && options.ExpectedLastEventId != Guid.Empty && cmd is SingleObjectCommand precheck && precheck.TargetId != default)
 			{
@@ -346,17 +350,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			// Only domain events are durable; command events carry live CLR payloads we don't persist.
 			var events = ctx.Events.Where(e => e is not CommandCreatedEvent).ToList();
-			if (_eventStorage is IMongoSessionAppendStorage<Event> inTransaction && events.Count > 0)
+			if (_eventStorage is not null && events.Count > 0)
 			{
-				await inTransaction.AppendBatchAsync(scope.Session, events);
+				await _eventStorage.AppendBatchAsync(events);
 			}
 			return events;
 		});
-		if (_eventStorage is not null and not IMongoSessionAppendStorage<Event> && committed.Count > 0)
-		{
-			// A log on another store cannot join the transaction; it follows the committed documents.
-			await _eventStorage.AppendBatchAsync(committed);
-		}
 		if (committed.Count > 0)
 		{
 			EventsCommitted?.Invoke(committed);
