@@ -32,9 +32,12 @@ mongod \
   --dbpath /tmp/mdb \
   --bind_ip 127.0.0.1 \
   --port 27017 \
+  --replSet rs0 \
   --fork \
   --logpath /tmp/mongod.log
 trap 'mongod --dbpath /tmp/mdb --shutdown || true' EXIT
+# One-node replica set: Synqra writes run in transactions, which a standalone refuses. The test
+# harness (Synqra EphemeralMongo) initiates the set on first use.
 export ConnectionStrings__Mongodb="mongodb://127.0.0.1:27017"
 exec "$@"
 EOF

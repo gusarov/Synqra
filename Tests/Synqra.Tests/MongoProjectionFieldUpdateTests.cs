@@ -84,6 +84,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 	{
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove(field);
+		clone.Remove("_lev"); // the version moves with every write by design
 		return clone.ToBson();
 	}
 
@@ -235,6 +236,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		actual.Remove("_id");
 		actual.Remove("_sid");
 		actual.Remove("_eid");
+		actual.Remove("_lev");
 		await Assert.That(actual.ToBson()).IsEquivalentTo(expected.ToBson());
 
 		// And it reads back through the projection's own deserializer as the same values.

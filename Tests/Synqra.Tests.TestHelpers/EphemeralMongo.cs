@@ -16,9 +16,10 @@ namespace Synqra.Tests.TestHelpers;
 /// first). Per-test isolation comes from a unique database name, not a new runner —
 /// per-test runners are slow and prone to port-rebind flakiness.
 /// <para>
-/// Standalone (not a replica set): the append-storage path does plain inserts/finds with
-/// no multi-document transactions, so it doesn't need the replica set the app-level base
-/// starts; standalone is faster and more reliable.
+/// Must be a replica set: every Mongo write of the projection runs in a transaction, which a
+/// standalone mongod refuses. A server started with <c>--replSet</c> (CI's <c>withmongo</c>, a
+/// local service with <c>replSetName</c> in its config) is initiated here on first use; a plain
+/// standalone fails fast with that instruction.
 /// </para>
 /// </summary>
 public static class EphemeralMongo
@@ -50,6 +51,8 @@ public static class EphemeralMongo
 						{
 							throw new Exception("ConnectionString 'mongodb' is required for test to run. Make sure spawning mongod and setting env var is part of test execution command");
 						}
+
+						new ReplicaSetInitiator(_engineConnectionString).EnsureInitiated();
 
 						// Maintenance - All databases named as a v7 guid
 						using var client = new MongoClient(_engineConnectionString);
