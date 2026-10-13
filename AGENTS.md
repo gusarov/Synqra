@@ -161,15 +161,6 @@ minimal, auto-merge-safe diffs.
   treated by the model-binding generator as a stored field and gets stamped into `[Schema]`
   (and emits a backing-field reference that may not exist).
 
-### No static members
-
-Static members are banned without explicit owner permission — not just static helper classes,
-but any `static` method, field, property or local function in production or test code. The
-**only** static allowed by default is an **extension method** (`static class Foo { static X Bar(this
-T t) }`). A private helper that happens not to touch instance state is still an instance method.
-Rationale: statics are hidden global state, untestable, and bypass DI; keeping the rule absolute
-is what keeps it maintainable. Pre-existing statics are not a licence to add more.
-
 ## Testing Notes
 
 - Tests use **TUnit**, not xUnit/NUnit.

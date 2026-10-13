@@ -441,7 +441,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// Same conversion ComponentApplyHelpers.ApplyPropertyChange does on the live instance (an event
 	// rehydrated from the log can carry e.g. a long for a double member), so an untracked write
 	// serializes the identical CLR value a tracked one would.
-	object? CoerceValue(BsonMemberMap memberMap, object? value)
+	static object? CoerceValue(BsonMemberMap memberMap, object? value)
 	{
 		var memberType = Nullable.GetUnderlyingType(memberMap.MemberType) ?? memberMap.MemberType;
 		if (value is IConvertible convertible && value.GetType() != memberType && memberType != typeof(object))
@@ -453,7 +453,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	// Serializes through the member's own serializer (the one ToDocument would use for this element)
 	// into a throwaway wrapper document and lifts the resulting BsonValue out.
-	BsonValue SerializeMember(BsonMemberMap memberMap, object? value)
+	static BsonValue SerializeMember(BsonMemberMap memberMap, object? value)
 	{
 		var wrapper = new BsonDocument();
 		using (var writer = new BsonDocumentWriter(wrapper))
