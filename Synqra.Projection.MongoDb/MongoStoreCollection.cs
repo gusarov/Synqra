@@ -55,29 +55,32 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 	// constructed and cached (see MongoProjection.GetCollection's per-collectionId cache). This
 	// instance is reused across every stream, so every actual query must re-read the ambient
 	// value fresh rather than trust what got baked in at construction.
-	FilterDefinition<BsonDocument> StreamFilter() => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
+	FilterDefinition<BsonDocument> StreamFilter => Builders<BsonDocument>.Filter.Eq("_sid", _projection.StreamId);
 
 	// Discriminators of T and every registered subtype ("_t" is the actual type). Recomputed only when the
 	// registry has grown since last time; the registry only ever grows.
 	string[] _discriminators = [];
 	int _discriminatorsFor = -1;
 
-	string[] Discriminators()
+	string[] Discriminators
 	{
-		var registered = _projection.TypeMetadataProvider.RegisteredTypes;
-		if (registered.Count != _discriminatorsFor)
+		get
 		{
-			_discriminators = registered.Where(m => typeof(T).IsAssignableFrom(m.Type)).Select(m => m.Type.Name).ToArray();
-			_discriminatorsFor = registered.Count;
+			var registered = _projection.TypeMetadataProvider.RegisteredTypes;
+			if (registered.Count != _discriminatorsFor)
+			{
+				_discriminators = registered.Where(m => typeof(T).IsAssignableFrom(m.Type)).Select(m => m.Type.Name).ToArray();
+				_discriminatorsFor = registered.Count;
+			}
+			return _discriminators;
 		}
-		return _discriminators;
 	}
 
 	// This stream's roots of T or any registered subtype — facets and other types share the same physical
 	// collection, and a type is either a root type or a facet type, so "_t" alone selects roots.
 	FilterDefinition<BsonDocument> RootsFilter => Builders<BsonDocument>.Filter.And(
-		StreamFilter(),
-		Builders<BsonDocument>.Filter.In("_t", Discriminators()));
+		StreamFilter,
+		Builders<BsonDocument>.Filter.In("_t", Discriminators));
 
 	public int Count => (int)_projection.Components.CountDocuments(RootsFilter);
 

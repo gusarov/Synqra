@@ -67,12 +67,12 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	// word for something unrelated (IComponentContainer — the object a component is attached to).
 	// Stream and node are the two concepts that actually exist; "container" isn't a third one.
 	const string StreamIdField = "_sid";
-	static FilterDefinition<BsonDocument> LinkTypeFilter(Type linkType)
+	FilterDefinition<BsonDocument> BuildLinkTypeFilter(Type linkType)
 		=> Builders<BsonDocument>.Filter.Eq(DiscriminatorField, linkType.Name);
 
 	/// <summary>Every read/write below is scoped to this instance's <see cref="StreamId"/> — see
 	/// the property's own remarks for why.</summary>
-	FilterDefinition<BsonDocument> StreamFilter()
+	FilterDefinition<BsonDocument> StreamFilter
 		=> Builders<BsonDocument>.Filter.Eq(StreamIdField, StreamId);
 
 	readonly IMongoDatabase _database;
@@ -208,7 +208,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		{
 			return tracked;
 		}
-		var doc = Components.Find(Builders<BsonDocument>.Filter.And(RootFilter(id), RootsOnlyFilter)).FirstOrDefault();
+		var doc = Components.Find(Builders<BsonDocument>.Filter.And(BuildRootFilter(id), RootsOnlyFilter)).FirstOrDefault();
 		if (doc is null)
 		{
 			return null;
@@ -393,8 +393,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		return doc;
 	}
 
-	FilterDefinition<BsonDocument> RootFilter(Guid id)
-		=> Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+	FilterDefinition<BsonDocument> BuildRootFilter(Guid id)
+		=> Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter);
 
 	// Create path only: a root document is written whole exactly once (ComponentAddedEvent with
 	// ComponentId == TargetId). Every later property change is a field-level SetField.
@@ -403,13 +403,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	{
 		var doc = ToDocument(model, id);
 		doc[EntityIdField] = new BsonBinaryData(id, GuidRepresentation.Standard);
-		Components.ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
+		Components.ReplaceOne(BuildRootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	// One statement drops the entity: its root (_eid == _id) and every facet hanging off _eid. Same
 	// observable result as the in-memory projection, where facets live on the removed instance.
 	void DeleteEntity(Guid id)
-		=> Components.DeleteMany(Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, id)));
+		=> Components.DeleteMany(Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq(EntityIdField, id)));
 
 	/// <summary>
 	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
@@ -615,7 +615,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
 		}
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(Components, RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}");
+		SetField(Components, BuildRootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}");
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
@@ -702,11 +702,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		if (ev.ComponentId == ev.TargetId)
 		{
-			SetField(Components, RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
+			SetField(Components, BuildRootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
 		}
 		else
 		{
-			SetField(Components, ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
+			SetField(Components, BuildComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
 		}
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
@@ -765,7 +765,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		// ToDocument already stamps the "_t" discriminator (= link type name) the per-type queries
 		// filter on, so no separate type column is written here.
 		var doc = ToDocument(link, link.LinkId);
-		var replaceFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), StreamFilter());
+		var replaceFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), StreamFilter);
 		linksMongo.ReplaceOne(replaceFilter, doc, new ReplaceOptions { IsUpsert = true });
 
 		if (link is IBindableModel bindable && bindable.Store is null)
@@ -778,7 +778,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter());
+		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter);
 		linksMongo.DeleteOne(deleteFilter); // no-op (idempotent) if already gone
 		return Task.CompletedTask;
 	}
@@ -792,7 +792,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	Guid? FindStructuralDuplicate(IMongoCollection<BsonDocument> linksMongo, Link link, Guid excludeId)
 	{
-		var typeIdFilter = LinkTypeFilter(link.GetType());
+		var typeIdFilter = BuildLinkTypeFilter(link.GetType());
 		// SourceId/TargetId are native Link fields, serialized through Link's own class map (the
 		// patched standard GuidSerializer) — filter with a raw Guid so the driver encodes it the same
 		// way (BSON Binary subtype), not a string.
@@ -804,7 +804,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), typeIdFilter, endpointFilter)).ToList())
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, typeIdFilter, endpointFilter)).ToList())
 		{
 			var candidateId = doc["_id"].AsGuid;
 			if (candidateId == excludeId)
@@ -862,9 +862,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// <paramref name="containerId"/> (<see cref="EntityIdField"/>) and <paramref name="componentType"/>
 	/// (<c>_t</c>) stay in the filter as a consistency guard.
 	/// </summary>
-	FilterDefinition<BsonDocument> ComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
+	FilterDefinition<BsonDocument> BuildComponentFilter(Guid containerId, Type componentType, Guid componentId) =>
 		Builders<BsonDocument>.Filter.And(
-			StreamFilter(),
+			StreamFilter,
 			Builders<BsonDocument>.Filter.Eq("_id", componentId),
 			Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId),
 			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name));
@@ -882,11 +882,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		doc["_id"] = new BsonBinaryData(componentId, GuidRepresentation.Standard);
 		doc[EntityIdField] = new BsonBinaryData(containerId, GuidRepresentation.Standard);
 		doc[StreamIdField] = new BsonBinaryData(StreamId, GuidRepresentation.Standard);
-		Components.ReplaceOne(ComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
+		Components.ReplaceOne(BuildComponentFilter(containerId, component.GetType(), componentId), doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	void DeleteComponentDoc(Guid containerId, Guid componentTypeId, Guid componentId)
-		=> Components.DeleteOne(ComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
+		=> Components.DeleteOne(BuildComponentFilter(containerId, TypeMetadataProvider.GetTypeMetadata(componentTypeId).Type, componentId));
 
 	/// <summary>
 	/// Re-attaches every persisted component onto a container as it's (re)loaded — called from
@@ -900,8 +900,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// </summary>
 	void LoadComponentsInto(IComponentContainer container, Guid containerId, Guid containerCollectionId)
 	{
-		// Ne(_id): the container's own root document carries _eid == _id too and is not one of its facets.
-		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
+		// Exclude the container itself: its root document also has _eid == _id but is not one of its facets.
+		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId), Builders<BsonDocument>.Filter.Ne("_id", containerId));
 		foreach (var doc in Components.Find(loadFilter).ToList())
 		{
 			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent).
@@ -945,7 +945,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		get
 		{
 			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-			return linksMongo.Find(StreamFilter()).ToList()
+			return linksMongo.Find(StreamFilter).ToList()
 				.Select(LoadLink)
 				.ToArray();
 		}
@@ -964,7 +964,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 				Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", nodeId)),
 		};
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList()
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -975,7 +975,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", a), Builders<BsonDocument>.Filter.Eq("TargetId", b)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", b), Builders<BsonDocument>.Filter.Eq("TargetId", a)));
-		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList()
+		return linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList()
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -988,7 +988,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.X), Builders<BsonDocument>.Filter.Eq("TargetId", key.Y)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.Y), Builders<BsonDocument>.Filter.Eq("TargetId", key.X)));
 
-		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter(), LinkTypeFilter(linkType), endpointFilter)).ToList())
+		foreach (var doc in linksMongo.Find(Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)).ToList())
 		{
 			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
@@ -1007,7 +1007,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	bool ILinkIndex.TryGetById(Guid linkId, out Link? link)
 	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), StreamFilter());
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), StreamFilter);
 		var doc = linksMongo.Find(filter).FirstOrDefault();
 		if (doc is null)
 		{

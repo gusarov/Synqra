@@ -63,22 +63,24 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 	}
 
 	// Same database the store under test opened (AddMongoDbSynqraStore's own name resolution).
-	IMongoDatabase Database()
+	IMongoDatabase Database => field ??= OpenDatabase();
+
+	IMongoDatabase OpenDatabase()
 	{
 		var url = new MongoUrl(_connectionString);
 		return new MongoClient(url).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
 	}
 
-	BsonDocument RootDocument<T>(Guid id)
-		=> Database().GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
+	BsonDocument FindRootDocument<T>(Guid id)
+		=> Database.GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
 
-	BsonDocument ComponentDocument<T>(Guid containerId)
-		=> Database().GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.And(
+	BsonDocument FindComponentDocument<T>(Guid containerId)
+		=> Database.GetCollection<BsonDocument>("Components").Find(Builders<BsonDocument>.Filter.And(
 			Builders<BsonDocument>.Filter.Eq("_eid", containerId),
 			Builders<BsonDocument>.Filter.Eq("_t", typeof(T).Name))).Single();
 
 	/// <summary>Everything but one field, as raw BSON bytes — the "nothing else moved" oracle.</summary>
-	byte[] BytesWithout(BsonDocument doc, string field)
+	byte[] SerializeWithout(BsonDocument doc, string field)
 	{
 		var clone = (BsonDocument)doc.DeepClone();
 		clone.Remove(field);
@@ -89,10 +91,10 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 	/// A second projection over the same database that has never seen the object: its tracking cache is
 	/// empty, so any write it makes must be addressed purely by id + stream.
 	/// </summary>
-	MongoProjection UntrackedProjection()
-		=> ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database());
+	MongoProjection CreateUntrackedProjection()
+		=> ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database);
 
-	ChangeComponentPropertyCommand RootChange<T>(Guid id, string propertyName, object? newValue)
+	ChangeComponentPropertyCommand BuildRootChange<T>(Guid id, string propertyName, object? newValue)
 	{
 		var metadata = Store.TypeMetadataProvider.GetTypeMetadata(typeof(T));
 		return new ChangeComponentPropertyCommand
@@ -115,13 +117,13 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		var model = new DemoModel { Name = "before", Prprpr = "keep" };
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
-		var before = RootDocument<DemoModel>(id);
+		var before = FindRootDocument<DemoModel>(id);
 
 		model.Name = "after";
 
-		var after = RootDocument<DemoModel>(id);
+		var after = FindRootDocument<DemoModel>(id);
 		await Assert.That(after["Name"].AsString).IsEqualTo("after");
-		await Assert.That(BytesWithout(after, "Name")).IsEquivalentTo(BytesWithout(before, "Name"));
+		await Assert.That(SerializeWithout(after, "Name")).IsEquivalentTo(SerializeWithout(before, "Name"));
 		await Assert.That(after["_id"]).IsEqualTo(before["_id"]);
 		await Assert.That(after["_sid"]).IsEqualTo(before["_sid"]);
 		await Assert.That(after["_t"]).IsEqualTo(before["_t"]);
@@ -136,12 +138,12 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 
-		var other = UntrackedProjection();
+		var other = CreateUntrackedProjection();
 		await Assert.That(other.TryGetTracked(id, out _)).IsFalse(); // nothing loaded
 
-		await other.SubmitCommandAsync(RootChange<DemoModel>(id, nameof(DemoModel.Name), "remote"));
+		await other.SubmitCommandAsync(BuildRootChange<DemoModel>(id, nameof(DemoModel.Name), "remote"));
 
-		var doc = RootDocument<DemoModel>(id);
+		var doc = FindRootDocument<DemoModel>(id);
 		await Assert.That(doc["Name"].AsString).IsEqualTo("remote");
 		await Assert.That(doc["Prprpr"].AsString).IsEqualTo("keep");
 		await Assert.That(doc["_sid"].AsGuid).IsEqualTo(_streamId);
@@ -153,13 +155,13 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 	{
 		_ = Store;
 		var missingId = Guid.NewGuid();
-		var other = UntrackedProjection();
+		var other = CreateUntrackedProjection();
 
 		var ex = await Assert.ThrowsAsync(async () =>
-			await other.SubmitCommandAsync(RootChange<DemoModel>(missingId, nameof(DemoModel.Name), "ghost")));
+			await other.SubmitCommandAsync(BuildRootChange<DemoModel>(missingId, nameof(DemoModel.Name), "ghost")));
 
 		await Assert.That(ex).IsTypeOf<InvalidOperationException>();
-		var count = Database().GetCollection<BsonDocument>("Components").CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", missingId));
+		var count = Database.GetCollection<BsonDocument>("Components").CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", missingId));
 		await Assert.That(count).IsEqualTo(0L); // no partial document minted out of a single field
 	}
 
@@ -171,7 +173,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 
-		var other = UntrackedProjection();
+		var other = CreateUntrackedProjection();
 		using (SynqraStreamContext.Enter(Guid.NewGuid()))
 		{
 			var ex = await Assert.ThrowsAsync(async () =>
@@ -189,7 +191,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 			await Assert.That(ex).IsTypeOf<InvalidOperationException>();
 		}
 
-		await Assert.That(RootDocument<DemoModel>(id)["Name"].AsString).IsEqualTo("mine");
+		await Assert.That(FindRootDocument<DemoModel>(id)["Name"].AsString).IsEqualTo("mine");
 	}
 
 	[Test]
@@ -200,17 +202,17 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		store.GetCollection<TestGeneratedContainerNode>().Add(node);
 		var id = store.GetId(node);
 		node.Components.Add(new TestUniqueComponent { Subject = "first" });
-		var before = ComponentDocument<TestUniqueComponent>(id);
+		var before = FindComponentDocument<TestUniqueComponent>(id);
 
 		var attached = (TestUniqueComponent)node.Components.GetUniqueComponent(typeof(TestUniqueComponent))!;
 		attached.Subject = "second";
 
-		var after = ComponentDocument<TestUniqueComponent>(id);
+		var after = FindComponentDocument<TestUniqueComponent>(id);
 		await Assert.That(after["Subject"].AsString).IsEqualTo("second");
-		await Assert.That(BytesWithout(after, "Subject")).IsEquivalentTo(BytesWithout(before, "Subject"));
+		await Assert.That(SerializeWithout(after, "Subject")).IsEquivalentTo(SerializeWithout(before, "Subject"));
 		await Assert.That(after["_eid"].AsGuid).IsEqualTo(id);
 		await Assert.That(after["_sid"].AsGuid).IsEqualTo(_streamId);
-		await Assert.That(RootDocument<TestGeneratedContainerNode>(id)["Name"].AsString).IsEqualTo("n"); // container untouched
+		await Assert.That(FindRootDocument<TestGeneratedContainerNode>(id)["Name"].AsString).IsEqualTo("n"); // container untouched
 	}
 
 	[Test]
@@ -229,14 +231,14 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		var expected = new TestFieldUpdateModel { Weight = 2.5, Tags = new List<string> { "x", "y" } }
 			.ToBsonDocument(typeof(object), MongoEventClassMaps.ScopedOpenObjectSerializer);
 
-		var actual = RootDocument<TestFieldUpdateModel>(id);
+		var actual = FindRootDocument<TestFieldUpdateModel>(id);
 		actual.Remove("_id");
 		actual.Remove("_sid");
 		actual.Remove("_eid");
 		await Assert.That(actual.ToBson()).IsEquivalentTo(expected.ToBson());
 
 		// And it reads back through the projection's own deserializer as the same values.
-		var other = UntrackedProjection();
+		var other = CreateUntrackedProjection();
 		var reloaded = other.GetCollection<TestFieldUpdateModel>().Single(m => other.GetId(m) == id);
 		await Assert.That(reloaded.Name).IsNull();
 		await Assert.That(reloaded.Weight).IsEqualTo(2.5);
@@ -252,9 +254,9 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		var id = store.GetId(model);
 
 		// An event read back from a log can carry a long where the member is a double.
-		await UntrackedProjection().SubmitCommandAsync(RootChange<TestFieldUpdateModel>(id, nameof(TestFieldUpdateModel.Weight), 3L));
+		await CreateUntrackedProjection().SubmitCommandAsync(BuildRootChange<TestFieldUpdateModel>(id, nameof(TestFieldUpdateModel.Weight), 3L));
 
-		var doc = RootDocument<TestFieldUpdateModel>(id);
+		var doc = FindRootDocument<TestFieldUpdateModel>(id);
 		await Assert.That(doc["Weight"].BsonType).IsEqualTo(BsonType.Double);
 		await Assert.That(doc["Weight"].AsDouble).IsEqualTo(3.0);
 	}

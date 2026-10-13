@@ -62,13 +62,15 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		}
 	}
 
-	IMongoDatabase Database()
+	IMongoDatabase Database => field ??= OpenDatabase();
+
+	IMongoDatabase OpenDatabase()
 	{
 		var url = new MongoUrl(_connectionString);
 		return new MongoClient(url).GetDatabase(string.IsNullOrWhiteSpace(url.DatabaseName) ? "synqra" : url.DatabaseName);
 	}
 
-	IMongoCollection<BsonDocument> Components() => Database().GetCollection<BsonDocument>("Components");
+	IMongoCollection<BsonDocument> Components => Database.GetCollection<BsonDocument>("Components");
 
 	[Test]
 	public async Task Should_store_a_root_as_a_self_owned_document_in_the_shared_collection()
@@ -78,13 +80,13 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 
-		var doc = Components().Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
+		var doc = Components.Find(Builders<BsonDocument>.Filter.Eq("_id", id)).Single();
 		await Assert.That(doc["_eid"].AsGuid).IsEqualTo(id);
 		await Assert.That(doc["_t"].AsString).IsEqualTo(nameof(DemoModel));
 		await Assert.That(doc["_sid"].AsGuid).IsEqualTo(_streamId);
 		await Assert.That(doc["Name"].AsString).IsEqualTo("root");
 
-		var collectionNames = Database().ListCollectionNames().ToList();
+		var collectionNames = Database.ListCollectionNames().ToList();
 		await Assert.That(collectionNames).DoesNotContain(nameof(DemoModel));
 	}
 
@@ -100,7 +102,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		await Assert.That(store.GetCollection<TestGeneratedContainerNode>().Count).IsEqualTo(1);
 		await Assert.That(store.GetCollection<TestGeneratedContainerNode>().Select(n => n.Name).ToList()).IsEquivalentTo(["n"]);
 		await Assert.That(store.GetCollection<DemoModel>().Count).IsEqualTo(1);
-		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_sid", _streamId))).IsEqualTo(3L);
+		await Assert.That(Components.CountDocuments(Builders<BsonDocument>.Filter.Eq("_sid", _streamId))).IsEqualTo(3L);
 	}
 
 	[Test]
@@ -130,7 +132,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		node.Components.Add(new TestUniqueComponent { Subject = "facet" });
 
 		// A projection that has never seen the entity: every caller below materializes from Mongo.
-		var other = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database());
+		var other = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, Database);
 		var results = new object?[32];
 		var idsSeen = new Guid[results.Length];
 		var facetsSeen = new int[results.Length];
@@ -175,7 +177,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		node.Components.Add(facet);
 		var facetId = ((IIdentifiable<Guid>)facet).Id;
 
-		var doc = Components().Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single();
+		var doc = Components.Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single();
 		await Assert.That(doc["_eid"].AsGuid).IsEqualTo(id);
 		await Assert.That(doc.Contains("ComponentId")).IsFalse();
 
@@ -187,7 +189,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		var reloadedFacet = (TestUniqueComponent)reloaded.Components.Single();
 		await Assert.That(((IIdentifiable<Guid>)reloadedFacet).Id).IsEqualTo(facetId);
 		reloadedFacet.Subject = "second";
-		await Assert.That(Components().Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single()["Subject"].AsString).IsEqualTo("second");
+		await Assert.That(Components.Find(Builders<BsonDocument>.Filter.Eq("_id", facetId)).Single()["Subject"].AsString).IsEqualTo("second");
 	}
 
 	[Test]
@@ -206,14 +208,14 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	public async Task Should_create_the_shared_collection_indexes_as_a_storage_upgrade()
 	{
 		// Tests never start the host, so run the upgrade service the way the host would.
-		var db = Database();
+		var db = Database;
 		var runner = new SynqraMongoUpgradeService(
 		[
 			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => db, "Event"),
 			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Projection, _ => db),
 		], ServiceProvider);
 		await runner.StartAsync(CancellationToken.None);
-		var keys = Components().Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
+		var keys = Components.Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
 		await Assert.That(keys).Contains("_sid,_t");
 		await Assert.That(keys).Contains("_sid,_eid");
 	}
@@ -238,9 +240,9 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 			ComponentId = id,
 		});
 
-		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", id))).IsEqualTo(0L);
+		await Assert.That(Components.CountDocuments(Builders<BsonDocument>.Filter.Eq("_id", id))).IsEqualTo(0L);
 		// One DeleteMany by _eid: the facet goes with its entity.
-		await Assert.That(Components().CountDocuments(Builders<BsonDocument>.Filter.Eq("_eid", id))).IsEqualTo(0L);
+		await Assert.That(Components.CountDocuments(Builders<BsonDocument>.Filter.Eq("_eid", id))).IsEqualTo(0L);
 		await Assert.That(store.GetCollection<TestGeneratedContainerNode>().Count).IsEqualTo(0);
 	}
 }
