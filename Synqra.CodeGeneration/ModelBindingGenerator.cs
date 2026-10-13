@@ -311,7 +311,9 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			bool hasLinkNav = clazz.Members.OfType<PropertyDeclarationSyntax>()
 				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps, classData.LinkSymbols) is not null);
 			var linkAwareIface = hasLinkNav ? (isPlainObjectBase ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
+			body.AppendLine("#if NET7_0_OR_GREATER");
 			body.AppendLine("[global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)]");
+			body.AppendLine("#endif");
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isPlainObjectBase ? ifaces : null)}{linkAwareIface}");
 			body.AppendLine("{");
 
