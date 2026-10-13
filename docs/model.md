@@ -480,6 +480,11 @@ gap is expected.
   links carry `Target`. No per-type object collections; no separate `Links` collection.
 - **Projections are derived and rebuildable** (core.md §4). Different backends may differ in
   physical layout; the event log is the invariant.
+- **A property change is a field-level update; `ReplaceOne` only creates documents.** On Mongo a
+  `*PropertyChangedEvent` becomes `UpdateOne({_id|component filter, _sid}, {$set: {field: value}})`
+  with the element name and serializer taken from the type's class map, so the write needs no
+  materialized instance (an untracked object is updated by id + stream, and never silently created:
+  no match throws). Whole-document writes happen exactly once, at root / facet / link creation.
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain
