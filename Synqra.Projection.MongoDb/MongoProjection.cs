@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MongoDB.Bson;
-using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
@@ -31,15 +30,12 @@ using IAppendStorage = IAppendStorage<Event, Guid>;
 /// <b>Tracking is per-process, not pre-warmed.</b> <see cref="GetId"/>, <see cref="ResolveObject"/>,
 /// component mutation, and (for links) endpoint navigation only see objects this projection instance has
 /// already touched (created, or loaded via enumerating a <see cref="GetCollection{T}"/>) — there is no
-/// startup replay that pre-populates the tracking cache. This is an existing, deliberate limitation that
-/// components and links below intentionally match rather than work around, so behaviour stays consistent
-/// across everything this projection materializes. Two things deliberately do NOT depend on tracking:
-/// link <i>queries</i> (<see cref="ILinkIndex"/>), which always hit Mongo directly since adjacency lookups
-/// need to work regardless of what this process has touched; and <i>property changes</i>
-/// (<see cref="VisitAsync(ObjectPropertyChangedEvent, EventVisitorContext)"/> /
-/// <see cref="VisitAsync(ComponentPropertyChangedEvent, EventVisitorContext)"/>), which are field-level
-/// <c>$set</c> writes addressed by id + stream (see <see cref="SetField"/>) — a tracked instance is kept in
-/// sync when there is one, but the durable write never requires the object to be materialized in RAM.
+/// startup replay that pre-populates the tracking cache. This is an existing, deliberate limitation (see
+/// <see cref="VisitAsync(ObjectPropertyChangedEvent, EventVisitorContext)"/>, which has always thrown for
+/// an untracked target) that components and links below intentionally match rather than work around, so
+/// behaviour stays consistent across everything this projection materializes. Link <i>queries</i>
+/// (<see cref="ILinkIndex"/>) are the exception — they always hit Mongo directly, since adjacency lookups
+/// need to work regardless of what this process has touched.
 /// </para>
 /// </summary>
 public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
@@ -100,7 +96,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 	/// <summary>
 	/// Every document this projection reads or writes belongs to exactly this stream — see
 	/// <see cref="StreamFilter"/>, applied to every Mongo query in this type, and the "_sid"
-	/// field <see cref="ToDocument"/>/<see cref="CreateComponent"/> stamp on every write. A single
+	/// field <see cref="ToDocument"/>/<see cref="UpsertComponent"/> stamp on every write. A single
 	/// physical Mongo database can therefore hold more than one stream's worth of documents
 	/// (per-user, per-tenant, whatever the caller's stream boundary is) without them leaking into
 	/// each other's queries.
@@ -375,96 +371,21 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		return doc;
 	}
 
-	FilterDefinition<BsonDocument> RootFilter(Guid id)
-		=> Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
-
-	// Create path only: a root document is written whole exactly once (ComponentAddedEvent with
-	// ComponentId == TargetId). Every later property change is a field-level SetField.
-	void CreateRoot(Guid targetTypeId, Guid id, object model)
+	void Upsert(Guid targetTypeId, Guid id, object model)
 	{
 		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
 		var collection = _database.GetCollection<BsonDocument>(type.Name);
 		var doc = ToDocument(model, id);
-		collection.ReplaceOne(RootFilter(id), doc, new ReplaceOptions { IsUpsert = true });
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+		collection.ReplaceOne(filter, doc, new ReplaceOptions { IsUpsert = true });
 	}
 
 	void DeleteRoot(Guid targetTypeId, Guid id)
 	{
 		var type = TypeMetadataProvider.GetTypeMetadata(targetTypeId).Type;
 		var collection = _database.GetCollection<BsonDocument>(type.Name);
-		collection.DeleteOne(RootFilter(id));
-	}
-
-	/// <summary>
-	/// Applies one property change as a field-level write: <c>UpdateOne(filter, {$set: {element: value}})</c>.
-	/// The element name and the value serializer come from the type's own <see cref="BsonClassMap"/> — the
-	/// very class map <see cref="ToDocument"/> serializes through — so the stored field is byte-identical to
-	/// what a full re-serialization would have produced, and the write needs no materialized instance at all.
-	/// A null value drops the field when the class map says so (the IgnoreIfNull convention), matching
-	/// <see cref="ToDocument"/>, which never writes such a field. Never upserts: a change to a document that
-	/// does not exist (within this stream) is an inconsistency and throws rather than minting a partial
-	/// document out of a single field.
-	/// </summary>
-	void SetField(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, Type type, string propertyName, object? value, string what)
-	{
-		var classMap = BsonClassMap.LookupClassMap(type);
-		var memberMap = classMap.GetMemberMap(propertyName);
-		if (memberMap is null)
-		{
-			// A [JsonIgnore] member is unmapped by convention and never persisted — nothing to write.
-			var property = type.GetProperty(propertyName)
-				?? throw new InvalidOperationException($"'{type.Name}' has no property '{propertyName}'.");
-			if (property.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
-			{
-				return;
-			}
-			throw new InvalidOperationException($"'{type.Name}.{propertyName}' is not mapped to a document field.");
-		}
-
-		UpdateDefinition<BsonDocument> update;
-		if (value is null && memberMap.IgnoreIfNull)
-		{
-			update = Builders<BsonDocument>.Update.Unset(memberMap.ElementName);
-		}
-		else
-		{
-			update = Builders<BsonDocument>.Update.Set(memberMap.ElementName, SerializeMember(memberMap, CoerceValue(memberMap, value)));
-		}
-
-		var result = collection.UpdateOne(filter, update, new UpdateOptions { IsUpsert = false });
-		if (result.MatchedCount == 0)
-		{
-			throw new InvalidOperationException($"Cannot apply a property change to {what}: no document matched in stream {StreamId}.");
-		}
-	}
-
-	// Same conversion ComponentApplyHelpers.ApplyPropertyChange does on the live instance (an event
-	// rehydrated from the log can carry e.g. a long for a double member), so an untracked write
-	// serializes the identical CLR value a tracked one would.
-	static object? CoerceValue(BsonMemberMap memberMap, object? value)
-	{
-		var memberType = Nullable.GetUnderlyingType(memberMap.MemberType) ?? memberMap.MemberType;
-		if (value is IConvertible convertible && value.GetType() != memberType && memberType != typeof(object))
-		{
-			return convertible.ToType(memberType, CultureInfo.InvariantCulture);
-		}
-		return value;
-	}
-
-	// Serializes through the member's own serializer (the one ToDocument would use for this element)
-	// into a throwaway wrapper document and lifts the resulting BsonValue out.
-	static BsonValue SerializeMember(BsonMemberMap memberMap, object? value)
-	{
-		var wrapper = new BsonDocument();
-		using (var writer = new BsonDocumentWriter(wrapper))
-		{
-			var context = BsonSerializationContext.CreateRoot(writer);
-			writer.WriteStartDocument();
-			writer.WriteName("v");
-			memberMap.GetSerializer().Serialize(context, value);
-			writer.WriteEndDocument();
-		}
-		return wrapper["v"];
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", id), StreamFilter());
+		collection.DeleteOne(filter);
 	}
 
 	// ---------------------------------------------------------------- ICommandVisitor
@@ -593,13 +514,20 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		// The live instance is kept in sync when this process holds it; the durable write never needs it.
-		if (TryGetTracked(ev.TargetId, out var model))
+		if (!TryGetTracked(ev.TargetId, out var model))
 		{
-			ComponentApplyHelpers.ApplyPropertyChange(model, ev.PropertyName, ev.NewValue);
+			throw new InvalidOperationException($"Cannot apply a property change to unknown object {ev.TargetId}.");
 		}
-		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
-		SetField(_database.GetCollection<BsonDocument>(type.Name), RootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"object {ev.TargetId}");
+		if (model is IBindableModel bindable)
+		{
+			bindable.Set(ev.PropertyName, ev.NewValue);
+		}
+		else
+		{
+			var pi = model.GetType().GetProperty(ev.PropertyName) ?? throw new InvalidOperationException($"Property '{ev.PropertyName}' not found.");
+			pi.SetValue(model, ev.NewValue);
+		}
+		Upsert(ev.TargetTypeId, ev.TargetId, model);
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
@@ -624,7 +552,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 			object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
 			AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
-			CreateRoot(ev.ComponentTypeId, ev.TargetId, rootModel);
+			Upsert(ev.ComponentTypeId, ev.TargetId, rootModel);
 			MarkApplied(ev.TargetId, ev.EventId);
 			return Task.CompletedTask;
 		}
@@ -661,32 +589,26 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			});
 		}
 
-		CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
+		UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
 	}
 
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
-		// The live instance (root entity, or the facet on its tracked container) is kept in sync when
-		// this process holds it; the durable write below never needs it. A tracked container that
-		// lacks the facet is still an inconsistency and throws (ResolveTarget).
-		if (TryGetTracked(ev.TargetId, out var trackedModel))
-		{
-			var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
-			ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
-		}
+		TryGetTracked(ev.TargetId, out var trackedModel);
+		var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
+		ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
 
 		// Durable persistence still forks: a root component is its entity's own document, a facet
-		// lives in the shared Components collection. Either way it is a single-field update.
-		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		// lives in the shared Components collection.
 		if (ev.ComponentId == ev.TargetId)
 		{
-			SetField(_database.GetCollection<BsonDocument>(componentType.Name), RootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}");
+			Upsert(ev.ComponentTypeId, ev.TargetId, target);
 		}
 		else
 		{
-			SetField(_database.GetCollection<BsonDocument>(ComponentsMongoCollectionName), ComponentFilter(ev.TargetId, componentType, ev.ComponentId), componentType, ev.PropertyName, ev.NewValue, $"component {ev.ComponentId} of {ev.TargetId}");
+			UpsertComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, (IComponent)target);
 		}
 		MarkApplied(ev.TargetId, ev.EventId);
 		return Task.CompletedTask;
@@ -845,8 +767,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 			Builders<BsonDocument>.Filter.Eq(DiscriminatorField, componentType.Name),
 			Builders<BsonDocument>.Filter.Eq("ComponentId", componentId));
 
-	// Create path only (facet add); a later property change is a field-level SetField on this document.
-	void CreateComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
+	void UpsertComponent(Guid containerId, Guid componentTypeId, Guid componentId, IComponent component)
 	{
 		var componentsMongo = _database.GetCollection<BsonDocument>(ComponentsMongoCollectionName);
 		// Native driver serialization through nominal type object -> always writes "_t" (see ToDocument).
@@ -878,7 +799,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex
 		var loadFilter = Builders<BsonDocument>.Filter.And(StreamFilter(), Builders<BsonDocument>.Filter.Eq(EntityIdField, containerId));
 		foreach (var doc in componentsMongo.Find(loadFilter).ToList())
 		{
-			// Concrete type comes from the "_t" discriminator inside the document (see CreateComponent) —
+			// Concrete type comes from the "_t" discriminator inside the document (see UpsertComponent) —
 			// no type-id column to read; FromDocument strips the addressing columns and resolves it.
 			var component = (IComponent)FromDocument(doc, EntityIdField, "ComponentId");
 
