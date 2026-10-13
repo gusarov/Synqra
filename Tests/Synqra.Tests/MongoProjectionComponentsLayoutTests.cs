@@ -203,10 +203,16 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_have_indexes_on_the_shared_collection()
+	public async Task Should_create_the_shared_collection_indexes_as_a_storage_upgrade()
 	{
-		var store = Store;
-		store.GetCollection<DemoModel>().Add(new DemoModel { Name = "indexed" });
+		// Tests never start the host, so run the upgrade service the way the host would.
+		var db = Database();
+		var runner = new SynqraMongoUpgradeService(
+		[
+			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => db, "Event"),
+			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Projection, _ => db),
+		], ServiceProvider);
+		await runner.StartAsync(CancellationToken.None);
 		var keys = Components().Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
 		await Assert.That(keys).Contains("_sid,_t");
 		await Assert.That(keys).Contains("_sid,_eid");

@@ -67,6 +67,7 @@ public sealed class SynqraMongoUpgradeService(
 	internal static readonly ISynqraMongoUpgrade[] Upgrades =
 	[
 		new EventSidBackfillUpgrade(),
+		new ComponentsIndexesUpgrade(),
 	];
 
 	readonly ILogger _logger = logger ?? NullLogger<SynqraMongoUpgradeService>.Instance;

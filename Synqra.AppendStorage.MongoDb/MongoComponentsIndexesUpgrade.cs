@@ -1,0 +1,39 @@
+using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
+using MongoDB.Driver;
+
+namespace Synqra.AppendStorage.MongoDb;
+
+/// <summary>
+/// Creates the query indexes of the projection's shared <c>Components</c> collection (the one
+/// collection every root and facet lives in — see <c>MongoProjection</c>): <c>(_sid, _t)</c> serves
+/// type-scoped enumeration and <c>Count</c>, <c>(_sid, _eid)</c> serves facet load, component
+/// addressing and entity delete. Idempotent (CreateMany on existing identical indexes is a no-op);
+/// invoked only by <see cref="SynqraMongoUpgradeService"/> under its single-node claim, so index
+/// builds never race across nodes and never run on a hot path.
+/// </summary>
+internal sealed class ComponentsIndexesUpgrade : ISynqraMongoUpgrade
+{
+	const string ComponentsCollectionName = "Components";
+	const string StreamIdField = "_sid";
+	const string DiscriminatorField = "_t";
+	const string EntityIdField = "_eid";
+
+	public string Id => "components-indexes/1";
+
+	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
+	{
+		if (projectionDatabase is null)
+		{
+			return; // event log only — nothing materialized here to index
+		}
+		var components = projectionDatabase.GetCollection<BsonDocument>(ComponentsCollectionName);
+		await components.Indexes.CreateManyAsync(
+			[
+				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField)),
+				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(EntityIdField)),
+			]
+			, cancellationToken);
+		logger.LogInformation("Projection upgrade: ensured Components indexes on '{Database}'.", projectionDatabase.DatabaseNamespace.DatabaseName);
+	}
+}
