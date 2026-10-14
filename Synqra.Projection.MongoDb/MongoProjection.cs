@@ -101,10 +101,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	readonly Guid? _pinnedStreamId;
 
 	// Tracking: model instance <-> id, so generated setters can route ChangeObjectPropertyCommands and
-	// GetId() resolves a live instance to its key. A strong id->model map keeps tracked instances alive
-	// for the projection's lifetime (acceptable for the v1 store; a weak/eviction policy comes later).
+	// GetId() resolves a live instance to its key. Weak both ways: the projection never keeps an entity
+	// alive; one nobody holds is collected and loaded again from Mongo on demand.
 	readonly ConditionalWeakTable<object, TrackedObject> _byModel = new();
-	readonly ConcurrentDictionary<Guid, object> _byId = new();
+	// Weak on purpose: holding the TrackedObject here would keep it reachable, so its finalizer would never drop this slot.
+	readonly ConcurrentDictionary<Guid, WeakReference<object>> _byId = new();
 	readonly Dictionary<Guid, MongoStoreCollection> _collections = new();
 	readonly object _collectionsGate = new();
 
@@ -161,11 +162,24 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 	}
 
+	/// <summary>
+	/// What the projection knows about one tracked instance. It lives in the ConditionalWeakTable keyed by
+	/// that instance, so it becomes unreachable exactly when the instance is collected; its finalizer then
+	/// drops the instance's id slot, and only that slot (a newer instance re-attached under the same id
+	/// holds a different WeakReference and stays).
+	/// </summary>
 	sealed class TrackedObject
 	{
+		/// <summary>The collection the instance belongs to: its plane (CollectionId), its root type (Type) and its projection; one reference instead of copies of each.</summary>
+		public required MongoStoreCollection Collection { get; init; }
 		public required Guid Id { get; init; }
-		public required Guid CollectionId { get; init; }
+		public required WeakReference<object> Slot { get; init; }
 		public Guid LastEventId { get; set; }
+
+		~TrackedObject()
+		{
+			Collection.Projection._byId.TryRemove(new KeyValuePair<Guid, WeakReference<object>>(Id, Slot));
+		}
 	}
 
 	// ---------------------------------------------------------------- IObjectStore
@@ -223,14 +237,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			return tracked;
 		}
 		var doc = FindDocument(Components, Builders<BsonDocument>.Filter.And(BuildRootFilter(id), RootsOnlyFilter));
-		return doc is null ? null : AttachLoaded(doc, id);
+		return doc is null ? null : AttachLoaded(doc, id, collection: null);
 	}
 
 	/// <summary>Tracks an entity read from its root document, restoring its persisted version. Winner-takes-all on a race.</summary>
-	internal object AttachLoaded(BsonDocument doc, Guid id)
+	/// <param name="collection">The collection the document was read through; by id alone (no plane stored per document yet) the instance type's default collection.</param>
+	internal object AttachLoaded(BsonDocument doc, Guid id, MongoStoreCollection? collection)
 	{
 		var model = FromDocument(doc);
-		var winner = AttachWithId(model, id, TypeMetadataProvider.GetTypeMetadata(model.GetType()).CollectionId);
+		var winner = AttachWithId(model, id, collection ?? GetCollection(model.GetType(), ""));
 		if (doc.TryGetValue(LastEventIdField, out var lev) && lev is BsonBinaryData binary && _byModel.TryGetValue(winner, out var tracked) && tracked.LastEventId == default)
 		{
 			tracked.LastEventId = binary.ToGuid(GuidRepresentation.Standard);
@@ -239,7 +254,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	}
 
 	public Guid GetLastEventId(Guid targetId)
-		=> _byId.TryGetValue(targetId, out var model) && _byModel.TryGetValue(model, out var tracked)
+		=> TryGetTracked(targetId, out var model) && _byModel.TryGetValue(model, out var tracked)
 			? tracked.LastEventId
 			: Guid.Empty;
 
@@ -281,7 +296,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			if (soc.CollectionId == default)
 			{
-				soc.CollectionId = tracked.CollectionId;
+				soc.CollectionId = tracked.Collection.CollectionId;
 			}
 			var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId;
 			if (soc.TargetTypeId == default)
@@ -296,15 +311,13 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	readonly SemaphoreSlim _submitGate = new(1, 1);
 
 	// The write in flight: its session (every document read and write inside the transaction goes
-	// through it, so later events see earlier ones), the instance updates to run after commit, the
-	// entities it attached (evicted on abort: tracking is a cache of committed state), and the
-	// entities whose creating command handed over a live instance (only those are attached).
+	// through it, so later events see earlier ones), the instance updates to run after commit, and the
+	// entities it attached (evicted on abort: tracking is a cache of committed state).
 	sealed class WriteScope(IClientSessionHandle session)
 	{
 		public IClientSessionHandle Session { get; } = session;
 		public List<Action> AfterCommit { get; } = [];
 		public List<Guid> Attached { get; } = [];
-		public HashSet<Guid> Materialized { get; } = [];
 	}
 
 	// Per async flow, so a reader or an inbound event on another flow never sees this write's session.
@@ -404,7 +417,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 		scope.Attached.Clear();
 		scope.AfterCommit.Clear();
-		scope.Materialized.Clear();
 	}
 
 	/// <summary>
@@ -439,7 +451,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	void Evict(Guid id)
 	{
-		if (_byId.TryRemove(id, out var model))
+		if (_byId.TryRemove(id, out var entry) && entry.TryGetTarget(out var model))
 		{
 			_byModel.Remove(model);
 		}
@@ -524,16 +536,32 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	// ---------------------------------------------------------------- tracking (internal)
 
-	internal Guid Attach(object model, Guid collectionId)
+	/// <summary>The open collection with <paramref name="collectionId"/>, or the type's default one; an unknown named collection is refused (the Mongo projection has none).</summary>
+	MongoStoreCollection OpenCollection(Guid collectionId, Guid typeId)
+	{
+		MongoStoreCollection? opened;
+		lock (_collectionsGate)
+		{
+			_collections.TryGetValue(collectionId, out opened);
+		}
+		var collection = opened ?? GetCollection(TypeMetadataProvider.GetTypeMetadata(typeId).Type, "");
+		if (collectionId != default && collection.CollectionId != collectionId)
+		{
+			throw new InvalidOperationException($"Collection {collectionId} is neither open nor the default collection of type {typeId}; the Mongo projection has no named collections.");
+		}
+		return collection;
+	}
+
+	internal Guid Attach(object model, MongoStoreCollection collection)
 	{
 		var id = _ids.CreateComponentId();
-		AttachWithId(model, id, collectionId);
+		AttachWithId(model, id, collection);
 		return id;
 	}
 
 	/// <summary>Tracks <paramref name="model"/> under <paramref name="id"/> and returns the instance that owns
 	/// that id — callers must use the returned instance. Winner-takes-all; see docs/model.md §9 "attach race".</summary>
-	internal object AttachWithId(object model, Guid id, Guid collectionId)
+	internal object AttachWithId(object model, Guid id, MongoStoreCollection collection)
 	{
 		if (_byModel.TryGetValue(model, out var existing))
 		{
@@ -545,16 +573,33 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 		// Build the instance completely (bound + facets hydrated) BEFORE publishing it, so no one can
 		// observe a half-built winner. A loser is rolled back from _byModel and dropped.
-		_byModel.Add(model, new TrackedObject { Id = id, CollectionId = collectionId });
+		var entry = new WeakReference<object>(model);
+		_byModel.Add(model, new TrackedObject { Collection = collection, Id = id, Slot = entry });
 		if (model is IBindableModel bindable && bindable.Store is null)
 		{
-			bindable.Attach(this, collectionId);
+			bindable.Attach(this, collection.CollectionId);
 		}
 		if (model is IComponentContainer container)
 		{
-			LoadComponentsInto(container, id, collectionId); // empty for a brand new container
+			LoadComponentsInto(container, id, collection.CollectionId); // empty for a brand new container
 		}
-		var winner = _byId.GetOrAdd(id, model);
+		object? winner = null;
+		while (winner is null)
+		{
+			var current = _byId.GetOrAdd(id, entry);
+			if (ReferenceEquals(current, entry))
+			{
+				winner = model;
+			}
+			else if (current.TryGetTarget(out var alive))
+			{
+				winner = alive;
+			}
+			else if (_byId.TryUpdate(id, entry, current))
+			{
+				winner = model; // the previous holder of this id was collected
+			}
+		}
 		if (!ReferenceEquals(winner, model))
 		{
 			_byModel.Remove(model);
@@ -562,7 +607,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		return winner;
 	}
 
-	internal bool TryGetTracked(Guid id, out object model) => _byId.TryGetValue(id, out model!);
+	/// <summary>The live instance tracked under <paramref name="id"/>; a collected one (slot not yet dropped by its finalizer) counts as untracked.</summary>
+	internal bool TryGetTracked(Guid id, out object model)
+	{
+		model = null!;
+		return _byId.TryGetValue(id, out var entry) && entry.TryGetTarget(out model!);
+	}
+
+	/// <summary>Whether an id slot exists at all, live or awaiting its finalizer; for tests.</summary>
+	internal bool IsSlotHeld(Guid id) => _byId.ContainsKey(id);
 
 	/// <summary>
 	/// Rehydrates a stored document into its concrete model via the native MongoDB driver
@@ -774,10 +827,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				bindable.SetComponentId(cmd.ComponentId);
 			}
 		}
-		if (cmd.TargetObject is not null && cmd.ComponentId == cmd.TargetId)
-		{
-			_scope.Value?.Materialized.Add(cmd.TargetId); // the caller holds this instance and expects it live
-		}
 		ctx.Events.Add(new ComponentAddedEvent
 		{
 			StreamId = cmd.StreamId,
@@ -925,7 +974,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	void MarkApplied(Guid targetId, Guid eventId)
 	{
-		if (_byId.TryGetValue(targetId, out var model) && _byModel.TryGetValue(model, out var tracked))
+		if (TryGetTracked(targetId, out var model) && _byModel.TryGetValue(model, out var tracked))
 		{
 			tracked.LastEventId = eventId;
 		}
@@ -953,32 +1002,23 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	/// <summary>
 	/// Phase 2 (ECS): a self-owned ROOT COMPONENT is the entity's own data (_id == _eid == entityId), a
-	/// self-owned document in the shared Components collection. Tracked only when someone here holds it.
+	/// self-owned document in the shared Components collection. Always attached; tracking is weak, so it
+	/// stays in memory only while someone holds it.
 	/// </summary>
 	void ApplyRootAdd(ComponentAddedEvent ev)
 	{
 		var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var tracked = TryGetTracked(ev.TargetId, out var trackedModel);
-		if (tracked || _scope.Value!.Materialized.Contains(ev.TargetId))
+		object rootModel = ev.Data ?? (TryGetTracked(ev.TargetId, out var tracked) ? tracked : Activator.CreateInstance(rootType)!);
+		// Race: another caller may materialize this same id concurrently (the collection enumerator or
+		// ResolveObject on a re-delivered add). AttachWithId registers id -> instance atomically and hands
+		// back whichever instance won; that one is written, so the tracked instance and the document agree.
+		var attached = AttachWithId(rootModel, ev.TargetId, OpenCollection(ev.CollectionId, ev.TargetTypeId));
+		if (ReferenceEquals(attached, rootModel) && !_scope.Value!.Attached.Contains(ev.TargetId))
 		{
-			object rootModel = ev.Data ?? (tracked ? trackedModel : Activator.CreateInstance(rootType)!);
-			// Race: another caller may materialize this same id concurrently (the collection enumerator or
-			// ResolveObject on a re-delivered add). AttachWithId registers id -> instance atomically and hands
-			// back whichever instance won; that one is written, so the tracked instance and the document agree.
-			var attached = AttachWithId(rootModel, ev.TargetId, ev.CollectionId);
-			if (ReferenceEquals(attached, rootModel) && !_scope.Value!.Attached.Contains(ev.TargetId))
-			{
-				_scope.Value.Attached.Add(ev.TargetId); // new to tracking: evicted if the transaction aborts
-			}
-			CreateRoot(ev.TargetId, attached, ev.EventId);
-			RunAfterCommit(() => MarkApplied(ev.TargetId, ev.EventId));
+			_scope.Value.Attached.Add(ev.TargetId); // new to tracking: evicted if the transaction aborts
 		}
-		else
-		{
-			// Nobody here holds this entity (an id-only create, an event from a peer): write its document and
-			// track nothing. ResolveObject loads it on demand.
-			CreateRoot(ev.TargetId, ev.Data ?? Activator.CreateInstance(rootType)!, ev.EventId);
-		}
+		CreateRoot(ev.TargetId, attached, ev.EventId);
+		RunAfterCommit(() => MarkApplied(ev.TargetId, ev.EventId));
 	}
 
 	/// <summary>

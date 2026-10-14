@@ -1,4 +1,5 @@
 ﻿using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -835,7 +836,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		public Task AppendAsync(Event item, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
 		public Task AppendBatchAsync(IEnumerable<Event> items, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
 		public Task<Event> GetAsync(Guid key, CancellationToken cancellationToken = default) => throw new KeyNotFoundException(key.ToString());
-		public async IAsyncEnumerable<Event> GetAllAsync(Guid from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public async IAsyncEnumerable<Event> GetAllAsync(Guid from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			await Task.CompletedTask;
 			yield break;
@@ -853,9 +854,8 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		var id = Guid.NewGuid();
 		using var _ = SynqraStreamContext.Enter(_streamId);
 
-		var refused = await Assert.ThrowsAsync(() => projection.SubmitCommandAsync(BuildCreateCommand(projection, id, "never stored")));
+		var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => projection.SubmitCommandAsync(BuildCreateCommand(projection, id, "never stored")));
 
-		await Assert.That(refused).IsTypeOf<InvalidOperationException>();
 		await Assert.That(OtherProcess().ResolveObject(id)).IsNull();
 	}
 
@@ -900,17 +900,45 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		return new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = subject }, };
 	}
 
+	/// <summary>
+	/// Creates an entity and hands back only its id and a weak reference to the instance. Synchronous and
+	/// never inlined, so its frame (and every local in it) is gone when it returns, in Debug and Release.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	(Guid Id, WeakReference<object> Instance) CreateUnreferenced(IObjectStore store, string name)
+	{
+		var id = Guid.NewGuid();
+		var command = BuildCreateCommand(store, id, name);
+		var instance = new WeakReference<object>(command.Data!);
+		store.SubmitCommandAsync(command).GetAwaiter().GetResult();
+		return (id, instance);
+	}
+
+	/// <summary>Never inlined, so the target it looks at is not held by the caller's frame.</summary>
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	bool IsAlive(WeakReference<object> instance) => instance.TryGetTarget(out _);
+
+	void CollectGarbage()
+	{
+		for (var i = 0; i < 3; i++)
+		{
+			GC.Collect();
+			GC.WaitForPendingFinalizers();
+		}
+	}
+
 	[Test]
-	public async Task Should_not_materialize_an_entity_created_by_id_until_it_is_resolved()
+	public async Task Should_not_keep_an_entity_alive_that_nobody_holds()
 	{
 		var store = (MongoProjection)Store;
-		var id = Guid.NewGuid();
+		var (id, instance) = CreateUnreferenced(store, "forgotten");
 
-		await store.SubmitCommandAsync(BuildCreateCommand(store, id, "by id"));
+		CollectGarbage();
 
-		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
+		await Assert.That(IsAlive(instance)).IsFalse();
+		await Assert.That(store.IsSlotHeld(id)).IsFalse(); // the tracking record's finalizer dropped the slot
 		var resolved = (TestGeneratedContainerNode)store.ResolveObject(id)!;
-		await Assert.That(resolved.Name).IsEqualTo("by id");
+		await Assert.That(resolved.Name).IsEqualTo("forgotten");
 		await Assert.That(store.TryGetTracked(id, out _)).IsTrue();
 	}
 
@@ -918,13 +946,13 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	public async Task Should_add_a_facet_to_an_untracked_entity_without_loading_it_and_keep_it_unique()
 	{
 		var store = (MongoProjection)Store;
-		var id = Guid.NewGuid();
-		await store.SubmitCommandAsync(BuildCreateCommand(store, id, "n"));
+		var (id, instance) = CreateUnreferenced(store, "n");
+		CollectGarbage();
+		await Assert.That(IsAlive(instance)).IsFalse();
 
 		await store.SubmitCommandAsync(BuildAddFacetCommand(store, id, "first"));
-		var second = await Assert.ThrowsAsync(() => store.SubmitCommandAsync(BuildAddFacetCommand(store, id, "second")));
+		var second = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SubmitCommandAsync(BuildAddFacetCommand(store, id, "second")));
 
-		await Assert.That(second).IsTypeOf<InvalidOperationException>();
 		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
 		var other = (TestGeneratedContainerNode)OtherProcess().ResolveObject(id)!;
 		await Assert.That(((TestUniqueComponent)other.Components.Single()).Subject).IsEqualTo("first");
@@ -971,9 +999,8 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "first" }, });
 		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "second" }, });
 
-		var refused = await Assert.ThrowsAsync(() => store.SubmitCommandAsync(batch));
+		var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SubmitCommandAsync(batch));
 
-		await Assert.That(refused).IsTypeOf<InvalidOperationException>();
 		await Assert.That(store.ResolveObject(id)).IsNull();
 		await Assert.That(OtherProcess().ResolveObject(id)).IsNull();
 	}
@@ -1023,9 +1050,8 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			PropertyName = nameof(TestGeneratedContainerNode.Name),
 			NewValue = "lost update",
 		};
-		var refused = await Assert.ThrowsAsync(() => other.SubmitCommandAsync(stale, new CommandSubmissionOptions { ExpectedLastEventId = v1 }));
+		var refused = await Assert.ThrowsAsync<ConcurrencyException>(() => other.SubmitCommandAsync(stale, new CommandSubmissionOptions { ExpectedLastEventId = v1 }));
 
-		await Assert.That(refused).IsTypeOf<ConcurrencyException>();
 		var reloaded = OtherProcess().GetCollection<TestGeneratedContainerNode>().Single(n => n.Name is not null);
 		await Assert.That(reloaded.Name).IsEqualTo("v2");
 	}

@@ -507,7 +507,8 @@ gap is expected.
   child 1 is there for child 2), and a refusal anywhere aborts the whole. Children address targets by id or by
   a tracked instance and keep their own `CommandCreatedEvent`s. Nothing is cloned and nothing is replayed. The
   in-memory projection applies a batch in order under its gate and stores nothing on a refusal; its state is a
-  replica of the log. The Sqlite and File projections refuse batches explicitly.
+  replica of the log. The File projection applies a batch's children in order but refuses expectations
+  (it keeps no versions); the SQLite projection is a stub for batches as for every other command.
 - **Projections are derived and rebuildable** (core.md §4). Different backends may differ in
   physical layout; the event log is the invariant.
 - **A property change is a field-level update; `ReplaceOne` only creates documents.** On Mongo a
@@ -521,20 +522,20 @@ gap is expected.
   facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)` and
   `(_sid, _eid)` are created by the `components-indexes/1` storage upgrade at host startup. Named collections are refused (`NotSupportedException`)
   — the layout has no column for them and collections are retired (§2).
-- **Tracking is per-process and lazy; a write never needs it.** An entity becomes tracked when a
-  caller hands over a live instance to create it (`collection.Add`, i.e. the create command carries
-  `TargetObject`), when it is enumerated, or when it is resolved by id (`ResolveObject` loads it from
-  Mongo on demand). An id-only create (REST, a job, a batch child, an event from a peer) writes the
-  document and tracks nothing. Property changes, facet adds and deletes, entity deletes and link writes
-  go to the documents by id; a tracked instance is updated after commit. A facet add on an untracked
-  entity checks existence and uniqueness on the stored state; component vetoes and activation belong to
-  a live container, so they run only when the entity is tracked. The attach race is explained inline
-  at `MongoProjection.AttachWithId`.
+- **Tracking is per-process, lazy and weak.** The Mongo projection keeps id <-> instance in a
+  `ConditionalWeakTable` and a map of `WeakReference`s, so it never keeps an entity alive: an entity is
+  in memory only while some caller holds it, and is loaded again from Mongo (`ResolveObject`, enumeration)
+  when needed. Every create attaches its instance, whether the caller handed one over (`collection.Add`)
+  or sent ids only (REST, a job, a batch child, a peer's event). An instance's id slot is dropped by the
+  finalizer of its tracking record (which the weak table releases together with the instance), and only
+  that slot: a newer instance re-attached under the same id keeps its own. Property changes, facet adds and deletes, entity
+  deletes and link writes go to the documents by id; a tracked instance is updated after commit. A
+  facet add on an entity nobody holds checks existence and uniqueness on the stored state and loads
+  nothing; component vetoes and activation belong to a live container, so they run only when it is
+  tracked. The attach race is explained inline at `MongoProjection.AttachWithId`.
 - **Events from a peer are a write of their own.** The replication endpoint applies a client's event
   straight through the projection's visitor; outside a submit that event takes the gate and runs in its
   own session and transaction (the endpoint appends the log and broadcasts itself).
-- **A computed `Id` is not stored.** A get-only `Id` on a model (e.g. `Id => Store.GetId(this)`) is
-  unmapped from the Mongo class map; the projection writes `_id` itself.
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain
