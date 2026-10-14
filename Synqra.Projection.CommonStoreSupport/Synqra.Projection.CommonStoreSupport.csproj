@@ -11,6 +11,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Synqra.Projection.InMemory"/>
     <InternalsVisibleTo Include="Synqra.Projection.Sqlite"/>
+    <InternalsVisibleTo Include="Synqra.Projection.MongoDb"/>
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
   </ItemGroup>
 
