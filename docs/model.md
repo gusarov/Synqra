@@ -408,7 +408,7 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `8C01` | `AddComponentCommand` | live | ↔ `8E01` |
 | `8C02` | `ChangeComponentPropertyCommand` | live | ↔ `8E02` |
 | `8C03` | `DeleteComponentCommand` | live | ↔ `8E03` |
-| `8C04` | `BatchCommand` | live | no paired event: its effect is its children's events; server-side only, never persisted or sent |
+| `8C04` | `BatchCommand` | live | no paired event: its effect is its children's events; its one `CommandCreatedEvent` carries the children |
 | `9C01` | `ChangeObjectPropertyCommand` | dying | ↔ `9E01` |
 | `9C02` | `DeleteObjectCommand` | dying | (no paired event) |
 | `9C03` | `AddLinkCommand` | dying | ↔ `9E03` |
@@ -499,13 +499,16 @@ gap is expected.
   a batch's `Expectations`) is compared against the stored `_lev`, read inside the transaction, so a write from
   another process is seen. The in-memory projection checks its precondition under its own submit gate.
 - **Committed events.** A projection that applies a locally submitted command raises `ICommittedEventSource.EventsCommitted`
-  with the domain events it stored. The server-side replication endpoint uses it to push writes that did not arrive
+  with exactly the events it appended to the log, its `CommandCreatedEvent` included when commands emit one
+  (`CommandHandlerContext.EmitCommandEvents`: an emitted command event is applied, stored and pushed; one that is
+  not emitted exists nowhere). The server-side replication endpoint uses it to push writes that did not arrive
   over a socket (REST, background jobs) to every subscribed client.
 - **Batches.** `BatchCommand` is its children's events in the one transaction every write already runs in:
   the expectations are checked first, each child produces its events in order, later children see earlier
   ones through the session (a facet added by child 1 counts for child 2's uniqueness check, an entity created by
   child 1 is there for child 2), and a refusal anywhere aborts the whole. Children address targets by id or by
-  a tracked instance and keep their own `CommandCreatedEvent`s. Nothing is cloned and nothing is replayed. The
+  a tracked instance. The batch is one unit of intent (and of undo): it emits one `CommandCreatedEvent` carrying its
+  children, which emit none. Nothing is cloned and nothing is replayed. The
   in-memory projection applies a batch in order under its gate and stores nothing on a refusal; its state is a
   replica of the log. The File projection applies a batch's children in order but refuses expectations
   (it keeps no versions); the SQLite projection is a stub for batches as for every other command.

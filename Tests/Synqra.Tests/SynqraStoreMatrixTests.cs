@@ -110,19 +110,11 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		RegisterStore(hostBuilder.Services);
 	}
 
-	/// <summary>
-	/// The store under test. Command-event persistence is turned off so the durable log keeps only
-	/// domain events (which carry no live CLR payload) — uniform across all backends.
-	/// </summary>
+	/// <summary>The store under test, with command events on (the default) on every backend.</summary>
 	protected IObjectStore ResolveStore()
 	{
 		_streamScope ??= SynqraStreamContext.Enter(_streamId);
-		var store = ResolveStoreInstance();
-		if (store is InMemoryProjection projection)
-		{
-			projection.PersistCommandEvents = false;
-		}
-		return store;
+		return ResolveStoreInstance();
 	}
 
 	/// <summary>
@@ -524,26 +516,25 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_57a_batch_children_keep_their_command_events()
+	public async Task Should_57a_store_a_batch_as_one_command_event()
 	{
 		var store = ResolveStore();
-		// The Mongo projection persists no command events at all, batch or not.
-		if (store is InMemoryProjection projection)
-		{
-			projection.PersistCommandEvents = true;
-			var a = Guid.NewGuid();
-			var b = Guid.NewGuid();
-			var batch = new BatchCommand();
-			batch.Commands.Add(BuildCreateRootCommand(store, a, new DemoModel { Name = "a" }));
-			batch.Commands.Add(BuildCreateRootCommand(store, b, new DemoModel { Name = "b" }));
+		var a = Guid.NewGuid();
+		var b = Guid.NewGuid();
+		var batch = new BatchCommand();
+		batch.Commands.Add(BuildCreateRootCommand(store, a, new DemoModel { Name = "a" }));
+		batch.Commands.Add(BuildCreateRootCommand(store, b, new DemoModel { Name = "b" }));
+		batch.Expectations.Add(new BatchExpectation { TargetId = a }); // no expected version: carried, not checked
 
-			await store.SubmitCommandAsync(batch);
+		await store.SubmitCommandAsync(batch);
 
-			var commandEvents = Events().GetAllAsync().ToBlockingEnumerable().OfType<CommandCreatedEvent>().Select(e => e.CommandId).ToList();
-			await Assert.That(commandEvents).Contains(batch.Commands[0].CommandId);
-			await Assert.That(commandEvents).Contains(batch.Commands[1].CommandId);
-			await Assert.That(commandEvents).DoesNotContain(batch.CommandId);
-		}
+		// The batch is one unit of intent (and of undo): one command event, carrying both children.
+		var commandEvents = Events().GetAllAsync().ToBlockingEnumerable().OfType<CommandCreatedEvent>().ToList();
+		var stored = commandEvents.Single(e => e.CommandId == batch.CommandId);
+		await Assert.That(commandEvents.Any(e => e.CommandId == batch.Commands[0].CommandId || e.CommandId == batch.Commands[1].CommandId)).IsFalse();
+		await Assert.That(stored.Data).IsTypeOf<BatchCommand>();
+		await Assert.That(((BatchCommand)stored.Data).Commands.Select(c => c.CommandId).ToList()).IsEquivalentTo(batch.Commands.Select(c => c.CommandId).ToList());
+		await Assert.That(((BatchCommand)stored.Data).Expectations.Single().TargetId).IsEqualTo(a);
 	}
 
 	[Test]
@@ -606,7 +597,10 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		model.Name = "pushed";
 
 		await Assert.That(committed.OfType<ComponentPropertyChangedEvent>().Any(e => e.TargetId == store.GetId(model))).IsTrue();
-		await Assert.That(committed.OfType<CommandCreatedEvent>().Any()).IsFalse();
+		// Exactly what the log holds: command events included.
+		var logged = Events().GetAllAsync().ToBlockingEnumerable().Select(e => e.EventId).ToHashSet();
+		await Assert.That(committed.OfType<CommandCreatedEvent>().Any()).IsTrue();
+		await Assert.That(committed.All(e => logged.Contains(e.EventId))).IsTrue();
 	}
 }
 

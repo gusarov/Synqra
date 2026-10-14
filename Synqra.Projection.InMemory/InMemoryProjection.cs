@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
 using Synqra.Projection;
@@ -528,25 +528,17 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	}
 
 	/// <summary>
-	/// When <c>false</c>, <see cref="CommandCreatedEvent"/>s are still applied in-memory (so
-	/// the <c>Command</c> collection is populated) but are NOT written to the durable event
-	/// store. Domain events alone rebuild state on replay, so the command audit isn't needed
-	/// for correctness.
-	/// <para>
-	/// This is a temporary opt-out for durable backends (e.g. MongoDB) whose serializer
-	/// can't yet take the live command payload (<see cref="SingleObjectCommand.TargetObject"/>
-	/// and create-command data are arbitrary CLR objects). Re-enable once command payloads
-	/// are persistable — the command log is wanted later for undo/redo.
-	/// </para>
+	/// Whether commands emit their <see cref="CommandCreatedEvent"/> (the command log, wanted for undo/redo); see
+	/// <see cref="CommandHandlerContext.EmitCommandEvents"/>.
 	/// </summary>
-	public bool PersistCommandEvents { get; set; } = true;
+	public bool EmitCommandEvents { get; set; } = true;
 
 	/// <summary>
 	/// Process and apply it locally
 	/// </summary>
 	private async Task ProcessCommandAsync(ISynqraCommand newCommand)
 	{
-		var commandHandlingContext = new CommandHandlerContext();
+		var commandHandlingContext = new CommandHandlerContext { EmitCommandEvents = EmitCommandEvents };
 		if (newCommand is not Command cmd)
 		{
 			throw new Exception("Only Syncra.Command can be an implementation of ICommand, please derive from Syncra.Command");
@@ -558,24 +550,17 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 		if (_eventStorage != null)
 		{
-			// Domain events are always durable. CommandCreatedEvents are only persisted when
-			// PersistCommandEvents is on — see that property for the temporary opt-out used by
-			// backends that can't yet serialize the live command payload.
-			var toStore = PersistCommandEvents
-				? (IEnumerable<Event>)commandHandlingContext.Events
-				: commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent).ToList();
-			await _eventStorage.AppendBatchAsync(toStore); // store event in storage and trigger replication
+			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
-		var committed = commandHandlingContext.Events.Where(e => e is not CommandCreatedEvent).ToList();
-		if (committed.Count > 0)
+		if (commandHandlingContext.Events.Count > 0)
 		{
-			EventsCommitted?.Invoke(committed);
+			EventsCommitted?.Invoke(commandHandlingContext.Events);
 		}
 	}
 
-	public event Action<IReadOnlyList<Event>>? EventsCommitted;
+	public event Action<IEnumerable<Event>>? EventsCommitted;
 
 	public event EventHandler<EventArgs>? CommandProcessed;
 
@@ -591,8 +576,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
 	{
-		// A batch is never persisted itself; its children's events are its whole effect.
-		if (cmd is not BatchCommand)
+		// One command event per submitted command; a batch is one (its children run with command events off).
+		if (ctx.EmitCommandEvents)
 		{
 			ctx.Events.Add(new CommandCreatedEvent
 			{
@@ -750,6 +735,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	/// </summary>
 	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
 	{
+		// The batch is the unit of intent (and of undo): its own command event carries the children, they emit none.
+		var inner = new CommandHandlerContext { Events = ctx.Events, EmitCommandEvents = false };
 		foreach (var expectation in cmd.Expectations)
 		{
 			if (expectation.ExpectedLastEventId == Guid.Empty)
@@ -781,7 +768,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				throw new InvalidOperationException($"Command {child.CommandId} of stream {child.StreamId} cannot run in a batch of stream {cmd.StreamId}.");
 			}
 			ResolveTargetIds(child);
-			await child.AcceptAsync(this, ctx);
+			await child.AcceptAsync(this, inner);
 		}
 	}
 

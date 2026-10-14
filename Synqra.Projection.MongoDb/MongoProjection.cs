@@ -346,19 +346,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			{
 				RequireVersion(precheck.TargetId, options.ExpectedLastEventId);
 			}
-			var ctx = new CommandHandlerContext();
+			var ctx = new CommandHandlerContext { EmitCommandEvents = EmitCommandEvents };
 			await cmd.AcceptAsync(this, ctx);
 			foreach (var ev in ctx.Events)
 			{
 				await ev.AcceptAsync(this, null);
 			}
-			// Only domain events are durable; command events carry live CLR payloads we don't persist.
-			var events = ctx.Events.Where(e => e is not CommandCreatedEvent).ToList();
-			if (_eventStorage is not null && events.Count > 0)
+			if (_eventStorage is not null && ctx.Events.Count > 0)
 			{
-				await _eventStorage.AppendBatchAsync(events);
+				await _eventStorage.AppendBatchAsync(ctx.Events);
 			}
-			return events;
+			return ctx.Events;
 		});
 		if (committed.Count > 0)
 		{
@@ -431,7 +429,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 	}
 
-	public event Action<IReadOnlyList<Event>>? EventsCommitted;
+	public event Action<IEnumerable<Event>>? EventsCommitted;
+
+	/// <summary>Whether commands emit their <see cref="CommandCreatedEvent"/>; see <see cref="CommandHandlerContext.EmitCommandEvents"/>.</summary>
+	public bool EmitCommandEvents { get; set; } = true;
 
 	void Evict(Guid id)
 	{
@@ -775,7 +776,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	// ---------------------------------------------------------------- ICommandVisitor
 
-	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
+	{
+		// One command event per submitted command; a batch is one (its children run with command events off).
+		if (ctx.EmitCommandEvents)
+		{
+			ctx.Events.Add(new CommandCreatedEvent
+			{
+				EventId = _ids.CreateEventId<CommandCreatedEvent>(cmd.CommandId, 0),
+				Data = cmd,
+				CommandId = cmd.CommandId,
+				StreamId = cmd.StreamId,
+			});
+		}
+		return Task.CompletedTask;
+	}
+
 	public Task AfterVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 
 	public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx)
@@ -892,6 +908,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// </summary>
 	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
 	{
+		// The batch is the unit of intent (and of undo): its own command event carries the children, they emit none.
+		var inner = new CommandHandlerContext { Events = ctx.Events, EmitCommandEvents = false };
 		foreach (var expectation in cmd.Expectations)
 		{
 			if (expectation.ExpectedLastEventId != Guid.Empty)
@@ -918,7 +936,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				throw new InvalidOperationException($"Command {child.CommandId} of stream {child.StreamId} cannot run in a batch of stream {cmd.StreamId}.");
 			}
 			ResolveTargetIds(child);
-			await child.AcceptAsync(this, ctx);
+			await child.AcceptAsync(this, inner);
 		}
 	}
 

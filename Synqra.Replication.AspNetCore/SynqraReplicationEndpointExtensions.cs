@@ -70,7 +70,7 @@ public static class SynqraReplicationEndpointExtensions
 		{
 			var pushLogger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Endpoint");
 			var queue = System.Threading.Channels.Channel.CreateUnbounded<Event>(new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, });
-			Action<IReadOnlyList<Event>> enqueue = events =>
+			Action<IEnumerable<Event>> enqueue = events =>
 			{
 				foreach (var ev in events)
 				{
