@@ -768,7 +768,18 @@ public static class FileSynqraExtensions
 		}
 		public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => throw new NotSupportedException("BatchCommand is not supported by the File projection.");
+		public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
+		{
+			// A batch is its children in order; this projection keeps no versions, so expectations cannot be honoured.
+			if (cmd.Expectations.Count > 0)
+			{
+				throw new NotSupportedException("The File projection keeps no versions; a BatchCommand with expectations cannot be checked here.");
+			}
+			foreach (var child in cmd.Commands)
+			{
+				await child.AcceptAsync(this, ctx);
+			}
+		}
 
 		public async Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx)
 		{

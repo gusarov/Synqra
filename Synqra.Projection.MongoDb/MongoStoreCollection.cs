@@ -24,6 +24,8 @@ internal abstract class MongoStoreCollection : StoreCollection
 		: base(store, streamId, collectionId, serializerFactory)
 	{
 	}
+
+	internal MongoProjection Projection => (MongoProjection)Store;
 }
 
 /// <summary>
@@ -88,7 +90,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	void ICollection<T>.Add(T item)
 	{
-		var id = _projection.Attach(item, CollectionId);
+		var id = _projection.Attach(item, this);
 		var typeId = _projection.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
 		// Phase 2 (ECS): GetCollection<T>().Add always creates an ENTITY — a self-owned root component
 		// (ComponentId == TargetId == entity id, _id == _eid == entityId). No object-vs-component branch.
@@ -116,7 +118,7 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 				yield return (T)existing;
 				continue;
 			}
-			yield return (T)_projection.AttachLoaded(doc, id);
+			yield return (T)_projection.AttachLoaded(doc, id, this);
 		}
 	}
 
