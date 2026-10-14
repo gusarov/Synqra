@@ -363,7 +363,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	public async Task Should_50_list_every_registered_type_once()
 	{
 		var store = ResolveStore();
-		var types = store.TypeMetadataProvider.Types.Select(t => t.Type).ToList();
+		var types = store.TypeMetadataProvider.RegisteredTypes.Select(t => t.Type).ToList();
 
 		await Assert.That(types.Contains(typeof(DemoModel))).IsTrue();
 		await Assert.That(types.Contains(typeof(HierarchyLink))).IsTrue();
@@ -544,6 +544,71 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			await Assert.That(commandEvents).Contains(batch.Commands[1].CommandId);
 			await Assert.That(commandEvents).DoesNotContain(batch.CommandId);
 		}
+	}
+
+	[Test]
+	public async Task Should_55a_refuse_a_link_event_without_a_link_id()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var child = AddNode(store, "child");
+		var ev = new LinkAddedEvent
+		{
+			StreamId = SynqraStreamContext.Current,
+			EventId = GuidExtensions.CreateVersion7(),
+			CommandId = GuidExtensions.CreateVersion7(),
+			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
+			SourceId = store.GetId(parent),
+			TargetId = store.GetId(child),
+			Data = new HierarchyLink(),
+		};
+
+		// Each replica minting its own id at apply time would give the same link a different id everywhere.
+		await Assert.ThrowsAsync<InvalidOperationException>(() => ev.AcceptAsync((IEventVisitor<EventVisitorContext>)store, new EventVisitorContext()));
+	}
+
+	[Test]
+	public async Task Should_56a_let_a_commit_handler_submit_synchronously_without_deadlock()
+	{
+		var store = ResolveStore();
+		var model = new DemoModel { Name = "start" };
+		store.GetCollection<DemoModel>().Add(model);
+		var id = store.GetId(model);
+		var nested = 0;
+		((ICommittedEventSource)store).EventsCommitted += events =>
+		{
+			// A callback that writes back synchronously, as generated setters and collections do.
+			if (Interlocked.Exchange(ref nested, 1) == 0)
+			{
+				store.SubmitCommandAsync(BuildRenameCommand(store, id, "written by the handler")).GetAwaiter().GetResult();
+			}
+		};
+
+		var write = store.SubmitCommandAsync(BuildRenameCommand(store, id, "trigger"));
+		var finished = await Task.WhenAny(write, Task.Delay(TimeSpan.FromSeconds(15))) == write;
+
+		await Assert.That(finished).IsTrue();
+		await write;
+		await Assert.That(Load(store, id).Name).IsEqualTo("written by the handler");
+	}
+
+	[Test]
+	public async Task Should_56b_list_registered_types_while_types_are_being_registered()
+	{
+		var registry = ResolveStore().TypeMetadataProvider;
+		var arguments = new[] { typeof(int), typeof(long), typeof(string), typeof(Guid), typeof(byte), typeof(short), typeof(double), typeof(decimal) };
+		var types = arguments.SelectMany(a => arguments.SelectMany(b => arguments.Select(c => typeof(Tuple<,,>).MakeGenericType(a, b, c)))).ToList();
+
+		var registering = Task.Run(() => types.ForEach(registry.RegisterType));
+		var listed = 0;
+		while (!registering.IsCompleted)
+		{
+			listed += registry.RegisteredTypes.Count(t => t.Type.IsGenericType);
+		}
+		await registering;
+
+		await Assert.That(registry.RegisteredTypes.Count(t => t.Type.IsGenericType && t.Type.GetGenericTypeDefinition() == typeof(Tuple<,,>))).IsEqualTo(types.Count);
+		await Assert.That(listed).IsGreaterThanOrEqualTo(0);
 	}
 
 	[Test]

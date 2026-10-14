@@ -149,10 +149,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	/// The <see cref="IProjectionKeeper"/> is the only caller during catch-up; <paramref name="isReplay"/>
 	/// suppresses one-shot activator side effects for historical events.
 	/// </summary>
-	public async Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default)
-	{
-		await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
-	}
+	public Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default)
+		=> _gate.RunAsync(() => ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay })); // replicated and replayed events serialize with submits
 
 
 	internal AttachedObjectData Attach(object model, StoreCollection collection)
@@ -435,9 +433,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 #endif
 	}
 
-	// One command at a time: the precondition check, the dry run of a batch and the apply of the
-	// produced events happen under this gate, so nothing lands between a check and its write.
-	readonly SemaphoreSlim _submitGate = new(1, 1);
+	// One write at a time (a submit, a replicated or replayed event): the precondition check and the
+	// apply of the produced events happen under this gate, so nothing lands between a check and its write.
+	readonly ReentrantGate _gate = new();
 
 	public async Task SubmitCommandAsync(ISynqraCommand newCommand, CommandSubmissionOptions? options = null)
 	{
@@ -465,8 +463,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			ResolveTargetIds(normalized);
 		}
 
-		await _submitGate.WaitAsync();
-		try
+		await _gate.RunAsync(async () =>
 		{
 			// Optimistic concurrency precondition — runs AFTER normalization so the check
 			// sees the resolved TargetId, but BEFORE any event production so a rejected
@@ -484,11 +481,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				}
 			}
 			await ProcessCommandAsync(newCommand);
-		}
-		finally
-		{
-			_submitGate.Release();
-		}
+		});
 	}
 
 	/// <summary>Fills a command's target ids from its live TargetObject when the caller gave the instance, not the ids.</summary>
@@ -531,15 +524,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	// [UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
-		_submitGate.Wait();
-		try
-		{
-			ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
-		}
-		finally
-		{
-			_submitGate.Release();
-		}
+		_gate.Run(() => ProcessCommandAsync(newCommand).GetAwaiter().GetResult());
 	}
 
 	/// <summary>
@@ -866,7 +851,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId;
+		link.LinkId = ev.LinkId != default ? ev.LinkId : throw new InvalidOperationException($"LinkAddedEvent {ev.EventId} carries no LinkId; ids are minted at command time, so every replica must agree on it.");
 		link.SourceId = ev.SourceId;
 		link.TargetId = ev.TargetId;
 
