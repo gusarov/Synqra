@@ -386,7 +386,14 @@ public static class SynqraReplicationEndpointExtensions
 					var projection = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IProjection>()
 						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
-					await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!);
+					if (projection is IReplayProjection replay)
+					{
+						await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
+					}
+					else
+					{
+						await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
+					}
 					var storage = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
 						: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
