@@ -66,8 +66,7 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		}
 		else if (list.Count > 1)
 		{
-			using var session = await _collection.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
-			await session.WithTransactionAsync(async (s, ct) =>
+			await _collection.Database.Client.RunInTransactionAsync(async (s, ct) =>
 			{
 				var ids = list.Select(ReadKey).ToList();
 				var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
@@ -76,8 +75,7 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 				{
 					await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
 				}
-				return missing.Count;
-			}, cancellationToken: cancellationToken);
+			}, cancellationToken);
 		}
 	}
 

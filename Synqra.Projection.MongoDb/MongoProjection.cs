@@ -368,29 +368,28 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// </summary>
 	async Task<T> RunWriteAsync<T>(Func<WriteScope, Task<T>> body)
 	{
-		using var session = await _database.Client.StartSessionAsync();
-		var scope = new WriteScope(session);
-		_scope.Value = scope;
+		WriteScope? scope = null;
 		var committed = false;
 		T result;
 		try
 		{
-			result = await session.WithTransactionAsync(async (_, _) =>
+			result = await _database.Client.RunInTransactionAsync(async (session, _) =>
 			{
-				ResetWrite(scope); // a retried attempt starts from nothing
+				scope ??= new WriteScope(session); // a retried attempt reuses the session
+				ResetWrite(scope); // and starts from nothing
+				_scope.Value = scope; // visible to this attempt's flow only
 				return await body(scope);
 			});
 			committed = true;
 		}
 		finally
 		{
-			_scope.Value = null;
-			if (!committed)
+			if (!committed && scope is not null)
 			{
 				ResetWrite(scope);
 			}
 		}
-		foreach (var apply in scope.AfterCommit)
+		foreach (var apply in scope!.AfterCommit)
 		{
 			apply();
 		}
@@ -426,7 +425,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				await RunWriteAsync(_ =>
 				{
 					apply();
-					return Task.FromResult(true);
+					return Task.FromResult(0); // nothing to return
 				});
 			}
 			finally
