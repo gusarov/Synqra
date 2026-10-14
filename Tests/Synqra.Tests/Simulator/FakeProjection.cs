@@ -13,9 +13,9 @@ namespace Synqra.Tests.Simulator;
 /// </summary>
 internal sealed class FakeProjection : IProjection, ICommittedEventSource
 {
-	public event Action<IReadOnlyList<Event>>? EventsCommitted;
+	public event Action<IEnumerable<Event>>? EventsCommitted;
 
-	public void RaiseCommitted(IReadOnlyList<Event> events) => EventsCommitted?.Invoke(events);
+	public void RaiseCommitted(IEnumerable<Event> events) => EventsCommitted?.Invoke(events);
 
 	// IEventVisitor<EventVisitorContext>
 	public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;

@@ -21,11 +21,8 @@ namespace Synqra.Tests;
 /// into materialized state. This is the actual durability story for a Mongo-backed graph,
 /// not just storage-level round-trips.
 /// <para>
-/// <see cref="InMemoryProjection.PersistCommandEvents"/> is turned off: the durable log
-/// keeps only the domain events (which carry no live CLR payload), so MongoDB's
-/// ObjectSerializer allowlist isn't tripped by a command's <c>TargetObject</c>. State
-/// replay needs only those domain events. (Command persistence returns for undo/redo once
-/// command payloads are serializable.)
+/// <see cref="InMemoryProjection.EmitCommandEvents"/> is turned off here, to cover the opt-out: no
+/// command event exists anywhere, and the domain events alone replay the state.
 /// </para>
 /// <para>
 /// Skips when the bundled mongod can't start (see <see cref="EphemeralMongo"/>).
@@ -70,7 +67,7 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 			throw new Exception("Mongo is not configured 4");
 		}
 		var projection = (InMemoryProjection)ServiceProvider.GetRequiredService<IProjectionProvider>().GetAsync(_streamId).GetAwaiter().GetResult();
-		projection.PersistCommandEvents = false;
+		projection.EmitCommandEvents = false;
 		return projection;
 	}
 
