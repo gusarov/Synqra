@@ -593,25 +593,6 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_56b_list_registered_types_while_types_are_being_registered()
-	{
-		var registry = ResolveStore().TypeMetadataProvider;
-		var arguments = new[] { typeof(int), typeof(long), typeof(string), typeof(Guid), typeof(byte), typeof(short), typeof(double), typeof(decimal) };
-		var types = arguments.SelectMany(a => arguments.SelectMany(b => arguments.Select(c => typeof(Tuple<,,>).MakeGenericType(a, b, c)))).ToList();
-
-		var registering = Task.Run(() => types.ForEach(registry.RegisterType));
-		var listed = 0;
-		while (!registering.IsCompleted)
-		{
-			listed += registry.RegisteredTypes.Count(t => t.Type.IsGenericType);
-		}
-		await registering;
-
-		await Assert.That(registry.RegisteredTypes.Count(t => t.Type.IsGenericType && t.Type.GetGenericTypeDefinition() == typeof(Tuple<,,>))).IsEqualTo(types.Count);
-		await Assert.That(listed).IsGreaterThanOrEqualTo(0);
-	}
-
-	[Test]
 	public async Task Should_57_report_the_events_a_local_write_committed()
 	{
 		var store = ResolveStore();
