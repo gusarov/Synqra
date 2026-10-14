@@ -54,43 +54,9 @@ public static class EphemeralMongo
 
 						new ReplicaSetInitiator(_engineConnectionString).EnsureInitiated();
 
-						// Maintenance - All databases named as a v7 guid
+						// Maintenance - drop the temp databases of earlier runs
 						using var client = new MongoClient(_engineConnectionString);
-						var utcNow = DateTime.UtcNow;
-						foreach (var databaseName in client.ListDatabaseNames().ToAsyncEnumerable().ToBlockingEnumerable().ToArray())
-						{
-							if (databaseName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-							{
-								if (Guid.TryParse(databaseName[prefix.Length..].Replace('_', '-'), out var guid) && guid.GetVersion() == 7)
-								{
-									if ((utcNow - guid.GetTimestamp()).TotalMinutes > 1)
-									{
-										client.DropDatabase(databaseName);
-									}
-								}
-								else
-								{
-									var marker = client.GetDatabase(databaseName).GetCollection<MongoDB.Bson.BsonDocument>("_xkit");
-									var stamp = marker.Find(Builders<MongoDB.Bson.BsonDocument>.Filter.Eq("_id", "EphemeralMongoStamp")).FirstOrDefault();
-									if (stamp is null)
-									{
-										try
-										{
-											marker.InsertOne(new MongoDB.Bson.BsonDocument { ["_id"] = "EphemeralMongoStamp", ["seen"] = utcNow });
-										}
-										catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
-										{
-											// Another concurrent test process (net8/net9/net10 runs overlap) stamped it
-											// first — fine, the next sweep compares against whatever timestamp won.
-										}
-									}
-									else if ((utcNow - stamp["seen"].ToUniversalTime()).TotalMinutes > 1)
-									{
-										client.DropDatabase(databaseName);
-									}
-								}
-							}
-						}
+						new TempDatabaseSweeper(client, prefix).Sweep(DateTime.UtcNow);
 					}
 				}
 			}
