@@ -16,15 +16,15 @@ internal sealed class RecentEventIds(int capacity)
 	/// <summary>True when the id was not seen within the window.</summary>
 	public bool TryAdd(Guid eventId)
 	{
-		if (!_seen.TryAdd(eventId, 0))
+		var added = _seen.TryAdd(eventId, 0);
+		if (added)
 		{
-			return false;
+			_order.Enqueue(eventId);
+			while (_order.Count > capacity && _order.TryDequeue(out var oldest))
+			{
+				_seen.TryRemove(oldest, out _);
+			}
 		}
-		_order.Enqueue(eventId);
-		while (_order.Count > capacity && _order.TryDequeue(out var oldest))
-		{
-			_seen.TryRemove(oldest, out _);
-		}
-		return true;
+		return added;
 	}
 }

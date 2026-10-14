@@ -272,23 +272,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// <summary>Fills a command's target ids from its live TargetObject when the caller gave the instance, not the ids.</summary>
 	void ResolveTargetIds(Command cmd)
 	{
-		if (cmd is not SingleObjectCommand soc || soc.TargetObject is null)
+		if (cmd is SingleObjectCommand soc && soc.TargetObject is not null)
 		{
-			return;
-		}
-		var tracked = _byModel.GetValue(soc.TargetObject, _ => throw new InvalidOperationException("Target object is not attached."));
-		if (soc.TargetId == default)
-		{
-			soc.TargetId = tracked.Id;
-		}
-		if (soc.CollectionId == default)
-		{
-			soc.CollectionId = tracked.CollectionId;
-		}
-		var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId;
-		if (soc.TargetTypeId == default)
-		{
-			soc.TargetTypeId = typeId;
+			var tracked = _byModel.GetValue(soc.TargetObject, _ => throw new InvalidOperationException("Target object is not attached."));
+			if (soc.TargetId == default)
+			{
+				soc.TargetId = tracked.Id;
+			}
+			if (soc.CollectionId == default)
+			{
+				soc.CollectionId = tracked.CollectionId;
+			}
+			var typeId = TypeMetadataProvider.GetTypeMetadata(soc.TargetObject.GetType()).TypeId;
+			if (soc.TargetTypeId == default)
+			{
+				soc.TargetTypeId = typeId;
+			}
 		}
 	}
 
@@ -418,20 +417,22 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		if (_scope.Value is not null)
 		{
 			apply();
-			return;
 		}
-		await _submitGate.WaitAsync();
-		try
+		else
 		{
-			await RunWriteAsync(_ =>
+			await _submitGate.WaitAsync();
+			try
 			{
-				apply();
-				return Task.FromResult(true);
-			});
-		}
-		finally
-		{
-			_submitGate.Release();
+				await RunWriteAsync(_ =>
+				{
+					apply();
+					return Task.FromResult(true);
+				});
+			}
+			finally
+			{
+				_submitGate.Release();
+			}
 		}
 	}
 
@@ -909,7 +910,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyObjectPropertyChange(ev));
 
 	void ApplyObjectPropertyChange(ObjectPropertyChangedEvent ev)
-{
+	{
 		var type = TypeMetadataProvider.GetTypeMetadata(ev.TargetTypeId).Type;
 		SetField(Components, BuildRootFilter(ev.TargetId), type, ev.PropertyName, ev.NewValue, $"entity {ev.TargetId}", ev.EventId);
 		RunAfterCommit(() =>
@@ -939,17 +940,28 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Phase 2 (ECS): self-owned ROOT COMPONENT = the entity's own data (_id == _eid == entityId),
-			// a self-owned document in the shared Components collection.
-			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-			var tracked = TryGetTracked(ev.TargetId, out var trackedModel);
-			if (!tracked && !_scope.Value!.Materialized.Contains(ev.TargetId))
-			{
-				// Nobody here holds this entity (an id-only create, an event from a peer): write its document
-				// and track nothing. ResolveObject loads it on demand.
-				CreateRoot(ev.TargetId, ev.Data ?? Activator.CreateInstance(rootType)!, ev.EventId);
-				return;
-			}
+			ApplyRootAdd(ev);
+		}
+		else if (TryGetTracked(ev.TargetId, out var containerModel))
+		{
+			ApplyFacetAddToLiveEntity(ev, ComponentApplyHelpers.ResolveContainer(containerModel, ev.TargetId));
+		}
+		else
+		{
+			ApplyFacetAddToStoredEntity(ev);
+		}
+	}
+
+	/// <summary>
+	/// Phase 2 (ECS): a self-owned ROOT COMPONENT is the entity's own data (_id == _eid == entityId), a
+	/// self-owned document in the shared Components collection. Tracked only when someone here holds it.
+	/// </summary>
+	void ApplyRootAdd(ComponentAddedEvent ev)
+	{
+		var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var tracked = TryGetTracked(ev.TargetId, out var trackedModel);
+		if (tracked || _scope.Value!.Materialized.Contains(ev.TargetId))
+		{
 			object rootModel = ev.Data ?? (tracked ? trackedModel : Activator.CreateInstance(rootType)!);
 			// Race: another caller may materialize this same id concurrently (the collection enumerator or
 			// ResolveObject on a re-delivered add). AttachWithId registers id -> instance atomically and hands
@@ -961,31 +973,39 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			}
 			CreateRoot(ev.TargetId, attached, ev.EventId);
 			RunAfterCommit(() => MarkApplied(ev.TargetId, ev.EventId));
-			return;
 		}
+		else
+		{
+			// Nobody here holds this entity (an id-only create, an event from a peer): write its document and
+			// track nothing. ResolveObject loads it on demand.
+			CreateRoot(ev.TargetId, ev.Data ?? Activator.CreateInstance(rootType)!, ev.EventId);
+		}
+	}
 
+	/// <summary>
+	/// Nobody here holds the entity: decide on the stored state, read through the session, and load
+	/// nothing. Vetoes and activation belong to a live container, so they run only when one is tracked.
+	/// </summary>
+	void ApplyFacetAddToStoredEntity(ComponentAddedEvent ev)
+	{
+		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var exists = Builders<BsonDocument>.Filter.And(BuildRootFilter(ev.TargetId), RootsOnlyFilter);
+		if (FindDocument(Components, exists, Builders<BsonDocument>.Projection.Include("_id")) is null)
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: no entity {ev.TargetId} in stream {StreamId} to add a '{componentType.Name}' to.");
+		}
+		if (HasUniqueFacet(ev.TargetId, componentType))
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to {ev.TargetId}: a unique slot it fills is taken.");
+		}
+		CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId));
+		StampVersion(ev.TargetId, ev.EventId);
+	}
+
+	void ApplyFacetAddToLiveEntity(ComponentAddedEvent ev, IComponentContainer container)
+	{
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
-
-		if (!TryGetTracked(ev.TargetId, out var containerModel))
-		{
-			// Nobody here holds the entity: decide on the stored state, read through the session, and load
-			// nothing. Vetoes and activation belong to a live container, so they run only when one is tracked.
-			var exists = Builders<BsonDocument>.Filter.And(BuildRootFilter(ev.TargetId), RootsOnlyFilter);
-			if (FindDocument(Components, exists, Builders<BsonDocument>.Projection.Include("_id")) is null)
-			{
-				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: no entity {ev.TargetId} in stream {StreamId} to add a '{componentType.Name}' to.");
-			}
-			if (HasUniqueFacet(ev.TargetId, componentType))
-			{
-				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to {ev.TargetId}: a unique slot it fills is taken.");
-			}
-			CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, component);
-			StampVersion(ev.TargetId, ev.EventId);
-			return;
-		}
-
-		var container = ComponentApplyHelpers.ResolveContainer(containerModel, ev.TargetId);
 		// Uniqueness is decided on the stored facets, read through the session, so a facet added earlier
 		// in the same write counts; the live collection answers for vetoes and for what it already holds.
 		if (!container.Components.CanAddComponent(componentType) || HasUniqueFacet(ev.TargetId, componentType))
@@ -1027,21 +1047,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	/// <summary>Whether the entity already stores a facet filling one of the unique slots this type declares ([Component(IsUnique)] on it, a base or an interface).</summary>
 	bool HasUniqueFacet(Guid entityId, Type componentType)
-	{
-		foreach (var slot in UniqueSlotsOf(componentType))
-		{
-			var filter = Builders<BsonDocument>.Filter.And(
-				StreamFilter,
-				Builders<BsonDocument>.Filter.Eq(EntityIdField, entityId),
-				Builders<BsonDocument>.Filter.Ne("_id", entityId),
-				Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(slot)));
-			if (FindDocument(Components, filter, Builders<BsonDocument>.Projection.Include("_id")) is not null)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
+		=> UniqueSlotsOf(componentType).Any(slot => FindDocument(Components, BuildFacetsInSlotFilter(entityId, slot), Builders<BsonDocument>.Projection.Include("_id")) is not null);
+
+	/// <summary>The entity's facets (its root excluded) whose type fills <paramref name="slot"/>.</summary>
+	FilterDefinition<BsonDocument> BuildFacetsInSlotFilter(Guid entityId, Type slot) => Builders<BsonDocument>.Filter.And(
+		StreamFilter,
+		Builders<BsonDocument>.Filter.Eq(EntityIdField, entityId),
+		Builders<BsonDocument>.Filter.Ne("_id", entityId),
+		Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(slot)));
 
 	IEnumerable<Type> UniqueSlotsOf(Type componentType)
 	{
@@ -1073,7 +1086,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyComponentPropertyChange(ev));
 
 	void ApplyComponentPropertyChange(ComponentPropertyChangedEvent ev)
-{
+	{
 		// Durable persistence still forks: a root component is its entity's own document, a facet
 		// lives in the shared Components collection. Either way it is a single-field update.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
@@ -1103,44 +1116,45 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyComponentDelete(ev));
 
 	void ApplyComponentDelete(ComponentDeletedEvent ev)
-{
+	{
 		if (ev.ComponentId == ev.TargetId)
 		{
 			// Root delete: the entity and its facets go in one DeleteMany by _eid; incident links are
 			// not cascaded yet (they live in Links, keyed by Source/Target).
 			DeleteEntity(ev.TargetId);
 			RunAfterCommit(() => Evict(ev.TargetId));
-			return;
 		}
-
-		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-		var filter = BuildComponentFilter(ev.TargetId, componentType, ev.ComponentId);
-		if (FindDocument(Components, filter, Builders<BsonDocument>.Projection.Include("_id")) is null)
+		else
 		{
-			throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: no '{componentType.Name}' facet {ev.ComponentId} on {ev.TargetId} in stream {StreamId}.");
-		}
-		DeleteDocument(Components, filter);
-		StampVersion(ev.TargetId, ev.EventId);
-		RunAfterCommit(() =>
-		{
-			// BypassRemove rather than Remove: when the container is wrapped in
-			// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
-			// projection is APPLYING an event, so it must skip the command channel — otherwise it would
-			// generate a recursive delete command.
-			if (TryGetTracked(ev.TargetId, out var trackedModel) && trackedModel is IComponentContainer container
-				&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == ev.ComponentId) is { } component
-				&& !container.Components.BypassRemove(component))
+			var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+			var filter = BuildComponentFilter(ev.TargetId, componentType, ev.ComponentId);
+			if (FindDocument(Components, filter, Builders<BsonDocument>.Projection.Include("_id")) is null)
 			{
-				throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: the live container refused to remove the deleted facet {ev.ComponentId}.");
+				throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: no '{componentType.Name}' facet {ev.ComponentId} on {ev.TargetId} in stream {StreamId}.");
 			}
-			MarkApplied(ev.TargetId, ev.EventId);
-		});
+			DeleteDocument(Components, filter);
+			StampVersion(ev.TargetId, ev.EventId);
+			RunAfterCommit(() =>
+			{
+				// BypassRemove rather than Remove: when the container is wrapped in
+				// StoreBoundComponentsCollection, the ICollection<T>.Remove path emits a command. The
+				// projection is APPLYING an event, so it must skip the command channel — otherwise it would
+				// generate a recursive delete command.
+				if (TryGetTracked(ev.TargetId, out var trackedModel) && trackedModel is IComponentContainer container
+					&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == ev.ComponentId) is { } component
+					&& !container.Components.BypassRemove(component))
+				{
+					throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: the live container refused to remove the deleted facet {ev.ComponentId}.");
+				}
+				MarkApplied(ev.TargetId, ev.EventId);
+			});
+		}
 	}
 
 	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkAdd(ev));
 
 	void ApplyLinkAdd(LinkAddedEvent ev)
-{
+	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
 		link.LinkId = ev.LinkId == default ? _ids.CreateLinkId() : ev.LinkId;
@@ -1173,7 +1187,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkRemove(ev));
 
 	void ApplyLinkRemove(LinkRemovedEvent ev)
-{
+	{
 		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter);
 		DeleteDocument(linksMongo, deleteFilter); // no-op (idempotent) if already gone

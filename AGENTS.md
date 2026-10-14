@@ -177,6 +177,12 @@ A method name must be a verb phrase. A noun-named parameterless accessor (`Compo
 `BuildRootFilter(id)`, `FindRootDocument(id)`, `CreateProjection()`, `OpenDatabase()`. Applies to test
 helpers as much as production code.
 
+### No early returns where a branch will do
+
+Avoid `return` that leaves a method early when an `if`/`else` (nested if need be) expresses the same
+flow. A method that computes a value has one `return`, at the end, of a variable or expression. Split a
+long branch into its own well-named method rather than flattening it with guard returns.
+
 ## Testing Notes
 
 - Tests use **TUnit**, not xUnit/NUnit.

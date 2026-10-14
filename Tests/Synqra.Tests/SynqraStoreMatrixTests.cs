@@ -312,7 +312,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	// refuse a write made against a stale version, apply several commands as one, and learn which
 	// events a server-side write committed so they can be pushed to connected clients.
 
-	static AddComponentCommand CreateRoot<T>(IObjectStore store, Guid id, T data) where T : class
+	AddComponentCommand BuildCreateRootCommand<T>(IObjectStore store, Guid id, T data) where T : class
 	{
 		var metadata = store.TypeMetadataProvider.GetTypeMetadata(typeof(T));
 		return new AddComponentCommand
@@ -326,7 +326,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		};
 	}
 
-	static ChangeComponentPropertyCommand Rename(IObjectStore store, Guid id, string name)
+	ChangeComponentPropertyCommand BuildRenameCommand(IObjectStore store, Guid id, string name)
 	{
 		var metadata = store.TypeMetadataProvider.GetTypeMetadata(typeof(DemoModel));
 		return new ChangeComponentPropertyCommand
@@ -341,17 +341,19 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		};
 	}
 
-	static async Task<Exception?> Caught(Func<Task> action)
+	/// <summary>The failure <paramref name="action"/> ended with, or null when it succeeded.</summary>
+	async Task<Exception?> CaptureFailureAsync(Func<Task> action)
 	{
+		Exception? failure = null;
 		try
 		{
 			await action();
-			return null;
 		}
 		catch (Exception ex)
 		{
-			return ex;
+			failure = ex; // the assertion that follows is the point of the test
 		}
+		return failure;
 	}
 
 	DemoModel Load(IObjectStore store, Guid id) => store.GetCollection<DemoModel>().Single(m => store.GetId(m) == id);
@@ -379,11 +381,11 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var current = store.GetLastEventId(id);
 		await Assert.That(current).IsNotEqualTo(stale);
 
-		var refused = await Caught(() => store.SubmitCommandAsync(Rename(store, id, "stale"), new CommandSubmissionOptions { ExpectedLastEventId = stale }));
+		var refused = await CaptureFailureAsync(() => store.SubmitCommandAsync(BuildRenameCommand(store, id, "stale"), new CommandSubmissionOptions { ExpectedLastEventId = stale }));
 		await Assert.That(refused is ConcurrencyException).IsTrue();
 		await Assert.That(Load(store, id).Name).IsEqualTo("first");
 
-		await store.SubmitCommandAsync(Rename(store, id, "fresh"), new CommandSubmissionOptions { ExpectedLastEventId = current });
+		await store.SubmitCommandAsync(BuildRenameCommand(store, id, "fresh"), new CommandSubmissionOptions { ExpectedLastEventId = current });
 		await Assert.That(Load(store, id).Name).IsEqualTo("fresh");
 	}
 
@@ -394,9 +396,9 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var a = Guid.NewGuid();
 		var b = Guid.NewGuid();
 		var batch = new BatchCommand();
-		batch.Commands.Add(CreateRoot(store, a, new DemoModel { Name = "a" }));
-		batch.Commands.Add(CreateRoot(store, b, new DemoModel { Name = "b" }));
-		batch.Commands.Add(Rename(store, a, "a, renamed in the same batch"));
+		batch.Commands.Add(BuildCreateRootCommand(store, a, new DemoModel { Name = "a" }));
+		batch.Commands.Add(BuildCreateRootCommand(store, b, new DemoModel { Name = "b" }));
+		batch.Commands.Add(BuildRenameCommand(store, a, "a, renamed in the same batch"));
 
 		await store.SubmitCommandAsync(batch);
 
@@ -412,10 +414,10 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var missing = Guid.NewGuid();
 		var before = Events().GetAllAsync().ToBlockingEnumerable().Count();
 		var batch = new BatchCommand();
-		batch.Commands.Add(CreateRoot(store, created, new DemoModel { Name = "would exist" }));
-		batch.Commands.Add(Rename(store, missing, "no such object"));
+		batch.Commands.Add(BuildCreateRootCommand(store, created, new DemoModel { Name = "would exist" }));
+		batch.Commands.Add(BuildRenameCommand(store, missing, "no such object"));
 
-		var refused = await Caught(() => store.SubmitCommandAsync(batch));
+		var refused = await CaptureFailureAsync(() => store.SubmitCommandAsync(batch));
 
 		await Assert.That(refused).IsNotNull();
 		await Assert.That(Events().GetAllAsync().ToBlockingEnumerable().Count()).IsEqualTo(before);
@@ -437,9 +439,9 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		model.Name = "moved on";
 		var batch = new BatchCommand();
 		batch.Expectations.Add(new BatchExpectation { TargetId = id, TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(DemoModel)).TypeId, ExpectedLastEventId = stale, });
-		batch.Commands.Add(Rename(store, id, "should not land"));
+		batch.Commands.Add(BuildRenameCommand(store, id, "should not land"));
 
-		var refused = await Caught(() => store.SubmitCommandAsync(batch));
+		var refused = await CaptureFailureAsync(() => store.SubmitCommandAsync(batch));
 
 		await Assert.That(refused is ConcurrencyException).IsTrue();
 		await Assert.That(Load(store, id).Name).IsEqualTo("moved on");
@@ -486,7 +488,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var id = Guid.NewGuid();
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
 		var batch = new BatchCommand();
-		batch.Commands.Add(CreateRoot(store, id, new TestComponentNode { Name = "container" }));
+		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = "container" }));
 		batch.Commands.Add(new AddComponentCommand
 		{
 			TargetTypeId = container.TypeId,
@@ -512,8 +514,8 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		store.GetCollection<DemoModel>().Add(model);
 		var id = store.GetId(model);
 		var batch = new BatchCommand();
-		batch.Commands.Add(Rename(store, id, "first"));
-		batch.Commands.Add(Rename(store, id, "second"));
+		batch.Commands.Add(BuildRenameCommand(store, id, "first"));
+		batch.Commands.Add(BuildRenameCommand(store, id, "second"));
 
 		await store.SubmitCommandAsync(batch);
 
@@ -524,23 +526,23 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	public async Task Should_57a_batch_children_keep_their_command_events()
 	{
 		var store = ResolveStore();
-		if (store is not InMemoryProjection projection)
+		// The Mongo projection persists no command events at all, batch or not.
+		if (store is InMemoryProjection projection)
 		{
-			return; // the Mongo projection persists no command events at all, batch or not
+			projection.PersistCommandEvents = true;
+			var a = Guid.NewGuid();
+			var b = Guid.NewGuid();
+			var batch = new BatchCommand();
+			batch.Commands.Add(BuildCreateRootCommand(store, a, new DemoModel { Name = "a" }));
+			batch.Commands.Add(BuildCreateRootCommand(store, b, new DemoModel { Name = "b" }));
+
+			await store.SubmitCommandAsync(batch);
+
+			var commandEvents = Events().GetAllAsync().ToBlockingEnumerable().OfType<CommandCreatedEvent>().Select(e => e.CommandId).ToList();
+			await Assert.That(commandEvents).Contains(batch.Commands[0].CommandId);
+			await Assert.That(commandEvents).Contains(batch.Commands[1].CommandId);
+			await Assert.That(commandEvents).DoesNotContain(batch.CommandId);
 		}
-		projection.PersistCommandEvents = true;
-		var a = Guid.NewGuid();
-		var b = Guid.NewGuid();
-		var batch = new BatchCommand();
-		batch.Commands.Add(CreateRoot(store, a, new DemoModel { Name = "a" }));
-		batch.Commands.Add(CreateRoot(store, b, new DemoModel { Name = "b" }));
-
-		await store.SubmitCommandAsync(batch);
-
-		var commandEvents = Events().GetAllAsync().ToBlockingEnumerable().OfType<CommandCreatedEvent>().Select(e => e.CommandId).ToList();
-		await Assert.That(commandEvents).Contains(batch.Commands[0].CommandId);
-		await Assert.That(commandEvents).Contains(batch.Commands[1].CommandId);
-		await Assert.That(commandEvents).DoesNotContain(batch.CommandId);
 	}
 
 	[Test]

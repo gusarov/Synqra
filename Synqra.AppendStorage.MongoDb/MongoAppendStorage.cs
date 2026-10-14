@@ -60,27 +60,25 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
 	{
 		var list = items as IReadOnlyList<T> ?? items.ToArray();
-		if (list.Count == 0)
-		{
-			return;
-		}
 		if (list.Count == 1)
 		{
 			await AppendAsync(list[0], cancellationToken);
-			return;
 		}
-		using var session = await _collection.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
-		await session.WithTransactionAsync(async (s, ct) =>
+		else if (list.Count > 1)
 		{
-			var ids = list.Select(ReadKey).ToList();
-			var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
-			var missing = list.Where(item => !stored.Contains(ReadKey(item))).ToList();
-			if (missing.Count > 0)
+			using var session = await _collection.Database.Client.StartSessionAsync(cancellationToken: cancellationToken);
+			await session.WithTransactionAsync(async (s, ct) =>
 			{
-				await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
-			}
-			return missing.Count;
-		}, cancellationToken: cancellationToken);
+				var ids = list.Select(ReadKey).ToList();
+				var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
+				var missing = list.Where(item => !stored.Contains(ReadKey(item))).ToList();
+				if (missing.Count > 0)
+				{
+					await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
+				}
+				return missing.Count;
+			}, cancellationToken: cancellationToken);
+		}
 	}
 
 	/// <summary>The item's key, read through the member its class map maps to <c>_id</c> (see the key contract above).</summary>

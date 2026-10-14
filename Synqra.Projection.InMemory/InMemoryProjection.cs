@@ -606,19 +606,17 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx)
 	{
-		if (cmd is BatchCommand)
+		// A batch is never persisted itself; its children's events are its whole effect.
+		if (cmd is not BatchCommand)
 		{
-			// A batch is never persisted itself; its children's events are its whole effect.
-			return Task.CompletedTask;
+			ctx.Events.Add(new CommandCreatedEvent
+			{
+				EventId = _ids.CreateEventId<CommandCreatedEvent>(cmd.CommandId, 0),
+				Data = cmd,
+				CommandId = cmd.CommandId,
+				StreamId = cmd.StreamId,
+			});
 		}
-		var created = new CommandCreatedEvent
-		{
-			EventId = _ids.CreateEventId<CommandCreatedEvent>(cmd.CommandId, 0),
-			Data = cmd,
-			CommandId = cmd.CommandId,
-			StreamId = cmd.StreamId,
-		};
-		ctx.Events.Add(created);
 		/*
 		var created = new ObjectCreatedEvent
 		{
