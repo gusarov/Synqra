@@ -101,7 +101,7 @@ public interface ITypeMetadataProvider
 	TypeMetadata GetTypeMetadata(Guid typeId);
 	TypeMetadata GetTypeMetadata(Type type);
 	void RegisterType(Type type);
-	/// <summary>Every registered type, once each (legacy ids are not listed separately): a snapshot, safe to enumerate while types are being registered. Lets a host serve a generic API over the model, or expand a base type into its subtypes.</summary>
+	/// <summary>Every registered type, once each (legacy ids are not listed separately), as a live view. Lets a host serve a generic API over the model, or expand a base type into its subtypes.</summary>
 	IReadOnlyCollection<TypeMetadata> RegisteredTypes { get; }
 }
 

@@ -43,7 +43,7 @@ public class MongoTestsIsolationAssumptions : BaseTest
 	[Test]
 	public async Task Should_4_drop_a_stale_temp_database_once_when_sweeps_race()
 	{
-		const string prefix = "temp_sweeptest_";
+		var prefix = $"temp_sweep{Guid.NewGuid():N}"[..18] + "_"; // unique per run: parallel test processes run this test at the same time
 		using var client = new MongoClient(new MongoUrlBuilder(_connectionString) { DatabaseName = null }.ToMongoUrl());
 		var ms = new DateTimeOffset(DateTime.UtcNow.AddMinutes(-5)).ToUnixTimeMilliseconds().ToString("x12");
 		var rnd = Guid.NewGuid().ToString("N");
