@@ -68,10 +68,10 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		{
 			await _collection.Database.Client.RunInTransactionAsync(async (s, ct) =>
 			{
-				var ids = list.Select(ReadKey).ToList();
+				var ids = list.Select(ReadKey);
 				var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
-				var missing = list.Where(item => !stored.Contains(ReadKey(item))).ToList();
-				if (missing.Count > 0)
+				var missing = list.Where(item => !stored.Contains(ReadKey(item)));
+				if (missing.Any())
 				{
 					await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
 				}
