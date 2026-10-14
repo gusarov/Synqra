@@ -5,7 +5,7 @@ namespace Synqra;
 /// write (EventsCommitted, Activate, a veto) and submits synchronously re-enters instead of deadlocking.
 /// The hold ends with the gated work; a task the holder started that outlives it does not inherit it.
 /// </summary>
-public sealed class ReentrantGate
+internal sealed class ReentrantGate
 {
 	readonly SemaphoreSlim _gate = new(1, 1);
 	readonly AsyncLocal<Hold?> _held = new();
