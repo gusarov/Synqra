@@ -78,7 +78,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	FilterDefinition<BsonDocument> BuildLinkTypeFilter(Type linkType)
 		=> Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(linkType));
 
-	IEnumerable<string> ConcreteTypeNamesOf(Type baseType) => TypeMetadataProvider.Types
+	IEnumerable<string> ConcreteTypeNamesOf(Type baseType) => TypeMetadataProvider.RegisteredTypes
 		.Select(m => m.Type)
 		.Where(t => !t.IsAbstract && baseType.IsAssignableFrom(t))
 		.Select(t => t.Name)
@@ -306,9 +306,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 	}
 
-	// One write at a time per instance; writers from other processes are serialized by the
-	// transaction itself (a conflict is retried by the driver until it lands).
-	readonly SemaphoreSlim _submitGate = new(1, 1);
+	// One write at a time per stream (this projection serves every stream); writers in other processes
+	// are serialized by the transaction itself (a conflict is retried by the driver until it lands).
+	readonly ConcurrentDictionary<Guid, ReentrantGate> _streamGates = new();
+
+	ReentrantGate GateOf(Guid streamId) => _streamGates.GetOrAdd(streamId, _ => new ReentrantGate());
 
 	// The write in flight: its session (every document read and write inside the transaction goes
 	// through it, so later events see earlier ones), the instance updates to run after commit, and the
@@ -325,18 +327,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	IClientSessionHandle? Session => _scope.Value?.Session;
 
-	async Task SubmitSerializedAsync(Command cmd, CommandSubmissionOptions? options)
-	{
-		await _submitGate.WaitAsync();
-		try
-		{
-			await ProcessCommandAsync(cmd, options);
-		}
-		finally
-		{
-			_submitGate.Release();
-		}
-	}
+	Task SubmitSerializedAsync(Command cmd, CommandSubmissionOptions? options)
+		=> GateOf(cmd.StreamId).RunAsync(() => ProcessCommandAsync(cmd, options));
 
 	/// <summary>
 	/// A submitted command is one write. Inside the projection's transaction: the precondition check and
@@ -431,19 +423,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 		else
 		{
-			await _submitGate.WaitAsync();
-			try
+			await GateOf(StreamId).RunAsync(() => RunWriteAsync(_ =>
 			{
-				await RunWriteAsync(_ =>
-				{
-					apply();
-					return Task.FromResult(0); // nothing to return
-				});
-			}
-			finally
-			{
-				_submitGate.Release();
-			}
+				apply();
+				return Task.FromResult(0); // nothing to return
+			}));
 		}
 	}
 
@@ -1196,7 +1180,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	{
 		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
 		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId == default ? _ids.CreateLinkId() : ev.LinkId;
+		link.LinkId = ev.LinkId != default ? ev.LinkId : throw new InvalidOperationException($"LinkAddedEvent {ev.EventId} carries no LinkId; ids are minted at command time, so every replica must agree on it.");
 		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
 		// remarks) — authoritative over whatever Data happened to carry.
 		link.SourceId = ev.SourceId;

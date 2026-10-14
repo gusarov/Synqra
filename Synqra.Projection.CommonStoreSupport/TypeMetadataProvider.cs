@@ -46,20 +46,30 @@ public static class TypeMetadataProviderExtensions
 	{
 		private readonly Dictionary<Type, TypeMetadata> _typeMetadataByType = new();
 		private readonly Dictionary<Guid, TypeMetadata> _typeMetadataByTypeId = new();
-		private readonly System.Collections.ObjectModel.ReadOnlyDictionary<Type, TypeMetadata> _readOnlyByType;
+		// Copy-on-write: replaced under the lock on each new registration, read without one.
+		TypeMetadata[] _registered = [];
+		readonly object _registerGate = new();
 
 		public TypeMetadataProvider(IOptions<TypeMetadataProviderConfig> options)
 		{
-			_readOnlyByType = _typeMetadataByType.AsReadOnly();
 			foreach (var type in options.Value.Types ?? [])
 			{
 				RegisterType(type);
 			}
 		}
 
-		public IReadOnlyCollection<TypeMetadata> RegisteredTypes => _typeMetadataByType.Values; // live view, no copy
+		/// <summary>Every registered type; a snapshot that grows with registration and is safe to enumerate while types are being registered.</summary>
+		public IReadOnlyCollection<TypeMetadata> RegisteredTypes => Volatile.Read(ref _registered);
 
 		public void RegisterType(Type type)
+		{
+			lock (_registerGate)
+			{
+				RegisterTypeLocked(type);
+			}
+		}
+
+		void RegisterTypeLocked(Type type)
 		{
 			ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_typeMetadataByType, type, out var exists);
 			if (!exists)
@@ -95,10 +105,10 @@ public static class TypeMetadataProviderExtensions
 				{
 					_typeMetadataByTypeId[legacyTypeId] = slot;
 				}
+				Volatile.Write(ref _registered, [.. _registered, slot]);
 			}
 		}
 
-		public IReadOnlyCollection<TypeMetadata> Types => _readOnlyByType.Values;
 
 		public TypeMetadata GetTypeMetadata(Type type)
 		{

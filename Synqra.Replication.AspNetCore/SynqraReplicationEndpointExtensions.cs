@@ -93,10 +93,9 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					await foreach (var ev in queue.Reader.ReadAllAsync(lifetime))
 					{
-						if (!knownEvents.TryAdd(ev.EventId))
-						{
-							continue;
-						}
+						// Server-committed events are new by construction: always push. Marking them lets the socket
+						// path drop an echo; a backlog replay that marked one first must not suppress it here.
+						knownEvents.TryAdd(ev.EventId);
 						// One event's failure must not end the push for every event after it.
 						try
 						{
