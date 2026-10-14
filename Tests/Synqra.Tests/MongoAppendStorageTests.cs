@@ -39,6 +39,29 @@ public class MongoTestsIsolationAssumptions : BaseTest
 	{
 		await Should_1();
 	}
+
+	[Test]
+	public async Task Should_4_drop_a_stale_temp_database_once_when_sweeps_race()
+	{
+		const string prefix = "temp_sweeptest_";
+		using var client = new MongoClient(new MongoUrlBuilder(_connectionString) { DatabaseName = null }.ToMongoUrl());
+		var ms = new DateTimeOffset(DateTime.UtcNow.AddMinutes(-5)).ToUnixTimeMilliseconds().ToString("x12");
+		var rnd = Guid.NewGuid().ToString("N");
+		var stale = prefix + $"{ms[..8]}_{ms[8..]}_7{rnd[13..16]}_8{rnd[17..20]}_{rnd[20..]}";
+		await client.GetDatabase(stale).GetCollection<BsonDocument>("payload").InsertManyAsync(Enumerable.Range(0, 200).Select(i => new BsonDocument { ["_id"] = i }));
+
+		using var start = new ManualResetEventSlim();
+		var sweeps = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+		{
+			start.Wait();
+			return new TempDatabaseSweeper(client, prefix).Sweep(DateTime.UtcNow);
+		})).ToArray();
+		start.Set();
+		var dropped = await Task.WhenAll(sweeps);
+
+		await Assert.That(dropped.Sum()).IsEqualTo(1);
+		await Assert.That((await client.ListDatabaseNamesAsync()).ToList()).DoesNotContain(stale);
+	}
 }
 
 /// <summary>
