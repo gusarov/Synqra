@@ -19,41 +19,40 @@ internal sealed class ReplicaSetInitiator(string connectionString)
 		using var client = new MongoClient(direct.ToMongoUrl());
 		var admin = client.GetDatabase("admin");
 		var hello = admin.RunCommand<BsonDocument>(new BsonDocument("hello", 1));
-		if (hello.Contains("setName") && hello["isWritablePrimary"].ToBoolean())
+		if (!(hello.Contains("setName") && hello["isWritablePrimary"].ToBoolean()))
 		{
-			return;
-		}
-		var options = admin.RunCommand<BsonDocument>(new BsonDocument("getCmdLineOpts", 1));
-		var replication = options["parsed"].AsBsonDocument.GetValue("replication", null)?.AsBsonDocument;
-		var setName = replication?.GetValue("replSetName", null)?.AsString ?? replication?.GetValue("replSet", null)?.AsString;
-		if (setName is null)
-		{
-			throw new InvalidOperationException($"The test Mongo at {url.Server} is a standalone server; Synqra's Mongo writes run in transactions and need a replica set. Start mongod with --replSet <name> (or set replication.replSetName in its config); the tests initiate it.");
-		}
-		if (!hello.Contains("setName"))
-		{
-			var config = new BsonDocument
+			var options = admin.RunCommand<BsonDocument>(new BsonDocument("getCmdLineOpts", 1));
+			var replication = options["parsed"].AsBsonDocument.GetValue("replication", null)?.AsBsonDocument;
+			var setName = replication?.GetValue("replSetName", null)?.AsString ?? replication?.GetValue("replSet", null)?.AsString;
+			if (setName is null)
 			{
-				["_id"] = setName,
-				["members"] = new BsonArray { new BsonDocument { ["_id"] = 0, ["host"] = url.Server.ToString() } },
-			};
-			try
-			{
-				admin.RunCommand<BsonDocument>(new BsonDocument("replSetInitiate", config));
+				throw new InvalidOperationException($"The test Mongo at {url.Server} is a standalone server; Synqra's Mongo writes run in transactions and need a replica set. Start mongod with --replSet <name> (or set replication.replSetName in its config); the tests initiate it.");
 			}
-			catch (MongoCommandException ex) when (ex.CodeName == "AlreadyInitialized")
+			if (!hello.Contains("setName"))
 			{
-				// Another test process (net8/net9/net10 runs overlap) initiated it first; wait for primary below.
+				var config = new BsonDocument
+				{
+					["_id"] = setName,
+					["members"] = new BsonArray { new BsonDocument { ["_id"] = 0, ["host"] = url.Server.ToString() } },
+				};
+				try
+				{
+					admin.RunCommand<BsonDocument>(new BsonDocument("replSetInitiate", config));
+				}
+				catch (MongoCommandException ex) when (ex.CodeName == "AlreadyInitialized")
+				{
+					// Another test process (net8/net9/net10 runs overlap) initiated it first; wait for primary below.
+				}
 			}
-		}
-		var deadline = DateTime.UtcNow + Timeout;
-		while (!admin.RunCommand<BsonDocument>(new BsonDocument("hello", 1)).GetValue("isWritablePrimary", false).ToBoolean())
-		{
-			if (DateTime.UtcNow > deadline)
+			var deadline = DateTime.UtcNow + Timeout;
+			while (!admin.RunCommand<BsonDocument>(new BsonDocument("hello", 1)).GetValue("isWritablePrimary", false).ToBoolean())
 			{
-				throw new TimeoutException($"Replica set '{setName}' at {url.Server} did not elect a primary within {Timeout}.");
+				if (DateTime.UtcNow > deadline)
+				{
+					throw new TimeoutException($"Replica set '{setName}' at {url.Server} did not elect a primary within {Timeout}.");
+				}
+				Thread.Sleep(200);
 			}
-			Thread.Sleep(200);
 		}
 	}
 }
