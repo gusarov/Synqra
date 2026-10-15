@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using MongoDB.Bson;
@@ -172,6 +173,7 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	[DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(TestColdComponent))] // reached only by its name at run time: the trimmed (AOT) run must keep its members for the driver's auto-map
 	public async Task Should_read_a_model_inside_a_stored_command_that_this_process_never_serialized()
 	{
 		// Registered with Synqra (as every model is at type load), never handed to the driver: the cold read.
