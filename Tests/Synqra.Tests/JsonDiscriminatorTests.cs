@@ -22,7 +22,9 @@ public class JsonDiscriminatorTests
 		await Assert.That(refused.Message).Contains("TwinA.Twin");
 		await Assert.That(refused.Message).Contains("TwinB.Twin");
 		// The first owner keeps working, and the refused twin left nothing behind.
-		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions); // fresh: a cached options instance finalized its derived types before this model existed
+		// Its own resolver instance: STJ pools type-info caches between options that compare equal, and a cache built
+		// before this model registered (by any earlier test) would not know it. A plain copy shares that cache.
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(SampleModels.TwinA.Twin)) };
 		var json = JsonSerializer.Serialize<object>(new SampleModels.TwinA.Twin { Name = "a" }, options);
 		await Assert.That(json.Replace(" ", "")).Contains("\"_t\":\"Twin\"");
 		await Assert.That(SynqraJsonTypeInfoResolver.GetByDiscriminator("Twin")).IsEqualTo(typeof(SampleModels.TwinA.Twin));
