@@ -203,6 +203,28 @@ public class TestsStateManageementInMemory : TestsStateManagement
 	Guid TypeIdOf<T>() => _sut.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
 
 	[Test]
+	public async Task Should_35_setter_persists_BaseEventId_on_the_property_changed_event()
+	{
+		var model = new DemoModel();
+		_sut.GetCollection<DemoModel>().Add(model);
+		var targetId = _sut.GetId(model);
+		var before = _sut.GetLastEventId(targetId);
+
+		model.Name = "WithBase"; // generated setter reads LastEventId once and stamps it on the command
+
+		var ev = _fakeStorage.Items.OfType<Event>().Last(e => e is ObjectPropertyChangedEvent or ComponentPropertyChangedEvent);
+		var baseEventId = ev switch
+		{
+			ObjectPropertyChangedEvent o => o.BaseEventId,
+			ComponentPropertyChangedEvent c => c.BaseEventId,
+			_ => throw new InvalidOperationException(ev.GetType().Name),
+		};
+		// The base names the point in history the writer had applied — the persisted counterpart of the request-side precondition.
+		await Assert.That(baseEventId).IsEqualTo(before);
+		await Assert.That(baseEventId).IsNotEqualTo(ev.EventId);
+	}
+
+	[Test]
 	public async Task Should_40_AddComponent_attaches_to_container()
 	{
 		var node = new TestComponentNode { Name = "n1" };
@@ -801,7 +823,7 @@ public abstract class TestsStateManagement : BaseTest
 
 	JsonSerializerOptions _jsonSerializerOptions => ServiceProvider.GetRequiredService<JsonSerializerOptions>();
 	// ISynqraStoreContext _sut => ServiceProvider.GetRequiredService<ISynqraStoreContext>();
-	FakeAppendStorage _fakeStorage => (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>(); // ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
+	protected FakeAppendStorage _fakeStorage => (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>(); // ServiceProvider.GetService<FakeAppendStorage>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage<Event, Guid>>() ?? (FakeAppendStorage)ServiceProvider.GetService<IAppendStorage>();
 	ISynqraCollection<MyPocoTask> _tasks => _sut.GetCollection<MyPocoTask>();
 
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)

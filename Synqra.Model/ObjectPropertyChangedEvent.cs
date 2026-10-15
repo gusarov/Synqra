@@ -13,6 +13,7 @@ namespace Synqra;
 [Schema(2026.168, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2026.169, "1 EventId Guid CommandId Guid ContainerId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
 [Schema(2026.170, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.740, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid PropertyName string OldValue object? NewValue object? BaseEventId Guid")]
 public partial class ObjectPropertyChangedEvent : SingleObjectEvent
 {
 	public ObjectPropertyChangedEvent()
@@ -22,6 +23,9 @@ public partial class ObjectPropertyChangedEvent : SingleObjectEvent
 	public required partial string PropertyName { get; set; }
 	public partial object? OldValue { get; set; }
 	public partial object? NewValue { get; set; }
+
+	// Copied from the command: what the writer had applied when it wrote. Persisted so a later fold can tell a sequential write from a concurrent one.
+	public partial Guid BaseEventId { get; set; }
 
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx) => visitor.VisitAsync(this, ctx);
 }
