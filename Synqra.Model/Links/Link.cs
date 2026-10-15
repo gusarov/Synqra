@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace Synqra;
 
 /// <summary>
@@ -45,6 +46,7 @@ public abstract partial class Link : IIdentifiable<Guid>
 	/// endpoints in order (A→B ≠ B→A); <see cref="UndirectedLink{TSource, TTarget}"/> folds them
 	/// symmetrically ({A,B} == {B,A}).
 	/// </summary>
+	[JsonIgnore] // derived, and it carries a System.Type: not data, never on the wire
 	public abstract LinkKey StructuralKey { get; }
 
 	/// <summary>Resolve an endpoint id to its model object through the attached store, or null.</summary>

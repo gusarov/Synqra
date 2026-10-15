@@ -15,6 +15,19 @@ namespace Synqra.Tests;
 public class JsonSerializationTests
 {
 	[Test]
+	public async Task Should_serialize_a_link_without_its_structural_key()
+	{
+		// StructuralKey is derived and carries a System.Type; the REST events feed serializes stored links.
+		var link = new HierarchyLink { LinkId = Guid.NewGuid(), SourceId = Guid.NewGuid(), TargetId = Guid.NewGuid() };
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(HierarchyLink)) };
+
+		var json = JsonSerializer.Serialize<object>(link, options);
+
+		await Assert.That(json).DoesNotContain("StructuralKey");
+		await Assert.That(json.Replace(" ", "")).Contains("\"_t\":\"HierarchyLink\"");
+	}
+
+	[Test]
 	public async Task Should_05_serialize()
 	{
 #if NET8_0_OR_GREATER
@@ -300,4 +313,3 @@ public record Person(string Name, int Age, int Height)
 	public string Name { get; set; } = Name;
 	public int Age { get; init; } = Age;
 }
-

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace Synqra;
 
 /// <summary>
@@ -10,5 +11,6 @@ public abstract class UndirectedLink<TSource, TTarget> : Link<TSource, TTarget>
 	where TSource : class
 	where TTarget : class
 {
+	[JsonIgnore]
 	public override LinkKey StructuralKey => LinkKey.Undirected(GetType(), SourceId, TargetId);
 }
