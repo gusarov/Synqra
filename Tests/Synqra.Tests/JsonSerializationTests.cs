@@ -15,6 +15,21 @@ namespace Synqra.Tests;
 public class JsonSerializationTests
 {
 	[Test]
+	public async Task Should_serialize_a_generated_container_without_its_components()
+	{
+		// A root's facets are their own events; the generated Components collection is live state, not data.
+		var node = new TestGeneratedContainerNode { Name = "root" };
+		node.Components.Add(new TestUniqueComponent { Subject = "facet" });
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(TestGeneratedContainerNode)) };
+
+		var json = JsonSerializer.Serialize<object>(node, options);
+
+		await Assert.That(json).DoesNotContain("Components");
+		await Assert.That(json).DoesNotContain("facet");
+		await Assert.That(json.Replace(" ", "")).Contains("\"Name\":\"root\"");
+	}
+
+	[Test]
 	public async Task Should_serialize_a_link_without_its_structural_key()
 	{
 		// StructuralKey is derived and carries a System.Type; the REST events feed serializes stored links.

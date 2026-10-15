@@ -415,6 +415,8 @@ public class ModelBindingGenerator : IIncrementalGenerator
 	// reaches the inner data via TryAdd / BypassRemove and stays command-free.
 	private global::Synqra.StoreBoundComponentsCollection? __components;
 
+	// Not data: a root's facets are their own events (and Mongo documents); a consumer that wants them in JSON exposes a snapshot.
+	[global::System.Text.Json.Serialization.JsonIgnore]
 	public global::Synqra.IComponentsCollection Components => EnsureComponentsWrapper();
 
 	global::Synqra.StoreBoundComponentsCollection EnsureComponentsWrapper()
