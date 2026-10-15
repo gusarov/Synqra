@@ -264,12 +264,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			// get new events from storage and send them to server
 			// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
-			// page), so one enumerator kept across triggers sent nothing after the first drain. `from` is inclusive.
+			// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
+			// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
 			var sent = _eventReplicationState.LastEventIdFromMe;
-			await foreach (var ev in _storage.GetAllAsync(from: sent, _cts.Token))
+			var reached = sent == default;
+			await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
 			{
-				if (ev.EventId == sent)
+				if (!reached)
 				{
+					reached = ev.EventId == sent;
 					continue;
 				}
 				// Single-stream connection: skip events belonging to any other stream that shares this
