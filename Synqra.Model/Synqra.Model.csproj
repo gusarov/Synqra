@@ -18,6 +18,7 @@
     <InternalsVisibleTo Include="Synqra.Tests" />
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
     <InternalsVisibleTo Include="Synqra.Projection.InMemory" />
+    <InternalsVisibleTo Include="Synqra.Projection.MongoDb" />
     <PackageReference Include="System.Text.Json" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
   </ItemGroup>
