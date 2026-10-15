@@ -16,3 +16,5 @@ It is also critically important to understand that SBX is general purpose, so ev
 
 **Types without a Map entry (Level 3)**
 Any type with no `Map(...)` entry - a plain POCO or a `[SynqraModel]` nobody mapped - is written by name and fields: type id `0`, then `"Namespace.Type, Assembly"` (no version, so an assembly upgrade still resolves), then `name value` pairs closed by an empty name. The name is written only where a type id is: when the requested type is sealed the reader already knows it, so neither id nor name is written. List headers follow the same rule for their collection/element types. Mapping a type later only makes it smaller; the by-name form keeps reading. In DEBUG this path is a test protection: a type outside the allowlist in SBXSerializer throws "quaranteened" until it is approved there.
+
+Under trimming/NativeAOT a by-name type must keep its constructor and properties: `[SynqraModel]` classes are annotated by the model generator, which also emits `[DynamicDependency]` on `SetCore` for every concrete class a model property refers to (e.g. `IList<BatchExpectation>`). A POCO reached any other way has to be rooted by hand.
