@@ -152,6 +152,19 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default)
 		=> _gate.RunAsync(() => ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay })); // replicated and replayed events serialize with submits
 
+	/// <summary>
+	/// The whole catch-up is one write: the cursor is read and the log enumerated under the gate, so a
+	/// command landing meanwhile waits instead of being applied once by itself and once more from the log.
+	/// </summary>
+	public Task CatchUpAsync(IEventLog log, Guid? till = null, bool isReplay = false, CancellationToken cancellationToken = default)
+		=> _gate.RunAsync(async () =>
+		{
+			await foreach (var ev in log.ReadFrom(afterEventId: Cursor, till: till, cancellationToken))
+			{
+				await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
+			}
+		});
+
 
 	internal AttachedObjectData Attach(object model, StoreCollection collection)
 	{

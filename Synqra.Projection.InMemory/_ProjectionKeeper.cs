@@ -218,10 +218,6 @@ public sealed class ProjectionKeeper : IProjectionKeeper
 		, CancellationToken cancellationToken = default
 		)
 	{
-		var log = _logProvider.GetEventLog(projection.StreamId);
-		await foreach (var ev in log.ReadFrom(afterEventId: projection.Cursor, till: till, cancellationToken))
-		{
-			await projection.ApplyAsync(ev, isReplay, cancellationToken);
-		}
+		await projection.CatchUpAsync(_logProvider.GetEventLog(projection.StreamId), till, isReplay, cancellationToken);
 	}
 }
