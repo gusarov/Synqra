@@ -333,13 +333,18 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	public void Trigger(Command command, IReadOnlyList<Event> events)
 	{
-		try
+		// Already signaled is the common case (one trigger per command); a thrown-and-caught exception for each
+		// is costly on the browser, so the signal is checked first and the catch covers only a concurrent race.
+		if (_autoResetEvent.CurrentCount == 0)
 		{
-			_autoResetEvent.Release();
-		}
-		catch (SemaphoreFullException)
-		{
-			// already signaled - concurrent triggers coalesce into one loop iteration
+			try
+			{
+				_autoResetEvent.Release();
+			}
+			catch (SemaphoreFullException)
+			{
+				// a concurrent trigger signaled first; the loop runs once for both
+			}
 		}
 	}
 
