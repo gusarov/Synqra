@@ -17,8 +17,8 @@ public abstract class Link<TSource, TTarget> : Link
 	where TSource : class
 	where TTarget : class
 {
-	public override System.Type SourceType => typeof(TSource);
-	public override System.Type TargetType => typeof(TTarget);
+	internal override System.Type SourceType => typeof(TSource);
+	internal override System.Type TargetType => typeof(TTarget);
 
 	/// <summary>The object at the link's source end, resolved through the store. Setting it records the source identity.</summary>
 	[JsonIgnore]

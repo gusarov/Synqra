@@ -20,7 +20,7 @@ public class JsonSerializationTests
 		// A root's facets are their own events; the generated Components collection is live state, not data.
 		var node = new TestGeneratedContainerNode { Name = "root" };
 		node.Components.Add(new TestUniqueComponent { Subject = "facet" });
-		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(TestGeneratedContainerNode)) };
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(TestGeneratedContainerNode)), IgnoreReadOnlyProperties = false };
 
 		var json = JsonSerializer.Serialize<object>(node, options);
 
@@ -34,11 +34,14 @@ public class JsonSerializationTests
 	{
 		// StructuralKey is derived and carries a System.Type; the REST events feed serializes stored links.
 		var link = new HierarchyLink { LinkId = Guid.NewGuid(), SourceId = Guid.NewGuid(), TargetId = Guid.NewGuid() };
-		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(HierarchyLink)) };
+		// Read-only properties included: the sample options ignore them, a consumer's (Quotaly's Scene) do not.
+		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(HierarchyLink)), IgnoreReadOnlyProperties = false };
 
 		var json = JsonSerializer.Serialize<object>(link, options);
 
 		await Assert.That(json).DoesNotContain("StructuralKey");
+		await Assert.That(json).DoesNotContain("SourceType");
+		await Assert.That(json).DoesNotContain("TargetType");
 		await Assert.That(json.Replace(" ", "")).Contains("\"_t\":\"HierarchyLink\"");
 	}
 

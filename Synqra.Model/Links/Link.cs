@@ -36,10 +36,10 @@ public abstract partial class Link : IIdentifiable<Guid>
 	Guid IIdentifiable<Guid>.Id => LinkId;
 
 	/// <summary>Declared type of the source endpoint.</summary>
-	public abstract System.Type SourceType { get; }
+	internal abstract System.Type SourceType { get; } // a System.Type is not data: never on the wire
 
 	/// <summary>Declared type of the target endpoint.</summary>
-	public abstract System.Type TargetType { get; }
+	internal abstract System.Type TargetType { get; }
 
 	/// <summary>
 	/// Identity-independent dedup/upsert key. <see cref="DirectedLink{TSource, TTarget}"/> folds the
