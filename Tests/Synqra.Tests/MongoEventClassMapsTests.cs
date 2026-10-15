@@ -171,6 +171,31 @@ public class MongoEventClassMapsTests
 		await Assert.That(doc["_id"].AsGuid).IsEqualTo(ev.EventId);
 	}
 
+	[Test]
+	public async Task Should_read_a_model_inside_a_stored_command_that_this_process_never_serialized()
+	{
+		// Registered with Synqra (as every model is at type load), never handed to the driver: the cold read.
+		SynqraJsonTypeInfoResolver.RegisterGeneratedModel(typeof(TestColdComponent));
+		var doc = new BsonDocument
+		{
+			["_t"] = "CommandCreatedEvent",
+			["_id"] = new BsonBinaryData(new Guid("C0DE0000-0000-8000-AE0E-0000000000D0"), GuidRepresentation.Standard),
+			["CommandId"] = new BsonBinaryData(new Guid("C0DE0000-0000-8000-AC01-0000000000D1"), GuidRepresentation.Standard),
+			["Data"] = new BsonDocument
+			{
+				["_t"] = "AddComponentCommand",
+				["CommandId"] = new BsonBinaryData(new Guid("C0DE0000-0000-8000-AC01-0000000000D1"), GuidRepresentation.Standard),
+				["Data"] = new BsonDocument { ["_t"] = "TestColdComponent", ["Subject"] = "cold" },
+			},
+		};
+
+		var back = (CommandCreatedEvent)BsonSerializer.Deserialize<Event>(doc);
+
+		var component = ((AddComponentCommand)back.Data).Data as TestColdComponent;
+		await Assert.That(component).IsNotNull();
+		await Assert.That(component!.Subject).IsEqualTo("cold");
+	}
+
 	/// <summary>
 	/// The driver learns a discriminator when it first serializes a type. A process that only reads the log
 	/// (a REST host after a redeploy) never does, so every event and every command (they ride inside
