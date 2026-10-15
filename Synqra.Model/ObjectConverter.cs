@@ -276,9 +276,18 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 		{
 			lock (_bindableModels)
 			{
-				_bindableModels.Add(type);
+				if (!_bindableModels.Contains(type))
+				{
+					// The discriminator is the simple name and the registry is process-wide (JSON, Mongo and SBX all read it):
+					// a second model with the same name would make every stored `_t` ambiguous, so it is refused at type load.
+					if (_descriminators.TryGetValue(type.Name, out var owner) && owner != type)
+					{
+						throw new SynqraJsonException($"Model {type.FullName} cannot register: {owner.FullName} already owns the discriminator '{type.Name}'. Model names must be unique across the process.");
+					}
+					_bindableModels.Add(type);
+					_descriminators[type.Name] = type;
+				}
 			}
-			_descriminators[type.Name] = type;
 		}
 	}
 
