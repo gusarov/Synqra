@@ -689,7 +689,7 @@ $$"""
 				On{{pro.Identifier}}Changing(value);
 				On{{pro.Identifier}}Changing(oldValue, value);
 				EmergencyLog.Default.Debug($"SBX {GetType().Name} PropertyChanging: {nameof({{pro.Identifier}})} from {oldValue} to {value} " + new StackTrace());
-				var task = __store.SubmitCommandAsync(new {{commandTypeName}}
+				__store.SubmitCommand(new {{commandTypeName}}
 				{
 					CollectionId = {{collectionIdExpr}},
 
@@ -701,10 +701,6 @@ $$"""
 					OldValue = oldValue,
 					NewValue = value{{componentExtraFields}}
 				}{{submissionOptionsArg}});
-				if (!OperatingSystem.IsBrowser())
-				{
-					task.GetAwaiter().GetResult();
-				}
 			}
 		}
 	}

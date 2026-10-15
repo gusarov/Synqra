@@ -72,10 +72,14 @@ public static class SynqraPocoTrackingExtensions
 
 		public void Dispose()
 		{
-			var disposeAsync = DisposeAsync();
-			if (!OperatingSystem.IsBrowser())
+			if (OperatingSystem.IsBrowser())
 			{
-				disposeAsync.GetAwaiter().GetResult();
+				_ = DisposeAsync(); // nothing can block here
+			}
+			else
+			{
+				using var _ = new NoSynchronizationContext();
+				DisposeAsync().GetAwaiter().GetResult();
 			}
 		}
 

@@ -537,7 +537,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	// [UnsupportedOSPlatform("browser")]
 	public void SubmitCommand(Command newCommand)
 	{
-		_gate.Run(() => ProcessCommandAsync(newCommand).GetAwaiter().GetResult());
+		_gate.Run(() =>
+		{
+			using var _ = new NoSynchronizationContext();
+			ProcessCommandAsync(newCommand).GetAwaiter().GetResult();
+		});
 	}
 
 	/// <summary>

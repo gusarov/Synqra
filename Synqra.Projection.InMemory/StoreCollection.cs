@@ -145,7 +145,7 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 		var typeId = _store.TypeMetadataProvider.GetTypeMetadata(typeof(T)).TypeId;
 		// Phase 2 (ECS): GetCollection<T>().Add always creates an ENTITY — a self-owned root component
 		// (ComponentId == TargetId == entity id, _id == _eid == entityId). No object-vs-component branch.
-		var task = Store.SubmitCommandAsync(new AddComponentCommand
+		Store.SubmitCommand(new AddComponentCommand
 		{
 			StreamId = StreamId,
 			CollectionId = CollectionId,
@@ -156,14 +156,6 @@ internal class InMemoryStoreCollection<[DynamicallyAccessedMembers(DynamicallyAc
 			ComponentId = attachedData.Id,
 			Data = item,
 		});
-		if (OperatingSystem.IsBrowser())
-		{
-			AsyncInvoker.InvokeAsync(task);
-		}
-		else
-		{
-			task.GetAwaiter().GetResult();
-		}
 		var n = _items.Count;
 		return n == o ? n + 1 : n; // if it is not changed, then it will be next index, if updated, then new count is actual index
 	}
