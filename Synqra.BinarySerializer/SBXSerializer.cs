@@ -471,15 +471,27 @@ public class SbxSerializer : ISbxSerializer
 						);
 					if (SpecList != null)
 					{
-						SerializeType(buffer, ref pos, SpecList);
+						SerializeType(buffer, ref pos, SpecList
+#if DEBUG
+							, $"SpecList"
+#endif
+							);
 					}
 					if (ListTSpecified != null)
 					{
-						SerializeType(buffer, ref pos, ListTSpecified);
+						SerializeType(buffer, ref pos, ListTSpecified
+#if DEBUG
+							, $"ListTSpecified"
+#endif
+							);
 					}
 					if (SharedElementType != null)
 					{
-						SerializeType(buffer, ref pos, SharedElementType);
+						SerializeType(buffer, ref pos, SharedElementType
+#if DEBUG
+							, $"SharedElementType"
+#endif
+							);
 					}
 				}
 				else
@@ -1372,6 +1384,15 @@ public class SbxSerializer : ISbxSerializer
 			SerializeTypeName(buffer, ref pos, type);
 		}
 	}
+
+#if DEBUG
+	private void SerializeType(in Span<byte> buffer, ref int pos, Type type, string tokenDebugData)
+	{
+		var start = pos;
+		SerializeType(buffer, ref pos, type);
+		Tokens.Add((start, pos, tokenDebugData));
+	}
+#endif
 
 	private Type DeserializeType(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
