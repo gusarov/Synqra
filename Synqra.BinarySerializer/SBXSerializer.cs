@@ -471,27 +471,15 @@ public class SbxSerializer : ISbxSerializer
 						);
 					if (SpecList != null)
 					{
-						Serialize(in buffer, ref pos, (int)SpecList.Value
-#if DEBUG
-							, $"SpecList"
-#endif
-							);
+						SerializeType(buffer, ref pos, SpecList);
 					}
 					if (ListTSpecified != null)
 					{
-						Serialize(in buffer, ref pos, (int)ListTSpecified.Value
-#if DEBUG
-							, $"ListTSpecified"
-#endif
-							);
+						SerializeType(buffer, ref pos, ListTSpecified);
 					}
 					if (SharedElementType != null)
 					{
-						Serialize(in buffer, ref pos, (int)SharedElementType.Value
-#if DEBUG
-							, $"SharedElementType"
-#endif
-							);
+						SerializeType(buffer, ref pos, SharedElementType);
 					}
 				}
 				else
@@ -502,12 +490,9 @@ public class SbxSerializer : ISbxSerializer
 #endif
 						);
 				}
-				if (typeId == 0)
+				if (typeId == TypeId.Unknown)
 				{
-					var aqn = actualType.AssemblyQualifiedName;
-					aqn = aqn[0..aqn.IndexOf(',', aqn.IndexOf(',') + 1)]; // trim assembly part
-
-					Serialize(buffer, ref pos, aqn ?? throw new NotSupportedException());
+					SerializeTypeName(buffer, ref pos, actualType!);
 				}
 			}
 			else if (obj == null)
@@ -542,17 +527,10 @@ public class SbxSerializer : ISbxSerializer
 			throw new NotSupportedException("Need to track capability of a type to encode null state inside value. You likely hitting generic overload of Serialize instead of some specific type capable to encode nullability.");
 		}
 
-		if (obj is IBindableModel bm)
+		if (obj is IBindableModel bm && _idByType.TryGetValue(actualType!, out var typeInfo1))
 		{
-			if (_idByType.TryGetValue(actualType, out var typeInfo1))
-			{
-				EmergencyLog.Default.Debug($"SBX Serializing {actualType.FullName} with schema version {typeInfo1.schemaVersion}");
-				bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
-			}
-			else
-			{
-				throw new Exception($"BindableModel {obj.GetType().Name} type id is not registered");
-			}
+			EmergencyLog.Default.Debug($"SBX Serializing {actualType!.FullName} with schema version {typeInfo1.schemaVersion}");
+			bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
 		}
 		else if (obj is null)
 		{
@@ -629,23 +607,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else
 		{
-			// Only generated bindable models are supported for Level 1 & 2 serialization. All other types are Level 3 (field names).
-
-#if DEBUG
-			var name = actualType.FullName;
-			if (name != "Synqra.Tests.BinarySerialization.SampleTestDataPoco"
-				&& name != "xx"
-				&& name != "xx"
-				&& name?.StartsWith("Synqra.Tests") == false
-				// && name?.StartsWith("Contoso.Model") == false
-				&& name?.Contains("Sample") == false
-				&& name?.EndsWith("Poco") == false
-				)
-			{
-				throw new Exception($"Type {actualType.FullName} is quaranteened for serialization in DEBUG. If you really want POCO serialization for it, please approve by whitelisting.");
-			}
-#endif
-
+			// Level 3 (field names): any type without a Map entry, POCO or [SynqraModel]; see readme.
 			var props = actualType.GetProperties();
 			foreach (var item in props)
 			{
@@ -751,14 +713,12 @@ public class SbxSerializer : ISbxSerializer
 			Type collectionType = requestedType;
 			if (specList)
 			{
-				var specListTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
-				collectionType = GetTypeFromId(specListTypeId) ?? throw new Exception();
+				collectionType = DeserializeType(buffer, ref pos);
 			}
 			Type? elementType = null;
 			if (specT)
 			{
-				var specTTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
-				elementType = GetTypeFromId(specTTypeId) ?? throw new Exception();
+				elementType = DeserializeType(buffer, ref pos);
 				if (!specList && !collectionType.IsAssignableTo(typeof(IEnumerable)))
 				{
 					collectionType = typeof(List<>).MakeGenericType(elementType);
@@ -767,8 +727,7 @@ public class SbxSerializer : ISbxSerializer
 			Type? sharedElementType = null;
 			if (listElementType == ListItemTypeId.Specified)
 			{
-				var sharedElementTypeId = (TypeId)DeserializeSigned(buffer, ref pos);
-				sharedElementType = GetTypeFromId(sharedElementTypeId) ?? throw new Exception();
+				sharedElementType = DeserializeType(buffer, ref pos);
 			}
 			return DeserializeList(
 				  in buffer
@@ -785,12 +744,12 @@ public class SbxSerializer : ISbxSerializer
 		Type type = requestedType;
 		object value;
 		float schemaVersion = 0;
-		if (typeId == 0)
+		if (typeId == TypeId.Unknown && consumeTypeId == true)
 		{
-			type = Type.GetType(DeserializeString(in buffer, ref pos), true);
+			type = DeserializeTypeName(buffer, ref pos);
 			schemaVersion = default;
 		}
-		else if (typeId == TypeId.AsRequested)
+		else if (typeId == TypeId.AsRequested || typeId == TypeId.Unknown) // an Unknown id not read from the stream is the requested type itself
 		{
 			type = requestedType;
 			_idByType.TryGetValue(type, out var typeInfo);
@@ -927,29 +886,27 @@ public class SbxSerializer : ISbxSerializer
 			}
 			*/
 			var propValue = Deserialize(in buffer, ref pos);
-			// Set the property value using reflection
+			var prop = type.GetProperty(propName);
+			if (prop != null && propValue != null && !prop.PropertyType.IsAssignableFrom(propValue.GetType()))
+			{
+				// integers arrive as long: narrow to the declared type before either setter sees them
+				var targetType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+				if (targetType.IsEnum && propValue is long l)
+				{
+					propValue = Enum.ToObject(targetType, l);
+				}
+				else
+				{
+					propValue = Convert.ChangeType(propValue, targetType);
+				}
+			}
 			if (value is IBindableModel bm)
 			{
 				bm.Set(propName, propValue);
 			}
-			else
+			else if (prop != null && prop.CanWrite)
 			{
-				var prop = type.GetProperty(propName);
-				if (prop != null && prop.CanWrite)
-				{
-					if (!prop.PropertyType.IsAssignableFrom(propValue.GetType()))
-					{
-						if (prop.PropertyType.IsEnum && propValue is long l)
-						{
-							propValue = Enum.ToObject(prop.PropertyType, l);
-						}
-						else
-						{
-							propValue = Convert.ChangeType(propValue, prop.PropertyType);
-						}
-					}
-					prop.SetValue(value, propValue);
-				}
+				prop.SetValue(value, propValue);
 			}
 		}
 
@@ -1184,7 +1141,7 @@ public class SbxSerializer : ISbxSerializer
 
 	#region Type
 
-	private (TypeId List, TypeId? SpecList, TypeId? ListTSpecified, TypeId? SharedElementType) GetTypeIdForList(Type type, object? obj = null)
+	private (TypeId List, Type? SpecList, Type? ListTSpecified, Type? SharedElementType) GetTypeIdForList(Type type, object? obj = null)
 	{
 		// Calculate requested type properly from static data before analyzing actual data
 		var rienum = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
@@ -1315,23 +1272,23 @@ public class SbxSerializer : ISbxSerializer
 			{
 				(false, false, ListItemTypeId.Empty) /*      */ => (/**/TypeId.List_R_E, /*               */null, /*             */null, null),
 				(false, false, ListItemTypeId.AsRequested) /**/ => (/**/TypeId.List_R_R, /*               */null, /*             */null, null),
-				(false, false, ListItemTypeId.Specified) /*  */ => (/**/TypeId.List_R_S, /*               */null, /*             */null, GetTypeId(monogenicType)),
+				(false, false, ListItemTypeId.Specified) /*  */ => (/**/TypeId.List_R_S, /*               */null, /*             */null, monogenicType),
 				(false, false, ListItemTypeId.Heterogen) /*  */ => (/**/TypeId.List_R_H, /*               */null, /*             */null, null),
 
-				(false, true, ListItemTypeId.Empty) /*       */ => (/**/TypeId.List_S_E, /*               */null, GetTypeId(specifiedT), null),
-				(false, true, ListItemTypeId.AsRequested) /* */ => (/**/TypeId.List_S_R, /*               */null, GetTypeId(specifiedT), null),
-				(false, true, ListItemTypeId.Specified) /*   */ => (/**/TypeId.List_S_S, /*               */null, GetTypeId(specifiedT), GetTypeId(monogenicType)),
-				(false, true, ListItemTypeId.Heterogen) /*   */ => (/**/TypeId.List_S_H, /*               */null, GetTypeId(specifiedT), null),
+				(false, true, ListItemTypeId.Empty) /*       */ => (/**/TypeId.List_S_E, /*               */null, specifiedT, null),
+				(false, true, ListItemTypeId.AsRequested) /* */ => (/**/TypeId.List_S_R, /*               */null, specifiedT, null),
+				(false, true, ListItemTypeId.Specified) /*   */ => (/**/TypeId.List_S_S, /*               */null, specifiedT, monogenicType),
+				(false, true, ListItemTypeId.Heterogen) /*   */ => (/**/TypeId.List_S_H, /*               */null, specifiedT, null),
 
-				(true, false, ListItemTypeId.Empty) /*       */ => (TypeId.SpecList_R_E, GetTypeId(specListType), /*             */null, null),
-				(true, false, ListItemTypeId.AsRequested) /* */ => (TypeId.SpecList_R_R, GetTypeId(specListType), /*             */null, null),
-				(true, false, ListItemTypeId.Specified) /*   */ => (TypeId.SpecList_R_S, GetTypeId(specListType), /*             */null, GetTypeId(monogenicType)),
-				(true, false, ListItemTypeId.Heterogen) /*   */ => (TypeId.SpecList_R_H, GetTypeId(specListType), /*             */null, null),
+				(true, false, ListItemTypeId.Empty) /*       */ => (TypeId.SpecList_R_E, specListType, /*             */null, null),
+				(true, false, ListItemTypeId.AsRequested) /* */ => (TypeId.SpecList_R_R, specListType, /*             */null, null),
+				(true, false, ListItemTypeId.Specified) /*   */ => (TypeId.SpecList_R_S, specListType, /*             */null, monogenicType),
+				(true, false, ListItemTypeId.Heterogen) /*   */ => (TypeId.SpecList_R_H, specListType, /*             */null, null),
 
-				(true, true, ListItemTypeId.Empty) /*        */ => (TypeId.SpecList_S_E, GetTypeId(specListType), GetTypeId(specifiedT), null),
-				(true, true, ListItemTypeId.AsRequested) /*  */ => (TypeId.SpecList_S_R, GetTypeId(specListType), GetTypeId(specifiedT), null),
-				(true, true, ListItemTypeId.Specified) /*    */ => (TypeId.SpecList_S_S, GetTypeId(specListType), GetTypeId(specifiedT), GetTypeId(monogenicType)),
-				(true, true, ListItemTypeId.Heterogen) /*    */ => (TypeId.SpecList_S_H, GetTypeId(specListType), GetTypeId(specifiedT), null),
+				(true, true, ListItemTypeId.Empty) /*        */ => (TypeId.SpecList_S_E, specListType, specifiedT, null),
+				(true, true, ListItemTypeId.AsRequested) /*  */ => (TypeId.SpecList_S_R, specListType, specifiedT, null),
+				(true, true, ListItemTypeId.Specified) /*    */ => (TypeId.SpecList_S_S, specListType, specifiedT, monogenicType),
+				(true, true, ListItemTypeId.Heterogen) /*    */ => (TypeId.SpecList_S_H, specListType, specifiedT, null),
 
 				(_, _, _) => throw new Exception($"Unknown ListItemTypeId {listItemTypeId}"),
 			};
@@ -1397,28 +1354,50 @@ public class SbxSerializer : ISbxSerializer
 
 	public void Serialize(in Span<byte> buffer, ref int pos, Type type)
 	{
-		var typeId = GetTypeId(type);
-		Serialize(buffer, ref pos, typeId);
-		if (typeId == TypeId.Unknown)
-		{
-			var typeName = type.FullName ?? throw new Exception("Type has no full name: " + type.Name);
-			Serialize(buffer, ref pos, typeName);
-		}
+		SerializeType(buffer, ref pos, type);
 	}
 
 	public Type Deserialize(in Span<byte> buffer, ref int pos)
 	{
-		var typeId = (TypeId)DeserializeSigned(buffer, ref pos);
+		return DeserializeType(buffer, ref pos);
+	}
 
+	// A type reference: the type id, then the type name when the id is Unknown (0).
+	private void SerializeType(in Span<byte> buffer, ref int pos, Type type)
+	{
+		var typeId = GetTypeId(type);
+		Serialize(in buffer, ref pos, (long)typeId);
 		if (typeId == TypeId.Unknown)
 		{
-			var typeName = DeserializeString(buffer, ref pos);
-			return Type.GetType(typeName, true);
+			SerializeTypeName(buffer, ref pos, type);
+		}
+	}
+
+	private Type DeserializeType(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var typeId = (TypeId)DeserializeSigned(buffer, ref pos);
+		Type type;
+		if (typeId == TypeId.Unknown)
+		{
+			type = DeserializeTypeName(buffer, ref pos);
 		}
 		else
 		{
-			return GetTypeFromId(typeId);
+			type = GetTypeFromId(typeId);
 		}
+		return type;
+	}
+
+	// "Namespace.Type, Assembly": no version, culture or key, so an assembly upgrade still resolves.
+	private void SerializeTypeName(in Span<byte> buffer, ref int pos, Type type)
+	{
+		var fullName = type.FullName ?? throw new NotSupportedException($"SBX can not name type {type}");
+		Serialize(in buffer, ref pos, $"{fullName}, {type.Assembly.GetName().Name}");
+	}
+
+	private Type DeserializeTypeName(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		return Type.GetType(DeserializeString(in buffer, ref pos), throwOnError: true)!;
 	}
 
 	#endregion
