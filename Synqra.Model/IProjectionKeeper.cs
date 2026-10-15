@@ -30,11 +30,17 @@ public interface IReplayProjection : IObjectStore, IProjection
     Guid Cursor { get; }
 
     /// <summary>
-    /// Apply one event to this projection, advancing <see cref="Cursor"/> to the event's id. The
-    /// <see cref="IProjectionKeeper"/> is the only caller during catch-up. <paramref name="isReplay"/>
-    /// suppresses one-shot activator side effects for historical events.
+    /// Apply one event that arrived from elsewhere (a socket), advancing <see cref="Cursor"/> to its id.
+    /// <paramref name="isReplay"/> suppresses one-shot activator side effects for historical events.
     /// </summary>
     Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fold in this stream's events after <see cref="Cursor"/> from <paramref name="log"/>, as one write of
+    /// this projection: a command submitted meanwhile waits for it, so an event the projection applied itself
+    /// is never applied again from the log. The <see cref="IProjectionKeeper"/> calls this.
+    /// </summary>
+    Task CatchUpAsync(IEventLog log, Guid? till = null, bool isReplay = false, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
