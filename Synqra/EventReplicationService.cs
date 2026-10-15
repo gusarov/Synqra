@@ -254,8 +254,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		#endregion
 
-		var myEnumerable = _storage.GetAllAsync(from: _eventReplicationState.LastEventIdFromMe);
-		await using var myEnumerator = myEnumerable.GetAsyncEnumerator(_cts.Token);
 		while (true)
 		{
 			await _autoResetEvent.WaitAsync();
@@ -265,9 +263,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				break;
 			}
 			// get new events from storage and send them to server
-			while (await myEnumerator.MoveNextAsync())
+			// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
+			// page), so one enumerator kept across triggers sent nothing after the first drain. `from` is inclusive.
+			var sent = _eventReplicationState.LastEventIdFromMe;
+			await foreach (var ev in _storage.GetAllAsync(from: sent, _cts.Token))
 			{
-				var ev = myEnumerator.Current;
+				if (ev.EventId == sent)
+				{
+					continue;
+				}
 				// Single-stream connection: skip events belonging to any other stream that shares this
 				// local multitenant store (e.g. the primary stream's events when this connection only
 				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
