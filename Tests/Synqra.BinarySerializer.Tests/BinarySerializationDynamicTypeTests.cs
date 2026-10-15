@@ -1,4 +1,4 @@
-using Synqra.BinarySerializer.Tests.Dynamic;
+using Synqra.Tests.BinarySerialization.Dynamic;
 
 namespace Synqra.BinarySerializer.Tests;
 
@@ -156,4 +156,24 @@ public class BinarySerializationDynamicTypeTests : SbxBaseTest
 		await Assert.That(batch.Expectations[0].TargetTypeId).IsEqualTo(expectation.TargetTypeId);
 		await Assert.That(batch.Expectations[0].ExpectedLastEventId).IsEqualTo(expectation.ExpectedLastEventId);
 	}
+#if DEBUG
+	// Outside the DEBUG allowlist: the test protection must still refuse it.
+	public sealed class UnapprovedType
+	{
+		public Guid Id { get; set; }
+	}
+
+	[Test]
+	public async Task Should_40_refuse_unapproved_type_in_debug()
+	{
+		var ser = new SbxSerializer();
+		var ex = await Assert.ThrowsAsync(async () =>
+		{
+			var pos = 0;
+			ser.Serialize<object>(_buffer, ref pos, new UnapprovedType { Id = Guid.NewGuid() });
+			await Task.CompletedTask;
+		});
+		await Assert.That(ex!.Message).Contains("quaranteened");
+	}
+#endif
 }
