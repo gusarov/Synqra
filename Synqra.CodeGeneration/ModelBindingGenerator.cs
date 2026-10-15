@@ -268,6 +268,48 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			bool isSealed = classData.Data.IsSealed;
 			var virtualKeyword = isSealed ? "" : " virtual";
 
+			// SBX can read a property's value back by type name only; root those types for trimming/AOT (see Synqra.BinarySerializer/readme.md).
+			string RootPropertyTypes(IEnumerable<IPropertySymbol> properties)
+			{
+				var roots = new StringBuilder();
+				var seen = new HashSet<string>();
+				void Visit(ITypeSymbol type)
+				{
+					if (type is IArrayTypeSymbol array)
+					{
+						Visit(array.ElementType);
+					}
+					else if (type is INamedTypeSymbol named)
+					{
+						foreach (var argument in named.TypeArguments)
+						{
+							Visit(argument);
+						}
+						var ns = named.ContainingNamespace?.ToDisplayString() ?? "";
+						if (named.TypeKind == TypeKind.Class
+							&& !named.IsAbstract
+							&& !named.IsStatic
+							&& named.SpecialType == SpecialType.None
+							&& ns != "System" && !ns.StartsWith("System.")
+							&& named.DeclaredAccessibility == Accessibility.Public
+							&& seen.Add(FQN(named)))
+						{
+							roots.AppendLine($"\t[global::System.Diagnostics.CodeAnalysis.DynamicDependency(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties, typeof({FQN(named)}))]");
+						}
+					}
+				}
+				foreach (var property in properties)
+				{
+					Visit(property.Type);
+				}
+				var result = "";
+				if (roots.Length > 0)
+				{
+					result = "#if NET7_0_OR_GREATER\n" + roots + "#endif\n";
+				}
+				return result;
+			}
+
 			var body = new StringBuilder();
 			body.AppendLine("#nullable enable");
 			HashSet<string> usingsSet = new HashSet<string>();
@@ -312,7 +354,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 				.Any(p => classData.Data.GetMembers(p.Identifier.Text).OfType<IPropertySymbol>().FirstOrDefault() is { } ps && TryGetLinkNav(ps, classData.LinkSymbols) is not null);
 			var linkAwareIface = hasLinkNav ? (isPlainObjectBase ? ", global::Synqra.ILinkAware" : " : global::Synqra.ILinkAware") : "";
 			body.AppendLine("#if NET7_0_OR_GREATER");
-			body.AppendLine("[global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)]");
+			body.AppendLine("[global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties | global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]");
 			body.AppendLine("#endif");
 			body.AppendLine($"{clazz.Modifiers} class {clazz.Identifier}{(isPlainObjectBase ? ifaces : null)}{linkAwareIface}");
 			body.AppendLine("{");
@@ -440,7 +482,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 		}
 	}
 
-	protected{{virtualKeyword}} void SetCore(string name, object? value)
+{{RootPropertyTypes(GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null && TryGetLinkNav(p, classData.LinkSymbols) is null))}}	protected{{virtualKeyword}} void SetCore(string name, object? value)
 	{
 		switch (name)
 		{
@@ -482,7 +524,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			else
 			{
 				body.AppendLine($$"""
-	protected override void SetCore(string name, object? value)
+{{RootPropertyTypes(GetAllInstancePropertiesOfType(classData.Data).Where(p => TryGetLinkNav(p, classData.LinkSymbols) is null))}}	protected override void SetCore(string name, object? value)
 	{
 		switch (name)
 		{
