@@ -13,3 +13,6 @@ A schema refactoring is only needed to be able to read old streams and accept pr
 It should be safe to amend existing schema versions as long as it does not break compatibility. For example, adding a new nullable field is safe, you can do that by adding "fieldName string?" at the end of the schema
 
 It is also critically important to understand that SBX is general purpose, so even if there is no new schema attribute or it has to talk to other party on older schema, it should be able to do so. Any unknown fields are added as named fields (by key string, not by key id, like properties in json), this way the data is always preserved, just probably not in the most efficient way yet.
+
+**Types without a Map entry (Level 3)**
+Any type with no `Map(...)` entry - a plain POCO or a `[SynqraModel]` nobody mapped - is written by name and fields: type id `0`, then `"Namespace.Type, Assembly"` (no version, so an assembly upgrade still resolves), then `name value` pairs closed by an empty name. The name is written only where a type id is: when the requested type is sealed the reader already knows it, so neither id nor name is written. List headers follow the same rule for their collection/element types. Mapping a type later only makes it smaller; the by-name form keeps reading.
