@@ -227,7 +227,35 @@ public static class MongoEventClassMaps
 	/// <c>MongoProjection.ToDocument</c> — since that path has no class-map member to scope a
 	/// convention to, and the driver's own ambient default rejects any type it doesn't recognize.
 	/// </summary>
-	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(static _ => true);
+	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(new SynqraDiscriminatorConvention(), static _ => true);
+
+	/// <summary>
+	/// Resolves an object-typed member's <c>_t</c> through Synqra's own model registry first (the one JSON and
+	/// <c>MongoProjection.FromDocument</c> read), then the driver's. The driver only learns a discriminator when it
+	/// serializes the type, so a process that only reads (a REST host after a redeploy) never knew the models
+	/// inside a stored command or event; Synqra's registry knows every model from type load.
+	/// </summary>
+	sealed class SynqraDiscriminatorConvention : IDiscriminatorConvention
+	{
+		readonly IDiscriminatorConvention _driver = StandardDiscriminatorConvention.Scalar;
+
+		public string ElementName => _driver.ElementName;
+
+		public BsonValue GetDiscriminator(Type nominalType, Type actualType) => _driver.GetDiscriminator(nominalType, actualType);
+
+		public Type GetActualType(IBsonReader bsonReader, Type nominalType)
+		{
+			Type? known = null;
+			var bookmark = bsonReader.GetBookmark();
+			bsonReader.ReadStartDocument();
+			if (bsonReader.FindElement(ElementName) && bsonReader.GetCurrentBsonType() == BsonType.String)
+			{
+				known = SynqraJsonTypeInfoResolver.GetByDiscriminator(bsonReader.ReadString());
+			}
+			bsonReader.ReturnToBookmark(bookmark);
+			return known ?? _driver.GetActualType(bsonReader, nominalType);
+		}
+	}
 
 	/// <summary>Shared, member-scoped <see cref="GuidRepresentation.Standard"/> serializer — see <see cref="RegisterSynqraConventions"/>.</summary>
 	static readonly IBsonSerializer ScopedStandardGuidSerializer = new GuidSerializer(GuidRepresentation.Standard);
