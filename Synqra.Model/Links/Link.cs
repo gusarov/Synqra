@@ -47,7 +47,7 @@ public abstract partial class Link : IIdentifiable<Guid>
 	/// symmetrically ({A,B} == {B,A}).
 	/// </summary>
 	[JsonIgnore] // derived, and it carries a System.Type: not data, never on the wire
-	public abstract LinkKey StructuralKey { get; }
+	internal abstract LinkKey StructuralKey { get; } // derived, carries a System.Type: an index key, not data, never on the wire
 
 	/// <summary>Resolve an endpoint id to its model object through the attached store, or null.</summary>
 	protected object? ResolveEndpoint(Guid id)
