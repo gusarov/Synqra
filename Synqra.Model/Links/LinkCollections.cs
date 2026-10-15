@@ -197,7 +197,7 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 		{
 			link.LinkId = store.IdProvider.CreateLinkId();
 		}
-		var task = store.SubmitCommandAsync(new AddLinkCommand
+		store.SubmitCommand(new AddLinkCommand
 		{
 			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TLink)).TypeId,
 			LinkId = link.LinkId,
@@ -205,43 +205,16 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 			TargetId = link.TargetId,
 			Data = link,
 		});
-		RunSync(task);
 	}
 
 	void SubmitRemoveLink(TLink link)
 	{
-		var task = Store.SubmitCommandAsync(new RemoveLinkCommand
+		Store.SubmitCommand(new RemoveLinkCommand
 		{
 			LinkId = link.LinkId,
 		});
-		RunSync(task);
 	}
 
-	// Mirrors InMemoryStoreCollection<T>.Add's WASM handling (Synqra.Projection.InMemory's
-	// AsyncInvoker isn't visible from here — this assembly's own copy of the same one-liner).
-	static async void FireAndForget(System.Threading.Tasks.Task task)
-	{
-		try
-		{
-			await task;
-		}
-		catch (System.Exception ex)
-		{
-			System.Console.Error.WriteLine($"LinkNavCollectionBase: {ex}");
-		}
-	}
-
-	static void RunSync(System.Threading.Tasks.Task task)
-	{
-		if (System.OperatingSystem.IsBrowser())
-		{
-			FireAndForget(task);
-		}
-		else
-		{
-			task.GetAwaiter().GetResult();
-		}
-	}
 }
 
 /// <summary>

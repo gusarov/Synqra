@@ -231,7 +231,10 @@ public class SqliteStore : IObjectStore
 		TypeMetadataProvider = typeMetadataProvider;
 		_jsonSerializerOptions = jsonSerializerOptions;
 
-		databaseContext.EnsureSchemaAsync().GetAwaiter().GetResult();
+		using (new NoSynchronizationContext())
+		{
+			databaseContext.EnsureSchemaAsync().GetAwaiter().GetResult();
+		}
 	}
 
 	ISynqraCollection IObjectStore.GetCollection(Type type, string? collectionName)

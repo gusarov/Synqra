@@ -102,7 +102,7 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 		var containerTypeId = _store.TypeMetadataProvider.GetTypeMetadata(_container.GetType()).TypeId;
 		var componentTypeId = _store.TypeMetadataProvider.GetTypeMetadata(component.GetType()).TypeId;
 		var componentId = component is IIdentifiable<Guid> id ? id.Id : Guid.Empty;
-		var task = _store.SubmitCommandAsync(
+		_store.SubmitCommand(
 			new AddComponentCommand
 			{
 				CollectionId = _containerCollectionId,
@@ -113,10 +113,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 				Data = component,
 			},
 			new CommandSubmissionOptions { ExpectedLastEventId = _store.GetLastEventId(containerId) });
-		if (!OperatingSystem.IsBrowser())
-		{
-			task.GetAwaiter().GetResult();
-		}
 	}
 
 	bool EmitRemoveCommand(IComponent component)
@@ -125,7 +121,7 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 		var containerTypeId = _store.TypeMetadataProvider.GetTypeMetadata(_container.GetType()).TypeId;
 		var componentTypeId = _store.TypeMetadataProvider.GetTypeMetadata(component.GetType()).TypeId;
 		var componentId = component is IIdentifiable<Guid> id ? id.Id : Guid.Empty;
-		var task = _store.SubmitCommandAsync(
+		_store.SubmitCommand(
 			new DeleteComponentCommand
 			{
 				CollectionId = _containerCollectionId,
@@ -135,10 +131,6 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 				ComponentId = componentId,
 			},
 			new CommandSubmissionOptions { ExpectedLastEventId = _store.GetLastEventId(containerId) });
-		if (!OperatingSystem.IsBrowser())
-		{
-			task.GetAwaiter().GetResult();
-		}
 		return true;
 	}
 }

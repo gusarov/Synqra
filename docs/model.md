@@ -539,6 +539,11 @@ gap is expected.
 - **Events from a peer are a write of their own.** The replication endpoint applies a client's event
   straight through the projection's visitor; outside a submit that event takes the gate and runs in its
   own session and transaction (the endpoint appends the log and broadcasts itself).
+- **A synchronous write detaches from the caller's SynchronizationContext.** Collection Add, generated setters and
+  links block on `IObjectStore.SubmitCommand` (the one sync path) under `NoSynchronizationContext`: a caller that
+  blocks cannot pump its context, so a continuation posted back to it (Blazor's renderer during SSR) never ran.
+- **Model names are unique across the process.** The discriminator is the simple name and JSON, Mongo (`_t`) and
+  SBX all read one registry, so a second model with the same name is refused when it registers.
 - **A catch-up is one write.** The in-memory projection reads its cursor and enumerates the log under its
   gate (`CatchUpAsync`), so a command landing meanwhile waits for it; otherwise the command's events, applied
   once by the submit, were applied again from the log (a unique facet refused the second time).
