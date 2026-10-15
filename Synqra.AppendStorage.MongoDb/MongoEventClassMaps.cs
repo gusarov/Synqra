@@ -115,6 +115,17 @@ public static class MongoEventClassMaps
 				});
 			}
 
+			// Commands ride inside CommandCreatedEvent.Data. The driver learns a discriminator when it first serializes the
+			// type, so a process that only reads (a REST host after a redeploy) must be told every command up front.
+			RegisterDerived<ChangeObjectPropertyCommand>("ChangeObjectPropertyCommand");
+			RegisterDerived<DeleteObjectCommand>("DeleteObjectCommand");
+			RegisterDerived<AddComponentCommand>("AddComponentCommand");
+			RegisterDerived<ChangeComponentPropertyCommand>("ChangeComponentPropertyCommand");
+			RegisterDerived<DeleteComponentCommand>("DeleteComponentCommand");
+			RegisterDerived<AddLinkCommand>("AddLinkCommand");
+			RegisterDerived<RemoveLinkCommand>("RemoveLinkCommand");
+			RegisterDerived<BatchCommand>("BatchCommand");
+
 			RegisterDerived<ObjectPropertyChangedEvent>("ObjectPropertyChangedEvent");
 			RegisterDerived<ObjectDeletedEvent>("ObjectDeletedEvent");
 			RegisterDerived<CommandCreatedEvent>("CommandCreatedEvent");
@@ -309,7 +320,7 @@ public static class MongoEventClassMaps
 	}
 
 	static void RegisterDerived<T>(string discriminator, Action<BsonClassMap<T>>? configure = null)
-		where T : Event
+		where T : class
 	{
 		if (BsonClassMap.IsClassMapRegistered(typeof(T)))
 		{
