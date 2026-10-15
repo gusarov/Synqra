@@ -1,5 +1,4 @@
-// Namespace deliberately outside Synqra.Tests.* so the SBX DEBUG name allowlist does not apply.
-namespace Synqra.BinarySerializer.Tests.Dynamic;
+namespace Synqra.Tests.BinarySerialization.Dynamic;
 
 // BatchCommand look-alike: unmapped in SBX, carries mapped children and plain POCO expectations.
 [SynqraModel("C0DE0000-0000-8000-9C46-000000000000")]

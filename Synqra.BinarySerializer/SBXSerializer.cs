@@ -619,7 +619,23 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else
 		{
-			// Level 3 (field names): any type without a Map entry, POCO or [SynqraModel]; see readme.
+			// Only generated bindable models are supported for Level 1 & 2 serialization. All other types are Level 3 (field names).
+
+#if DEBUG
+			var name = actualType.FullName;
+			if (name != "Synqra.Tests.BinarySerialization.SampleTestDataPoco"
+				&& name != "Synqra.BatchCommand"
+				&& name != "Synqra.BatchExpectation"
+				&& name?.StartsWith("Synqra.Tests") == false
+				// && name?.StartsWith("Contoso.Model") == false
+				&& name?.Contains("Sample") == false
+				&& name?.EndsWith("Poco") == false
+				)
+			{
+				throw new Exception($"Type {actualType.FullName} is quaranteened for serialization in DEBUG. If you really want POCO serialization for it, please approve by whitelisting.");
+			}
+#endif
+
 			var props = actualType.GetProperties();
 			foreach (var item in props)
 			{
