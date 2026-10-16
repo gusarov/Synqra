@@ -70,6 +70,8 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await Assert.That(collectionC.First().Subject).IsEqualTo("Pre-existing task");
 	}
 
+#if NET10_0_OR_GREATER
+	// Only the real endpoint (net10) sends watermarks; on older targets the test node falls back to a master that does not.
 	/// <summary>
 	/// A client that remembers the server's watermark (docs/model.md §9) resumes with the delta: the history it already
 	/// holds is not sent again, only what the stream committed after it.
@@ -110,6 +112,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await Assert.That(collectionD).HasCount(1);
 		await Assert.That(collectionD.First().Subject).IsEqualTo("second");
 	}
+#endif
 
 	async Task<int> CountEventsAsync(SynqraTestNode master)
 	{
