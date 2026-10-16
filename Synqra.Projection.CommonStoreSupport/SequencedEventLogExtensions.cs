@@ -9,8 +9,9 @@ public static class SequencedEventLogExtensions
 	/// Makes the registered <see cref="IAppendStorage{Event, Guid}"/> (keyed by <paramref name="serviceKey"/> when given) the
 	/// server's sequenced log: every append is stamped with its commit order and reported through
 	/// <see cref="ICommittedEventSource"/>. A server host calls this once after registering its log; a client never does.
+	/// Tune the sequencer with <c>services.Configure&lt;EventSequencerOptions&gt;(...)</c>.
 	/// </summary>
-	public static IServiceCollection AddSequencedEventLog(this IServiceCollection services, string? serviceKey = null, TimeSpan? maxAhead = null)
+	public static IServiceCollection AddSequencedEventLog(this IServiceCollection services, string? serviceKey = null)
 	{
 		var result = services;
 		if (services.Any(d => d.ServiceType == typeof(EventSequencer) && Equals(d.ServiceKey, serviceKey)))
@@ -19,12 +20,12 @@ public static class SequencedEventLogExtensions
 		}
 		else
 		{
-			result = services.Decorate(serviceKey, maxAhead);
+			result = services.Decorate(serviceKey);
 		}
 		return result;
 	}
 
-	static IServiceCollection Decorate(this IServiceCollection services, string? serviceKey, TimeSpan? maxAhead)
+	static IServiceCollection Decorate(this IServiceCollection services, string? serviceKey)
 	{
 		var index = services.ToList().FindLastIndex(d => d.ServiceType == typeof(IAppendStorage<Event, Guid>) && Equals(d.ServiceKey, serviceKey));
 		if (index < 0)
@@ -32,17 +33,17 @@ public static class SequencedEventLogExtensions
 			throw new InvalidOperationException($"AddSequencedEventLog: no IAppendStorage<Event, Guid> is registered{(serviceKey is null ? "" : $" under key '{serviceKey}'")}; register the log first.");
 		}
 		var inner = services[index];
-		var sequencer = new EventSequencer(maxAhead);
+		services.AddOptions<EventSequencerOptions>();
 		ServiceDescriptor sequenced;
 		if (serviceKey is null)
 		{
-			sequenced = ServiceDescriptor.Singleton<IAppendStorage<Event, Guid>>(sp => new SequencedEventLog(inner.Instantiate(sp, null), sequencer));
-			services.AddSingleton(sequencer);
+			services.AddSingleton<EventSequencer>();
+			sequenced = ServiceDescriptor.Singleton<IAppendStorage<Event, Guid>>(sp => new SequencedEventLog(inner.Instantiate(sp, null), sp.GetRequiredService<EventSequencer>()));
 		}
 		else
 		{
-			sequenced = ServiceDescriptor.KeyedSingleton<IAppendStorage<Event, Guid>>(serviceKey, (sp, key) => new SequencedEventLog(inner.Instantiate(sp, key), sequencer));
-			services.AddKeyedSingleton(serviceKey, sequencer);
+			services.AddKeyedSingleton<EventSequencer>(serviceKey);
+			sequenced = ServiceDescriptor.KeyedSingleton<IAppendStorage<Event, Guid>>(serviceKey, (sp, key) => new SequencedEventLog(inner.Instantiate(sp, key), sp.GetRequiredKeyedService<EventSequencer>(key)));
 		}
 		services[index] = sequenced;
 		return services;
