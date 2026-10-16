@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Synqra.AppendStorage;
 
@@ -23,7 +24,8 @@ public static class EventLogExtensions
 		return services;
 	}
 
-	static void AddEventLog<TLog>(this IServiceCollection services, string? serviceKey)
+	// PublicConstructors flows to ActivatorUtilities.CreateInstance<TLog>: without it the trimmer drops the log's constructor (native AOT).
+	static void AddEventLog<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TLog>(this IServiceCollection services, string? serviceKey)
 		where TLog : EventLog
 	{
 		services.AddOptions<EventSequencerOptions>();
