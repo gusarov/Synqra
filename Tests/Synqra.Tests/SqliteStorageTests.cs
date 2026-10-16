@@ -241,9 +241,8 @@ public class SqliteStorageTests : BaseTest
 
 		var items = _storage.GetAllAsync(from: id2).ToBlockingEnumerable().ToList();
 
-		await Assert.That(items).HasCount(2);
-		await Assert.That(items[0].Name).IsEqualTo("B");
-		await Assert.That(items[1].Name).IsEqualTo("C");
+		await Assert.That(items).HasSingleItem(); // a cursor names an item the caller holds: the read starts after it
+		await Assert.That(items[0].Name).IsEqualTo("C");
 	}
 
 	[Test]

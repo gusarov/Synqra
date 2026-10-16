@@ -218,9 +218,9 @@ public class MongoAppendStorageTests : BaseTest
 		// No `from` (default) must return everything (the null-handling fix).
 		await Assert.That(storage.GetAllAsync().ToBlockingEnumerable().Count()).IsEqualTo(3);
 
-		// from = e2 is inclusive (Gte on _id): e2, e3.
+		// from = e2 is a cursor (the caller holds e2): the tail after it, e3.
 		var tail = storage.GetAllAsync(e2.EventId).ToBlockingEnumerable().Select(x => x.EventId).ToArray();
-		await Assert.That(tail).IsEquivalentTo(new[] { e2.EventId, e3.EventId });
+		await Assert.That(tail).IsEquivalentTo(new[] { e3.EventId });
 	}
 
 	[Test]
