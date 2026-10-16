@@ -399,18 +399,16 @@ public static class FileSynqraExtensions
 		{
 			get
 			{
-				var enumerable = _store.AppendStores.ItemAppendStorage.GetAllAsync((CollectionId, index)).ToBlockingEnumerable();
-				var first = enumerable.FirstOrDefault();
-				if (first != null)
+				Item item;
+				try
 				{
-					var blob = ConsumeItem(index, first);
-					var id = _store.GetId(blob);
-					if (id == index)
-					{
-						return blob;
-					}
+					item = _store.AppendStores.ItemAppendStorage.GetAsync((CollectionId, index)).GetAwaiter().GetResult(); // a point lookup, not a read from a cursor
 				}
-				throw new Exception($"Object with id {index} is not found in collection {CollectionId}");
+				catch (Exception ex) when (ex is KeyNotFoundException or FileNotFoundException)
+				{
+					throw new Exception($"Object with id {index} is not found in collection {CollectionId}", ex);
+				}
+				return ConsumeItem(index, item);
 			}
 		}
 

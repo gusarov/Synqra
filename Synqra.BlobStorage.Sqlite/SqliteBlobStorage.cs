@@ -80,7 +80,7 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 		if (from is not null && !Equals(from, default(TKey)))
 		{
-			cmd.CommandText = "SELECT id FROM blobs WHERE store_name = @store_name AND id >= @from ORDER BY id";
+			cmd.CommandText = "SELECT id FROM blobs WHERE store_name = @store_name AND id > @from ORDER BY id";
 			cmd.Parameters.AddWithValue("@from", EncodeKey(from));
 		}
 		else

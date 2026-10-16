@@ -277,6 +277,8 @@ public static class AppendStorageJsonLinesExtensions
 			private readonly JsonLinesStorage<T, TKey> _storage;
 			private readonly TKey? _from;
 			private readonly string? _fromStr;
+			private readonly bool _prefix;
+			private bool _passedCursor;
 			private readonly string _fileName;
 			private readonly JsonSerializerOptions _jsonSerializerOptions;
 			private readonly CancellationToken? _cancellationToken;
@@ -295,6 +297,7 @@ public static class AppendStorageJsonLinesExtensions
 					if (fromStr.Length == 64 && fromStr.TrimEnd('0').Length <= 32)
 					{
 						fromStr = fromStr[..32]; // second key component is empty - prefix-match by the first component only
+						_prefix = true;
 					}
 					_fromStr = fromStr;
 				}
@@ -404,9 +407,20 @@ public static class AppendStorageJsonLinesExtensions
 						return true;
 					}
 					var keyStr = _currentLine.Split(new[] { '§' }, 2)[0];
-					if (keyStr.StartsWith(_fromStr, StringComparison.Ordinal))
+					if (_prefix)
 					{
-						return true;
+						if (keyStr.StartsWith(_fromStr, StringComparison.Ordinal))
+						{
+							return true;
+						}
+					}
+					else if (_passedCursor)
+					{
+						return true; // a full key is a cursor: the file is in append order, so everything after the cursor's line is the delta
+					}
+					else if (keyStr == _fromStr)
+					{
+						_passedCursor = true;
 					}
 				}
 			}

@@ -105,9 +105,9 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		// "from the beginning". Check for null explicitly (Equals(null, default(Guid))
 		// would be false and wrongly build `_id >= null`). Use a typed filter so the
 		// bound serializes with the same representation as the stored _id.
-		var filter = from is null
+		var filter = from is null || Equals(from, default(TKey))
 			? filterBuilder.Empty
-			: filterBuilder.Gte("_id", (TKey)from);
+			: filterBuilder.Gt("_id", (TKey)from);
 
 		// Replay in id order — v7 GUID ids are time-ordered, so this is append order.
 		var sort = Builders<T>.Sort.Ascending("_id");

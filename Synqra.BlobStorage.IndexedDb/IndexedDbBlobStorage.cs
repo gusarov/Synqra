@@ -94,7 +94,7 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 		var currentFrom = from is null || Equals(from, default(TKey))
 			? null
 			: _getKeyFromItem(from);
-		var fromExclusive = false;
+		var fromExclusive = true; // a cursor names a key the caller holds; every later page continues after its last key the same way
 		const int pageSize = 1024;
 
 		while (true)
