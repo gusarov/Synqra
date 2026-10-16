@@ -10,7 +10,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// <c>(StreamId, SequenceId)</c> = <c>(_sid, _id)</c> and read in that order through the <c>(_sid, _id)</c> index, so a
 /// stream is a key prefix (docs/model.md §9). <see cref="Event.EventId"/> is a unique field: appending the same event
 /// again is a no-op. The <see cref="ServerEventLog"/> over it stamps the sequence; registered by
-/// <see cref="MongoEventLogExtensions.AddMongoEventLog"/>.
+/// <see cref="MongoEventStorageExtensions.AddMongoEventStorage"/>.
 /// </summary>
 public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail
 {

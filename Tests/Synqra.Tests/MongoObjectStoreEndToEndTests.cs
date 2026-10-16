@@ -48,7 +48,7 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 			ser.Map(102, 3000.0, typeof(DemoModel));
 		});
 
-		hostApplicationBuilder.Services.AddMongoEventLog(_connectionString);
+		hostApplicationBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 

@@ -49,8 +49,8 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 			ser.Map(231, typeof(TestShapeBase));
 			ser.Map(232, typeof(TestCircle));
 		});
-		hostBuilder.Services.AddMongoEventLog(_connectionString);
-		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoProjection();
 	}
 
 	IObjectStore Store
@@ -208,12 +208,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 	public async Task Should_create_the_shared_collection_indexes_as_a_storage_upgrade()
 	{
 		// Tests never start the host, so run the upgrade service the way the host would.
-		var db = Database;
-		var runner = new SynqraMongoUpgradeService(
-		[
-			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => db, "Event"),
-			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Projection, _ => db),
-		], ServiceProvider);
+		var runner = ServiceProvider.GetServices<IHostedService>().OfType<SynqraMongoUpgradeService>().Single();
 		await runner.StartAsync(CancellationToken.None);
 		var keys = Components.Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
 		await Assert.That(keys).Contains("_sid,_t");

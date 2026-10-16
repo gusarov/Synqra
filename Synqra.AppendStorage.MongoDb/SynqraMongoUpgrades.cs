@@ -1,36 +1,25 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Synqra.AppendStorage.MongoDb;
 
 /// <summary>
-/// Which half of a Synqra store a registered Mongo database is — an upgrade declares which
-/// roles it needs, and the runner matches them up per service key.
+/// What Synqra's Mongo registrations opened, by service key (null = unkeyed): the upgrade runner upgrades exactly these.
+/// Filled by <c>AddMongoEventStorage</c> and <c>AddMongoProjection</c>; a host never wires anything.
 /// </summary>
-public enum SynqraMongoDatabaseRole
+public sealed class SynqraMongoUpgradeOptions
 {
-	/// <summary>The append-only event log (source of truth).</summary>
-	Events,
-	/// <summary>The materialized projection / read models (rebuildable).</summary>
-	Projection,
-}
+	/// <summary>Keys of the Mongo event storages: each one's <c>IMongoCollection&lt;Event&gt;</c> is upgraded.</summary>
+	public HashSet<string?> EventStorages { get; } = [];
 
-/// <summary>
-/// One Mongo database a Synqra DI extension opened, announced for the upgrade runner. Every
-/// extension that opens a database (<c>AddAppendStorageMongoDb</c>, <c>AddMongoDbSynqraStore</c>)
-/// contributes one of these — that is what makes upgrades fully automatic: Synqra upgrades
-/// whatever storage it opens, and a host never wires anything. The database is a factory so
-/// nothing connects until the runner actually starts.
-/// </summary>
-public sealed record SynqraMongoUpgradeParticipant(
-	  string? ServiceKey
-	, SynqraMongoDatabaseRole Role
-	, Func<IServiceProvider, IMongoDatabase> Database
-	, string? EventsCollectionName = null
-	);
+	/// <summary>Keys of the Mongo projections: each one's <see cref="IMongoDatabase"/> is a derivation source for its key's upgrades.</summary>
+	public HashSet<string?> Projections { get; } = [];
+}
 
 /// <summary>A single, versioned, idempotent storage upgrade the runner can apply.</summary>
 internal interface ISynqraMongoUpgrade
@@ -54,7 +43,7 @@ internal interface ISynqraMongoUpgrade
 /// cannot correctly interpret is worse than not booting.
 /// </summary>
 public sealed class SynqraMongoUpgradeService(
-	  IEnumerable<SynqraMongoUpgradeParticipant> participants
+	  IOptions<SynqraMongoUpgradeOptions> options
 	, IServiceProvider serviceProvider
 	, ILogger<SynqraMongoUpgradeService>? logger = null
 	) : IHostedService
@@ -75,41 +64,46 @@ public sealed class SynqraMongoUpgradeService(
 
 	public async Task StartAsync(CancellationToken cancellationToken)
 	{
-		// Group what was opened by service key: a process hosting several independent
-		// Synqra-backed features upgrades each feature's own databases separately. Duplicate
-		// contributions (an extension called twice) collapse — same key+role is the same DB.
-		foreach (var group in participants.GroupBy(p => p.ServiceKey))
+		// Each key is one feature's store: a process hosting several Synqra features upgrades each one's databases separately.
+		foreach (var key in options.Value.EventStorages)
 		{
-			var events = group.FirstOrDefault(p => p.Role == SynqraMongoDatabaseRole.Events);
-			if (events is null)
-			{
-				continue; // nothing upgradeable without an event log
-			}
-			var projection = group.FirstOrDefault(p => p.Role == SynqraMongoDatabaseRole.Projection);
-
-			var eventsDb = events.Database(serviceProvider);
+			var events = serviceProvider.GetRequiredKeyedService<IMongoCollection<Event>>(key);
+			var eventsDb = events.Database;
 			// Probe before claiming, with a short timeout. An UNREACHABLE database (server gone,
 			// wrong credentials — e.g. a test host that configures a store it never touches) must
 			// not fail startup: nothing can read an unreachable store, so there is nothing the
 			// upgrade needs to protect, and before upgrades existed such a host booted fine
 			// because Mongo connects lazily. Only a REACHABLE store with a FAILING upgrade is
 			// fatal (see RunOnceAsync) — that one would otherwise serve misinterpretable data.
-			if (!await IsReachableAsync(eventsDb, cancellationToken))
+			if (await IsReachableAsync(eventsDb, cancellationToken))
 			{
-				_logger.LogError("Storage upgrades skipped for '{Database}' (service key '{Key}'): events database unreachable — the store will fail on first use instead.", eventsDb.DatabaseNamespace.DatabaseName, group.Key);
-				continue;
+				var projectionDb = await FindProjectionAsync(key, cancellationToken);
+				foreach (var upgrade in Upgrades)
+				{
+					await RunOnceAsync(upgrade, eventsDb, events.CollectionNamespace.CollectionName, projectionDb, cancellationToken);
+				}
 			}
-			var projectionDb = projection?.Database(serviceProvider);
-			if (projectionDb is not null && !await IsReachableAsync(projectionDb, cancellationToken))
+			else
+			{
+				_logger.LogError("Storage upgrades skipped for '{Database}' (service key '{Key}'): events database unreachable — the store will fail on first use instead.", eventsDb.DatabaseNamespace.DatabaseName, key);
+			}
+		}
+	}
+
+	/// <summary>The key's projection database when one is registered and reachable; upgrades run without that fallback otherwise.</summary>
+	async Task<IMongoDatabase?> FindProjectionAsync(string? key, CancellationToken cancellationToken)
+	{
+		IMongoDatabase? projectionDb = null;
+		if (options.Value.Projections.Contains(key))
+		{
+			projectionDb = serviceProvider.GetRequiredKeyedService<IMongoDatabase>(key);
+			if (!await IsReachableAsync(projectionDb, cancellationToken))
 			{
 				_logger.LogWarning("Projection database '{Database}' unreachable — upgrades run without the projection-derived fallback.", projectionDb.DatabaseNamespace.DatabaseName);
 				projectionDb = null;
 			}
-			foreach (var upgrade in Upgrades)
-			{
-				await RunOnceAsync(upgrade, eventsDb, events.EventsCollectionName ?? "Event", projectionDb, cancellationToken);
-			}
 		}
+		return projectionDb;
 	}
 
 	static async Task<bool> IsReachableAsync(IMongoDatabase database, CancellationToken cancellationToken)

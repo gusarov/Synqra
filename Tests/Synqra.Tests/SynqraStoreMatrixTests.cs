@@ -132,7 +132,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 
 	protected IEventLog Events() => ServiceProvider.GetRequiredService<IEventLog>();
 
-	protected void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
+	protected void UseMongoProjectionStore(IServiceCollection services) => services.AddTestMongoDatabase(_connectionString).AddMongoProjection();
 
 	[Test]
 	public async Task Should_10_persist_property_change_to_event_log()
@@ -727,7 +727,7 @@ public abstract class Cobra_MongoEventStorageContract : Cobra_DurableSynqraStore
 {
 	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder)
 	{
-		hostBuilder.Services.AddMongoEventLog(_connectionString);
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
 	}
 }
 
@@ -851,11 +851,11 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			ser.Map(222, typeof(TestTaggingComponent));
 			ser.Map(223, typeof(TestActivatableComponent));
 		});
-		hostBuilder.Services.AddMongoEventLog(_connectionString);
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
 		UseMongoProjectionStore(hostBuilder.Services);
 	}
 
-	void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
+	void UseMongoProjectionStore(IServiceCollection services) => services.AddTestMongoDatabase(_connectionString).AddMongoProjection();
 
 	IObjectStore Store
 	{

@@ -1,3 +1,6 @@
+using Synqra.Projection.MongoDb;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Synqra.AppendStorage.MongoDb;
@@ -24,11 +27,15 @@ public class MongoEventSidBackfillTests : BaseTest
 
 	static BsonBinaryData Bin(Guid g) => new(g, GuidRepresentation.Standard);
 
-	static SynqraMongoUpgradeService Runner(IMongoDatabase db) => new(
-	[
-		new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => db, "Event"),
-		new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Projection, _ => db),
-	], null!);
+	/// <summary>The runner a host over <paramref name="db"/> (events and projection in one database) gets from DI.</summary>
+	SynqraMongoUpgradeService Runner(IMongoDatabase db)
+	{
+		var services = new ServiceCollection();
+		services.AddSingleton(db);
+		services.AddMongoEventStorage();
+		services.AddMongoProjection();
+		return services.BuildServiceProvider().GetServices<IHostedService>().OfType<SynqraMongoUpgradeService>().Single();
+	}
 
 	[Test]
 	public async Task Should_backfill_sid_from_command_join_and_projection_fallback()
@@ -149,11 +156,7 @@ public class MongoEventSidBackfillTests : BaseTest
 		// connects lazily. The runner must probe-and-skip, not take the whole host down;
 		// the unreachable store fails on first actual use instead.
 		var dead = new MongoClient("mongodb://localhost:1/?serverSelectionTimeoutMS=500&connectTimeoutMS=500").GetDatabase("nope");
-		var runner = new SynqraMongoUpgradeService(
-		[
-			new SynqraMongoUpgradeParticipant(null, SynqraMongoDatabaseRole.Events, _ => dead, "Event"),
-		], null!);
-		await runner.StartAsync(CancellationToken.None); // must not throw
+		await Runner(dead).StartAsync(CancellationToken.None); // must not throw
 	}
 
 	[Test]

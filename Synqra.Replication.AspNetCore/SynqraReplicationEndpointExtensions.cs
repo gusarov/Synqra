@@ -27,8 +27,8 @@ public static class SynqraReplicationEndpointExtensions
 	/// matches <see cref="EventReplicationService"/>'s hardcoded client URL,
 	/// "/api/synqra/ws"). Resolves <see cref="INetworkSerializationService"/>,
 	/// <see cref="IProjection"/>, and <see cref="IAppendStorage{Event, Guid}"/> from DI —
-	/// register those (e.g. AddSbxSerializer + AddMongoDbSynqraStore +
-	/// AddAppendStorageMongoDb&lt;Event, Guid&gt;) before calling this.
+	/// register those (e.g. AddSbxSerializer + AddMongoProjection +
+	/// AddMongoEventStorage + AddServerEventLog) before calling this.
 	/// <para>
 	/// Pass <paramref name="serviceKey"/> when the process hosts more than one independent
 	/// Synqra-backed feature — the endpoint will resolve <see cref="IProjection"/> and
