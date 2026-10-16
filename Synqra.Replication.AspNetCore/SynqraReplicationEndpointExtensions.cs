@@ -311,7 +311,11 @@ public static class SynqraReplicationEndpointExtensions
 							continue;
 						}
 						knownEvents.TryAdd(ev.EventId);
-						await SendEventFrameAsync(socket, backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
+						// The log reads from the cursor inclusively; the watermark's own event is one the client already holds.
+						if (clientCursor == default || ev.SequenceId != clientCursor)
+						{
+							await SendEventFrameAsync(socket, backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
+						}
 					}
 				}
 				finally
