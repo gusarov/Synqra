@@ -71,7 +71,7 @@
     <PackageReference Include="MongoDB.Bson" />
     <PackageReference Include="MongoDB.Driver" />
     <PackageReference Include="TUnit" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Condition="'$(TargetFramework)' != 'net10.0'" /> <!-- in-box on net10 (NU1510 breaks EF precompile) -->
   </ItemGroup>
 
   <ItemGroup>

@@ -19,7 +19,7 @@
     <InternalsVisibleTo Include="Synqra.CodeGeneration" />
     <InternalsVisibleTo Include="Synqra.Projection.InMemory" />
     <InternalsVisibleTo Include="Synqra.Projection.MongoDb" />
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Text.Json" Condition="'$(TargetFramework)' != 'net10.0'" /> <!-- in-box on net10 (NU1510 breaks EF precompile) -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
   </ItemGroup>
 
