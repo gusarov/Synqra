@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Driver;
@@ -20,7 +21,7 @@ public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid
 	readonly ILogger _logger;
 	readonly Lazy<Task> _indexes;
 
-	public MongoEventStorage(IMongoCollection<Event> collection, ILogger<MongoEventStorage>? logger = null)
+	public MongoEventStorage([FromKeyedServices] IMongoCollection<Event> collection, ILogger<MongoEventStorage>? logger = null)
 	{
 		_collection = collection;
 		_logger = logger ?? NullLogger<MongoEventStorage>.Instance;

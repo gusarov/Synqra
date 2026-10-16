@@ -19,13 +19,16 @@ public static class MongoEventLogExtensions
 	{
 		MongoEventClassMaps.Register(); // before the driver serializes anything
 		var name = collectionName ?? DefaultCollectionName;
+		// The store and its collection share the key: MongoEventStorage takes the collection with [FromKeyedServices].
 		if (serviceKey is null)
 		{
-			services.TryAddSingleton<IAppendStorage<Event, (Guid Stream, Guid Sequence)>>(sp => ActivatorUtilities.CreateInstance<MongoEventStorage>(sp, services.OpenDatabase(connectionString).GetCollection<Event>(name)));
+			services.TryAddSingleton(_ => services.OpenDatabase(connectionString).GetCollection<Event>(name));
+			services.TryAddSingleton<IAppendStorage<Event, (Guid Stream, Guid Sequence)>, MongoEventStorage>();
 		}
 		else
 		{
-			services.TryAddKeyedSingleton<IAppendStorage<Event, (Guid Stream, Guid Sequence)>>(serviceKey, (sp, _) => ActivatorUtilities.CreateInstance<MongoEventStorage>(sp, services.OpenDatabase(connectionString).GetCollection<Event>(name)));
+			services.TryAddKeyedSingleton(serviceKey, (_, _) => services.OpenDatabase(connectionString).GetCollection<Event>(name));
+			services.TryAddKeyedSingleton<IAppendStorage<Event, (Guid Stream, Guid Sequence)>, MongoEventStorage>(serviceKey);
 		}
 		services.AddServerEventLog(serviceKey);
 		services.AnnounceForUpgrades(serviceKey, connectionString, name);
