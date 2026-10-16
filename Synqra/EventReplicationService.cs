@@ -43,6 +43,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <inheritdoc />
 	public event Action? EventsReceived;
 
+	/// <summary>Event frames this run received from the server, known ones included: what a resumed client was sent again.</summary>
+	public long FramesReceived { get; private set; }
+
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
 		=> SendOperationAsync(new SubscribeRequest { StreamId = streamId }, ct);
@@ -244,6 +247,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		// watermark on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves.
 		async Task ReceiveAsync(EventEnvelope envelope)
 		{
+			FramesReceived++;
 			var ev = envelope.Event;
 			bool known;
 			lock (_skipSet)
