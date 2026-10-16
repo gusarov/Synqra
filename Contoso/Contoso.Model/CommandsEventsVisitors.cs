@@ -30,6 +30,7 @@ public partial class FooContosoCommand : Command
 
 [SynqraModel]
 [Schema(2026.134, "1 EventId Guid CommandId Guid")]
+[Schema(2026.790, "1 EventId Guid CommandId Guid SequenceId Guid")]
 public partial class FooContosoEvent : Event
 {
 	protected override Task AcceptCoreAsync<T>(IEventVisitor<T> visitor, T ctx)
