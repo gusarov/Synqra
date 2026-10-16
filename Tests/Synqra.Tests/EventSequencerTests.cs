@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests;
@@ -11,7 +12,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_keep_a_proposal_that_follows_the_stream()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var first = GuidExtensions.CreateVersion7();
@@ -24,7 +25,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_fast_forward_a_proposal_behind_the_last_stamp()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var older = GuidExtensions.CreateVersion7();
@@ -41,7 +42,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_replace_a_proposal_running_ahead_of_the_clock()
 	{
-		var sequencer = new EventSequencer(TimeSpan.FromMinutes(5));
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions { MaxAhead = TimeSpan.FromMinutes(5), }));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var future = Shift(GuidExtensions.CreateVersion7(), TimeSpan.FromMinutes(6));
@@ -56,7 +57,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_replace_a_proposal_that_is_not_a_clock_id()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var structured = new Guid("C0DE0000-0000-8000-8E01-000000000001");
@@ -70,7 +71,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_follow_the_seeded_tail()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		var tail = GuidExtensions.CreateVersion7();
 		var behind = Shift(tail, TimeSpan.FromMilliseconds(-10));
@@ -85,7 +86,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_refuse_to_stamp_a_stream_that_is_not_seeded()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 
 		Assert.Throws<InvalidOperationException>(() => sequencer.Stamp(Guid.NewGuid(), GuidExtensions.CreateVersion7()));
 		await Task.CompletedTask;
@@ -94,7 +95,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_hold_the_watermark_below_a_stamp_still_in_flight()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var a = sequencer.Stamp(stream, GuidExtensions.CreateVersion7());
@@ -110,7 +111,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_let_an_aborted_stamp_go()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var a = sequencer.Stamp(stream, GuidExtensions.CreateVersion7());
@@ -125,7 +126,7 @@ public class EventSequencerTests
 	[Test]
 	public async Task Should_report_the_commits_watermark_inside_the_callback()
 	{
-		var sequencer = new EventSequencer();
+		var sequencer = new EventSequencer(Options.Create(new EventSequencerOptions()));
 		var stream = Guid.NewGuid();
 		sequencer.Seed(stream, default);
 		var a = sequencer.Stamp(stream, GuidExtensions.CreateVersion7());

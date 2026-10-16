@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Synqra;
 
@@ -15,12 +16,12 @@ public sealed class EventSequencer
 	readonly ConcurrentDictionary<Guid, StreamSequence> _streams = new();
 	readonly GuidOrder _order = new();
 
-	public EventSequencer(TimeSpan? maxAhead = null)
+	public EventSequencer(IOptions<EventSequencerOptions> options)
 	{
-		MaxAhead = maxAhead ?? TimeSpan.FromMinutes(5);
+		MaxAhead = options.Value.MaxAhead;
 	}
 
-	/// <summary>How far ahead of the server clock a proposal may run and still be kept (the Kerberos five minutes).</summary>
+	/// <summary>How far ahead of the server clock a proposal may run and still be kept; see <see cref="EventSequencerOptions.MaxAhead"/>.</summary>
 	public TimeSpan MaxAhead { get; }
 
 	/// <summary>Whether the stream's clock has been seeded from the log's tail; a cold stream must be seeded before its first stamp.</summary>

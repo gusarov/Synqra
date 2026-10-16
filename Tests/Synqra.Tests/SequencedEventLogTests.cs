@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Synqra.AppendStorage;
@@ -107,7 +108,7 @@ public class SequencedEventLogTests : BaseTest
 	public async Task Should_let_a_failed_append_go_so_the_watermark_moves_on()
 	{
 		var inner = new FailingOnce(ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>());
-		var log = new SequencedEventLog(inner, new EventSequencer());
+		var log = new SequencedEventLog(inner, new EventSequencer(Options.Create(new EventSequencerOptions())));
 		var lost = Change(GuidExtensions.CreateVersion7(), "lost");
 		var kept = Change(GuidExtensions.CreateVersion7(), "kept");
 
