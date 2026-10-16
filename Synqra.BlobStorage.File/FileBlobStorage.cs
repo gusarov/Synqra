@@ -96,13 +96,16 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 			yield break;
 		}
 
+		// A full key is a cursor (strictly after it); a composite key with an empty tail is a prefix (everything under it).
 		string? fromKey = null;
+		var prefix = false;
 		if (from != null && !Equals(from, default(TKey)))
 		{
 			fromKey = _getPathFromKey(from);
 			if (fromKey.Length == 64 && fromKey.TrimEnd('0').Length <= 32)
 			{
 				fromKey = fromKey[..32];
+				prefix = true;
 			}
 		}
 
@@ -114,12 +117,12 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 			}
 
 			var keyHex = GetKeyHexFromPath(fileInfo.FullName);
-			if (!string.IsNullOrEmpty(fromKey) && !keyHex.StartsWith(fromKey, StringComparison.Ordinal))
+			var admitted = fromKey is null
+				|| (prefix ? keyHex.StartsWith(fromKey, StringComparison.Ordinal) : string.CompareOrdinal(keyHex, fromKey) > 0);
+			if (admitted)
 			{
-				continue;
+				yield return _getKeyFromPath(keyHex);
 			}
-
-			yield return _getKeyFromPath(keyHex);
 		}
 
 		await Task.CompletedTask;

@@ -397,14 +397,15 @@ public abstract class AppendStorageTests : BaseTest
 		await Assert.That(((MyPocoTask)allRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item1.Blob).Subject);
 		await Assert.That(((MyPocoTask)allRange[1].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
 
-		Console.WriteLine("ByExactRange");
-		var hitRange = storage.GetAllAsync((collectionId1, item2.ObjectId)).ToBlockingEnumerable().ToArray();
-		foreach (var item in hitRange)
+		Console.WriteLine("AfterCursor");
+		var afterCursor = storage.GetAllAsync((collectionId1, item2.ObjectId)).ToBlockingEnumerable().ToArray();
+		foreach (var item in afterCursor)
 		{
-			EmergencyLog.Default.LogDebug($"ByExactRange: {item.CollectionId} {item.ObjectId} {item.Blob}");
+			EmergencyLog.Default.LogDebug($"AfterCursor: {item.CollectionId} {item.ObjectId} {item.Blob}");
 		}
-		await Assert.That(hitRange).HasCount(1);
-		await Assert.That(((MyPocoTask)hitRange[0].Blob).Subject).IsEqualTo(((MyPocoTask)item2.Blob).Subject);
+		// A full key is a cursor (point lookups are GetAsync, above): the read is everything appended after item2.
+		await Assert.That(afterCursor).HasCount(1);
+		await Assert.That(((MyPocoTask)afterCursor[0].Blob).Subject).IsEqualTo(((MyPocoTask)item3.Blob).Subject);
 	}
 }
 

@@ -28,6 +28,12 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 	}
 
 	Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Every item in key order. A full <paramref name="from"/> key is a cursor: the read starts strictly after it
+	/// (the caller already holds that item); default reads everything. A composite key whose tail component is
+	/// empty (the File projection's <c>(collection, default)</c>) is a prefix: the read is every key under it.
+	/// </summary>
 	IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
 
 	[EditorBrowsable(EditorBrowsableState.Advanced)]

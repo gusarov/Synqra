@@ -61,7 +61,8 @@ public static class InMemoryAppendStorageExtensions
 			{
 				data = _data.ToArray();
 			}
-			foreach (var item in data.SkipWhile(x => x.Key.CompareTo(from ?? default(TKey)) < 0))
+			var hasCursor = from is not null && !Equals(from, default(TKey));
+			foreach (var item in data.SkipWhile(x => hasCursor && x.Key.CompareTo(from!) <= 0))
 			{
 				yield return item.Value;
 			}
