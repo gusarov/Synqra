@@ -99,7 +99,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		return stream;
 	}
 
-	async Task LoadStateAsync()
+	/// <summary>
+	/// The cursors of the last run describe the local log they were saved with: with that log empty (cleared, or a new
+	/// store) they would resume past history this client no longer holds, so only the node id is kept.
+	/// </summary>
+	async Task LoadStateAsync(bool logHoldsEvents)
 	{
 		if (_stateStore is not null)
 		{
@@ -107,8 +111,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			if (saved is not null)
 			{
 				_eventReplicationState.MyNodeId = saved.MyNodeId;
-				_eventReplicationState.LastEventIdFromMe = saved.LastEventIdFromMe;
-				_eventReplicationState.ServerWatermark = saved.ServerWatermark;
+				if (logHoldsEvents)
+				{
+					_eventReplicationState.LastEventIdFromMe = saved.LastEventIdFromMe;
+					_eventReplicationState.ServerWatermark = saved.ServerWatermark;
+				}
 			}
 		}
 	}
@@ -159,6 +166,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	protected async override Task ExecuteAsync(CancellationToken stoppingToken)
 	{
+		// A host stop ends the service: it cancels every socket read and wakes the send loop, which then sees the cancellation.
+		using var stopping = stoppingToken.Register(() =>
+		{
+			_cts.Cancel();
+			Wake();
+		});
+
 		// Seed the by-EventId dedup (_skipSet/_skipList, otherwise only populated as events are
 		// received live) from whatever's already durably stored locally. Without this, the server's
 		// backlog replay on reconnect (see SynqraReplicationEndpointExtensions.cs) would be echoed
@@ -188,7 +202,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			await ClearLocalStorageAsync();
 		}
 
-		await LoadStateAsync(); // the cursor of the last run: HELLO asks for the delta, not the stream
+		bool logHoldsEvents;
+		lock (_skipSet)
+		{
+			logHoldsEvents = _skipSet.Count > 0;
+		}
+		await LoadStateAsync(logHoldsEvents); // the cursor of the last run: HELLO asks for the delta, not the stream
 
 		ClientWebSocket wsConnection;
 		for (int i = 0; ; i++)
@@ -403,7 +422,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 	*/
 
-	public void Trigger(Command command, IReadOnlyList<Event> events)
+	public void Trigger(Command command, IReadOnlyList<Event> events) => Wake();
+
+	/// <summary>Wakes the send loop.</summary>
+	void Wake()
 	{
 		// Already signaled is the common case (one trigger per command); a thrown-and-caught exception for each
 		// is costly on the browser, so the signal is checked first and the catch covers only a concurrent race.
