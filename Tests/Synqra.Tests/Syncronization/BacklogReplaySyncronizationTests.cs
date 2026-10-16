@@ -97,12 +97,14 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await WaitForOnlineAsync(nodeC);
 		await WaitUntilAsync(() => Task.FromResult(nodeC.StoreContext.GetCollection<SampleTaskModel>().Count == 1), "C holds the first task");
 		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.ServerWatermark != default), "C persisted a watermark");
+		// C's run ends here: C stays connected and would take the second task into its state as well.
+		var endOfRunC = remembered.Saved;
 
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
 		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterFirst, "the second write reaches the master");
 
 		// D is C's next run: an empty local log but C's state. It must get the second task and nothing of the first.
-		var nodeD = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(remembered.Saved))) { Port = nodeMaster.Port };
+		var nodeD = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(endOfRunC))) { Port = nodeMaster.Port };
 		await nodeD.Started;
 		await WaitForOnlineAsync(nodeD);
 		var collectionD = nodeD.StoreContext.GetCollection<SampleTaskModel>();
@@ -111,6 +113,55 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 		await Assert.That(collectionD).HasCount(1);
 		await Assert.That(collectionD.First().Subject).IsEqualTo("second");
+	}
+
+	/// <summary>
+	/// The watermark names an event the client already holds, so the resume starts after it: a watermark that lands
+	/// on the first task's own event must not hand that task back (the resume above did, whenever the commit timing
+	/// put the component event last).
+	/// </summary>
+	[Test]
+	public async Task Should_resume_after_the_watermark_not_at_it()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "first" });
+		await WaitUntilAsync(async () => await FirstSequenceOfAsync<ComponentAddedEvent>(nodeMaster) != default, "the first task's event reaches the master");
+		var atFirstTask = await FirstSequenceOfAsync<ComponentAddedEvent>(nodeMaster);
+		var afterFirst = await CountEventsAsync(nodeMaster);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterFirst, "the second write reaches the master");
+
+		var resumed = new RecordingStateStore(new EventReplicationState { ServerWatermark = atFirstTask });
+		var nodeD = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(resumed)) { Port = nodeMaster.Port };
+		await nodeD.Started;
+		await WaitForOnlineAsync(nodeD);
+		var collectionD = nodeD.StoreContext.GetCollection<SampleTaskModel>();
+		await WaitUntilAsync(() => Task.FromResult(collectionD.Count >= 1), "D receives the delta");
+		await Task.Delay(500); // nothing more may follow
+
+		await Assert.That(collectionD).HasCount(1);
+		await Assert.That(collectionD.First().Subject).IsEqualTo("second");
+	}
+
+	async Task<Guid> FirstSequenceOfAsync<TEvent>(SynqraTestNode master)
+		where TEvent : Event
+	{
+		var sequence = Guid.Empty;
+		await foreach (var ev in master.Events.GetAllAsync())
+		{
+			if (sequence == Guid.Empty && ev is TEvent)
+			{
+				sequence = ev.SequenceId;
+			}
+		}
+		return sequence;
 	}
 #endif
 
