@@ -14,7 +14,7 @@ using Synqra.BinarySerializer;
 
 namespace Synqra.Projection.MongoDb;
 
-using IAppendStorage = IAppendStorage<Event, Guid>;
+using IAppendStorage = IEventLog;
 
 /// <summary>
 /// A MongoDB-backed Synqra projection: it processes commands into events, appends those events to the
@@ -134,7 +134,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		  IMongoDatabase database
 		, ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
-		, IAppendStorage<Event, Guid>? eventStorage = null
+		, IEventLog? eventStorage = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		, IServiceProvider? serviceProvider = null

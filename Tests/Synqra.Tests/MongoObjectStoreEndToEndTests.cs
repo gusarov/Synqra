@@ -48,7 +48,7 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 			ser.Map(102, 3000.0, typeof(DemoModel));
 		});
 
-		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostApplicationBuilder.Services.AddMongoEventLog(_connectionString);
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 	}
 
@@ -71,9 +71,9 @@ public class MongoObjectStoreEndToEndTests : BaseTest
 		return projection;
 	}
 
-	IAppendStorage<Event, Guid> Events()
+	IEventLog Events()
 	{
-		return ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+		return ServiceProvider.GetRequiredService<IEventLog>();
 	}
 
 	[Test]

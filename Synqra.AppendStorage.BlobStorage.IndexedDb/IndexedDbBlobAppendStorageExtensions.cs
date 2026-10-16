@@ -17,6 +17,13 @@ public static class IndexedDbBlobAppendStorageExtensions
 		return services.AddAppendStorageBlobIndexedDb(keyAccessor, x => x.ToString("N"), Guid.Parse, configuration, storeName);
 	}
 
+	/// <summary>A two-part key (an event log's (stream, sequence)): both parts as hex, so the text sorts like the key.</summary>
+	public static IServiceCollection AddAppendStorageBlobIndexedDb<T>(this IServiceCollection services, Func<T, (Guid, Guid)> keyAccessor, IConfiguration configuration, string? storeName = null)
+		where T : class
+	{
+		return services.AddAppendStorageBlobIndexedDb(keyAccessor, x => x.Item1.ToString("N") + x.Item2.ToString("N"), x => (Guid.Parse(x[..32]), Guid.Parse(x[32..])), configuration, storeName);
+	}
+
 	public static IServiceCollection AddAppendStorageBlobIndexedDb<T, TKey>(
 		this IServiceCollection services,
 		Func<T, TKey> keyAccessor,

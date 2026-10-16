@@ -547,18 +547,34 @@ gap is expected.
 - **A catch-up is one write.** The in-memory projection reads its cursor and enumerates the log under its
   gate (`CatchUpAsync`), so a command landing meanwhile waits for it; otherwise the command's events, applied
   once by the submit, were applied again from the log (a unique facet refused the second time).
-- **The server log owns commit order (`Event.SequenceId`).** A client proposes its EventId as the sequence; the server's
-  `SequencedEventLog` (over the Mongo log, or any log a server registers) keeps a proposal that follows the stream's last
-  stamp and runs at most five minutes ahead of the server clock, and fast-forwards any other past the last stamp
-  (`Generator.CreateVersion7OrApprove`, one generator per stream, seeded from the log's tail). EventId stays the identity
-  everywhere; on Mongo `_id` is the sequence and EventId a unique field (`event-sequence/1` backfills legacy logs).
+- **An event log is an append storage keyed by `(StreamId, SequenceId)`.** `IEventLog : IAppendStorage<Event, (Guid Stream,
+  Guid Sequence)>`; the sequence is the event's position in THAT log and the log stamps it on append, so a key always means
+  order, never identity (EventId is the identity everywhere and a unique field for dedup). A stream is a key prefix:
+  `ReadStreamAsync(stream, after)` reads `(stream, after)` strictly after the cursor (`IAppendStorage` reads from a cursor
+  exclusively; a composite key with an empty tail is a prefix) and stops at the first event of another stream. One log, one
+  clock: an event's stamp from another log is never kept — the endpoint clears an inbound event's stamp, a client log
+  overwrites the server's.
+  - **Server log (`ServerEventLog`): commit order.** A client proposes its EventId as the sequence; the stream's
+    `EventSequencer` keeps a proposal that follows the stream's last stamp and runs at most `EventSequencerOptions.MaxAhead`
+    (five minutes) ahead of the server clock, and fast-forwards any other past the last stamp
+    (`Generator.CreateVersion7OrApprove`, one generator per stream, seeded from the log's tail). A stamp already present is
+    a retry of this log's own append (a projection transaction retried): tracked, not stamped again. On Mongo
+    (`AddMongoEventLog`: `MongoEventStorage` under a `ServerEventLog`) `_id` is the sequence, `_sid` the stream, read
+    through the `(_sid, _id)` index; EventId a unique field (`event-sequence/1` backfills legacy logs).
+  - **Client log (`ClientEventLog`): arrival order.** Every event, its own or one received, takes the next local stamp, so
+    a projection's cursor (the last applied stamp, `IReplayProjection.Cursor`) is a position in arrival order and a
+    catch-up from it sees everything that arrived after it, whoever wrote it and whatever its id. (Keyed by EventId, a
+    pushed event whose author's clock sorted before the cursor was skipped until the next reload.) A received event is
+    filed under the connection's one subscribed stream: the stream is not on the wire.
+  - **Registration is explicit, no decoration:** register the storage keyed by `x => (x.StreamId, x.SequenceId)`, then
+    `AddServerEventLog()` / `AddClientEventLog()` (optionally keyed); consumers ask for `IEventLog`.
   **The watermark** is the highest committed sequence below the lowest stamp still in flight, read under the commit's own
   lock. Every `EventEnvelope` carries the watermark its event was committed under; a client keeps the highest it saw
   (`EventReplicationState.ServerWatermark`, persisted by the host through `IEventReplicationStateStore`), sends it in
-  HELLO, and the backlog is everything from there (a known id is never appended twice). One broadcaster: the push loop
-  fed by the log's committed signal, socket-borne events included (echoed to the sender, so it learns a replaced
-  sequence), so frames reach a socket in commit order and a resumed client misses nothing. Ids order by their bytes
-  (`CompareBigEndian`, explicit and the same on every target; the Framework's `Guid.CompareTo` is signed per group).
+  HELLO, and the backlog is each subscribed stream strictly after it (a known id is never appended twice). One broadcaster:
+  the push loop fed by the log's committed signal, socket-borne events included (echoed to the sender), so frames reach a
+  socket in commit order and a resumed client misses nothing. Ids order by their bytes (`CompareBigEndian`, explicit and
+  the same on every target; the Framework's `Guid.CompareTo` is signed per group).
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain

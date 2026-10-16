@@ -9,8 +9,8 @@ using TUnit.Assertions.Extensions;
 namespace Synqra.Tests;
 
 /// <summary>
-/// The sequenced log over an in-memory log: every append is stamped, reported with the watermark it was committed
-/// under, and read back in commit order (docs/model.md §9).
+/// The server's event log over an in-memory storage: every append is stamped, reported with the watermark it was
+/// committed under, and read back in commit order (docs/model.md §9).
 /// </summary>
 public class SequencedEventLogTests : BaseTest
 {
@@ -19,11 +19,11 @@ public class SequencedEventLogTests : BaseTest
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		hostApplicationBuilder.Services.AddAppendStorageInMemory<Event, Guid>(x => x.SequenceId);
-		hostApplicationBuilder.Services.AddSequencedEventLog();
+		hostApplicationBuilder.Services.AddAppendStorageInMemory<Event, (Guid, Guid)>(x => (x.StreamId, x.SequenceId));
+		hostApplicationBuilder.Services.AddServerEventLog();
 	}
 
-	SequencedEventLog Log => (SequencedEventLog)ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+	ServerEventLog Log => (ServerEventLog)ServiceProvider.GetRequiredService<IEventLog>();
 
 	ObjectPropertyChangedEvent Change(Guid id, string value) => new()
 	{
@@ -107,8 +107,8 @@ public class SequencedEventLogTests : BaseTest
 	[Test]
 	public async Task Should_let_a_failed_append_go_so_the_watermark_moves_on()
 	{
-		var inner = new FailingOnce(ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>());
-		var log = new SequencedEventLog(inner, new EventSequencer(Options.Create(new EventSequencerOptions())));
+		var inner = new FailingOnce(ServiceProvider.GetRequiredService<IAppendStorage<Event, (Guid, Guid)>>());
+		var log = new ServerEventLog(inner, new EventSequencer(Options.Create(new EventSequencerOptions())));
 		var lost = Change(GuidExtensions.CreateVersion7(), "lost");
 		var kept = Change(GuidExtensions.CreateVersion7(), "kept");
 
@@ -119,7 +119,7 @@ public class SequencedEventLogTests : BaseTest
 	}
 
 	/// <summary>An inner log whose first append fails after the stamp was issued.</summary>
-	sealed class FailingOnce(IAppendStorage<Event, Guid> inner) : IAppendStorage<Event, Guid>
+	sealed class FailingOnce(IAppendStorage<Event, (Guid, Guid)> inner) : IAppendStorage<Event, (Guid, Guid)>
 	{
 		bool _failed;
 
@@ -133,9 +133,9 @@ public class SequencedEventLogTests : BaseTest
 			await inner.AppendAsync(item, cancellationToken);
 		}
 
-		public Task<Event> GetAsync(Guid key, CancellationToken cancellationToken = default) => inner.GetAsync(key, cancellationToken);
+		public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default) => inner.GetAsync(key, cancellationToken);
 
-		public IAsyncEnumerable<Event> GetAllAsync(Guid from = default, CancellationToken cancellationToken = default) => inner.GetAllAsync(from, cancellationToken);
+		public IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, CancellationToken cancellationToken = default) => inner.GetAllAsync(from, cancellationToken);
 
 		public void Dispose()
 		{

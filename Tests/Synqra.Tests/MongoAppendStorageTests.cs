@@ -79,7 +79,7 @@ public class MongoAppendStorageTests : BaseTest
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		hostApplicationBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostApplicationBuilder.Services.AddMongoEventLog(_connectionString);
 	}
 
 	void Reopen()
@@ -88,25 +88,26 @@ public class MongoAppendStorageTests : BaseTest
 		Console.WriteLine("Reopened (new client/host, same database)");
 	}
 
-	IAppendStorage<Event, Guid> Storage()
+	readonly Guid _stream = Guid.NewGuid();
+
+	IEventLog Storage()
 	{
 		if (_connectionString is null)
 		{
 			throw new Exception("Mongo is not configured 3");
 			// throw new SkipTestException(EphemeralMongo.SkipReason);
 		}
-		return ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+		return ServiceProvider.GetRequiredService<IEventLog>();
 	}
 
-	// A regular, payload-light core event that carries an assertable value. streamId defaults
-	// to unset (Guid.Empty) — the stream-scoping tests below pass an explicit one.
-	static ObjectPropertyChangedEvent Change(Guid id, string value, Guid streamId = default)
+	// A regular, payload-light core event that carries an assertable value, on this test's stream unless one is given.
+	ObjectPropertyChangedEvent Change(Guid id, string value, Guid streamId = default)
 	{
 		return new ObjectPropertyChangedEvent
 		{
 			EventId = id,
 			CommandId = GuidExtensions.CreateVersion7(),
-			StreamId = streamId,
+			StreamId = streamId == default ? _stream : streamId,
 			TargetId = Guid.NewGuid(),
 			TargetTypeId = Guid.NewGuid(),
 			CollectionId = Guid.NewGuid(),
@@ -169,7 +170,7 @@ public class MongoAppendStorageTests : BaseTest
 		var ev = Change(GuidExtensions.CreateVersion7(), "Carol");
 		await storage.AppendAsync(ev);
 
-		var back = await storage.GetAsync(ev.EventId);
+		var back = await storage.GetAsync((ev.StreamId, ev.SequenceId));
 		await Assert.That(back.EventId).IsEqualTo(ev.EventId);
 		await Assert.That((string?)((ObjectPropertyChangedEvent)back).NewValue).IsEqualTo("Carol");
 	}
@@ -220,8 +221,8 @@ public class MongoAppendStorageTests : BaseTest
 		// No `from` (default) must return everything (the null-handling fix).
 		await Assert.That(storage.GetAllAsync().ToBlockingEnumerable().Count()).IsEqualTo(3);
 
-		// from = e2 is a cursor (the caller holds e2): the tail after it, e3.
-		var tail = storage.GetAllAsync(e2.EventId).ToBlockingEnumerable().Select(x => x.EventId).ToArray();
+		// from = e2's key is a cursor (the caller holds e2): the tail after it, e3.
+		var tail = storage.GetAllAsync((_stream, e2.SequenceId)).ToBlockingEnumerable().Select(x => x.EventId).ToArray();
 		await Assert.That(tail).IsEquivalentTo(new[] { e3.EventId });
 	}
 
@@ -245,7 +246,7 @@ public class MongoAppendStorageTests : BaseTest
 		var url = new MongoUrl(_connectionString);
 		var doc = await new MongoClient(url).GetDatabase(url.DatabaseName)
 			.GetCollection<BsonDocument>("Event")
-			.Find(Builders<BsonDocument>.Filter.Eq("_id", ev.EventId)).SingleAsync();
+			.Find(Builders<BsonDocument>.Filter.Eq("_id", ev.SequenceId)).SingleAsync();
 		await Assert.That(doc.Contains("_sid")).IsTrue();
 		await Assert.That(doc["_sid"].AsGuid).IsEqualTo(stream);
 	}
@@ -257,28 +258,21 @@ public class MongoAppendStorageTests : BaseTest
 		var streamA = Guid.NewGuid();
 		var streamB = Guid.NewGuid();
 
-		// Two per-stream logs over ONE shared multitenant collection — the production shape
-		// (EventLogProvider hands out one of these per stream over the process's single
-		// IAppendStorage<Event,Guid>).
-		var logA = new AppendStorageEventLog(streamA, storage);
-		var logB = new AppendStorageEventLog(streamB, storage);
-
+		// One shared multitenant collection — the production shape: a stream is the key's prefix.
 		var a = Change(GuidExtensions.CreateVersion7(), "a", streamA);
 		var b = Change(GuidExtensions.CreateVersion7(), "b", streamB);
-		await logA.AppendAsync(a);
-		await logB.AppendAsync(b);
+		await storage.AppendAsync(a);
+		await storage.AppendAsync(b);
 
-		// Each log reads back ONLY its own stream's events. Before _sid round-tripped, both
-		// logs saw both events — the persisted StreamId came back default, so ReadFrom's
-		// `ev.StreamId != default && != StreamId` guard never skipped the other stream's rows.
-		await Assert.That(await ReadIds(logA)).IsEquivalentTo(new[] { a.EventId });
-		await Assert.That(await ReadIds(logB)).IsEquivalentTo(new[] { b.EventId });
+		// Each stream reads back ONLY its own events, whichever of the two sorts first.
+		await Assert.That(await ReadIds(storage, streamA)).IsEquivalentTo(new[] { a.EventId });
+		await Assert.That(await ReadIds(storage, streamB)).IsEquivalentTo(new[] { b.EventId });
 	}
 
-	static async Task<List<Guid>> ReadIds(IEventLog log)
+	async Task<List<Guid>> ReadIds(IEventLog log, Guid streamId)
 	{
 		var ids = new List<Guid>();
-		await foreach (var ev in log.ReadFrom())
+		await foreach (var ev in log.ReadStreamAsync(streamId))
 		{
 			ids.Add(ev.EventId);
 		}

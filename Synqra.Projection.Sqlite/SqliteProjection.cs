@@ -17,7 +17,7 @@ using System.Text.Json.Serialization;
 
 namespace Synqra.Projection.Sqlite;
 
-using IAppendStorage = IAppendStorage<Event, Guid>;
+using IAppendStorage = IEventLog;
 
 internal static class SynqraStoreContextInternalExtensions
 {

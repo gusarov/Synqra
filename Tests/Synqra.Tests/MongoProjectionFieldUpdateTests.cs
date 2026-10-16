@@ -48,7 +48,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 			ser.Map(221, typeof(TestUniqueComponent));
 			ser.Map(230, typeof(TestFieldUpdateModel));
 		});
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostBuilder.Services.AddMongoEventLog(_connectionString);
 		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
 	}
 

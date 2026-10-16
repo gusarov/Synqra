@@ -19,7 +19,7 @@ using System.Text.Json.Serialization;
 
 namespace Synqra;
 
-using IAppendStorage = IAppendStorage<Event, Guid>;
+using IAppendStorage = IEventLog;
 
 public static class InMemoryStoreContextExtensions
 {
@@ -83,7 +83,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
 		, Guid streamId
-		, IAppendStorage<Event, Guid>? eventStorage = null
+		, IEventLog? eventStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
@@ -101,7 +101,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		// ambient scope per call when unpinned, via the shared SynqraStreamContext.Resolve), this store
 		// returns its pinned stream unconditionally. It does NOT replay itself here — a freshly created
 		// projection is cold (Cursor == Guid.Empty); IProjectionKeeper.MaintainAsync folds in the delta
-		// from the stream's IEventLog before first use.
+		// from the event log before first use.
 		StreamId = streamId;
 		if (StreamId == default)
 		{
@@ -155,11 +155,12 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	/// <summary>
 	/// The whole catch-up is one write: the cursor is read and the log enumerated under the gate, so a
 	/// command landing meanwhile waits instead of being applied once by itself and once more from the log.
+	/// The cursor is a position in the log (arrival order), so everything after it is new, whoever wrote it.
 	/// </summary>
-	public Task CatchUpAsync(IEventLog log, Guid? till = null, bool isReplay = false, CancellationToken cancellationToken = default)
+	public Task CatchUpAsync(Func<Guid, IAsyncEnumerable<Event>> readAfter, bool isReplay = false, CancellationToken cancellationToken = default)
 		=> _gate.RunAsync(async () =>
 		{
-			await foreach (var ev in log.ReadFrom(afterEventId: Cursor, till: till, cancellationToken))
+			await foreach (var ev in readAfter(Cursor).WithCancellation(cancellationToken))
 			{
 				await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
 			}
@@ -568,6 +569,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		if (_eventStorage != null)
 		{
 			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
+			foreach (var @event in commandHandlingContext.Events)
+			{
+				Advance(@event.SequenceId); // stamped by the append: this projection's own events are behind the cursor now
+			}
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);
@@ -835,8 +840,17 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			throw new InvalidOperationException(
 				$"Event stream {ev.StreamId} does not match projection stream {StreamId} — misrouted event {ev.EventId}.");
 		}
-		Cursor = ev.EventId;
+		Advance(ev.SequenceId);
 		return Task.CompletedTask;
+	}
+
+	/// <summary>Moves <see cref="Cursor"/> forward to a log position; an event not yet stamped (own, before its append) leaves it.</summary>
+	void Advance(Guid sequence)
+	{
+		if (sequence != default && sequence.CompareBigEndian(Cursor) > 0)
+		{
+			Cursor = sequence;
+		}
 	}
 
 	/// <summary>

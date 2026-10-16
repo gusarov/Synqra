@@ -33,7 +33,7 @@ public sealed class MongoProjectionStreamIsolationTests : BaseTest
 			ser.Map(220, typeof(TestGeneratedContainerNode));
 			ser.Map(221, typeof(TestUniqueComponent));
 		});
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostBuilder.Services.AddMongoEventLog(_connectionString);
 		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
 	}
 

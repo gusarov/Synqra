@@ -117,13 +117,13 @@ internal class SynqraTestNode
 		_projection ?? throw new InvalidOperationException("Projection not initialized yet — await node.Started first.");
 #endif
 
-	public IAppendStorage<Event, Guid> Events
+	public IEventLog Events
 	{
 		get =>
 #if NETFRAMEWORK
 			throw new NotImplementedException();
 #else
-			field ??= Host.Services.GetRequiredService<IAppendStorage<Event, Guid>>(); private set;
+			field ??= Host.Services.GetRequiredService<IEventLog>(); private set;
 #endif
 	}
 
@@ -221,16 +221,20 @@ internal class SynqraTestNode
 			// The real endpoint reads events back from its own log to replay a stream's backlog and
 			// filters by Event.StreamId — so the log must preserve it. InMemory does (it holds the
 			// object); JSON-lines does not ([JsonIgnore]). See the useRealEndpoint remarks above.
-			builder.Services.AddAppendStorageInMemory<Event, Guid>(x => x.SequenceId); // a server log is keyed by the commit order
+			builder.Services.AddAppendStorageInMemory<Event, (Guid, Guid)>(x => (x.StreamId, x.SequenceId));
 		}
 		else
 #endif
 		{
-			builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
+			builder.AddAppendStorageJsonLines<Event>("Key", x => (x.StreamId, x.SequenceId));
 		}
 		if (masterHost)
 		{
-			builder.Services.AddSequencedEventLog(); // the master owns commit order (docs/model.md §9)
+			builder.Services.AddServerEventLog(); // the master owns commit order (docs/model.md §9)
+		}
+		else
+		{
+			builder.Services.AddClientEventLog(); // a node's own log is in arrival order
 		}
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();
@@ -420,12 +424,15 @@ internal class SynqraTestNode
 				{
 					_sockets.Add(socket);
 					await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+					// The HELLO ack, as the real endpoint sends it: the client files received events under its one subscribed stream.
+					var ack = networkSerializationService.Serialize<TransportOperation>(new SubscriptionState { Streams = [StreamId] }, new ArraySegment<byte>(new byte[EventReplicationService.DefaultFrameSize]));
+					await socket.SendAsync(ack, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 
-					var backlogStorage = app.Services.GetRequiredService<IAppendStorage<Event, Guid>>();
+					var backlogStorage = app.Services.GetRequiredService<IEventLog>();
 					var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 					try
 					{
-						await foreach (var ev in backlogStorage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
+						await foreach (var ev in backlogStorage.ReadStreamAsync(StreamId, clientCursor, ctx.RequestAborted))
 						{
 							knownEvents.TryAdd(ev.EventId, null);
 							var payload = networkSerializationService.Serialize<TransportOperation>(new EventEnvelope { Event = ev }, new ArraySegment<byte>(backlogBuffer));
@@ -473,9 +480,10 @@ internal class SynqraTestNode
 							try
 							{
 								var ev = eventEnvelope.Event;
-								// ev.MasterSeq
+								ev.StreamId = StreamId; // this master serves its own stream; the stream is not on the wire
+								ev.SequenceId = default; // the client's local stamp: this log stamps its own
 								await ev.AcceptAsync(storeCtx, null);
-								var storage = app.Services.GetRequiredService<IAppendStorage<Event, Guid>>();
+								var storage = app.Services.GetRequiredService<IEventLog>();
 								await storage.AppendAsync(ev);
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try
