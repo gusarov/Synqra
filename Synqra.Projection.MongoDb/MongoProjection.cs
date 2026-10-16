@@ -105,7 +105,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	// alive; one nobody holds is collected and loaded again from Mongo on demand.
 	readonly ConditionalWeakTable<object, TrackedObject> _byModel = new();
 	// Weak on purpose: holding the TrackedObject here would keep it reachable, so its finalizer would never drop this slot.
-	readonly ConcurrentDictionary<Guid, WeakReference<object>> _byId = new();
+	// Keyed by stream as well: one multitenant instance serves every stream, and an id seen in one must never answer in another.
+	readonly ConcurrentDictionary<(Guid Stream, Guid Id), WeakReference<object>> _byId = new();
 	readonly Dictionary<Guid, MongoStoreCollection> _collections = new();
 	readonly object _collectionsGate = new();
 
@@ -173,12 +174,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		/// <summary>The collection the instance belongs to: its plane (CollectionId), its root type (Type) and its projection; one reference instead of copies of each.</summary>
 		public required MongoStoreCollection Collection { get; init; }
 		public required Guid Id { get; init; }
+		/// <summary>The stream the instance was attached in; it is tracked, and answers lookups, only there.</summary>
+		public required Guid StreamId { get; init; }
 		public required WeakReference<object> Slot { get; init; }
 		public Guid LastEventId { get; set; }
 
 		~TrackedObject()
 		{
-			Collection.Projection._byId.TryRemove(new KeyValuePair<Guid, WeakReference<object>>(Id, Slot));
+			Collection.Projection._byId.TryRemove(new KeyValuePair<(Guid, Guid), WeakReference<object>>((StreamId, Id), Slot));
 		}
 	}
 
@@ -436,7 +439,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	void Evict(Guid id)
 	{
-		if (_byId.TryRemove(id, out var entry) && entry.TryGetTarget(out var model))
+		if (_byId.TryRemove((StreamId, id), out var entry) && entry.TryGetTarget(out var model))
 		{
 			_byModel.Remove(model);
 		}
@@ -559,7 +562,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		// Build the instance completely (bound + facets hydrated) BEFORE publishing it, so no one can
 		// observe a half-built winner. A loser is rolled back from _byModel and dropped.
 		var entry = new WeakReference<object>(model);
-		_byModel.Add(model, new TrackedObject { Collection = collection, Id = id, Slot = entry });
+		var key = (Stream: StreamId, Id: id);
+		_byModel.Add(model, new TrackedObject { Collection = collection, Id = id, StreamId = key.Stream, Slot = entry });
 		if (model is IBindableModel bindable && bindable.Store is null)
 		{
 			bindable.Attach(this, collection.CollectionId);
@@ -571,7 +575,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		object? winner = null;
 		while (winner is null)
 		{
-			var current = _byId.GetOrAdd(id, entry);
+			var current = _byId.GetOrAdd(key, entry);
 			if (ReferenceEquals(current, entry))
 			{
 				winner = model;
@@ -580,7 +584,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			{
 				winner = alive;
 			}
-			else if (_byId.TryUpdate(id, entry, current))
+			else if (_byId.TryUpdate(key, entry, current))
 			{
 				winner = model; // the previous holder of this id was collected
 			}
@@ -592,15 +596,15 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		return winner;
 	}
 
-	/// <summary>The live instance tracked under <paramref name="id"/>; a collected one (slot not yet dropped by its finalizer) counts as untracked.</summary>
+	/// <summary>The live instance tracked under <paramref name="id"/> in the current stream; a collected one (slot not yet dropped by its finalizer) counts as untracked.</summary>
 	internal bool TryGetTracked(Guid id, out object model)
 	{
 		model = null!;
-		return _byId.TryGetValue(id, out var entry) && entry.TryGetTarget(out model!);
+		return _byId.TryGetValue((StreamId, id), out var entry) && entry.TryGetTarget(out model!);
 	}
 
-	/// <summary>Whether an id slot exists at all, live or awaiting its finalizer; for tests.</summary>
-	internal bool IsSlotHeld(Guid id) => _byId.ContainsKey(id);
+	/// <summary>Whether an id slot exists at all in the current stream, live or awaiting its finalizer; for tests.</summary>
+	internal bool IsSlotHeld(Guid id) => _byId.ContainsKey((StreamId, id));
 
 	/// <summary>
 	/// Rehydrates a stored document into its concrete model via the native MongoDB driver
