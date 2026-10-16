@@ -21,7 +21,7 @@ public class ContosoObjectStore : InMemoryProjection, IContosoObjectStore
 	public ContosoObjectStore(
 		// ISbxSerializerFactory serializerFactory
 		// , ITypeMetadataProvider typeMetadataProvider
-		// , IAppendStorage<Event, Guid>? eventStorage = null
+		// , IEventLog? eventStorage = null
 		// , IEventReplicationService? eventReplicationService = null
 		// , JsonSerializerOptions? jsonSerializerOptions = null
 		// , JsonSerializerContext? jsonSerializerContext = null

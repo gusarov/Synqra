@@ -37,7 +37,9 @@ public static class InMemoryAppendStorageExtensions
 			// Guid keys order by their bytes: v7 time order, the wire's and Mongo's order, the same on every target
 			_data = typeof(TKey) == typeof(Guid)
 				? new SortedDictionary<TKey, T>((IComparer<TKey>)Comparer<Guid>.Create((a, b) => a.CompareBigEndian(b)))
-				: new SortedDictionary<TKey, T>();
+				: typeof(TKey) == typeof((Guid, Guid))
+					? new SortedDictionary<TKey, T>((IComparer<TKey>)Comparer<(Guid, Guid)>.Create((a, b) => a.Item1.CompareBigEndian(b.Item1) is var first && first != 0 ? first : a.Item2.CompareBigEndian(b.Item2)))
+					: new SortedDictionary<TKey, T>();
 		}
 
 		public Task AppendAsync(T item, CancellationToken cancellationToken = default)

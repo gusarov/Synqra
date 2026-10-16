@@ -29,7 +29,7 @@ using Synqra.Tests.SampleModels.Syncronization;
 
 namespace Synqra.Tests;
 
-using IAppendStorage = IAppendStorage<Event, Guid>;
+using IAppendStorage = IAppendStorage<Event, (Guid, Guid)>;
 
 [InheritsTests]
 public class TestsStateManageementInMemory : TestsStateManagement
@@ -685,8 +685,7 @@ public class TestsStateManageementFile : TestsStateManagement
 	{
 		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.AddFileSynqraStore();
-		// IAppendStorage<Event, Guid> stays FakeAppendStorage from base.Register (Reopen carries it across restarts)
-		hostApplicationBuilder.AddAppendStorageBlobFile<Event>(e => e.EventId);
+		// the event log stays FakeAppendStorage from base.Register (Reopen carries it across restarts)
 		hostApplicationBuilder.AddAppendStorageBlobFile<Command>(e => e.CommandId);
 		hostApplicationBuilder.AddAppendStorageBlobFile<Item>(e =>
 		{
@@ -832,7 +831,8 @@ public abstract class TestsStateManagement : BaseTest
 		var q3 = new ChangeObjectPropertyCommand() { PropertyName = "q" }; // must register polimorfic before serializaiton
 
 		HostBuilder.Services.AddSingleton<FakeAppendStorage>();
-		HostBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<FakeAppendStorage>());
+		HostBuilder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(sp => sp.GetRequiredService<FakeAppendStorage>());
+		HostBuilder.Services.AddClientEventLog();
 		// HostBuilder.Services.AddSingleton<IAppendStorage>(sp => sp.GetRequiredService<FakeAppendStorage>());
 
 		HostBuilder.Services.AddSbxSerializer(ser =>
@@ -1037,8 +1037,10 @@ public class MyPocoTask
 	public string Subject { get; set; }
 }
 
-public class FakeAppendStorage : FakeAppendStorage<Event, Guid>, IAppendStorage
+public class FakeAppendStorage : FakeAppendStorage<Event, (Guid, Guid)>, IAppendStorage
 {
+	protected override bool IsAfter(Event item, (Guid, Guid) from)
+		=> item.StreamId.CompareBigEndian(from.Item1) is var stream && stream != 0 ? stream > 0 : item.SequenceId.CompareBigEndian(from.Item2) > 0;
 }
 
 public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
@@ -1075,14 +1077,18 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 
 	public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
-		foreach (T item in Items)
+		var hasCursor = from is not null && !Equals(from, default(TKey));
+		foreach (T item in Items.ToArray())
 		{
-			// if (from == null || item is IEvent e && e.Id > from)
+			if (!hasCursor || IsAfter(item, from!))
 			{
 				yield return item;
 			}
 		}
 	}
+
+	/// <summary>Whether an item sorts strictly after the cursor; a fake that knows its keys overrides this.</summary>
+	protected virtual bool IsAfter(T item, TKey from) => true;
 
 	public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{

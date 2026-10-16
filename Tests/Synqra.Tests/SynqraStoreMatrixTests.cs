@@ -130,7 +130,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	protected IObjectStore ResolveInMemoryStoreForStream()
 		=> (IObjectStore)ServiceProvider.GetRequiredService<IProjectionProvider>().GetAsync(_streamId).GetAwaiter().GetResult();
 
-	protected IAppendStorage<Event, Guid> Events() => ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+	protected IEventLog Events() => ServiceProvider.GetRequiredService<IEventLog>();
 
 	protected void UseMongoProjectionStore(IServiceCollection services) => services.AddMongoDbSynqraStore(_connectionString);
 
@@ -719,7 +719,7 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 }
 
 // =====================================================================================
-// Event-storage axis (abstract — fixes IAppendStorage<Event, Guid>, leaves the store open)
+// Event-storage axis (abstract — fixes the event log, leaves the store open)
 // =====================================================================================
 
 /// <summary>Event log = MongoDB (native, queryable BSON documents) — durable.</summary>
@@ -727,7 +727,7 @@ public abstract class Cobra_MongoEventStorageContract : Cobra_DurableSynqraStore
 {
 	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder)
 	{
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostBuilder.Services.AddMongoEventLog(_connectionString);
 	}
 }
 
@@ -740,7 +740,8 @@ public abstract class Cobra_SbxFileEventStorageContract : Cobra_DurableSynqraSto
 	{
 		_folder ??= CreateTestFolder(); // stable across Restart() so replay reads the same files
 		Configuration["Storage:BlobStorage:File:Folder"] = Path.Combine(_folder, "[Store]") + Path.DirectorySeparatorChar;
-		hostBuilder.AddAppendStorageBlobFile<Event>(x => x.EventId);
+		hostBuilder.AddAppendStorageBlobFile<Event>(x => (x.StreamId, x.SequenceId));
+		hostBuilder.Services.AddClientEventLog();
 	}
 }
 
@@ -750,7 +751,11 @@ public abstract class Cobra_SbxFileEventStorageContract : Cobra_DurableSynqraSto
 /// </summary>
 public abstract class Cobra_InMemoryEventStorageContract : Cobra_SynqraStoreContractTests
 {
-	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder) => InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, Guid>(hostBuilder, x => x.EventId);
+	protected override void RegisterAppendStorage(IHostApplicationBuilder hostBuilder)
+	{
+		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, (Guid, Guid)>(hostBuilder, x => (x.StreamId, x.SequenceId));
+		hostBuilder.Services.AddClientEventLog();
+	}
 }
 
 // =====================================================================================
@@ -846,7 +851,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			ser.Map(222, typeof(TestTaggingComponent));
 			ser.Map(223, typeof(TestActivatableComponent));
 		});
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostBuilder.Services.AddMongoEventLog(_connectionString);
 		UseMongoProjectionStore(hostBuilder.Services);
 	}
 
@@ -871,12 +876,12 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	}
 
 	/// <summary>An event log that refuses every append: stands for a log on another cluster that is down.</summary>
-	sealed class UnavailableLog : IAppendStorage<Event, Guid>
+	sealed class UnavailableLog : IEventLog
 	{
 		public Task AppendAsync(Event item, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
 		public Task AppendBatchAsync(IEnumerable<Event> items, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The event store is unavailable.");
-		public Task<Event> GetAsync(Guid key, CancellationToken cancellationToken = default) => throw new KeyNotFoundException(key.ToString());
-		public async IAsyncEnumerable<Event> GetAllAsync(Guid from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public Task<Event> GetAsync((Guid Stream, Guid Sequence) key, CancellationToken cancellationToken = default) => throw new KeyNotFoundException(key.ToString());
+		public async IAsyncEnumerable<Event> GetAllAsync((Guid Stream, Guid Sequence) from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			await Task.CompletedTask;
 			yield break;
@@ -890,7 +895,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	[Test]
 	public async Task Should_write_no_documents_when_the_event_log_refuses_the_append()
 	{
-		var projection = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase(), (IAppendStorage<Event, Guid>)new UnavailableLog());
+		var projection = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase(), (IEventLog)new UnavailableLog());
 		var id = Guid.NewGuid();
 		using var _ = SynqraStreamContext.Enter(_streamId);
 
@@ -902,7 +907,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	[Test]
 	public async Task Should_append_a_batch_to_the_mongo_log_whole_and_only_once()
 	{
-		var log = ServiceProvider.GetRequiredService<IAppendStorage<Event, Guid>>();
+		var log = ServiceProvider.GetRequiredService<IEventLog>();
 		var metadata = Store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
 		var target = Guid.NewGuid();
 		var batch = Enumerable.Range(0, 3).Select(i => (Event)new ComponentPropertyChangedEvent

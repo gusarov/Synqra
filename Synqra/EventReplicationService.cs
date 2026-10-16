@@ -19,7 +19,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 {
 	public const int DefaultFrameSize = 8192;
 
-	private readonly IAppendStorage<Event, Guid> _storage;
+	private readonly IEventLog _storage;
 	private readonly EventReplicationState _eventReplicationState;
 	private readonly JsonSerializerContext? _jsonSerializerContext;
 	private readonly EventReplicationConfig _config;
@@ -63,7 +63,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	public EventReplicationService(
 		  IOptions<EventReplicationConfig> options
-		, IAppendStorage<Event, Guid> storage
+		, IEventLog storage
 		, EventReplicationState eventReplicationState
 		, INetworkSerializationService networkSerializationService
 		, JsonSerializerContext? jsonSerializerContext = null
@@ -81,6 +81,23 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>The stream this connection serves; the persisted state is keyed by it.</summary>
 	Guid StreamKey => _config.StreamId ?? _config.InitialSubscribeStreamId ?? default;
+
+	/// <summary>
+	/// The stream a received event belongs to. The stream is not on the wire: the event's own when a peer set it, else the one
+	/// stream this connection is subscribed to, else the configured one.
+	/// </summary>
+	Guid StreamOf(Event ev)
+	{
+		var active = _activeStreams;
+		var stream = ev.StreamId != default ? ev.StreamId
+			: active.Count == 1 ? active.First()
+			: StreamKey;
+		if (stream == default)
+		{
+			throw new InvalidOperationException($"EventReplicationService: event {ev.EventId} arrived on a connection subscribed to {active.Count} streams and no configured stream; its stream cannot be told.");
+		}
+		return stream;
+	}
 
 	async Task LoadStateAsync()
 	{
@@ -258,16 +275,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					_skipList.AddLast(ev.EventId);
 				}
 			}
-			if (known)
+			if (!known)
 			{
-				if (ev.SequenceId != ev.EventId)
-				{
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev} committed as {ev.SequenceId} (the server replaced the proposed sequence)");
-				}
-			}
-			else
-			{
-				await _storage.AppendAsync(ev);
+				ev.StreamId = StreamOf(ev);
+				await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
 				EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
 			}
 			if (envelope.Watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)

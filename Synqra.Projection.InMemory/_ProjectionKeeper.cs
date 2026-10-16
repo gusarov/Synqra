@@ -108,116 +108,28 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 }
 
 /// <summary>
-/// An <see cref="IEventLog"/> over a multitenant <see cref="IAppendStorage{Event, Guid}"/>. The store
-/// holds every stream (events are keyed by globally-unique v7 <see cref="Event.EventId"/> and carry
-/// their own <see cref="Event.StreamId"/>), so reads are filtered to this log's stream — exactly
-/// Todo's shared <c>RamEventsStore</c> filtered by ContainerId. The stream id also rejects a misrouted
-/// append and satisfies the provider's <c>StreamId == streamId</c> guarantee.
-/// </summary>
-public sealed class AppendStorageEventLog : IEventLog
-{
-	private readonly IAppendStorage<Event, Guid> _storage;
-
-	public AppendStorageEventLog(Guid streamId, IAppendStorage<Event, Guid> storage)
-	{
-		StreamId = streamId;
-		_storage = storage;
-	}
-
-	public Guid StreamId { get; }
-
-	public Task AppendAsync(Event ev, CancellationToken cancellationToken = default)
-	{
-		if (ev.StreamId != default && ev.StreamId != StreamId)
-		{
-			throw new InvalidOperationException(
-				$"Event stream {ev.StreamId} does not match log stream {StreamId} — refusing misrouted append of {ev.EventId}.");
-		}
-		return _storage.AppendAsync(ev);
-	}
-
-	public async IAsyncEnumerable<Event> ReadFrom(
-		  Guid afterEventId = default
-		, Guid? till = null
-		, [EnumeratorCancellation] CancellationToken cancellationToken = default
-		)
-	{
-		// Backend-agnostic incremental read. IAppendStorage.GetAllAsync(from) is NOT a uniform
-		// range scan across backends — the in-memory store treats `from` as a >= key bound, but the
-		// JsonLines store treats it as a key *prefix* match (returning only the boundary event), and
-		// others may differ. Relying on it for "everything after the cursor" silently returns nothing
-		// on a prefix-match backend, breaking live catch-up. So always do a full read (from: default,
-		// which every backend agrees means "everything") in append/chronological order and skip past
-		// the cursor here. The log is multitenant, so also filter to this stream (a legacy event with
-		// a default StreamId is tolerated — it belongs to whichever single stream owned the store
-		// historically).
-		//
-		// A cold cursor (default) means "apply the whole stream". Otherwise skip every event up to and
-		// including the one whose EventId == cursor (it is already applied), then yield the rest.
-		var reached = afterEventId == default;
-		await foreach (var ev in _storage.GetAllAsync(from: default, cancellationToken))
-		{
-			if (ev.StreamId != default && ev.StreamId != StreamId)
-			{
-				continue;
-			}
-			if (!reached)
-			{
-				if (ev.EventId == afterEventId)
-				{
-					reached = true;
-				}
-				continue;
-			}
-			yield return ev;
-			if (till is Guid t && ev.EventId == t)
-			{
-				yield break;
-			}
-		}
-	}
-}
-
-public sealed class EventLogProvider : IEventLogProvider
-{
-	private readonly IAppendStorage<Event, Guid> _storage;
-
-	public EventLogProvider(IAppendStorage<Event, Guid> storage)
-	{
-		_storage = storage;
-	}
-
-	public IEventLog GetEventLog(Guid streamId)
-	{
-		if (streamId == default)
-		{
-			throw new ArgumentException("A non-default stream id is required.", nameof(streamId));
-		}
-		return new AppendStorageEventLog(streamId, _storage);
-	}
-}
-
-/// <summary>
-/// The one and only replay path: reads the delta from <see cref="IReplayProjection.Cursor"/> forward
-/// out of the stream's <see cref="IEventLog"/> and applies it, advancing the cursor. A cheap no-op
-/// when already at head, a full replay when cold.
+/// The one and only replay path: reads the stream's delta after <see cref="IReplayProjection.Cursor"/> out of the
+/// <see cref="IEventLog"/> and applies it, advancing the cursor. A cheap no-op when already at head, a full replay when
+/// cold, and nothing at all for a host without a log.
 /// </summary>
 public sealed class ProjectionKeeper : IProjectionKeeper
 {
-	private readonly IEventLogProvider _logProvider;
+	private readonly IEventLog? _log;
 
-	public ProjectionKeeper(IEventLogProvider logProvider)
+	public ProjectionKeeper(IEventLog? log = null)
 	{
-		_logProvider = logProvider;
+		_log = log;
 	}
 
 	public async Task MaintainAsync(
 		  IReplayProjection projection
-		, Guid? till = null
 		, bool isReplay = false
 		, CancellationToken cancellationToken = default
 		)
 	{
-		await projection.CatchUpAsync(_logProvider.GetEventLog(projection.StreamId), till, isReplay, cancellationToken);
+		if (_log is not null)
+		{
+			await projection.CatchUpAsync(cursor => _log.ReadStreamAsync(projection.StreamId, cursor, cancellationToken), isReplay, cancellationToken);
+		}
 	}
 }

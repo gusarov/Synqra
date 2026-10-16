@@ -18,7 +18,7 @@ public static class FileSynqraExtensions
 	static FileSynqraExtensions()
 	{
 		// AOT ROOTS:
-		_ = typeof(IAppendStorage<Event, Guid>);
+		_ = typeof(IAppendStorage<Event, (Guid, Guid)>);
 	}
 
 	/// <summary>
@@ -579,7 +579,7 @@ public static class FileSynqraExtensions
 		  ITypeMetadataProvider _typeMetadataProvider
 		, Lazy<IObjectStore> _lazyObjectStore
 		, AppendStores _appendStores
-		, IAppendStorage<Event, Guid> _eventStorage
+		, IEventLog _eventStorage
 		, IEventReplicationService? _eventReplicationService = null
 		) : IProjection
 	{
@@ -879,11 +879,11 @@ public static class FileSynqraExtensions
 
 	private class AppendStores
 	{
-		public IAppendStorage<Event, Guid> EventAppendStorage { get; } // this always corresponds to current event store
+		public IEventLog EventAppendStorage { get; } // this always corresponds to current event store
 		public IAppendStorage<Command, Guid> CommandAppendStorage { get; }
 		public IAppendStorage<Item, (Guid, Guid)> ItemAppendStorage { get; }
 
-		public AppendStores(IAppendStorage<Event, Guid> eventAppendStorage, IAppendStorage<Command, Guid> commandAppendStorage, IAppendStorage<Item, (Guid, Guid)> itemAppendStorage)
+		public AppendStores(IEventLog eventAppendStorage, IAppendStorage<Command, Guid> commandAppendStorage, IAppendStorage<Item, (Guid, Guid)> itemAppendStorage)
 		{
 			EventAppendStorage = eventAppendStorage;
 			CommandAppendStorage = commandAppendStorage;

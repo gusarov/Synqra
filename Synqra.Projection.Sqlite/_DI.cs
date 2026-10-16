@@ -9,7 +9,7 @@ public static class SqliteSynqraExtensions
 	static SqliteSynqraExtensions()
 	{
 		// AOT ROOTS:
-		_ = typeof(IAppendStorage<Event, Guid>);
+		_ = typeof(IAppendStorage<Event, (Guid, Guid)>);
 	}
 
 	public static IHostApplicationBuilder AddSqliteSynqraStore(this IHostApplicationBuilder builder)

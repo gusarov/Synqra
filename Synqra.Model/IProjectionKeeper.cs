@@ -24,52 +24,23 @@ public interface IReplayProjection : IObjectStore, IProjection
     Guid StreamId { get; }
 
     /// <summary>
-    /// Id of the last event applied to this projection (Todo's CurrentVersion). <see cref="Guid.Empty"/>
-    /// means cold — nothing applied yet.
+    /// Position of the last event applied to this projection: its <see cref="Event.SequenceId"/> in the stream's log, which
+    /// is arrival order on a client and commit order on a server (docs/model.md §9). <see cref="Guid.Empty"/> means cold.
     /// </summary>
     Guid Cursor { get; }
 
     /// <summary>
-    /// Apply one event that arrived from elsewhere (a socket), advancing <see cref="Cursor"/> to its id.
+    /// Apply one event that arrived from elsewhere (a socket), advancing <see cref="Cursor"/> to its stamp when it has one.
     /// <paramref name="isReplay"/> suppresses one-shot activator side effects for historical events.
     /// </summary>
     Task ApplyAsync(Event ev, bool isReplay = false, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Fold in this stream's events after <see cref="Cursor"/> from <paramref name="log"/>, as one write of
-    /// this projection: a command submitted meanwhile waits for it, so an event the projection applied itself
-    /// is never applied again from the log. The <see cref="IProjectionKeeper"/> calls this.
+    /// Fold in this stream's events after <see cref="Cursor"/>, read by <paramref name="readAfter"/> (the log's events of this
+    /// stream strictly after a cursor), as one write of this projection: a command submitted meanwhile waits for it, so an
+    /// event the projection applied itself is never applied again from the log. The <see cref="IProjectionKeeper"/> calls this.
     /// </summary>
-    Task CatchUpAsync(IEventLog log, Guid? till = null, bool isReplay = false, CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// A per-stream event reader/writer. The log knows which stream it is (<see cref="StreamId"/>), so a
-/// misrouted append is caught here rather than silently folded into the wrong projection.
-/// </summary>
-public interface IEventLog
-{
-    /// <summary>The stream this log is scoped to.</summary>
-    Guid StreamId { get; }
-
-    /// <summary>Append one event to this stream's durable log.</summary>
-    Task AppendAsync(Event ev, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Read this stream's events strictly AFTER <paramref name="afterEventId"/> (exclusive), optionally
-    /// stopping once the event with id <paramref name="till"/> has been yielded. Passing
-    /// <see cref="Guid.Empty"/> reads from the beginning.
-    /// </summary>
-    IAsyncEnumerable<Event> ReadFrom(Guid afterEventId = default, Guid? till = null, CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// Hands out per-stream <see cref="IEventLog"/>s. The result is guaranteed to have
-/// <c>GetEventLog(s).StreamId == s</c>.
-/// </summary>
-public interface IEventLogProvider
-{
-    IEventLog GetEventLog(Guid streamId);
+    Task CatchUpAsync(Func<Guid, IAsyncEnumerable<Event>> readAfter, bool isReplay = false, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -79,7 +50,7 @@ public interface IEventLogProvider
 /// </summary>
 public interface IProjectionKeeper
 {
-    Task MaintainAsync(IReplayProjection projection, Guid? till = null, bool isReplay = false, CancellationToken cancellationToken = default);
+    Task MaintainAsync(IReplayProjection projection, bool isReplay = false, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -87,7 +58,7 @@ public interface IProjectionKeeper
 /// to the supplied stream id. The stream id is a runtime argument supplied at the call site (a fresh
 /// random stream in tests, the session stream on a client) — never pinned into a DI registration.
 /// <para>
-/// This is the counterpart to the event-area <see cref="IEventLogProvider"/>. A store whose projection
+/// A store whose projection
 /// cannot be multitenant (in-memory today, an instance-per-stream client store like IndexedDb
 /// tomorrow) registers a factory here instead of a DI-resolvable projection singleton. Use this
 /// directly only for an <i>alternative</i> build of a stream; for the regular latest projection of a

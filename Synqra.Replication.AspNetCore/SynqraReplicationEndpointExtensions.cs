@@ -66,8 +66,8 @@ public static class SynqraReplicationEndpointExtensions
 		// The sequenced log (docs/model.md §9) reports every commit, socket-borne ones included, with the watermark it
 		// was committed under; a host without one falls back to the projection's own signal and the socket path's fan-out.
 		var log = serviceKey is null
-			? app.Services.GetService<IAppendStorage<Event, Guid>>()
-			: app.Services.GetKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+			? app.Services.GetService<IEventLog>()
+			: app.Services.GetKeyedService<IEventLog>(serviceKey);
 		var watermarks = log as IEventWatermarks;
 		var logBroadcasts = log is ICommittedEventSource;
 		var projectionSource = (serviceKey is null
@@ -294,22 +294,20 @@ public static class SynqraReplicationEndpointExtensions
 				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 
 				var storage = serviceKey is null
-					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
-					: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+					? ctx.RequestServices.GetRequiredService<IEventLog>()
+					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 				var backlogWatermarks = WatermarksOf(socketScope.Active);
 				try
 				{
-					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
+					// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark: a
+					// stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own streams.
+					// An unscoped host (connectionStream null) sends every stream's events after the watermark.
+					var backlog = connectionStream is null
+						? AfterCursor(storage.GetAllAsync(default, ctx.RequestAborted), clientCursor)
+						: ReadStreams(storage, socketScope.Active.ToArray(), clientCursor, ctx.RequestAborted);
+					await foreach (var ev in backlog)
 					{
-						// Replay only streams THIS connection is currently subscribed to. The log is one
-						// shared multitenant collection; ev.StreamId (persisted as _sid) says which stream
-						// each event belongs to. Without this filter the backlog leaked every stream's
-						// events to any connecting client. Unscoped host (connectionStream null) → send all.
-						if (!ReplicationStreamScope.Admits(ev.StreamId, connectionStream, socketScope.Active))
-						{
-							continue;
-						}
 						knownEvents.TryAdd(ev.EventId);
 						// The log reads from the cursor inclusively; the watermark's own event is one the client already holds.
 						if (clientCursor == default || ev.SequenceId != clientCursor)
@@ -362,18 +360,14 @@ public static class SynqraReplicationEndpointExtensions
 							if ((connectionStream is null || grantable.Contains(target)) && socketScope.Active.Add(target))
 							{
 								var storage = serviceKey is null
-									? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
-									: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+									? ctx.RequestServices.GetRequiredService<IEventLog>()
+									: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								var subWatermark = watermarks?.ReadWatermark(target) ?? default;
 								try
 								{
-									await foreach (var ev in storage.GetAllAsync(from: default, ctx.RequestAborted))
+									await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
 									{
-										if (ev.StreamId != target)
-										{
-											continue;
-										}
 										knownEvents.TryAdd(ev.EventId);
 										await SendEventFrameAsync(socket, subBuffer, ev, subWatermark);
 									}
@@ -419,6 +413,7 @@ public static class SynqraReplicationEndpointExtensions
 					{
 						ev.StreamId = stream;
 					}
+					ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
 					var projection = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IProjection>()
 						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
@@ -431,8 +426,8 @@ public static class SynqraReplicationEndpointExtensions
 						await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
 					}
 					var storage = serviceKey is null
-						? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
-						: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+						? ctx.RequestServices.GetRequiredService<IEventLog>()
+						: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 					await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
 					if (!logBroadcasts)
 					{
@@ -538,5 +533,29 @@ public static class SynqraReplicationEndpointExtensions
 		public Guid? WritableStream { get; }
 		public IReadOnlySet<Guid> Grantable { get; }
 		public HashSet<Guid> Active { get; }
+	}
+
+	/// <summary>Each stream's events strictly after the cursor, stream by stream.</summary>
+	static async IAsyncEnumerable<Event> ReadStreams(this IEventLog log, Guid[] streams, Guid cursor, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		foreach (var stream in streams)
+		{
+			await foreach (var ev in log.ReadStreamAsync(stream, cursor, cancellationToken))
+			{
+				yield return ev;
+			}
+		}
+	}
+
+	/// <summary>The events whose sequence is past the cursor (all of them for a cold cursor).</summary>
+	static async IAsyncEnumerable<Event> AfterCursor(this IAsyncEnumerable<Event> events, Guid cursor)
+	{
+		await foreach (var ev in events)
+		{
+			if (cursor == default || ev.SequenceId.CompareBigEndian(cursor) > 0)
+			{
+				yield return ev;
+			}
+		}
 	}
 }

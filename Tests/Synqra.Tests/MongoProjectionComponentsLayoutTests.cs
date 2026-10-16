@@ -49,7 +49,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 			ser.Map(231, typeof(TestShapeBase));
 			ser.Map(232, typeof(TestCircle));
 		});
-		hostBuilder.Services.AddAppendStorageMongoDb<Event>(_connectionString);
+		hostBuilder.Services.AddMongoEventLog(_connectionString);
 		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
 	}
 

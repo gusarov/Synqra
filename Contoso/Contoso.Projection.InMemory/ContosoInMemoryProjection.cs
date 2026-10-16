@@ -28,7 +28,7 @@ public class ContosoInMemoryProjection : InMemoryProjection, IContosoCommandVisi
 		  ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
 		, Guid streamId
-		, IAppendStorage<Event, Guid>? eventStorage = null
+		, IEventLog? eventStorage = null
 		, IAppendStorage<ProjectionSnapshot, Guid>? snapshotStorage = null
 		, IEventReplicationService? eventReplicationService = null
 		, JsonSerializerOptions? jsonSerializerOptions = null

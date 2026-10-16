@@ -165,7 +165,8 @@ public class LinksTests
 		);
 		services.AddSbxSerializer();
 		// Event-store area (multitenant in-memory singleton, keyed by v7 EventId) + projection area.
-		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, Guid>(services, x => x.EventId);
+		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, (Guid, Guid)>(services, x => (x.StreamId, x.SequenceId));
+		services.AddClientEventLog();
 		services.AddInMemorySynqraStore();
 		return services.BuildServiceProvider();
 	}

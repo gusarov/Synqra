@@ -19,7 +19,8 @@ public class ProjectionCatchUpTests : TestsStateManagement
 		base.Register(hostApplicationBuilder);
 		hostApplicationBuilder.Services.AddInMemorySynqraStore();
 		hostApplicationBuilder.Services.AddSingleton<ParkingStorage>();
-		hostApplicationBuilder.Services.AddSingleton<IAppendStorage<Event, Guid>>(sp => sp.GetRequiredService<ParkingStorage>());
+		hostApplicationBuilder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(sp => sp.GetRequiredService<ParkingStorage>());
+		hostApplicationBuilder.Services.AddClientEventLog();
 	}
 
 	[Test]
@@ -49,6 +50,40 @@ public class ProjectionCatchUpTests : TestsStateManagement
 		await Assert.That(node.Components.Count).IsEqualTo(1);
 	}
 
+	/// <summary>
+	/// Another author's event (a REST write, another device) carries that author's clock in its EventId, which can sort
+	/// before everything this client already applied. The log stamps arrival order, so the catch-up still sees it.
+	/// </summary>
+	[Test]
+	public async Task Should_apply_a_pushed_event_whose_id_sorts_before_the_cursor()
+	{
+		var log = ServiceProvider.GetRequiredService<IEventLog>();
+		var provider = ServiceProvider.GetRequiredService<IProjectionProvider>();
+		var keeper = ServiceProvider.GetRequiredService<IProjectionKeeper>();
+		var streamId = Guid.NewGuid();
+		var projection = await provider.GetAsync(streamId);
+		var store = (IObjectStore)projection;
+		await WriteNodeWithUniqueComponentAsync(store, Guid.NewGuid()); // the cursor moves past a local write
+
+		var pushedId = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = new Guid("00000000-0000-7000-8000-000000000001"), // an early clock: sorts before every id this client minted
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = pushedId,
+			ComponentTypeId = container.TypeId,
+			ComponentId = pushedId,
+			Data = new TestComponentNode { Name = "pushed" },
+		}); // as the replication service appends a received event
+		await keeper.MaintainAsync(projection);
+
+		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == pushedId)).IsTrue();
+	}
+
 	async Task WriteNodeWithUniqueComponentAsync(IObjectStore store, Guid id)
 	{
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
@@ -73,9 +108,9 @@ public class ProjectionCatchUpTests : TestsStateManagement
 	}
 
 	/// <summary>An in-memory log whose enumeration can be held at the door, so a test can write while a catch-up is in flight.</summary>
-	public sealed class ParkingStorage : IAppendStorage<Event, Guid>
+	public sealed class ParkingStorage : IAppendStorage<Event, (Guid, Guid)>
 	{
-		readonly SortedDictionary<Guid, Event> _data = new();
+		readonly SortedDictionary<(Guid, Guid), Event> _data = new(Comparer<(Guid, Guid)>.Create((a, b) => a.Item1.CompareBigEndian(b.Item1) is var first && first != 0 ? first : a.Item2.CompareBigEndian(b.Item2)));
 		TaskCompletionSource _released = Completed();
 		TaskCompletionSource _entered = new();
 
@@ -101,12 +136,12 @@ public class ProjectionCatchUpTests : TestsStateManagement
 		{
 			lock (_data)
 			{
-				_data[item.EventId] = item;
+				_data[(item.StreamId, item.SequenceId)] = item;
 			}
 			return Task.CompletedTask;
 		}
 
-		public Task<Event> GetAsync(Guid key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public Task<Event> GetAsync((Guid, Guid) key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			lock (_data)
 			{
@@ -114,14 +149,14 @@ public class ProjectionCatchUpTests : TestsStateManagement
 			}
 		}
 
-		public async IAsyncEnumerable<Event> GetAllAsync(Guid from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			_entered.TrySetResult();
 			await _released.Task;
 			Event[] snapshot;
 			lock (_data)
 			{
-				snapshot = _data.Values.ToArray();
+				snapshot = _data.Where(x => from == default || _data.Comparer.Compare(x.Key, from) > 0).Select(x => x.Value).ToArray();
 			}
 			foreach (var item in snapshot)
 			{

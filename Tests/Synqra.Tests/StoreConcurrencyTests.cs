@@ -31,7 +31,8 @@ public class StoreConcurrencyTests
 			typeof(HierarchyLink)
 		);
 		services.AddSbxSerializer();
-		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, Guid>(services, x => x.EventId);
+		InMemoryAppendStorageExtensions.AddAppendStorageInMemory<Event, (Guid, Guid)>(services, x => (x.StreamId, x.SequenceId));
+		services.AddClientEventLog();
 		services.AddInMemorySynqraStore();
 		return services.BuildServiceProvider();
 	}

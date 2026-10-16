@@ -12,8 +12,8 @@ using System.Text.Json.Serialization;
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
 // Event Storage
-builder.Services.AddAppendStorageBlobIndexedDb<Event>(x => x.EventId, builder.Configuration);
-// builder.Services.AddSingleton<Func<Event, Guid>>(x => x.EventId);
+builder.Services.AddAppendStorageBlobIndexedDb<Event>(x => (x.StreamId, x.SequenceId), builder.Configuration);
+builder.Services.AddClientEventLog();
 builder.Services.AddSbxSerializer(ser =>
 {
 	ser.Map(100, typeof(ContosoItem));
