@@ -3,7 +3,7 @@
 		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
 		<!--
 		<TargetFramework>net10.0</TargetFramework>
-		<TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+		<TargetFrameworks>net10.0</TargetFrameworks> delayed: net9.0
 		-->
 
 		<Nullable>enable</Nullable>
