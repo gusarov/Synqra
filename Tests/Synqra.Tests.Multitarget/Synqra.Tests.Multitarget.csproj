@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net9.0;net8.0;net48</TargetFrameworks>
+    <TargetFrameworks>net9.0;net8.0;net48</TargetFrameworks><!-- delayed: no net10 target; kept out of Synqra.sln until multi-targeting returns -->
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
