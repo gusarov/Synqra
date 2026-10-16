@@ -98,4 +98,37 @@ public sealed class MongoProjectionStreamIsolationTests : BaseTest
 		await Assert.That(((TestUniqueComponent)nodeA.Components.GetUniqueComponent(typeof(TestUniqueComponent))!).Subject).IsEqualTo("a-component");
 		await Assert.That(((TestUniqueComponent)nodeB.Components.GetUniqueComponent(typeof(TestUniqueComponent))!).Subject).IsEqualTo("b-component");
 	}
+
+	[Test]
+	public async Task Should_not_resolve_another_streams_tracked_object_by_id()
+	{
+		var store = Store;
+		var streamA = Guid.NewGuid();
+		var streamB = Guid.NewGuid();
+
+		// Held on purpose: the instance stays tracked, which is exactly when a stream-blind identity map would hand it out.
+		var nodeA = new TestGeneratedContainerNode { Name = "secret-a" };
+		Guid id;
+		using (SynqraStreamContext.Enter(streamA))
+		{
+			store.GetCollection<TestGeneratedContainerNode>().Add(nodeA);
+			id = store.GetId(nodeA);
+			await Assert.That(store.ResolveObject(id)).IsSameReferenceAs(nodeA);
+		}
+
+		object? seenByB;
+		Guid versionSeenByB;
+		using (SynqraStreamContext.Enter(streamB))
+		{
+			seenByB = store.ResolveObject(id);
+			versionSeenByB = store.GetLastEventId(id);
+		}
+
+		await Assert.That(seenByB).IsNull();
+		await Assert.That(versionSeenByB).IsEqualTo(Guid.Empty);
+		using (SynqraStreamContext.Enter(streamA))
+		{
+			await Assert.That(store.ResolveObject(id)).IsSameReferenceAs(nodeA);
+		}
+	}
 }
