@@ -11,6 +11,7 @@ namespace Synqra;
 /// </summary>
 [SynqraModel("C0DEADD0-1032-8000-8E02-000000000000")]
 [Schema(2026.405, "1 EventId Guid CommandId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid PropertyName string OldValue object? NewValue object?")]
+[Schema(2026.789, "1 EventId Guid CommandId Guid SequenceId Guid TargetId Guid TargetTypeId Guid CollectionId Guid ComponentTypeId Guid ComponentId Guid PropertyName string OldValue object? NewValue object?")]
 public partial class ComponentPropertyChangedEvent : SingleObjectEvent
 {
 	public partial System.Guid ComponentTypeId { get; set; }

@@ -1,9 +1,12 @@
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
+using TUnit.Assertions.Extensions;
 
 namespace Synqra.Tests.Syncronization;
 
@@ -51,7 +54,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		}
 		await Assert.That(await MasterHasEventForAsync(nodeMaster)).IsTrue();
 
-		// Node C has never connected before — a cold LastEventIdFromServer cursor, exactly
+		// Node C has never connected before — a cold ServerWatermark cursor, exactly
 		// like a brand-new device or a cleared browser.
 		var nodeC = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
 		await nodeC.Started;
@@ -65,6 +68,83 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		}
 		await Assert.That(collectionC).HasCount(1);
 		await Assert.That(collectionC.First().Subject).IsEqualTo("Pre-existing task");
+	}
+
+	/// <summary>
+	/// A client that remembers the server's watermark (docs/model.md §9) resumes with the delta: the history it already
+	/// holds is not sent again, only what the stream committed after it.
+	/// </summary>
+	[Test]
+	public async Task Should_resume_from_the_remembered_watermark_with_the_delta_only()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "first" });
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > 0, "the first write reaches the master");
+		var afterFirst = await CountEventsAsync(nodeMaster);
+
+		// C syncs the whole stream and remembers where it got to.
+		var remembered = new RecordingStateStore();
+		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeC.Started;
+		await WaitForOnlineAsync(nodeC);
+		await WaitUntilAsync(() => Task.FromResult(nodeC.StoreContext.GetCollection<SampleTaskModel>().Count == 1), "C holds the first task");
+		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.ServerWatermark != default), "C persisted a watermark");
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterFirst, "the second write reaches the master");
+
+		// D is C's next run: an empty local log but C's state. It must get the second task and nothing of the first.
+		var nodeD = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(remembered.Saved))) { Port = nodeMaster.Port };
+		await nodeD.Started;
+		await WaitForOnlineAsync(nodeD);
+		var collectionD = nodeD.StoreContext.GetCollection<SampleTaskModel>();
+		await WaitUntilAsync(() => Task.FromResult(collectionD.Count >= 1), "D receives the delta");
+		await Task.Delay(500); // nothing more may follow
+
+		await Assert.That(collectionD).HasCount(1);
+		await Assert.That(collectionD.First().Subject).IsEqualTo("second");
+	}
+
+	async Task<int> CountEventsAsync(SynqraTestNode master)
+	{
+		var count = 0;
+		await foreach (var _ in master.Events.GetAllAsync())
+		{
+			count++;
+		}
+		return count;
+	}
+
+	async Task WaitUntilAsync(Func<Task<bool>> condition, string what)
+	{
+		var sw = Stopwatch.StartNew();
+		while (!await condition() && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
+		{
+			await Task.Delay(100);
+		}
+		await Assert.That(await condition()).IsTrue().Because($"timed out waiting until {what}");
+	}
+
+	/// <summary>The host's state store, in memory: what a client saved is what its next run loads.</summary>
+	sealed class RecordingStateStore(EventReplicationState? remembered = null) : IEventReplicationStateStore
+	{
+		public EventReplicationState? Saved { get; private set; } = remembered;
+
+		public Task<EventReplicationState?> LoadAsync(Guid streamId, CancellationToken cancellationToken = default) => Task.FromResult(Saved is null ? null : Copy(Saved));
+
+		public Task SaveAsync(Guid streamId, EventReplicationState state, CancellationToken cancellationToken = default)
+		{
+			Saved = Copy(state);
+			return Task.CompletedTask;
+		}
+
+		EventReplicationState Copy(EventReplicationState state) => new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
 	}
 
 	static async Task<bool> MasterHasEventForAsync(SynqraTestNode master)

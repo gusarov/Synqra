@@ -547,6 +547,18 @@ gap is expected.
 - **A catch-up is one write.** The in-memory projection reads its cursor and enumerates the log under its
   gate (`CatchUpAsync`), so a command landing meanwhile waits for it; otherwise the command's events, applied
   once by the submit, were applied again from the log (a unique facet refused the second time).
+- **The server log owns commit order (`Event.SequenceId`).** A client proposes its EventId as the sequence; the server's
+  `SequencedEventLog` (over the Mongo log, or any log a server registers) keeps a proposal that follows the stream's last
+  stamp and runs at most five minutes ahead of the server clock, and fast-forwards any other past the last stamp
+  (`Generator.CreateVersion7OrApprove`, one generator per stream, seeded from the log's tail). EventId stays the identity
+  everywhere; on Mongo `_id` is the sequence and EventId a unique field (`event-sequence/1` backfills legacy logs).
+  **The watermark** is the highest committed sequence below the lowest stamp still in flight, read under the commit's own
+  lock. Every `EventEnvelope` carries the watermark its event was committed under; a client keeps the highest it saw
+  (`EventReplicationState.ServerWatermark`, persisted by the host through `IEventReplicationStateStore`), sends it in
+  HELLO, and the backlog is everything from there (a known id is never appended twice). One broadcaster: the push loop
+  fed by the log's committed signal, socket-borne events included (echoed to the sender, so it learns a replaced
+  sequence), so frames reach a socket in commit order and a resumed client misses nothing. Ids order by their bytes
+  (`CompareBigEndian`, explicit and the same on every target; the Framework's `Guid.CompareTo` is signed per group).
 - **Backends:** InMemory / Mongo / Sqlite / File. Parity is required; where a backend cannot yet
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain

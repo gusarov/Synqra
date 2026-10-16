@@ -29,12 +29,16 @@ namespace Synqra;
 [Schema(2026.168, "1 EventId Guid CommandId Guid")]
 [Schema(2026.169, "1 EventId Guid CommandId Guid ContainerId Guid")]
 [Schema(2026.170, "1 EventId Guid CommandId Guid")]
+[Schema(2026.789, "1 EventId Guid CommandId Guid SequenceId Guid")]
 public abstract partial class Event : IEvent, IGuidentifiable
 {
 	Guid IIdentifiable<Guid>.Id => EventId;
 
 	public required partial Guid EventId { get; set; }
 	public required partial Guid CommandId { get; set; }
+	/// <summary>The server's commit order (docs/model.md §9): proposed as EventId, kept when it follows the stream, else fast-forwarded. Default until the server stamped it.</summary>
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] // unstamped until the server committed it
+	public partial Guid SequenceId { get; set; }
 	// public required Guid UserId { get; set; }
 	[JsonIgnore] // too verbose, containerId (streamId) should be handled outside of event stream
 	public partial Guid StreamId { get; set; } // like layer id

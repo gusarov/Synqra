@@ -21,9 +21,14 @@ public abstract partial class TransportOperation
 /// </summary>
 [SynqraModel("C0DEADD0-1032-8000-9A02-000000000000")] // family A = envelope/message (permanent); mode 9 = staging registry, pinned — this id is not committed yet
 [Schema(2025.785, "1 Event Event")]
+[Schema(2026.789, "1 Event Event Watermark Guid")]
 public partial class EventEnvelope : TransportOperation
 {
 	public required partial Event Event { get; set; }
+
+	/// <summary>Master → client: the stream's watermark this event was committed under; the client resumes from the highest it saw.</summary>
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+	public partial Guid Watermark { get; set; }
 
 	public override string ToString()
 	{

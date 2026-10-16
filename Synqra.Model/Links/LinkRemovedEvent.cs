@@ -9,6 +9,7 @@ namespace Synqra;
 /// </summary>
 [SynqraModel("C0DEADD0-1032-8000-9E04-000000000000")]
 [Schema(2026.504, "1 EventId Guid CommandId Guid LinkId Guid")]
+[Schema(2026.789, "1 EventId Guid CommandId Guid SequenceId Guid LinkId Guid")]
 public partial class LinkRemovedEvent : Event
 {
 	public partial System.Guid LinkId { get; set; }

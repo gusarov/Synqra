@@ -143,7 +143,7 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_M11_replay_in_id_order()
+	public async Task Should_M11_replay_in_commit_order()
 	{
 		var storage = Storage();
 		var gen = new GuidExtensions.Generator();
@@ -151,13 +151,15 @@ public class MongoAppendStorageTests : BaseTest
 		var e2 = Change(gen.CreateVersion7(), "two");
 		var e3 = Change(gen.CreateVersion7(), "three");
 
-		// Append out of order — replay must still be by _id (append order).
+		// Appended out of id order: the log's order is the commit order (docs/model.md §9), the late e1 fast-forwarded past e2.
 		await storage.AppendAsync(e2);
 		await storage.AppendAsync(e1);
 		await storage.AppendAsync(e3);
 
 		var ids = storage.GetAllAsync().ToBlockingEnumerable().Select(x => x.EventId).ToArray();
-		await Assert.That(ids).IsEquivalentTo(new[] { e1.EventId, e2.EventId, e3.EventId });
+		await Assert.That(ids).IsEquivalentTo(new[] { e2.EventId, e1.EventId, e3.EventId });
+		await Assert.That(e1.SequenceId).IsNotEqualTo(e1.EventId);
+		await Assert.That(e3.SequenceId.CompareBigEndian(e1.SequenceId)).IsGreaterThan(0); // minted in one burst: e3 may be bumped too, but stays last
 	}
 
 	[Test]

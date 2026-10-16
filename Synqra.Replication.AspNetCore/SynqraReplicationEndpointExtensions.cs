@@ -63,47 +63,65 @@ public static class SynqraReplicationEndpointExtensions
 		// projection reports what each locally submitted command committed, and one ordered queue fans
 		// those events out to every subscribed socket. Socket-borne events are applied directly and
 		// never raised here, and knownEvents dedups anything seen twice.
-		var committedSource = (serviceKey is null
+		// The sequenced log (docs/model.md §9) reports every commit, socket-borne ones included, with the watermark it
+		// was committed under; a host without one falls back to the projection's own signal and the socket path's fan-out.
+		var log = serviceKey is null
+			? app.Services.GetService<IAppendStorage<Event, Guid>>()
+			: app.Services.GetKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
+		var watermarks = log as IEventWatermarks;
+		var logBroadcasts = log is ICommittedEventSource;
+		var projectionSource = (serviceKey is null
 			? app.Services.GetService<IProjection>()
 			: app.Services.GetKeyedService<IProjection>(serviceKey)) as ICommittedEventSource;
-		if (committedSource is not null)
+		var committedSources = new[] { log as ICommittedEventSource, projectionSource }.OfType<ICommittedEventSource>().Distinct().ToArray();
+		if (committedSources.Length > 0)
 		{
 			var pushLogger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Endpoint");
-			var queue = System.Threading.Channels.Channel.CreateUnbounded<Event>(new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, });
+			var queue = System.Threading.Channels.Channel.CreateUnbounded<(Event Event, Guid Watermark)>(new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, });
 			Action<IEnumerable<Event>> enqueue = events =>
 			{
 				foreach (var ev in events)
 				{
-					queue.Writer.TryWrite(ev);
+					queue.Writer.TryWrite((ev, watermarks?.ReadWatermark(ev.StreamId) ?? default)); // read under the commit's lock: the watermark of this very commit
 				}
 			};
-			committedSource.EventsCommitted += enqueue;
+			foreach (var source in committedSources)
+			{
+				source.EventsCommitted += enqueue;
+			}
 			var lifetime = app.Lifetime.ApplicationStopping;
-			// The projection is a singleton that can outlive this endpoint: stop feeding the queue on shutdown.
+			// The sources are singletons that can outlive this endpoint: stop feeding the queue on shutdown.
 			lifetime.Register(() =>
 			{
-				committedSource.EventsCommitted -= enqueue;
+				foreach (var source in committedSources)
+				{
+					source.EventsCommitted -= enqueue;
+				}
 				queue.Writer.TryComplete();
 			});
+			var pushed = new RecentEventIds(capacity: 100_000); // the log and the projection both report a REST write: one push
 			_ = Task.Run(async () =>
 			{
 				var networkSerializationService = app.Services.GetRequiredService<INetworkSerializationService>();
 				var buffer = new byte[EventReplicationService.DefaultFrameSize];
 				try
 				{
-					await foreach (var ev in queue.Reader.ReadAllAsync(lifetime))
+					await foreach (var (ev, watermark) in queue.Reader.ReadAllAsync(lifetime))
 					{
-						// Server-committed events are new by construction: always push. Marking them lets the socket
-						// path drop an echo; a backlog replay that marked one first must not suppress it here.
-						knownEvents.TryAdd(ev.EventId);
-						// One event's failure must not end the push for every event after it.
-						try
+						if (pushed.TryAdd(ev.EventId))
 						{
-							await BroadcastAsync(ev);
-						}
-						catch (Exception ex) when (ex is not OperationCanceledException)
-						{
-							pushLogger?.LogError(ex, "Synqra replication: pushing committed event {EventId} failed; the push loop continues.", ev.EventId);
+							// Marking a committed event lets the socket path drop an echo; a backlog replay that marked
+							// one first must not suppress it here, hence the separate pushed set above.
+							knownEvents.TryAdd(ev.EventId);
+							// One event's failure must not end the push for every event after it.
+							try
+							{
+								await BroadcastAsync(ev, watermark);
+							}
+							catch (Exception ex) when (ex is not OperationCanceledException)
+							{
+								pushLogger?.LogError(ex, "Synqra replication: pushing committed event {EventId} failed; the push loop continues.", ev.EventId);
+							}
 						}
 					}
 				}
@@ -112,7 +130,7 @@ public static class SynqraReplicationEndpointExtensions
 					// host shutting down
 				}
 
-				async Task BroadcastAsync(Event ev)
+				async Task BroadcastAsync(Event ev, Guid watermark)
 				{
 					await broadcastGate.WaitAsync(lifetime);
 					try
@@ -125,7 +143,7 @@ public static class SynqraReplicationEndpointExtensions
 							}
 							try
 							{
-								await peer.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev }, buffer, lifetime);
+								await peer.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev, Watermark = watermark }, buffer, lifetime);
 							}
 							catch (Exception sendEx) when (sendEx is not OperationCanceledException)
 							{
@@ -182,15 +200,27 @@ public static class SynqraReplicationEndpointExtensions
 
 			// Serializes one event as an SBX TransportOperation — no tag byte, the polymorphic model
 			// layer discriminates it from the subscription-control messages.
-			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev)
+			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev, Guid watermark)
 			{
-				await target.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev }, frameBuffer, ctx.RequestAborted);
+				await target.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev, Watermark = watermark }, frameBuffer, ctx.RequestAborted);
+			}
+
+			// A backlog frame carries the watermark taken under the gate BEFORE the read: anything committed after it is
+			// either in the read or queued behind the gate for this socket, so a client resuming from it misses nothing.
+			IReadOnlyDictionary<Guid, Guid> WatermarksOf(IEnumerable<Guid> streams)
+			{
+				var taken = new Dictionary<Guid, Guid>();
+				foreach (var stream in streams)
+				{
+					taken[stream] = watermarks?.ReadWatermark(stream) ?? default;
+				}
+				return taken;
 			}
 
 			#region HELLO — from client
 			// 8 bytes magic + 16 bytes the client's own "last event id it already received from a
 			// server" cursor (Guid.Empty means "never synced, send me everything") — see
-			// EventReplicationState.LastEventIdFromServer's remarks — plus the HELLO "ws-method":
+			// EventReplicationState.ServerWatermark's remarks — plus the HELLO "ws-method":
 			//   byte[24] kind: see ReplicationHelloKind (0 is reserved/invalid).
 			//   For kind 2 the next 16 bytes are the stream id to subscribe to (total 41 bytes).
 			// A legacy 24-byte HELLO omits the kind and is treated as UserDefaultMainStream.
@@ -267,6 +297,7 @@ public static class SynqraReplicationEndpointExtensions
 					? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
 					: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+				var backlogWatermarks = WatermarksOf(socketScope.Active);
 				try
 				{
 					await foreach (var ev in storage.GetAllAsync(from: clientCursor, ctx.RequestAborted))
@@ -280,7 +311,7 @@ public static class SynqraReplicationEndpointExtensions
 							continue;
 						}
 						knownEvents.TryAdd(ev.EventId);
-						await SendEventFrameAsync(socket, backlogBuffer, ev);
+						await SendEventFrameAsync(socket, backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
 					}
 				}
 				finally
@@ -330,6 +361,7 @@ public static class SynqraReplicationEndpointExtensions
 									? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
 									: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
 								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+								var subWatermark = watermarks?.ReadWatermark(target) ?? default;
 								try
 								{
 									await foreach (var ev in storage.GetAllAsync(from: default, ctx.RequestAborted))
@@ -339,7 +371,7 @@ public static class SynqraReplicationEndpointExtensions
 											continue;
 										}
 										knownEvents.TryAdd(ev.EventId);
-										await SendEventFrameAsync(socket, subBuffer, ev);
+										await SendEventFrameAsync(socket, subBuffer, ev, subWatermark);
 									}
 								}
 								finally
@@ -397,37 +429,39 @@ public static class SynqraReplicationEndpointExtensions
 					var storage = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IAppendStorage<Event, Guid>>()
 						: ctx.RequestServices.GetRequiredKeyedService<IAppendStorage<Event, Guid>>(serviceKey);
-					await storage.AppendAsync(ev);
-
-					var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-					try
+					await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
+					if (!logBroadcasts)
 					{
-						foreach (var (other, otherScope) in sockets)
+						var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
+						try
 						{
-							if (other == socket || other.State != WebSocketState.Open) { continue; }
-							// Only fan out to peers subscribed to the event's stream. Without this a
-							// client's event was broadcast to every connected socket regardless of stream
-							// — a live cross-tenant leak. The check is oriented per peer: is THIS peer
-							// currently subscribed to the event's stream (ev.StreamId, stamped above from
-							// the sender's stream)? Unscoped peer (null own stream) → admits all, as before.
-							if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.Active))
+							foreach (var (other, otherScope) in sockets)
 							{
-								continue;
-							}
-							try
-							{
-								await SendEventFrameAsync(other, buffer, ev);
-							}
-							catch (Exception broadcastEx)
-							{
-								// best-effort broadcast — a dead peer socket shouldn't fail this client's request
-								logger?.LogDebug(broadcastEx, "Synqra replication: dropping event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
+								if (other == socket || other.State != WebSocketState.Open) { continue; }
+								// Only fan out to peers subscribed to the event's stream. Without this a
+								// client's event was broadcast to every connected socket regardless of stream
+								// — a live cross-tenant leak. The check is oriented per peer: is THIS peer
+								// currently subscribed to the event's stream (ev.StreamId, stamped above from
+								// the sender's stream)? Unscoped peer (null own stream) → admits all, as before.
+								if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.Active))
+								{
+									continue;
+								}
+								try
+								{
+									await SendEventFrameAsync(other, buffer, ev, default);
+								}
+								catch (Exception broadcastEx)
+								{
+									// best-effort broadcast — a dead peer socket shouldn't fail this client's request
+									logger?.LogDebug(broadcastEx, "Synqra replication: dropping event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
+								}
 							}
 						}
-					}
-					finally
-					{
-						ArrayPool<byte>.Shared.Return(buffer);
+						finally
+						{
+							ArrayPool<byte>.Shared.Return(buffer);
+						}
 					}
 				}
 				catch (Exception eventEx)

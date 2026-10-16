@@ -18,6 +18,7 @@ namespace Synqra;
 /// </summary>
 [SynqraModel("C0DEADD0-1032-8000-9E03-000000000000")]
 [Schema(2026.502, "1 EventId Guid CommandId Guid LinkTypeId Guid LinkId Guid SourceId Guid TargetId Guid Data object?")]
+[Schema(2026.789, "1 EventId Guid CommandId Guid SequenceId Guid LinkTypeId Guid LinkId Guid SourceId Guid TargetId Guid Data object?")]
 public partial class LinkAddedEvent : Event
 {
 	public partial System.Guid LinkTypeId { get; set; }
