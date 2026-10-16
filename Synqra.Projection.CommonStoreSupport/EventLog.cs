@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Synqra.AppendStorage;
 
 namespace Synqra;
@@ -130,7 +131,7 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 /// </summary>
 public sealed class ServerEventLog : EventLog
 {
-	public ServerEventLog(IAppendStorage<Event, (Guid Stream, Guid Sequence)> inner, EventSequencer sequencer)
+	public ServerEventLog([FromKeyedServices] IAppendStorage<Event, (Guid Stream, Guid Sequence)> inner, [FromKeyedServices] EventSequencer sequencer)
 		: base(inner, sequencer)
 	{
 	}
@@ -155,7 +156,7 @@ public sealed class ServerEventLog : EventLog
 /// </summary>
 public sealed class ClientEventLog : EventLog
 {
-	public ClientEventLog(IAppendStorage<Event, (Guid Stream, Guid Sequence)> inner, EventSequencer sequencer)
+	public ClientEventLog([FromKeyedServices] IAppendStorage<Event, (Guid Stream, Guid Sequence)> inner, [FromKeyedServices] EventSequencer sequencer)
 		: base(inner, sequencer)
 	{
 	}

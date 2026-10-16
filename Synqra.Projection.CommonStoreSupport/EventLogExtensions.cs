@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
-using Synqra.AppendStorage;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Synqra;
 
@@ -24,26 +24,20 @@ public static class EventLogExtensions
 		return services;
 	}
 
-	// PublicConstructors flows to ActivatorUtilities.CreateInstance<TLog>: without it the trimmer drops the log's constructor (native AOT).
+	// The log's dependencies inherit its key ([FromKeyedServices]); PublicConstructors keeps its constructor through the trimmer (native AOT).
 	static void AddEventLog<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TLog>(this IServiceCollection services, string? serviceKey)
 		where TLog : EventLog
 	{
 		services.AddOptions<EventSequencerOptions>();
 		if (serviceKey is null)
 		{
-			services.AddSingleton<EventSequencer>();
-			services.AddSingleton<IEventLog>(sp => ActivatorUtilities.CreateInstance<TLog>(sp
-				, sp.GetRequiredService<IAppendStorage<Event, (Guid Stream, Guid Sequence)>>()
-				, sp.GetRequiredService<EventSequencer>()
-			));
+			services.TryAddSingleton<EventSequencer>();
+			services.TryAddSingleton<IEventLog, TLog>();
 		}
 		else
 		{
-			services.AddKeyedSingleton<EventSequencer>(serviceKey);
-			services.AddKeyedSingleton<IEventLog>(serviceKey, (sp, key) => ActivatorUtilities.CreateInstance<TLog>(sp
-				, sp.GetRequiredKeyedService<IAppendStorage<Event, (Guid Stream, Guid Sequence)>>(key)
-				, sp.GetRequiredKeyedService<EventSequencer>(key)
-			));
+			services.TryAddKeyedSingleton<EventSequencer>(serviceKey);
+			services.TryAddKeyedSingleton<IEventLog, TLog>(serviceKey);
 		}
 	}
 }
