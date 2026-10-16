@@ -79,7 +79,7 @@ public class MongoAppendStorageTests : BaseTest
 	protected override void Register(IHostApplicationBuilder hostApplicationBuilder)
 	{
 		base.Register(hostApplicationBuilder);
-		hostApplicationBuilder.Services.AddMongoEventLog(_connectionString);
+		hostApplicationBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
 	}
 
 	void Reopen()

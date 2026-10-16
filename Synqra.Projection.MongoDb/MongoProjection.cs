@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
@@ -131,10 +132,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	public Guid StreamId => SynqraStreamContext.Resolve(_pinnedStreamId);
 
 	public MongoProjection(
-		  IMongoDatabase database
+		  [FromKeyedServices] IMongoDatabase database
 		, ISbxSerializerFactory serializerFactory
 		, ITypeMetadataProvider typeMetadataProvider
-		, IEventLog? eventStorage = null
+		, [FromKeyedServices] IEventLog? eventStorage = null
 		, JsonSerializerOptions? jsonSerializerOptions = null
 		, JsonSerializerContext? jsonSerializerContext = null
 		, IServiceProvider? serviceProvider = null

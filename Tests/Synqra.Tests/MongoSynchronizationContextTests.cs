@@ -29,8 +29,8 @@ public sealed class MongoSynchronizationContextTests : BaseTest
 			ser.Map(220, typeof(TestGeneratedContainerNode));
 			ser.Map(221, typeof(TestUniqueComponent));
 		});
-		hostBuilder.Services.AddMongoEventLog(_connectionString);
-		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoProjection();
 	}
 
 	[Test]

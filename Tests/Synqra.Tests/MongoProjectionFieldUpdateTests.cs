@@ -48,8 +48,8 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 			ser.Map(221, typeof(TestUniqueComponent));
 			ser.Map(230, typeof(TestFieldUpdateModel));
 		});
-		hostBuilder.Services.AddMongoEventLog(_connectionString);
-		hostBuilder.Services.AddMongoDbSynqraStore(_connectionString);
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
+		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoProjection();
 	}
 
 	// Entered inline from the accessor, not a [Before(Test)] hook — see Cobra_SynqraStoreContractTests.ResolveStore.
@@ -62,7 +62,7 @@ public sealed class MongoProjectionFieldUpdateTests : BaseTest
 		}
 	}
 
-	// Same database the store under test opened (AddMongoDbSynqraStore's own name resolution).
+	// Same database the store under test opened (AddTestMongoDatabase's name resolution).
 	IMongoDatabase Database => field ??= OpenDatabase();
 
 	IMongoDatabase OpenDatabase()

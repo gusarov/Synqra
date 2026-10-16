@@ -559,7 +559,7 @@ gap is expected.
     (five minutes) ahead of the server clock, and fast-forwards any other past the last stamp
     (`Generator.CreateVersion7OrApprove`, one generator per stream, seeded from the log's tail). A stamp already present is
     a retry of this log's own append (a projection transaction retried): tracked, not stamped again. On Mongo
-    (`AddMongoEventLog`: `MongoEventStorage` under a `ServerEventLog`) `_id` is the sequence, `_sid` the stream, read
+    (`AddMongoEventStorage` then `AddServerEventLog`) `_id` is the sequence, `_sid` the stream, read
     through the `(_sid, _id)` index; EventId a unique field (`event-sequence/1` backfills legacy logs).
   - **Client log (`ClientEventLog`): arrival order.** Every event, its own or one received, takes the next local stamp, so
     a projection's cursor (the last applied stamp, `IReplayProjection.Cursor`) is a position in arrival order and a
@@ -568,6 +568,9 @@ gap is expected.
     filed under the connection's one subscribed stream: the stream is not on the wire.
   - **Registration is explicit, no decoration:** register the storage keyed by `x => (x.StreamId, x.SequenceId)`, then
     `AddServerEventLog()` / `AddClientEventLog()` (optionally keyed); consumers ask for `IEventLog`.
+  - **The host owns the Mongo database.** Synqra never opens a client: `AddMongoEventStorage(serviceKey, databaseKey)` and
+    `AddMongoProjection(serviceKey)` read the host's `IMongoDatabase` by key. Under one feature key the types keep two
+    databases apart: the storage takes `IMongoCollection<Event>`, the projection `IMongoDatabase`.
   **The watermark** is the highest committed sequence below the lowest stamp still in flight, read under the commit's own
   lock. Every `EventEnvelope` carries the watermark its event was committed under; a client keeps the highest it saw
   (`EventReplicationState.ServerWatermark`, persisted by the host through `IEventReplicationStateStore`), sends it in
