@@ -25,6 +25,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	private readonly EventReplicationConfig _config;
 
 	private readonly INetworkSerializationService _networkSerializationService;
+	private readonly IEventReplicationStateStore? _stateStore;
 
 	private SemaphoreSlim _autoResetEvent = new SemaphoreSlim(0, 1);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
@@ -64,6 +65,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		, INetworkSerializationService networkSerializationService
 		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
+		, IEventReplicationStateStore? stateStore = null
 		)
 	{
 		_storage = storage;
@@ -71,6 +73,32 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		_networkSerializationService = networkSerializationService;
 		_jsonSerializerContext = jsonSerializerContext;
 		_config = config ?? options.Value;
+		_stateStore = stateStore;
+	}
+
+	/// <summary>The stream this connection serves; the persisted state is keyed by it.</summary>
+	Guid StreamKey => _config.StreamId ?? _config.InitialSubscribeStreamId ?? default;
+
+	async Task LoadStateAsync()
+	{
+		if (_stateStore is not null)
+		{
+			var saved = await _stateStore.LoadAsync(StreamKey, _cts.Token);
+			if (saved is not null)
+			{
+				_eventReplicationState.MyNodeId = saved.MyNodeId;
+				_eventReplicationState.LastEventIdFromMe = saved.LastEventIdFromMe;
+				_eventReplicationState.ServerWatermark = saved.ServerWatermark;
+			}
+		}
+	}
+
+	async Task SaveStateAsync()
+	{
+		if (_stateStore is not null)
+		{
+			await _stateStore.SaveAsync(StreamKey, _eventReplicationState, _cts.Token);
+		}
 	}
 
 	HashSet<Guid> _skipSet = new HashSet<Guid>();
@@ -140,6 +168,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			await ClearLocalStorageAsync();
 		}
 
+		await LoadStateAsync(); // the cursor of the last run: HELLO asks for the delta, not the stream
+
 		ClientWebSocket wsConnection;
 		for (int i = 0; ; i++)
 		{
@@ -201,25 +231,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
 						break;
 					case EventEnvelope envelope:
-						await _storage.AppendAsync(envelope.Event);
-						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {envelope.Event}");
-						// Transport-only: dedup so the outgoing loop never echoes a server event back,
-						// then notify the projection owner to fold in the delta via the keeper. The
-						// event is already durably stored, so a missed/awaited-late notification is
-						// harmless — the owner also catches up on next use through the provider.
-						lock (_skipSet)
-						{
-							if (_skipSet.Add(envelope.Event.EventId))
-							{
-								_skipList.AddLast(envelope.Event.EventId);
-							}
-						}
-						// Tracks how far this client's backlog catch-up has progressed —
-						// applies to both a genuine live event and one the server resent as
-						// backlog (see the HELLO region above); mirrors LastEventIdFromMe's
-						// own bookkeeping for outgoing events.
-						_eventReplicationState.LastEventIdFromServer = envelope.Event.EventId;
-						EventsReceived?.Invoke();
+						await ReceiveAsync(envelope);
 						break;
 					default:
 						throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
@@ -228,9 +240,46 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		_readerTask = Reader();
 
+		// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
+		// watermark on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves.
+		async Task ReceiveAsync(EventEnvelope envelope)
+		{
+			var ev = envelope.Event;
+			bool known;
+			lock (_skipSet)
+			{
+				known = !_skipSet.Add(ev.EventId);
+				if (!known)
+				{
+					_skipList.AddLast(ev.EventId);
+				}
+			}
+			if (known)
+			{
+				if (ev.SequenceId != ev.EventId)
+				{
+					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev} committed as {ev.SequenceId} (the server replaced the proposed sequence)");
+				}
+			}
+			else
+			{
+				await _storage.AppendAsync(ev);
+				EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
+			}
+			if (envelope.Watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+			{
+				_eventReplicationState.ServerWatermark = envelope.Watermark;
+				await SaveStateAsync();
+			}
+			if (!known)
+			{
+				EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
+			}
+		}
+
 		#region HELLO
 		{
-			// 8 bytes magic + 16 bytes LastEventIdFromServer (Guid.Empty = "send me everything") + the
+			// 8 bytes magic + 16 bytes ServerWatermark (Guid.Empty = "send me everything") + the
 			// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
 			// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
 			var isSubscribeTo = _config.HelloKind == ReplicationHelloKind.SubscribeTo;
@@ -239,7 +288,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			try
 			{
 				BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
-				_eventReplicationState.LastEventIdFromServer.TryWriteBytes(buffer.AsSpan(8, 16));
+				_eventReplicationState.ServerWatermark.TryWriteBytes(buffer.AsSpan(8, 16));
 				buffer[24] = (byte)_config.HelloKind;
 				if (isSubscribeTo)
 				{
@@ -310,6 +359,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 				_eventReplicationState.LastEventIdFromMe = ev.EventId;
 			}
+			await SaveStateAsync();
 			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
 
 			// get events from server and apply them locally
@@ -363,10 +413,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_skipSet.Clear();
 			_skipList.Clear();
 		}
-		_eventReplicationState.LastEventIdFromServer = default;
+		_eventReplicationState.ServerWatermark = default;
+		_eventReplicationState.LastEventIdFromMe = default;
 		if (_storage is IClearableAppendStorage clearable)
 		{
 			await clearable.ClearAllAsync();
 		}
+		await SaveStateAsync();
 	}
 }

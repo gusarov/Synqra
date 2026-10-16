@@ -21,7 +21,8 @@ namespace Synqra.AppendStorage.MongoDb;
 /// the JSON-lines log or Mongo — a future migration between the two is a copy, not a transform.
 /// </para>
 /// <para>
-/// <see cref="Event.EventId"/> maps to <c>_id</c> (the natural document key).
+/// <see cref="Event.SequenceId"/> maps to <c>_id</c> (the commit order, docs/model.md §9); <see cref="Event.EventId"/>
+/// is a plain field under a unique index, the identity every reference uses.
 /// <see cref="Event.StreamId"/> maps to <c>_sid</c> — the same stream column
 /// <c>MongoProjection</c> stamps on its read-model documents. Unlike the JSON-lines log
 /// (one file per stream, so the stream is out-of-band file routing and the field is
@@ -37,7 +38,7 @@ public static class MongoEventClassMaps
 {
 	/// <summary>The per-event stream column — same name and Guid representation MongoProjection
 	/// uses for its own read-model documents, so an event and its materialized state read alike.</summary>
-	const string StreamIdField = "_sid";
+	internal const string StreamIdField = "_sid";
 
 	static readonly object _gate = new();
 	static bool _registered;
@@ -84,7 +85,7 @@ public static class MongoEventClassMaps
 					// the scalar _t the JSON-lines log uses. Discriminator-required so _t is
 					// always present even if an event is ever serialized as its concrete type.
 					cm.SetDiscriminatorIsRequired(true);
-					cm.MapIdProperty(e => e.EventId);
+					cm.MapIdProperty(e => e.SequenceId);
 					// Drop every [JsonIgnore] member (materialized/in-memory-only state) so the durable
 					// Mongo log persists the same surface as the JSON log — then re-map StreamId as _sid
 					// below, the one [JsonIgnore] field the shared Mongo log DOES need (see type remarks).
@@ -375,9 +376,9 @@ public static class MongoEventClassMaps
 	{
 		foreach (var memberMap in cm.DeclaredMemberMaps.ToArray())
 		{
-			if (memberMap.MemberInfo.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Length > 0)
+			if (memberMap.MemberInfo.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true).Any(a => ((JsonIgnoreAttribute)a).Condition == JsonIgnoreCondition.Always))
 			{
-				cm.UnmapMember(memberMap.MemberInfo);
+				cm.UnmapMember(memberMap.MemberInfo); // a conditional JsonIgnore still serializes the member
 			}
 		}
 	}

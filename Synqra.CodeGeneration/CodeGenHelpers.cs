@@ -16,9 +16,16 @@ internal static class CodeGenHelpers
 		foreach (var attr in p.GetAttributes())
 		{
 			var fullName = attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-			if (fullName is "global::System.Text.Json.Serialization.JsonIgnoreAttribute"
-				|| fullName is "global::SbxIgnoreAttribute"
-				|| fullName is "SbxIgnoreAttribute")
+			if (fullName is "global::System.Text.Json.Serialization.JsonIgnoreAttribute")
+			{
+				// JsonIgnore(Condition = WhenWritingDefault/Null/...) still serializes the member: only Always (the default) ignores it
+				var condition = attr.NamedArguments.FirstOrDefault(a => a.Key == "Condition").Value.Value;
+				if (condition is null || (int)condition == 1)
+				{
+					return true;
+				}
+			}
+			else if (fullName is "global::SbxIgnoreAttribute" || fullName is "SbxIgnoreAttribute")
 			{
 				return true;
 			}

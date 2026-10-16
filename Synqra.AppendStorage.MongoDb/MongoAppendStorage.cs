@@ -24,15 +24,19 @@ namespace Synqra.AppendStorage.MongoDb;
 /// matching the "events are immutable facts" model.
 /// </para>
 /// </summary>
-public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
+public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IEventSequenceTail
 	where T : class
 	where TKey : notnull
 {
 	readonly IMongoCollection<T> _collection;
+	readonly Lazy<Task> _indexes;
 
 	public MongoAppendStorage([FromKeyedServices("Synqra.AppendStorage")] IMongoCollection<T> collection)
 	{
 		_collection = collection ?? throw new ArgumentNullException(nameof(collection));
+		_indexes = new Lazy<Task>(() => typeof(Event).IsAssignableFrom(typeof(T))
+			? new EventLogIndexes().EnsureAsync(_collection.Database, _collection.CollectionNamespace.CollectionName)
+			: Task.CompletedTask);
 	}
 
 	public async Task AppendAsync(T item, CancellationToken cancellationToken = default)
@@ -41,6 +45,8 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		{
 			throw new ArgumentNullException(nameof(item));
 		}
+		RequireSequenced(item);
+		await _indexes.Value;
 		try
 		{
 			await _collection.InsertOneAsync(item, options: null, cancellationToken);
@@ -66,11 +72,16 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 		}
 		else if (list.Count > 1)
 		{
+			foreach (var item in list)
+			{
+				RequireSequenced(item);
+			}
+			await _indexes.Value;
 			await _collection.Database.Client.RunInTransactionAsync(async (s, ct) =>
 			{
-				var ids = list.Select(ReadKey);
-				var stored = (await _collection.Find(s, Builders<T>.Filter.In("_id", ids)).ToListAsync(ct)).Select(ReadKey).ToHashSet(); // normally empty: only a retry finds any
-				var missing = list.Where(item => !stored.Contains(ReadKey(item)));
+				var ids = list.Select(ReadIdentity);
+				var stored = (await _collection.Find(s, Builders<T>.Filter.In(IdentityField, ids)).ToListAsync(ct)).Select(ReadIdentity).ToHashSet(); // normally empty: only a retry finds any
+				var missing = list.Where(item => !stored.Contains(ReadIdentity(item)));
 				if (missing.Any())
 				{
 					await _collection.InsertManyAsync(s, missing, new InsertManyOptions { IsOrdered = true }, ct);
@@ -80,6 +91,33 @@ public sealed class MongoAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	}
 
 	/// <summary>The item's key, read through the member its class map maps to <c>_id</c> (see the key contract above).</summary>
+	/// <summary>An event's identity is its EventId (a plain unique field); anything else is identified by its key.</summary>
+	string IdentityField => typeof(Event).IsAssignableFrom(typeof(T)) ? nameof(Event.EventId) : "_id";
+
+	object ReadIdentity(T item) => item is Event ev ? ev.EventId : ReadKey(item);
+
+	/// <summary>The server's log refuses an event nobody sequenced: a host without the sequenced log would otherwise insert _id = empty once and swallow every later event as a duplicate.</summary>
+	void RequireSequenced(T item)
+	{
+		if (item is Event ev && ev.SequenceId == default)
+		{
+			throw new InvalidOperationException($"Event {ev.EventId} has no SequenceId: the Mongo log is a server log and must be registered as the sequenced log (AddSequencedEventLog).");
+		}
+	}
+
+	/// <summary>The stream's highest committed sequence: one query on the (_sid, _id) index.</summary>
+	public async Task<Guid> LastSequenceAsync(Guid streamId, CancellationToken cancellationToken = default)
+	{
+		var documents = _collection.Database.GetCollection<MongoDB.Bson.BsonDocument>(_collection.CollectionNamespace.CollectionName);
+		var last = await documents
+			.Find(Builders<MongoDB.Bson.BsonDocument>.Filter.Eq(MongoEventClassMaps.StreamIdField, streamId))
+			.Sort(Builders<MongoDB.Bson.BsonDocument>.Sort.Descending("_id"))
+			.Project(Builders<MongoDB.Bson.BsonDocument>.Projection.Include("_id"))
+			.Limit(1)
+			.FirstOrDefaultAsync(cancellationToken);
+		return last is null ? default : last["_id"].AsGuid;
+	}
+
 	TKey ReadKey(T item)
 	{
 		var idMember = BsonClassMap.LookupClassMap(item.GetType()).IdMemberMap

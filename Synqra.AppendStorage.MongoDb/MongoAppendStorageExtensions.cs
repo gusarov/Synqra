@@ -83,6 +83,7 @@ public static class MongoAppendStorageExtensions
 		});
 
 		services.TryAddSingleton<IAppendStorage<T, TKey>, MongoAppendStorage<T, TKey>>();
+		services.SequenceEventLog<T, TKey>(serviceKey: null);
 		services.AnnounceForUpgrades<T>(serviceKey: null, sp =>
 		{
 			var options = sp.GetRequiredService<IOptions<MongoAppendStorageOptions>>().Value;
@@ -110,6 +111,15 @@ public static class MongoAppendStorageExtensions
 			var (database, collectionName) = open(sp);
 			return new SynqraMongoUpgradeParticipant(serviceKey, SynqraMongoDatabaseRole.Events, _ => database, collectionName);
 		});
+	}
+
+	/// <summary>The Mongo log is a server log: an Event log is the sequenced log (docs/model.md §9), whatever else is stored here is not.</summary>
+	static void SequenceEventLog<T, TKey>(this IServiceCollection services, string? serviceKey)
+	{
+		if (typeof(T) == typeof(Event) && typeof(TKey) == typeof(Guid))
+		{
+			services.AddSequencedEventLog(serviceKey);
+		}
 	}
 
 	static IMongoDatabase OpenDatabase(string connectionString)
@@ -159,6 +169,7 @@ public static class MongoAppendStorageExtensions
 
 		services.AddKeyedSingleton<IAppendStorage<T, TKey>>(serviceKey, (sp, key) =>
 			ActivatorUtilities.CreateInstance<MongoAppendStorage<T, TKey>>(sp, sp.GetRequiredKeyedService<IMongoCollection<T>>(key)));
+		services.SequenceEventLog<T, TKey>(serviceKey);
 		services.AnnounceForUpgrades<T>(serviceKey, _ => (OpenDatabase(connectionString), ResolveCollectionName<T>(collectionName)));
 		return services;
 	}

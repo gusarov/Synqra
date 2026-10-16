@@ -14,6 +14,7 @@ namespace Synqra;
 [Schema(2026.168, "1 EventId Guid CommandId Guid Data Command")]
 [Schema(2026.169, "1 EventId Guid CommandId Guid ContainerId Guid Data Command")]
 [Schema(2026.170, "1 EventId Guid CommandId Guid Data Command")]
+[Schema(2026.789, "1 EventId Guid CommandId Guid SequenceId Guid Data Command")]
 public partial class CommandCreatedEvent : Event
 {
 	public required partial Command Data { get; set; }

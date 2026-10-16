@@ -29,11 +29,15 @@ public static class InMemoryAppendStorageExtensions
 		where TKey : notnull, IComparable<TKey>
 	{
 		private readonly Func<T, TKey> _getKey;
-		private SortedDictionary<TKey, T> _data = new SortedDictionary<TKey, T>();
+		private readonly SortedDictionary<TKey, T> _data;
 
 		public InMemoryAppendStorage([FromKeyedServices("Synqra.AppendStorage.InMemory")] Func<T, TKey> getKey)
 		{
 			_getKey = getKey;
+			// Guid keys order by their bytes: v7 time order, the wire's and Mongo's order, the same on every target
+			_data = typeof(TKey) == typeof(Guid)
+				? new SortedDictionary<TKey, T>((IComparer<TKey>)Comparer<Guid>.Create((a, b) => a.CompareBigEndian(b)))
+				: new SortedDictionary<TKey, T>();
 		}
 
 		public Task AppendAsync(T item, CancellationToken cancellationToken = default)
@@ -62,7 +66,7 @@ public static class InMemoryAppendStorageExtensions
 				data = _data.ToArray();
 			}
 			var hasCursor = from is not null && !Equals(from, default(TKey));
-			foreach (var item in data.SkipWhile(x => hasCursor && x.Key.CompareTo(from!) <= 0))
+			foreach (var item in data.SkipWhile(x => hasCursor && _data.Comparer.Compare(x.Key, from!) <= 0))
 			{
 				yield return item.Value;
 			}

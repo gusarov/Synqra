@@ -38,6 +38,7 @@ public class MongoEventClassMapsTests
 		var ev = new ObjectPropertyChangedEvent
 		{
 			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000B2"),
+			SequenceId   = new Guid("01A10000-0000-7000-8000-0000000000B2"),
 			CommandId    = new Guid("C0DE0000-0000-8000-9C01-0000000000B3"),
 			TargetId     = new Guid("C0DE0000-0000-8000-9001-0000000000B4"),
 			TargetTypeId = new Guid("C0DE0000-0000-8000-90B5-000000000000"),
@@ -52,7 +53,8 @@ public class MongoEventClassMapsTests
 		// Discriminator + id mapping the Mongo log depends on. MongoDB uses a hierarchical
 		// discriminator (the native idiom) — `_t` is the type chain, concrete type last.
 		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("ObjectPropertyChangedEvent");
-		await Assert.That(doc["_id"].AsGuid).IsEqualTo(ev.EventId);
+		await Assert.That(doc["_id"].AsGuid).IsEqualTo(ev.SequenceId); // the commit order keys the document (docs/model.md §9)
+		await Assert.That(doc["EventId"].AsGuid).IsEqualTo(ev.EventId); // the identity, a plain unique field
 		// StreamId is intentionally unmapped (out-of-band routing concern).
 		await Assert.That(doc.Contains("StreamId")).IsFalse();
 
@@ -159,6 +161,7 @@ public class MongoEventClassMapsTests
 		var ev = new ObjectPropertyChangedEvent
 		{
 			EventId      = new Guid("C0DE0000-0000-8000-9E01-0000000000BD"),
+			SequenceId   = new Guid("01A10000-0000-7000-8000-0000000000BD"),
 			CommandId    = Guid.Empty,
 			TargetId     = Guid.Empty,
 			TargetTypeId = Guid.Empty,
@@ -168,8 +171,8 @@ public class MongoEventClassMapsTests
 		};
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
 		await Assert.That(doc.Contains("_id")).IsTrue();
-		await Assert.That(doc.Contains("EventId")).IsFalse(); // mapped to _id, not duplicated
-		await Assert.That(doc["_id"].AsGuid).IsEqualTo(ev.EventId);
+		await Assert.That(doc["_id"].AsGuid).IsEqualTo(ev.SequenceId); // the commit order keys the document (docs/model.md §9)
+		await Assert.That(doc["EventId"].AsGuid).IsEqualTo(ev.EventId); // the identity, a plain unique field
 	}
 
 	[Test]

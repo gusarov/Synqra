@@ -12,7 +12,12 @@
     <InternalsVisibleTo Include="Synqra.Projection.InMemory"/>
     <InternalsVisibleTo Include="Synqra.Projection.Sqlite"/>
     <InternalsVisibleTo Include="Synqra.Projection.MongoDb"/>
+    <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
 </Project>

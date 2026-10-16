@@ -221,12 +221,16 @@ internal class SynqraTestNode
 			// The real endpoint reads events back from its own log to replay a stream's backlog and
 			// filters by Event.StreamId — so the log must preserve it. InMemory does (it holds the
 			// object); JSON-lines does not ([JsonIgnore]). See the useRealEndpoint remarks above.
-			builder.Services.AddAppendStorageInMemory<Event, Guid>(x => x.EventId);
+			builder.Services.AddAppendStorageInMemory<Event, Guid>(x => x.SequenceId); // a server log is keyed by the commit order
 		}
 		else
 #endif
 		{
 			builder.AddAppendStorageJsonLines<Event>("EventId", x => x.EventId);
+		}
+		if (masterHost)
+		{
+			builder.Services.AddSequencedEventLog(); // the master owns commit order (docs/model.md §9)
 		}
 
 		// builder.Services.AddSingleton<INetworkSerializationService, JsonNetworkSerializationService>();

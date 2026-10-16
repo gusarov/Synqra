@@ -167,7 +167,7 @@ public static class GuidExtensions
 			long omniStamp = *(ushort*)(bytes + 6); // 12 bits of c
 			omniStamp &= 0x0FFF; // clear version bits
 			omniStamp |= (*(ushort*)(bytes + 4)) << 12; // b
-			omniStamp |= (*(uint*)bytes) << 28; // a
+			omniStamp |= ((long)*(uint*)bytes) << 28; // a (widened first: a uint shift would keep four bits)
 
 			// Rotate omnistamp
 			bool fix = false;
@@ -296,6 +296,27 @@ public static class GuidExtensions
 	// https://www.rfc-editor.org/rfc/rfc9562.html?utm_source=chatgpt.com#name-namespace-id-usage-and-allo
 	private static readonly Guid _namespaceDns = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 	private static readonly Guid _namespaceUrl = new Guid("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+
+	/// <summary>Orders ids by their big-endian (RFC, wire, Mongo) bytes on every target; <see cref="Guid.CompareTo(Guid)"/> compares the groups signed on .NET Framework.</summary>
+	public static unsafe int CompareBigEndian(this Guid guid, Guid other)
+	{
+		byte* a = (byte*)&guid;
+		byte* b = (byte*)&other;
+		var order = (*(uint*)a).CompareTo(*(uint*)b);
+		if (order == 0)
+		{
+			order = (*(ushort*)(a + 4)).CompareTo(*(ushort*)(b + 4));
+		}
+		if (order == 0)
+		{
+			order = (*(ushort*)(a + 6)).CompareTo(*(ushort*)(b + 6));
+		}
+		for (var i = 8; order == 0 && i < 16; i++)
+		{
+			order = a[i].CompareTo(b[i]);
+		}
+		return order;
+	}
 
 	public static unsafe int GetVariant(this Guid guid)
 	{
