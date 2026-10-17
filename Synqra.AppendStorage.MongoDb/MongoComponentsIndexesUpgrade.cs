@@ -7,7 +7,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// <summary>
 /// Creates the query indexes of the projection's shared <c>Components</c> collection (the one
 /// collection every root and facet lives in — see <c>MongoProjection</c>): <c>(_sid, _t)</c> serves
-/// type-scoped enumeration and <c>Count</c>, <c>(_sid, _eid)</c> serves facet load, component
+/// type-scoped enumeration and <c>Count</c>, <c>(_sid, _t, _id)</c> pages a type in id order, <c>(_sid, _t, _eid)</c> finds the owners of a facet type, <c>(_sid, _eid)</c> serves facet load, component
 /// addressing and entity delete. Idempotent (CreateMany on existing identical indexes is a no-op);
 /// invoked only by <see cref="SynqraMongoUpgradeService"/> under its single-node claim, so index
 /// builds never race across nodes and never run on a hot path.
@@ -19,7 +19,7 @@ internal sealed class ComponentsIndexesUpgrade : ISynqraMongoUpgrade
 	const string DiscriminatorField = "_t";
 	const string EntityIdField = "_eid";
 
-	public string Id => "components-indexes/1";
+	public string Id => "components-indexes/2"; // 2: (_sid, _t, _id) pages a type in id order, (_sid, _t, _eid) finds the owners of a facet type
 
 	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
 	{
@@ -32,6 +32,8 @@ internal sealed class ComponentsIndexesUpgrade : ISynqraMongoUpgrade
 			[
 				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField)),
 				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(EntityIdField)),
+				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField).Ascending("_id")),
+				new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField).Ascending(EntityIdField)),
 			]
 			, cancellationToken);
 		logger.LogInformation("Projection upgrade: ensured Components indexes on '{Database}'.", projectionDatabase.DatabaseNamespace.DatabaseName);

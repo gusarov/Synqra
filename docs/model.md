@@ -522,9 +522,13 @@ gap is expected.
 - **Mongo layout details.** A facet's `_id` is its component id, exactly like a root's `_id` is
   the entity id — no extra id column. `GetCollection<T>()` matches `_t` against every registered
   type assignable to `T`; no root marker is needed there since a type is either a root type or a
-  facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)` and
-  `(_sid, _eid)` are created by the `components-indexes/1` storage upgrade at host startup. Named collections are refused (`NotSupportedException`)
+  facet type, and the `_id == _eid` test is only applied on single-document lookups. Indexes `(_sid, _t)`,
+  `(_sid, _eid)`, `(_sid, _t, _id)` and `(_sid, _t, _eid)` are created by the `components-indexes/2` storage upgrade at host startup. Named collections are refused (`NotSupportedException`)
   — the layout has no column for them and collections are retired (§2).
+- **Lookups never walk collections (`IComponentIndex`).** A host serving a generic API asks the store, not its
+  collections: `FindComponent(id)` is one `_id` query for the facet's `_eid`, then the owner; `FindObjects` pages roots by
+  `(_sid, _t, _id)` through a cursor in id order, a facet filter (`Has`) first collecting owners by `(_sid, _t, _eid)`.
+  The in-memory projection answers the same contract from a facet-owner map and its typed collections.
 - **Tracking is per-process, lazy and weak.** The Mongo projection keeps id <-> instance in a
   `ConditionalWeakTable` and a map of `WeakReference`s, so it never keeps an entity alive: an entity is
   in memory only while some caller holds it, and is loaded again from Mongo (`ResolveObject`, enumeration)

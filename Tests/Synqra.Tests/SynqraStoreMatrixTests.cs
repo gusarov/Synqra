@@ -516,6 +516,87 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_70_find_a_facet_and_its_object_by_the_facet_id()
+	{
+		var store = ResolveStore();
+		var (id, facet) = await CreateWithFacetAsync(store, "holder");
+
+		var hit = ((IComponentIndex)store).FindComponent(facet);
+
+		await Assert.That(hit).IsNotNull();
+		await Assert.That(store.GetId(hit!.Container)).IsEqualTo(id);
+		await Assert.That(((TestUniqueComponent)hit.Component).Subject).IsEqualTo("holder");
+	}
+
+	[Test]
+	public async Task Should_71_find_no_facet_for_an_object_id_or_an_unknown_id()
+	{
+		var store = ResolveStore();
+		var (id, _) = await CreateWithFacetAsync(store, "holder");
+
+		await Assert.That(((IComponentIndex)store).FindComponent(id)).IsNull(); // a root is an object, not a facet
+		await Assert.That(((IComponentIndex)store).FindComponent(Guid.NewGuid())).IsNull();
+	}
+
+	[Test]
+	public async Task Should_72_find_objects_of_a_type_in_id_order_after_a_cursor()
+	{
+		var store = ResolveStore();
+		var ids = new List<Guid>();
+		foreach (var name in new[] { "a", "b", "c" })
+		{
+			var model = new DemoModel { Name = name };
+			store.GetCollection<DemoModel>().Add(model);
+			ids.Add(store.GetId(model));
+		}
+		await CreateWithFacetAsync(store, "another type");
+		ids.Sort();
+		var index = (IComponentIndex)store;
+
+		var all = index.FindObjects(new ObjectQuery([typeof(DemoModel)])).Select(store.GetId).ToList();
+		var afterFirst = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { After = ids[0] }).Select(store.GetId).ToList();
+		var picked = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Ids = [ids[2], Guid.NewGuid()] }).Select(store.GetId).ToList();
+
+		await Assert.That(all.SequenceEqual(ids)).IsTrue(); // id order
+		await Assert.That(afterFirst.SequenceEqual(ids.Skip(1))).IsTrue();
+		await Assert.That(picked).IsEquivalentTo(new[] { ids[2] });
+	}
+
+	[Test]
+	public async Task Should_73_find_only_the_objects_carrying_a_facet_type()
+	{
+		var store = ResolveStore();
+		var (holder, _) = await CreateWithFacetAsync(store, "holder");
+		var bare = new TestComponentNode { Name = "bare" };
+		store.GetCollection<TestComponentNode>().Add(bare);
+
+		var found = ((IComponentIndex)store).FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Has = typeof(TestUniqueComponent) }).Select(store.GetId).ToList();
+
+		await Assert.That(found).IsEquivalentTo(new[] { holder });
+	}
+
+	/// <summary>A <see cref="TestComponentNode"/> with one <see cref="TestUniqueComponent"/> of a known id, created in one batch.</summary>
+	async Task<(Guid Id, Guid Facet)> CreateWithFacetAsync(IObjectStore store, string subject)
+	{
+		var id = Guid.NewGuid();
+		var facet = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		var batch = new BatchCommand();
+		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = subject }));
+		batch.Commands.Add(new AddComponentCommand
+		{
+			TargetTypeId = container.TypeId,
+			CollectionId = container.GetCollectionId(""),
+			TargetId = id,
+			ComponentId = facet,
+			ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
+			Data = new TestUniqueComponent { Subject = subject },
+		});
+		await store.SubmitCommandAsync(batch);
+		return (id, facet);
+	}
+
+	[Test]
 	public async Task Should_57a_store_a_batch_as_one_command_event()
 	{
 		var store = ResolveStore();

@@ -43,7 +43,7 @@ using IAppendStorage = IEventLog;
 /// sync when there is one, but neither ever requires the entity to be materialized in RAM.
 /// </para>
 /// </summary>
-public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICommittedEventSource
+public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, IComponentIndex, ICommittedEventSource
 {
 	static MongoProjection()
 	{
@@ -1370,6 +1370,62 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				bindableComponent.AttachToContainer(this, containerId, TypeMetadataProvider.GetTypeMetadata(container.GetType()).TypeId, containerCollectionId);
 			}
 		}
+	}
+
+	// ---------------------------------------------------------------- IComponentIndex
+
+	/// <summary>One query on <c>_id</c> + stream for the facet's owner, then the owner itself (tracked, or one more <c>_id</c> query that also loads its facets).</summary>
+	public ComponentHit? FindComponent(Guid componentId)
+	{
+		ComponentHit? hit = null;
+		var doc = componentId == default ? null : FindDocument(Components, BuildRootFilter(componentId), Builders<BsonDocument>.Projection.Include(EntityIdField));
+		if (doc is not null && doc.TryGetValue(EntityIdField, out var owner) && owner.AsGuid != componentId
+			&& ResolveObject(owner.AsGuid) is IComponentContainer container
+			&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == componentId) is { } component)
+		{
+			hit = new ComponentHit(container, component);
+		}
+		return hit;
+	}
+
+	/// <summary>
+	/// Roots by <c>(_sid, _t, _id)</c>, in id order through a cursor: a page reads one batch, never the stream. A facet
+	/// filter first collects the owners carrying that facet type, by <c>(_sid, _t, _eid)</c>.
+	/// </summary>
+	public IEnumerable<object> FindObjects(ObjectQuery query)
+	{
+		var filters = Builders<BsonDocument>.Filter;
+		var parts = new List<FilterDefinition<BsonDocument>> { StreamFilter, filters.In(DiscriminatorField, query.Types.SelectMany(ConcreteTypeNamesOf).Distinct()) };
+		if (query.After != default)
+		{
+			parts.Add(filters.Gt("_id", query.After));
+		}
+		if (query.Ids is { } ids)
+		{
+			parts.Add(filters.In("_id", ids));
+		}
+		if (query.Has is { } has)
+		{
+			parts.Add(filters.In("_id", OwnersOf(has)));
+		}
+		var find = Session is { } session ? Components.Find(session, filters.And(parts)) : Components.Find(filters.And(parts));
+		using var cursor = find.Sort(Builders<BsonDocument>.Sort.Ascending("_id")).ToCursor();
+		while (cursor.MoveNext())
+		{
+			foreach (var doc in cursor.Current)
+			{
+				var id = doc["_id"].AsGuid;
+				yield return TryGetTracked(id, out var tracked) ? tracked : AttachLoaded(doc, id, collection: null);
+			}
+		}
+	}
+
+	// The ids of the entities carrying a facet of this type (or a subtype): a distinct over the (_sid, _t, _eid) index, read when the outer query renders.
+	IEnumerable<Guid> OwnersOf(Type facetType)
+	{
+		var filter = Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(facetType)));
+		var distinct = Session is { } session ? Components.Distinct<BsonValue>(session, EntityIdField, filter) : Components.Distinct<BsonValue>(EntityIdField, filter);
+		return distinct.ToEnumerable().Select(v => v.AsGuid);
 	}
 
 	// ---------------------------------------------------------------- ILinkIndex
