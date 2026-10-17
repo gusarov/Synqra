@@ -529,6 +529,13 @@ gap is expected.
   collections: `FindComponent(id)` is one `_id` query for the facet's `_eid`, then the owner; `FindObjects` pages roots by
   `(_sid, _t, _id)` through a cursor in id order, a facet filter (`Has`) first collecting owners by `(_sid, _t, _eid)`.
   The in-memory projection answers the same contract from a facet-owner map and its typed collections.
+- **Free-text search (`ObjectQuery.Text`).** Every whitespace-separated word must appear, whole and case-insensitive, in the
+  object's or one of its facets' text: string values and the `_t` type name. Mongo answers from the `components-text/1`
+  index `(_sid, $** text)`: language `none` (no stemming or stop words, any language), a language override no model writes,
+  and the stream as the equality prefix every `$text` query needs. Each word is one phrase query whose owners (`_eid`) are
+  intersected, so words may sit on different documents of one entity; the roots then page by id like any other filter.
+  Results are in id order, not by relevance, so the `After` cursor stays stable. In memory the same rule scans public string
+  properties (nested documents are not reached there).
 - **Tracking is per-process, lazy and weak.** The Mongo projection keeps id <-> instance in a
   `ConditionalWeakTable` and a map of `WeakReference`s, so it never keeps an entity alive: an entity is
   in memory only while some caller holds it, and is loaded again from Mongo (`ResolveObject`, enumeration)

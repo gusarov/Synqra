@@ -213,6 +213,7 @@ public sealed class MongoProjectionComponentsLayoutTests : BaseTest
 		var keys = Components.Indexes.List().ToList().Select(i => i["key"].AsBsonDocument.Names.Aggregate((a, b) => a + "," + b)).ToList();
 		await Assert.That(keys).Contains("_sid,_t");
 		await Assert.That(keys).Contains("_sid,_eid");
+		await Assert.That(Components.Indexes.List().ToList().Select(i => i["name"].AsString)).Contains("components_text"); // the text index, by the stream
 	}
 
 	[Test]
