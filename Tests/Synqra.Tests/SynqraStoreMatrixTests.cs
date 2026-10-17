@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Driver;
 using Synqra.AppendStorage;
 using Synqra.AppendStorage.BlobStorage.File;
@@ -575,14 +576,84 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		await Assert.That(found).IsEquivalentTo(new[] { holder });
 	}
 
+	[Test]
+	public async Task Should_74_find_objects_holding_every_word_whole_and_case_insensitive()
+	{
+		var store = ResolveStore();
+		await EnsureTextIndexAsync(store);
+		var review = AddDemo(store, "Quarterly budget review");
+		AddDemo(store, "budget draft");
+		var weekly = AddDemo(store, "Weekly REVIEW");
+		var index = (IComponentIndex)store;
+
+		var both = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "budget \"review\"" }).Select(store.GetId).ToList();
+		var either = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "review" }).Select(store.GetId).ToList();
+		var part = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "view" }).Select(store.GetId).ToList();
+
+		await Assert.That(both).IsEquivalentTo(new[] { review });
+		await Assert.That(either.SequenceEqual(new[] { review, weekly }.Order())).IsTrue(); // id order
+		await Assert.That(part).IsEmpty(); // whole words only
+	}
+
+	[Test]
+	public async Task Should_75_find_an_object_by_words_split_between_it_and_its_facet()
+	{
+		var store = ResolveStore();
+		await EnsureTextIndexAsync(store);
+		var (holder, _) = await CreateWithFacetAsync(store, "zanzibar", name: "plain");
+		await CreateWithFacetAsync(store, "elsewhere", name: "plain");
+		var index = (IComponentIndex)store;
+
+		var found = index.FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Text = "Plain ZANZIBAR" }).Select(store.GetId).ToList();
+		var byFacetType = index.FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Text = nameof(TestUniqueComponent) }).Count();
+
+		await Assert.That(found).IsEquivalentTo(new[] { holder });
+		await Assert.That(byFacetType).IsEqualTo(2); // a type name is text too
+	}
+
+	[Test]
+	public async Task Should_76_combine_text_with_type_and_cursor()
+	{
+		var store = ResolveStore();
+		await EnsureTextIndexAsync(store);
+		var ids = new[] { AddDemo(store, "shared word"), AddDemo(store, "shared word") }.Order().ToList();
+		await CreateWithFacetAsync(store, "shared word");
+		var index = (IComponentIndex)store;
+
+		var demos = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "shared word" }).Select(store.GetId).ToList();
+		var afterFirst = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "shared word", After = ids[0] }).Select(store.GetId).ToList();
+		var nothing = index.FindObjects(new ObjectQuery([typeof(DemoModel)]) { Text = "shared absent" }).ToList();
+
+		await Assert.That(demos.SequenceEqual(ids)).IsTrue();
+		await Assert.That(afterFirst).IsEquivalentTo(new[] { ids[1] });
+		await Assert.That(nothing).IsEmpty();
+	}
+
+	Guid AddDemo(IObjectStore store, string name)
+	{
+		var model = new DemoModel { Name = name };
+		store.GetCollection<DemoModel>().Add(model);
+		return store.GetId(model);
+	}
+
+	// Tests never start the host: a Mongo projection gets its text index the way the upgrade runner would create it.
+	async Task EnsureTextIndexAsync(IObjectStore store)
+	{
+		if (store is MongoProjection)
+		{
+			var database = ServiceProvider.GetRequiredService<IMongoDatabase>();
+			await new ComponentsTextIndexUpgrade().RunAsync(database, "events", database, NullLogger.Instance, CancellationToken.None);
+		}
+	}
+
 	/// <summary>A <see cref="TestComponentNode"/> with one <see cref="TestUniqueComponent"/> of a known id, created in one batch.</summary>
-	async Task<(Guid Id, Guid Facet)> CreateWithFacetAsync(IObjectStore store, string subject)
+	async Task<(Guid Id, Guid Facet)> CreateWithFacetAsync(IObjectStore store, string subject, string? name = null)
 	{
 		var id = Guid.NewGuid();
 		var facet = Guid.NewGuid();
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
 		var batch = new BatchCommand();
-		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = subject }));
+		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = name ?? subject }));
 		batch.Commands.Add(new AddComponentCommand
 		{
 			TargetTypeId = container.TypeId,

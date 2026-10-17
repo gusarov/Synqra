@@ -1390,7 +1390,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	/// <summary>
 	/// Roots by <c>(_sid, _t, _id)</c>, in id order through a cursor: a page reads one batch, never the stream. A facet
-	/// filter first collects the owners carrying that facet type, by <c>(_sid, _t, _eid)</c>.
+	/// filter first collects the owners carrying that facet type, by <c>(_sid, _t, _eid)</c>; a text filter the owners holding its words, by <c>(_sid, $** text)</c>.
 	/// </summary>
 	public IEnumerable<object> FindObjects(ObjectQuery query)
 	{
@@ -1407,6 +1407,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		if (query.Has is { } has)
 		{
 			parts.Add(filters.In("_id", OwnersOf(has)));
+		}
+		if (query.Words is { Count: > 0 } words)
+		{
+			parts.Add(filters.In("_id", FindOwnersMentioning(words)));
 		}
 		var find = Session is { } session ? Components.Find(session, filters.And(parts)) : Components.Find(filters.And(parts));
 		using var cursor = find.Sort(Builders<BsonDocument>.Sort.Ascending("_id")).ToCursor();
@@ -1426,6 +1430,28 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		var filter = Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.In(DiscriminatorField, ConcreteTypeNamesOf(facetType)));
 		var distinct = Session is { } session ? Components.Distinct<BsonValue>(session, EntityIdField, filter) : Components.Distinct<BsonValue>(EntityIdField, filter);
 		return distinct.ToEnumerable().Select(v => v.AsGuid);
+	}
+
+	/// <summary>
+	/// The ids of the entities whose root or facets hold every word: one <c>(_sid, $** text)</c> query per word, each word a
+	/// phrase so it matches whole, owners intersected across words; stops at the first word nothing holds.
+	/// </summary>
+	HashSet<Guid> FindOwnersMentioning(IReadOnlyList<string> words)
+	{
+		var owners = FindOwnersHolding(words[0]);
+		for (var i = 1; i < words.Count && owners.Count > 0; i++)
+		{
+			owners.IntersectWith(FindOwnersHolding(words[i]));
+		}
+		return owners;
+	}
+
+	// The owners (_eid) of the stream's documents holding this word, read from the text index.
+	HashSet<Guid> FindOwnersHolding(string word)
+	{
+		var filter = Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Text("\"" + word + "\""));
+		var find = Session is { } session ? Components.Find(session, filter) : Components.Find(filter);
+		return find.Project(Builders<BsonDocument>.Projection.Include(EntityIdField)).ToEnumerable().Select(d => d[EntityIdField].AsGuid).ToHashSet();
 	}
 
 	// ---------------------------------------------------------------- ILinkIndex

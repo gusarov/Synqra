@@ -7,9 +7,11 @@ using System;
 using System.Collections.Concurrent;
 using System.ComponentModel.Design;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Numerics;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -965,14 +967,44 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			.Select(m => m.Type)
 			.Where(t => !t.IsAbstract && query.Types.Any(q => q.IsAssignableFrom(t)))
 			.Distinct();
+		var words = query.Words;
 		return types
 			.SelectMany(t => GetCollection(t, "").Cast<object>().Where(t.IsInstanceOfType))
 			.Select(o => (Id: GetId(o), Model: o))
 			.Where(x => x.Id.CompareTo(query.After) > 0)
 			.Where(x => query.Ids is null || query.Ids.Contains(x.Id))
 			.Where(x => query.Has is null || (x.Model is IComponentContainer c && c.Components.Any(query.Has.IsInstanceOfType)))
+			.Where(x => words.All(w => Mentions(x.Model, w)))
 			.OrderBy(x => x.Id)
 			.Select(x => x.Model);
+	}
+
+	// The Mongo text index's contract without one: the word whole, case-insensitive, in a string or type name of the object or a facet.
+	bool Mentions(object model, string word)
+		=> (model is IComponentContainer container ? container.Components.Cast<object>().Prepend(model) : [model])
+			.SelectMany(EnumerateTexts)
+			.Any(text => HoldsWord(text, word));
+
+	// The type name and the public string (and string collection) properties: what Mongo's $** text index sees of a document.
+	[UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "A property trimmed away is not searchable; nothing else depends on it.")]
+	IEnumerable<string> EnumerateTexts(object model)
+		=> model.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+			.Where(p => p.CanRead && p.GetIndexParameters().Length == 0 && (p.PropertyType == typeof(string) || typeof(IEnumerable<string>).IsAssignableFrom(p.PropertyType)))
+			.SelectMany(p => p.GetValue(model) switch { string s => [s], IEnumerable<string> many => many, _ => [] })
+			.Prepend(model.GetType().Name);
+
+	// A case-insensitive occurrence not glued to a letter or digit on either side.
+	bool HoldsWord(string text, string word)
+	{
+		var holds = false;
+		var at = text.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+		while (!holds && at >= 0)
+		{
+			var end = at + word.Length;
+			holds = (at == 0 || !char.IsLetterOrDigit(text[at - 1])) && (end == text.Length || !char.IsLetterOrDigit(text[end]));
+			at = holds ? at : text.IndexOf(word, at + 1, StringComparison.OrdinalIgnoreCase);
+		}
+		return holds;
 	}
 
 	// ---------------------------------------------------------------- ILinkIndex

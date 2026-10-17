@@ -58,6 +58,7 @@ public sealed class SynqraMongoUpgradeService(
 		new EventSidBackfillUpgrade(),
 		new ComponentsIndexesUpgrade(),
 		new EventSequenceUpgrade(),
+		new ComponentsTextIndexUpgrade(),
 	];
 
 	readonly ILogger _logger = logger ?? NullLogger<SynqraMongoUpgradeService>.Instance;
