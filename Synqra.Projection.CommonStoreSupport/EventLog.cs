@@ -100,7 +100,7 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 			}
 			else
 			{
-				await foreach (var ev in ((IEventLog)this).ReadStreamAsync(streamId, default, cancellationToken))
+				await foreach (var ev in ReadStreamAsync(streamId, default, cancellationToken))
 				{
 					if (ev.SequenceId.CompareBigEndian(tail) > 0)
 					{
@@ -109,6 +109,26 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 				}
 			}
 			_sequencer.Seed(streamId, tail);
+		}
+	}
+
+	/// <summary>One stream after a cursor: bounded by the storage when it can (<see cref="IEventStreamReader"/>), else the key range stopped at the next stream.</summary>
+	public IAsyncEnumerable<Event> ReadStreamAsync(Guid streamId, Guid after = default, CancellationToken cancellationToken = default)
+		=> _inner is IEventStreamReader reader ? reader.ReadStreamAsync(streamId, after, cancellationToken) : ReadKeyRangeAsync(streamId, after, cancellationToken);
+
+	// Safe without a bound: the in-memory storage deserializes nothing, and SBX/JSON-lines storages hold one stream each.
+	async IAsyncEnumerable<Event> ReadKeyRangeAsync(Guid streamId, Guid after, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		var inStream = true;
+		await using var events = _inner.GetAllAsync((streamId, after), cancellationToken).GetAsyncEnumerator(cancellationToken);
+		while (inStream && await events.MoveNextAsync())
+		{
+			var ev = events.Current;
+			inStream = ev.StreamId == default || ev.StreamId == streamId; // a store that drops the stream on read (SBX, JSON lines) holds one stream
+			if (inStream)
+			{
+				yield return ev;
+			}
 		}
 	}
 

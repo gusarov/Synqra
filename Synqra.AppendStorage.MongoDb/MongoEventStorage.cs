@@ -12,7 +12,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// again is a no-op. The <see cref="ServerEventLog"/> over it stamps the sequence; registered by
 /// <see cref="MongoEventStorageExtensions.AddMongoEventStorage"/>.
 /// </summary>
-public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail
+public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail, IEventStreamReader
 {
 	const string IdField = "_id";
 	const string StreamField = MongoEventClassMaps.StreamIdField;
@@ -90,6 +90,23 @@ public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid
 			);
 		var sort = Builders<Event>.Sort.Ascending(StreamField).Ascending(IdField);
 		using var cursor = await _collection.Find(filter).Sort(sort).ToCursorAsync(cancellationToken);
+		while (await cursor.MoveNextAsync(cancellationToken))
+		{
+			foreach (var ev in cursor.Current)
+			{
+				yield return ev;
+			}
+		}
+	}
+
+	/// <summary>One stream after a cursor: bounded by <c>_sid ==</c>, so the cursor's batches never hold another stream's documents.</summary>
+	public async IAsyncEnumerable<Event> ReadStreamAsync(Guid streamId, Guid after = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		var filters = Builders<Event>.Filter;
+		var filter = after == default
+			? filters.Eq(StreamField, streamId)
+			: filters.And(filters.Eq(StreamField, streamId), filters.Gt(IdField, after));
+		using var cursor = await _collection.Find(filter).Sort(Builders<Event>.Sort.Ascending(IdField)).ToCursorAsync(cancellationToken);
 		while (await cursor.MoveNextAsync(cancellationToken))
 		{
 			foreach (var ev in cursor.Current)

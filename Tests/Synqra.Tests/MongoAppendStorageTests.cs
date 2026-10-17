@@ -252,6 +252,28 @@ public class MongoAppendStorageTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_M43_a_stream_read_never_touches_a_later_stream()
+	{
+		var storage = Storage();
+		var early = new Guid("10000000-0000-0000-0000-000000000000");
+		var late = new Guid("f0000000-0000-0000-0000-000000000000");
+		await storage.AppendAsync(Change(GuidExtensions.CreateVersion7(), "mine", early));
+		// A document this build cannot read (a retired event type) in a stream that sorts after the one being read.
+		var url = new MongoUrl(_connectionString);
+		await new MongoClient(url).GetDatabase(url.DatabaseName).GetCollection<BsonDocument>("Event").InsertOneAsync(new BsonDocument
+		{
+			["_id"] = new BsonBinaryData(GuidExtensions.CreateVersion7(), GuidRepresentation.Standard),
+			["_sid"] = new BsonBinaryData(late, GuidRepresentation.Standard),
+			["_t"] = "RetiredEvent",
+		});
+
+		var read = await storage.ReadStreamAsync(early).ToListAsync();
+
+		await Assert.That(read.Count).IsEqualTo(1);
+		await Assert.That((string?)((ObjectPropertyChangedEvent)read[0]).NewValue).IsEqualTo("mine");
+	}
+
+	[Test]
 	public async Task Should_M42_event_log_isolates_two_streams_in_one_collection()
 	{
 		var storage = Storage();

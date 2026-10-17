@@ -560,7 +560,9 @@ gap is expected.
     (`Generator.CreateVersion7OrApprove`, one generator per stream, seeded from the log's tail). A stamp already present is
     a retry of this log's own append (a projection transaction retried): tracked, not stamped again. On Mongo
     (`AddMongoEventStorage` then `AddServerEventLog`) `_id` is the sequence, `_sid` the stream, read
-    through the `(_sid, _id)` index; EventId a unique field (`event-sequence/1` backfills legacy logs).
+    through the `(_sid, _id)` index; EventId a unique field (`event-sequence/1` backfills legacy logs). A stream read is
+    bounded to its stream (`IEventStreamReader`: `_sid ==`), never a key range into later streams, so one stream's
+    documents are never deserialized for another: bad data in one stream must not break the rest (fault isolation).
   - **Client log (`ClientEventLog`): arrival order.** Every event, its own or one received, takes the next local stamp, so
     a projection's cursor (the last applied stamp, `IReplayProjection.Cursor`) is a position in arrival order and a
     catch-up from it sees everything that arrived after it, whoever wrote it and whatever its id. (Keyed by EventId, a
