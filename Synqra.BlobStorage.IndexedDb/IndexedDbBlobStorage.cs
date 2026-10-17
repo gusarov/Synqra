@@ -13,7 +13,7 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage
+internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -80,6 +80,29 @@ internal class IndexedDbBlobStorage<TKey> : IBlobStorage<TKey>, IJsonMirrorBlobS
 	{
 		await _initTask.Value;
 		await _indexedDbInterop.AddBlobAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key), blob, json);
+	}
+
+	public async ValueTask<TKey> ReadTailAsync(CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		var tail = await _indexedDbInterop.GetTailKeyAsync(_databaseName, _options.ObjectStoreName, _storeName);
+		return tail is null ? default! : _getKeyFromText(tail);
+	}
+
+	// Every tab of the browser shares this database: the tag check, the tail check and the write run in one IndexedDB
+	// transaction (see appendAtTail), so tabs agree on one order and one copy without talking to each other.
+	public async ValueTask<TailAppendResult> AppendAtTailAsync(TKey key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, TKey expectedTail, CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		var expectedTailText = Equals(expectedTail, default(TKey)) ? null : _getKeyFromItem(expectedTail);
+		var outcome = await _indexedDbInterop.AppendAtTailAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key), blob, json, uniqueTag, expectedTailText);
+		return outcome switch
+		{
+			"appended" => TailAppendResult.Appended,
+			"duplicate" => TailAppendResult.Duplicate,
+			"tailMoved" => TailAppendResult.TailMoved,
+			_ => throw new InvalidOperationException($"IndexedDB appendAtTail returned an unknown outcome '{outcome}'."),
+		};
 	}
 
 	public async ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default)
