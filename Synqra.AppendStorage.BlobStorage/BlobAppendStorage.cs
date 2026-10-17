@@ -40,7 +40,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 
 	public Task<string> TestAsync(string input) => Task.FromResult(input);
 
-	public Task AppendAsync(T item, CancellationToken cancellationToken = default)
+	public virtual Task AppendAsync(T item, CancellationToken cancellationToken = default)
 	{
 		if (_blobStorage.SupportsSyncOperations)
 		{
@@ -51,7 +51,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return WriteAsyncCore(item, cancellationToken);
 	}
 
-	public async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+	public virtual async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
 	{
 		foreach (var item in items)
 		{
@@ -231,7 +231,32 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return _deserializer.Deserialize<T>(blob, ref pos);
 	}
 
-	private void Attach(T item)
+	/// <summary>The item's SBX bytes: what <see cref="GetAsync"/> and <see cref="GetAllAsync"/> read back.</summary>
+	protected byte[] Serialize(T item)
+	{
+		byte[] rented = ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize);
+		try
+		{
+			int bytesWritten;
+			while (!TrySerialize(item, rented.AsSpan(), out bytesWritten))
+			{
+				ArrayPool<byte>.Shared.Return(rented);
+				rented = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
+			}
+			return rented.AsSpan(0, bytesWritten).ToArray();
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(rented);
+		}
+	}
+
+	/// <summary>The JSON rendering stored beside the SBX bytes, when the blob storage wants one; otherwise null.</summary>
+	protected string? JsonMirrorOf(T item)
+		=> _jsonMirrorBlobStorage is { WantsJsonMirror: true } ? JsonSerializer.Serialize(item, item.GetType(), _jsonMirrorOptions) : null;
+
+	/// <summary>Keeps a written item for <see cref="GetAsync"/> and <see cref="GetAllAsync"/> to hand back without reading it again.</summary>
+	protected void Attach(T item)
 	{
 		Attach(_getKeyFromItem(item), item);
 	}

@@ -148,6 +148,9 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 
 	public Guid Cursor { get; private set; }
 
+	/// <summary>This projection's own events: applied when submitted, still ahead of <see cref="Cursor"/> in the log.</summary>
+	readonly HashSet<Guid> _ownAhead = [];
+
 	/// <summary>
 	/// Apply one event, advancing <see cref="Cursor"/> (in <see cref="AfterVisitAsync(Event, EventVisitorContext)"/>).
 	/// The <see cref="IProjectionKeeper"/> is the only caller during catch-up; <paramref name="isReplay"/>
@@ -159,14 +162,22 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	/// <summary>
 	/// The whole catch-up is one write: the cursor is read and the log enumerated under the gate, so a
 	/// command landing meanwhile waits instead of being applied once by itself and once more from the log.
-	/// The cursor is a position in the log (arrival order), so everything after it is new, whoever wrote it.
+	/// The cursor is a position in the log (arrival order), so everything after it is new, whoever wrote it,
+	/// except this projection's own events, applied when submitted: the cursor only steps over those.
 	/// </summary>
 	public Task CatchUpAsync(Func<Guid, IAsyncEnumerable<Event>> readAfter, bool isReplay = false, CancellationToken cancellationToken = default)
 		=> _gate.RunAsync(async () =>
 		{
 			await foreach (var ev in readAfter(Cursor).WithCancellation(cancellationToken))
 			{
-				await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
+				if (_ownAhead.Remove(ev.EventId))
+				{
+					Advance(ev.SequenceId);
+				}
+				else
+				{
+					await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
+				}
 			}
 		});
 
@@ -573,10 +584,14 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		if (_eventStorage != null)
 		{
 			await _eventStorage.AppendBatchAsync(commandHandlingContext.Events); // store event in storage and trigger replication
+			// Another writer (a second browser tab, this host's replication) may have appended before these: jumping the
+			// cursor to them would skip that event for good. Catch up instead, stepping over our own (applied above).
 			foreach (var @event in commandHandlingContext.Events)
 			{
-				Advance(@event.SequenceId); // stamped by the append: this projection's own events are behind the cursor now
+				_ownAhead.Add(@event.EventId);
 			}
+			var log = _eventStorage;
+			await CatchUpAsync(after => log.ReadStreamAsync(StreamId, after));
 		}
 		CommandProcessed?.Invoke(this, EventArgs.Empty);
 		_eventReplicationService?.Trigger(cmd, commandHandlingContext.Events);

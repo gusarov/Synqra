@@ -35,6 +35,20 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		await module.InvokeVoidAsync("addBlob", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json);
 	}
 
+	/// <summary>The store's last key text, or null when it is empty.</summary>
+	public async Task<string?> GetTailKeyAsync(string databaseName, string objectStoreName, string storeName)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<string?>("getTailKey", databaseName, objectStoreName, storeName);
+	}
+
+	/// <summary>One transaction: writes the record and its tag only while the tag is new and the tail is <paramref name="expectedTailText"/> (null = empty).</summary>
+	public async Task<string> AppendAtTailAsync(string databaseName, string objectStoreName, string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, string? expectedTailText)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<string>("appendAtTail", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json, uniqueTag, expectedTailText);
+	}
+
 	public async Task<byte[]?> GetBlobAsync(string databaseName, string objectStoreName, string storeName, string keyText)
 	{
 		var module = await _moduleTask.Value;
