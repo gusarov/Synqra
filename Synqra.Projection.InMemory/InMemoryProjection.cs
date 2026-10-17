@@ -38,7 +38,7 @@ public static class InMemoryStoreContextExtensions
 /// It can be used to replay events from scratch
 /// It can also be treated like EF DataContext
 /// </summary>
-public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IReplayProjection, ICommittedEventSource
+public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<CommandHandlerContext>, IEventVisitor<EventVisitorContext>, ILinkIndex, IComponentIndex, IReplayProjection, ICommittedEventSource
 {
 	private static UTF8Encoding _utf8nobom = new UTF8Encoding(false, false);
 	static InMemoryProjection()
@@ -69,6 +69,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	// LinkRemovedEvent — links have their own dedicated command/event pair, not the generic
 	// object lifecycle. See plans/links.md.
 	private readonly ConcurrentDictionary<Guid, Link> _linksById = new();
+	// facet id -> the entity it hangs off: IComponentIndex.FindComponent without walking every object
+	private readonly ConcurrentDictionary<Guid, Guid> _componentOwners = new();
 	private readonly ConcurrentDictionary<LinkKey, Link> _linksByKey = new();
 	// The outer ConcurrentDictionary only ever made the *lookup* safe — the values were plain lists that
 	// LinkAdded/LinkRemoved mutated while LinksAt/LinksBetween read them. Append-ordered concurrent
@@ -927,6 +929,37 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		}
 	}
 
+	// ---------------------------------------------------------------- IComponentIndex
+
+	public ComponentHit? FindComponent(Guid componentId)
+	{
+		ComponentHit? hit = null;
+		if (_componentOwners.TryGetValue(componentId, out var owner)
+			&& TryGetModel(owner, out var data) && data.Model is IComponentContainer container
+			&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == componentId) is { } component)
+		{
+			hit = new ComponentHit(container, component);
+		}
+		return hit;
+	}
+
+	/// <summary>The typed collections of every registered concrete type the query names, filtered and put in id order (in memory the collections are the index).</summary>
+	public IEnumerable<object> FindObjects(ObjectQuery query)
+	{
+		var types = TypeMetadataProvider.RegisteredTypes
+			.Select(m => m.Type)
+			.Where(t => !t.IsAbstract && query.Types.Any(q => q.IsAssignableFrom(t)))
+			.Distinct();
+		return types
+			.SelectMany(t => GetCollection(t, "").Cast<object>().Where(t.IsInstanceOfType))
+			.Select(o => (Id: GetId(o), Model: o))
+			.Where(x => x.Id.CompareTo(query.After) > 0)
+			.Where(x => query.Ids is null || query.Ids.Contains(x.Id))
+			.Where(x => query.Has is null || (x.Model is IComponentContainer c && c.Components.Any(query.Has.IsInstanceOfType)))
+			.OrderBy(x => x.Id)
+			.Select(x => x.Model);
+	}
+
 	// ---------------------------------------------------------------- ILinkIndex
 
 	IReadOnlyCollection<Link> ILinkIndex.Links => (IReadOnlyCollection<Link>)_linksByKey.Values;
@@ -1080,6 +1113,8 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it during replay. The event stream is inconsistent.");
 		}
 
+		_componentOwners[ev.ComponentId] = ev.TargetId;
+
 		// Wire up the container linkage so the component's generated property
 		// setters can build ChangeComponentPropertyCommands without the user
 		// having to pass the container reference manually.
@@ -1147,6 +1182,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			{
 				var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 				GetCollection(rootType, "").RemoveByEvent(rd.Model);
+				if (rd.Model is IComponentContainer deleted)
+				{
+					foreach (var facet in deleted.Components.OfType<IIdentifiable<Guid>>())
+					{
+						_componentOwners.TryRemove(facet.Id, out _);
+					}
+				}
 				Untrack(ev.TargetId, rd.Model);
 			}
 			return Task.CompletedTask;
@@ -1164,6 +1206,7 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			throw new InvalidOperationException(
 				$"ComponentDeletedEvent {ev.EventId}: component instance was located but the collection refused to remove it. The event stream is inconsistent.");
 		}
+		_componentOwners.TryRemove(ev.ComponentId, out _);
 
 		if (TryGetModel(ev.TargetId, out var data) && data.Attached is not null)
 		{
