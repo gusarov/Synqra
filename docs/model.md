@@ -572,6 +572,11 @@ gap is expected.
     catch-up from it sees everything that arrived after it, whoever wrote it and whatever its id. (Keyed by EventId, a
     pushed event whose author's clock sorted before the cursor was skipped until the next reload.) A received event is
     filed under the connection's one subscribed stream: the stream is not on the wire.
+  - **Browser tabs share one log** (IndexedDB, `AddEventStorageBlobIndexedDb`) and never talk to each other: every tab
+    replicates and appends every pushed event. `BlobEventStorage` (the event layer over `BlobAppendStorage`) makes the
+    store decide: an append stamps after the store's tail and lands once per EventId, checked and written in one IndexedDB
+    transaction (`ITailAppendBlobStorage`), so tabs agree on one arrival order and one copy. A projection never jumps its
+    cursor to its own write's stamp (another tab may have appended just before it): it catches up, stepping over its own.
   - **Registration is explicit, no decoration:** register the storage keyed by `x => (x.StreamId, x.SequenceId)`, then
     `AddServerEventLog()` / `AddClientEventLog()` (optionally keyed); consumers ask for `IEventLog`.
   - **The host owns the Mongo database.** Synqra never opens a client: `AddMongoEventStorage(serviceKey, databaseKey)` and

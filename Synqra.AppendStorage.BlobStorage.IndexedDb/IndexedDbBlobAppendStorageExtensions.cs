@@ -1,5 +1,8 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Synqra.BlobStorage;
 using Synqra.BlobStorage.IndexedDb;
 
 namespace Synqra.AppendStorage.BlobStorage.IndexedDb;
@@ -22,6 +25,24 @@ public static class IndexedDbBlobAppendStorageExtensions
 		where T : class
 	{
 		return services.AddAppendStorageBlobIndexedDb(keyAccessor, x => x.Item1.ToString("N") + x.Item2.ToString("N"), x => (Guid.Parse(x[..32]), Guid.Parse(x[32..])), configuration, storeName);
+	}
+
+	/// <summary>
+	/// A browser event log on IndexedDB: <see cref="BlobEventStorage"/> keyed by (stream, sequence), which every tab of the
+	/// browser may share. Each append stamps the next sequence after the store's tail and lands once per EventId, in one
+	/// IndexedDB transaction, so tabs agree on one arrival order and one copy of each event. Compose the log on top with
+	/// <c>AddClientEventLog()</c>.
+	/// </summary>
+	public static IServiceCollection AddEventStorageBlobIndexedDb(this IServiceCollection services, IConfiguration configuration, string storeName = "Events")
+	{
+		// IndexedDB exists only in a browser; elsewhere this registers nothing, like AddBlobStorageIndexedDb itself.
+		if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER")))
+		{
+			services.AddBlobStorageIndexedDb<(Guid Stream, Guid Sequence)>(storeName, x => x.Stream.ToString("N") + x.Sequence.ToString("N"), x => (Guid.Parse(x[..32]), Guid.Parse(x[32..])), configuration);
+			services.TryAddSingleton<IBlobStorage<(Guid Stream, Guid Sequence)>>(sp => sp.GetRequiredKeyedService<IBlobStorage<(Guid Stream, Guid Sequence)>>(storeName));
+			services.TryAddSingleton<IAppendStorage<Event, (Guid Stream, Guid Sequence)>, BlobEventStorage>();
+		}
+		return services;
 	}
 
 	public static IServiceCollection AddAppendStorageBlobIndexedDb<T, TKey>(
