@@ -103,8 +103,6 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			ser.Map(212, typeof(DependsOn));
 			ser.Map(213, typeof(RelatedTo));
 			ser.Map(214, typeof(WeightedLink));
-			ser.Map(215, typeof(LinkAddedEvent));
-			ser.Map(216, typeof(LinkRemovedEvent));
 		});
 
 		RegisterAppendStorage(hostBuilder);
@@ -447,19 +445,21 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var store = ResolveStore();
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
-		await store.SubmitCommandAsync(new AddLinkCommand
+		var linkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId;
+		await store.SubmitCommandAsync(new AddComponentCommand
 		{
-			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
-			SourceId = store.GetId(parent),
-			TargetId = store.GetId(child),
-			Data = new HierarchyLink(),
+			TargetId = store.GetId(parent),
+			TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(parent.GetType()).TypeId,
+			ComponentTypeId = linkTypeId,
+			Data = new HierarchyLink { TargetId = store.GetId(child) },
 		});
 
-		var added = Events().GetAllAsync().ToBlockingEnumerable().OfType<LinkAddedEvent>().Single(e => e.SourceId == store.GetId(parent));
-		await Assert.That(added.LinkId).IsNotEqualTo(Guid.Empty);
+		var added = Events().GetAllAsync().ToBlockingEnumerable().OfType<ComponentAddedEvent>().Single(e => e.TargetId == store.GetId(parent) && e.ComponentTypeId == linkTypeId);
+		await Assert.That(added.ComponentId).IsNotEqualTo(Guid.Empty);
 		var index = (ILinkIndex)store;
-		await Assert.That(index.TryGetById(added.LinkId, out var link)).IsTrue();
-		await Assert.That(link!.TargetId).IsEqualTo(store.GetId(child));
+		await Assert.That(index.TryGetById(added.ComponentId, out var link)).IsTrue();
+		await Assert.That(link!.SourceId).IsEqualTo(store.GetId(parent));
+		await Assert.That(link.TargetId).IsEqualTo(store.GetId(child));
 	}
 
 	[Test]
@@ -695,15 +695,16 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var store = ResolveStore();
 		var parent = AddNode(store, "parent");
 		var child = AddNode(store, "child");
-		var ev = new LinkAddedEvent
+		var ev = new ComponentAddedEvent
 		{
 			StreamId = SynqraStreamContext.Current,
 			EventId = GuidExtensions.CreateVersion7(),
 			CommandId = GuidExtensions.CreateVersion7(),
-			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
-			SourceId = store.GetId(parent),
-			TargetId = store.GetId(child),
-			Data = new HierarchyLink(),
+			TargetId = store.GetId(parent),
+			TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(parent.GetType()).TypeId,
+			ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
+			CollectionId = Guid.Empty,
+			Data = new HierarchyLink { TargetId = store.GetId(child) },
 		};
 
 		// Each replica minting its own id at apply time would give the same link a different id everywhere.
@@ -753,6 +754,109 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		var logged = Events().GetAllAsync().ToBlockingEnumerable().Select(e => e.EventId).ToHashSet();
 		await Assert.That(committed.OfType<CommandCreatedEvent>().Any()).IsTrue();
 		await Assert.That(committed.All(e => logged.Contains(e.EventId))).IsTrue();
+	}
+	// ---------------------------------------------------------------- Links are components
+
+	[Test]
+	public async Task Should_77_retarget_a_link_in_place_keeping_its_id()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var first = AddNode(store, "first");
+		var second = AddNode(store, "second");
+		parent.WeightedChildren.Add(new WeightedLink { Target = first, Order = 1 });
+		var link = parent.WeightedChildren.Single();
+		var linkId = link.LinkId;
+
+		link.TargetId = store.GetId(second);
+
+		var index = (ILinkIndex)store;
+		await Assert.That(index.TryGetById(linkId, out var stored)).IsTrue();
+		await Assert.That(stored!.TargetId).IsEqualTo(store.GetId(second));
+		await Assert.That(index.LinksAt(store.GetId(first), LinkEnd.Target, typeof(WeightedLink)).Count).IsEqualTo(0);
+		await Assert.That(index.LinksAt(store.GetId(second), LinkEnd.Target, typeof(WeightedLink)).Single().LinkId).IsEqualTo(linkId);
+	}
+
+	[Test]
+	public async Task Should_78_edit_a_link_payload_in_place()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var child = AddNode(store, "child");
+		parent.WeightedChildren.Add(new WeightedLink { Target = child, Order = 1 });
+		var link = parent.WeightedChildren.Single();
+
+		link.Order = 7.5;
+
+		var reread = parent.WeightedChildren.Single();
+		await Assert.That(reread.LinkId).IsEqualTo(link.LinkId);
+		await Assert.That(reread.Order).IsEqualTo(7.5);
+	}
+
+	[Test]
+	public async Task Should_79_refuse_retargeting_onto_an_equivalent_link()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var first = AddNode(store, "first");
+		var second = AddNode(store, "second");
+		parent.Children.Add(first);
+		parent.Children.Add(second);
+		var index = (ILinkIndex)store;
+		var toFirst = index.LinksBetween(store.GetId(parent), store.GetId(first), typeof(HierarchyLink)).Single();
+
+		var refused = await CaptureFailureAsync(() =>
+		{
+			toFirst.TargetId = store.GetId(second);
+			return Task.CompletedTask;
+		});
+
+		await Assert.That(refused is InvalidOperationException).IsTrue();
+		await Assert.That(index.LinksBetween(store.GetId(parent), store.GetId(first), typeof(HierarchyLink)).Count).IsEqualTo(1);
+		await Assert.That(parent.Children.Count).IsEqualTo(2);
+	}
+
+	[Test]
+	public async Task Should_80_delete_an_entity_with_every_link_it_owns_or_receives()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var child = AddNode(store, "child");
+		var grandchild = AddNode(store, "grandchild");
+		parent.Children.Add(child);
+		child.Children.Add(grandchild);
+		var childId = store.GetId(child);
+		var nodeTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGraphNode)).TypeId;
+
+		await store.SubmitCommandAsync(new DeleteComponentCommand
+		{
+			TargetId = childId,
+			TargetTypeId = nodeTypeId,
+			ComponentTypeId = nodeTypeId,
+			ComponentId = childId,
+		});
+
+		var index = (ILinkIndex)store;
+		await Assert.That(index.LinksAt(childId, LinkEnd.Either, typeof(Link)).Count).IsEqualTo(0);
+		await Assert.That(parent.Children.Count).IsEqualTo(0);
+		await Assert.That(grandchild.Parents.Count).IsEqualTo(0);
+		await Assert.That(store.ResolveObject(store.GetId(grandchild))).IsNotNull();
+	}
+
+	[Test]
+	public async Task Should_81_remove_a_link_without_touching_either_endpoint()
+	{
+		var store = ResolveStore();
+		var a = AddNode(store, "a");
+		var b = AddNode(store, "b");
+		a.Children.Add(b);
+
+		a.Children.Remove(b);
+
+		await Assert.That(a.Children.Count).IsEqualTo(0);
+		await Assert.That(store.ResolveObject(store.GetId(a))).IsNotNull();
+		await Assert.That(store.ResolveObject(store.GetId(b))).IsNotNull();
+		await Assert.That(((TestGraphNode)store.ResolveObject(store.GetId(b))!).Name).IsEqualTo("b");
 	}
 }
 
@@ -867,6 +971,29 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		await Assert.That(store2.GetId(a2.Children.Single())).IsEqualTo(idB);
 		await Assert.That(store2.GetId(b2.Children.Single())).IsEqualTo(idC);
 		await Assert.That(store2.GetId(c2.Children.Single())).IsEqualTo(idA);
+	}
+	[Test]
+	public async Task Should_82_retargeted_link_survives_restart()
+	{
+		var store = ResolveStore();
+		var parent = AddNode(store, "parent");
+		var first = AddNode(store, "first");
+		var second = AddNode(store, "second");
+		parent.WeightedChildren.Add(new WeightedLink { Target = first, Order = 2 });
+		var link = parent.WeightedChildren.Single();
+		var linkId = link.LinkId;
+		link.TargetId = store.GetId(second);
+		var parentId = store.GetId(parent);
+		var secondId = store.GetId(second);
+
+		Restart();
+
+		var index = (ILinkIndex)ResolveStore();
+		var reloaded = index.LinksAt(parentId, LinkEnd.Source, typeof(WeightedLink)).Single();
+		await Assert.That(reloaded.LinkId).IsEqualTo(linkId);
+		await Assert.That(reloaded.SourceId).IsEqualTo(parentId);
+		await Assert.That(reloaded.TargetId).IsEqualTo(secondId);
+		await Assert.That(((WeightedLink)reloaded).Order).IsEqualTo(2);
 	}
 }
 

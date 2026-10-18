@@ -354,18 +354,9 @@ public class SqliteProjection : IProjection
 	{
 	}
 
-	public async Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx)
-	{
-		// SQLite projection is a stub; links are not yet wired here.
-	}
-
 	public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
 	{
 		// SQLite projection is a stub; batches are not wired here.
-	}
-
-	public async Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
-	{
 	}
 
 	#endregion
@@ -398,15 +389,6 @@ public class SqliteProjection : IProjection
 	}
 
 	public async Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx)
-	{
-	}
-
-	public async Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx)
-	{
-		// SQLite projection is a stub; links are not yet wired here.
-	}
-
-	public async Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx)
 	{
 	}
 

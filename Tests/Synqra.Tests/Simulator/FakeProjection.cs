@@ -26,8 +26,6 @@ internal sealed class FakeProjection : IProjection, ICommittedEventSource
 	public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
 	// ICommandVisitor<CommandHandlerContext>
 	public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
@@ -37,8 +35,6 @@ internal sealed class FakeProjection : IProjection, ICommittedEventSource
 	public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 	public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 }
 #endif

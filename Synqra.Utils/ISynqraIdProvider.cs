@@ -34,8 +34,7 @@ public interface ISynqraIdProvider
 	[Obsolete("Collections are retired — the vocabulary is being folded into components. No production code mints a collection id; this remains only so the still-present collection tests keep compiling.")]
 	Guid CreateCollectionId();
 
-	/// <summary>A link id (semantic class <c>003</c>). Reserved: links are being folded into components, kept
-	/// documented/compliant while still in the codebase.</summary>
+	/// <summary>A link id (semantic class <c>003</c>): the component id a link is minted with, so a link reads as one in logs.</summary>
 	Guid CreateLinkId();
 
 	/// <summary>

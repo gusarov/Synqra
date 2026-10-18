@@ -12,14 +12,15 @@ namespace Synqra.Tests;
 // differentiated by concrete type, replaces all four — and the consumer never sees a
 // raw Guid or an imperative Link() call: a typed model with [To]/[From]/[Related]
 // navigation properties is the whole surface, and mutating a collection IS the link.
-// A link is an attached fact (AddLinkCommand/LinkAddedEvent), not a top-level object —
-// it never rides CreateObjectCommand/ObjectCreatedEvent the way a plain object does.
+// A link is a component of its source entity (docs/model.md §4): it rides the component
+// commands/events, and the store indexes it by both ends and by its structural key.
 
 /// <summary>Primitive parent→child link (no payload). Same type serves "single parent"
 /// (IHierarchy) and "multi parent" (IMHierarchy) — the difference is purely how many a
 /// caller creates.</summary>
 [SynqraModel]
 [Schema(2026.510, "1 LinkId Guid SourceId Guid TargetId Guid")]
+[Schema(2026.794, "1 SourceId Guid TargetId Guid")]
 public partial class HierarchyLink : DirectedLink<TestGraphNode, TestGraphNode>
 {
 }
@@ -30,6 +31,7 @@ public partial class HierarchyLink : DirectedLink<TestGraphNode, TestGraphNode>
 /// type being mapped, not just on an inherited base.</summary>
 [SynqraModel]
 [Schema(2026.518, "1 LinkId Guid SourceId Guid TargetId Guid")]
+[Schema(2026.794, "1 SourceId Guid TargetId Guid")]
 public partial class DependsOn : DirectedLink<TestGraphNode, TestGraphNode>
 {
 }
@@ -37,6 +39,7 @@ public partial class DependsOn : DirectedLink<TestGraphNode, TestGraphNode>
 /// <summary>Undirected relation — absent from the Todo predecessor, new in this design. Primitive.</summary>
 [SynqraModel]
 [Schema(2026.511, "1 LinkId Guid SourceId Guid TargetId Guid")]
+[Schema(2026.794, "1 SourceId Guid TargetId Guid")]
 public partial class RelatedTo : UndirectedLink<TestGraphNode, TestGraphNode>
 {
 }
@@ -46,6 +49,7 @@ public partial class RelatedTo : UndirectedLink<TestGraphNode, TestGraphNode>
 /// not the node — so the payload stays reachable.</summary>
 [SynqraModel]
 [Schema(2026.512, "1 LinkId Guid SourceId Guid TargetId Guid Order double?")]
+[Schema(2026.794, "1 SourceId Guid TargetId Guid Order double?")]
 public partial class WeightedLink : DirectedLink<TestGraphNode, TestGraphNode>
 {
 	public partial double? Order { get; set; }
@@ -103,6 +107,7 @@ public sealed class FiledIn : DirectedLink<TestDocNode, TestFolderNode>
 /// link-typed so the payload stays reachable.</summary>
 [SynqraModel]
 [Schema(2026.514, "1 LinkId Guid SourceId Guid TargetId Guid AddedBy string?")]
+[Schema(2026.794, "1 SourceId Guid TargetId Guid AddedBy string?")]
 public partial class TaggedWith : DirectedLink<TestDocNode, TestTagNode>
 {
 	public partial string? AddedBy { get; set; }
@@ -292,7 +297,7 @@ public class LinksTests
 		await Assert.That(a.Children.Count).IsEqualTo(1);
 	}
 
-	// ---- Structural dedup at the store level (AddLinkCommand submitted directly vetoes duplicates) ----
+	// ---- Structural dedup at the store level (a link component submitted directly vetoes duplicates) ----
 
 	[Test]
 	public async Task Should_reject_a_structurally_duplicate_directed_link_submitted_directly()
@@ -308,13 +313,13 @@ public class LinksTests
 		// must be rejected exactly like the nav-collection path would (it just doesn't swallow it as a no-op).
 		var ex = await Assert.ThrowsAsync(async () =>
 		{
-			await store.SubmitCommandAsync(new AddLinkCommand
+			await store.SubmitCommandAsync(new AddComponentCommand
 			{
 				CommandId = GuidExtensions.CreateVersion7(),
-				LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
-				LinkId = GuidExtensions.CreateVersion7(),
-				SourceId = store.GetId(a),
-				TargetId = store.GetId(b),
+				TargetId = store.GetId(a),
+				TargetTypeId = store.TypeMetadataProvider.GetTypeMetadata(a.GetType()).TypeId,
+				ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(HierarchyLink)).TypeId,
+				ComponentId = GuidExtensions.CreateVersion7(),
 				Data = new HierarchyLink { SourceId = store.GetId(a), TargetId = store.GetId(b) },
 			});
 		});

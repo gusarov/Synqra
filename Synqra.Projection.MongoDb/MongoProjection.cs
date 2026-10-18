@@ -55,12 +55,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		MongoEventClassMaps.Register();
 	}
 
-	const string LinksMongoCollectionName = "Links";
-
-	// Links of every concrete type share one collection (so a graph-wide scan is a single query),
-	// so each document needs a type marker. That marker is the same "_t" discriminator ToDocument
-	// already stamps for polymorphic deserialization — no separate type-id column. The value is the
-	// link type's simple name (what ObjectConverter writes), so a per-type query filters on it directly.
+	// Links are components (docs/model.md §4): they live in the shared Components collection, owned by
+	// their source (_eid == SourceId), told apart by the same "_t" discriminator every document carries —
+	// the link type's simple name, so a per-type query filters on it directly.
 	const string DiscriminatorField = "_t";
 	// Short, underscore-prefixed system column — matches the "_id"/"_t" naming convention. NOT
 	// "_cid" ("ContainerId", the historical Synqra name for this concept — see
@@ -622,10 +619,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// <paramref name="addressingFields"/> names the projection's own non-model bookkeeping columns
 	/// (e.g. a component's <c>ContainerId</c>) to drop before deserializing, alongside the always-
 	/// dropped <c>_t</c> (resolving the type is the only thing <c>_t</c> is for; the concrete type's
-	/// own class map has no member for it). <c>_id</c> is dropped too — UNLESS the resolved type is a
-	/// <see cref="Link"/>, whose own class map maps <c>_id</c> to the real <c>LinkId</c> member (see
-	/// <see cref="MongoEventClassMaps.Register"/>): stripping it there would leave <c>LinkId</c>
-	/// un-set on the deserialized instance.
+	/// own class map has no member for it). <c>_id</c> is dropped too: a component's id (a link's included)
+	/// is generated hidden state the caller restores from it.
 	/// </summary>
 	internal object FromDocument(BsonDocument doc, params string[] addressingFields)
 	{
@@ -634,10 +629,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			?? throw new InvalidOperationException($"Unknown discriminator '{discriminator}' — no model is registered under that name.");
 
 		var clone = (BsonDocument)doc.DeepClone();
-		if (!typeof(Link).IsAssignableFrom(type))
-		{
-			clone.Remove("_id");
-		}
+		clone.Remove("_id");
 		clone.Remove("_t");
 		clone.Remove(StreamIdField);
 		clone.Remove(EntityIdField); // projection bookkeeping on every document, root or facet
@@ -659,10 +651,9 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// declared base/interface's). The globally-registered conventions (see
 	/// <see cref="MongoEventClassMaps.Register"/>, called from this class's static constructor) drop
 	/// any <c>[JsonIgnore]</c> member from that class map, matching the JSON side's persisted shape.
-	/// A type whose own class map already designates an id member (<see cref="Link"/>'s <c>LinkId</c>,
-	/// mapped onto <c>_id</c> — see <see cref="MongoEventClassMaps.Register"/>) gets <c>_id</c> written
-	/// natively as part of that serialization, so it's left alone here; a plain model with no such
-	/// member gets <paramref name="id"/> written as the document's <c>_id</c>, as a native Guid (not a
+	/// A type whose own class map already designates an id member gets <c>_id</c> written natively as
+	/// part of that serialization, so it's left alone here; a plain model with no such member gets
+	/// <paramref name="id"/> written as the document's <c>_id</c>, as a native Guid (not a
 	/// string) so every id is represented identically across the whole document.
 	/// </summary>
 	BsonDocument ToDocument(object model, Guid id)
@@ -715,8 +706,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// </summary>
 	void SetField(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, Type type, string propertyName, object? value, string what, Guid stampVersion = default)
 	{
+		// GetMemberMap sees declared members only; an inherited one (a link's TargetId) lives on a base map.
 		var classMap = BsonClassMap.LookupClassMap(type);
 		var memberMap = classMap.GetMemberMap(propertyName);
+		while (memberMap is null && classMap.BaseClassMap is { } baseMap)
+		{
+			classMap = baseMap;
+			memberMap = classMap.GetMemberMap(propertyName);
+		}
 		if (memberMap is null)
 		{
 			// A [JsonIgnore] member is unmapped by convention and never persisted — nothing to write.
@@ -882,30 +879,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx)
-	{
-		// Structural dedup happens during event apply (queried straight from Mongo, since link
-		// queries always hit Mongo directly — see the type-level remarks) — same pattern as
-		// AddComponentCommand's uniqueness check.
-		// The id is minted here, not at apply, so the persisted event carries it and every replica agrees.
-		if (cmd.LinkId == default)
-		{
-			cmd.LinkId = _ids.CreateLinkId();
-		}
-		ctx.Events.Add(new LinkAddedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId<LinkAddedEvent>(cmd.CommandId, 1),
-			LinkTypeId = cmd.LinkTypeId,
-			LinkId = cmd.LinkId,
-			SourceId = cmd.SourceId,
-			TargetId = cmd.TargetId,
-			Data = cmd.Data,
-		});
-		return Task.CompletedTask;
-	}
-
 	/// <summary>
 	/// A batch is its children's events in the one transaction every write already runs in: later
 	/// children see earlier ones through the session, a refusal anywhere aborts the whole, and the
@@ -943,18 +916,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			ResolveTargetIds(child);
 			await child.AcceptAsync(this, inner);
 		}
-	}
-
-	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
-	{
-		ctx.Events.Add(new LinkRemovedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId<LinkRemovedEvent>(cmd.CommandId, 1),
-			LinkId = cmd.LinkId,
-		});
-		return Task.CompletedTask;
 	}
 
 	// ---------------------------------------------------------------- IEventVisitor
@@ -996,6 +957,10 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		if (ev.ComponentId == ev.TargetId)
 		{
 			ApplyRootAdd(ev);
+		}
+		else if (TypeMetadataProvider.IsLinkComponent(ev.ComponentTypeId))
+		{
+			ApplyLinkAdd(ev);
 		}
 		else if (TryGetTracked(ev.TargetId, out var containerModel))
 		{
@@ -1136,6 +1101,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		// Durable persistence still forks: a root component is its entity's own document, a facet
 		// lives in the shared Components collection. Either way it is a single-field update.
 		var componentType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var isLink = typeof(Link).IsAssignableFrom(componentType);
+		if (isLink)
+		{
+			GuardLinkChange(ev, componentType);
+		}
 		if (ev.ComponentId == ev.TargetId)
 		{
 			SetField(Components, BuildRootFilter(ev.TargetId), componentType, ev.PropertyName, ev.NewValue, $"root component {ev.TargetId}", ev.EventId);
@@ -1150,7 +1120,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			// The live instance (root entity, or the facet on its tracked container) is kept in sync when
 			// this process holds it; the durable write never needed it. A tracked container that lacks
 			// the facet is still an inconsistency and throws (ResolveTarget).
-			if (TryGetTracked(ev.TargetId, out var trackedModel))
+			// A link is re-read from Mongo on every index query; only a container holds one live.
+			if (TryGetTracked(ev.TargetId, out var trackedModel) && (!isLink || trackedModel is IComponentContainer))
 			{
 				var target = ComponentApplyHelpers.ResolveTarget(trackedModel, ev, TypeMetadataProvider);
 				ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
@@ -1165,10 +1136,18 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root delete: the entity and its facets go in one DeleteMany by _eid; incident links are
-			// not cascaded yet (they live in Links, keyed by Source/Target).
+			// Root delete: the entity, its facets and the links it owns go in one DeleteMany by _eid; the
+			// links pointing at it are removed from their owners too.
+			var incoming = DeleteLinksTargeting(ev.TargetId, ev.EventId);
 			DeleteEntity(ev.TargetId);
-			RunAfterCommit(() => Evict(ev.TargetId));
+			RunAfterCommit(() =>
+			{
+				foreach (var (ownerId, linkId) in incoming)
+				{
+					RemoveLiveFacet(ownerId, linkId);
+				}
+				Evict(ev.TargetId);
+			});
 		}
 		else
 		{
@@ -1197,46 +1176,90 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 	}
 
-	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkAdd(ev));
-
-	void ApplyLinkAdd(LinkAddedEvent ev)
+	/// <summary>
+	/// A link component lands in the shared Components collection under its owner (the source): the owner
+	/// is stamped as <see cref="Link.SourceId"/> and must exist, a structural duplicate is refused, and its
+	/// unique slots are checked like any facet's. A live container gets it after commit.
+	/// </summary>
+	void ApplyLinkAdd(ComponentAddedEvent ev)
 	{
-		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
-		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId != default ? ev.LinkId : throw new InvalidOperationException($"LinkAddedEvent {ev.EventId} carries no LinkId; ids are minted at command time, so every replica must agree on it.");
-		// SourceId/TargetId are mandatory, explicit fields on the event (see AddLinkCommand's
-		// remarks) — authoritative over whatever Data happened to carry.
-		link.SourceId = ev.SourceId;
-		link.TargetId = ev.TargetId;
-
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		if (FindStructuralDuplicate(linksMongo, link, link.LinkId) is { } duplicateId)
+		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		var link = (Link)ComponentApplyHelpers.MaterializeComponent(linkType, ev.Data, ev.ComponentId);
+		link.SourceId = ev.TargetId;
+		var exists = Builders<BsonDocument>.Filter.And(BuildRootFilter(ev.TargetId), RootsOnlyFilter);
+		if (FindDocument(Components, exists, Builders<BsonDocument>.Projection.Include("_id")) is null)
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: no entity {ev.TargetId} in stream {StreamId} to own a '{linkType.Name}' link.");
+		}
+		if (FindStructuralDuplicate(link, ev.ComponentId) is { } duplicateId)
 		{
 			throw new InvalidOperationException(
-				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link ({duplicateId}) already exists between the same endpoints.");
+				$"ComponentAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link ({duplicateId}) already exists between the same endpoints.");
 		}
-
-		// ToDocument already stamps the "_t" discriminator (= link type name) the per-type queries
-		// filter on, so no separate type column is written here.
-		var doc = ToDocument(link, link.LinkId);
-		var replaceFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", link.LinkId), StreamFilter);
-		ReplaceDocument(linksMongo, replaceFilter, doc);
+		TryGetTracked(ev.TargetId, out var ownerModel);
+		var container = ownerModel as IComponentContainer;
+		if (HasUniqueFacet(ev.TargetId, linkType) || container?.Components.CanAddComponent(linkType) == false)
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} could not attach a '{linkType.Name}' link to {ev.TargetId}: uniqueness or veto check rejected it.");
+		}
+		CreateComponent(ev.TargetId, ev.ComponentTypeId, ev.ComponentId, link);
+		StampVersion(ev.TargetId, ev.EventId);
 		RunAfterCommit(() =>
 		{
-			if (link is IBindableModel bindable && bindable.Store is null)
+			if (container is not null && !container.Components.TryAdd(link))
 			{
-				bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
+				throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: the stored '{linkType.Name}' link could not be attached to the live container {ev.TargetId} after commit.");
 			}
+			((IBindableComponent)link).AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
+			MarkApplied(ev.TargetId, ev.EventId);
 		});
 	}
 
-	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => ApplyInWriteAsync(() => ApplyLinkRemove(ev));
-
-	void ApplyLinkRemove(LinkRemovedEvent ev)
+	/// <summary>
+	/// A link's owner never changes; a new target must not make it a duplicate of another link. Read from
+	/// the stored document, through the session, so an earlier change in the same write counts.
+	/// </summary>
+	void GuardLinkChange(ComponentPropertyChangedEvent ev, Type linkType)
 	{
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var deleteFilter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", ev.LinkId), StreamFilter);
-		DeleteDocument(linksMongo, deleteFilter); // no-op (idempotent) if already gone
+		LinkApplyHelpers.GuardSourceUnchanged(ev);
+		if (ev.PropertyName == nameof(Link.TargetId))
+		{
+			var doc = FindDocument(Components, BuildComponentFilter(ev.TargetId, linkType, ev.ComponentId))
+				?? throw new InvalidOperationException($"ComponentPropertyChangedEvent {ev.EventId}: no '{linkType.Name}' link {ev.ComponentId} on {ev.TargetId} in stream {StreamId}.");
+			var retargeted = (Link)FromDocument(doc);
+			retargeted.SourceId = ev.TargetId;
+			retargeted.TargetId = ev.NewValue is Guid target ? target : Guid.Parse(Convert.ToString(ev.NewValue, System.Globalization.CultureInfo.InvariantCulture)!);
+			if (FindStructuralDuplicate(retargeted, ev.ComponentId) is { } duplicateId)
+			{
+				throw new InvalidOperationException(
+					$"ComponentPropertyChangedEvent {ev.EventId} could not retarget '{linkType.Name}' link {ev.ComponentId} — an equivalent link ({duplicateId}) already exists between the new endpoints.");
+			}
+		}
+	}
+
+	/// <summary>Deletes every link pointing at <paramref name="entityId"/> from its owner and returns which ones went.</summary>
+	IReadOnlyList<(Guid OwnerId, Guid LinkId)> DeleteLinksTargeting(Guid entityId, Guid eventId)
+	{
+		var filter = Builders<BsonDocument>.Filter.And(AllLinksFilter, Builders<BsonDocument>.Filter.Eq(nameof(Link.TargetId), entityId), Builders<BsonDocument>.Filter.Ne(EntityIdField, entityId));
+		var incoming = FindDocuments(Components, filter)
+			.Select(doc => (OwnerId: doc[EntityIdField].AsGuid, LinkId: doc["_id"].AsGuid))
+			.ToArray();
+		foreach (var (ownerId, linkId) in incoming)
+		{
+			DeleteDocument(Components, Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.Eq("_id", linkId)));
+			StampVersion(ownerId, eventId);
+		}
+		return incoming;
+	}
+
+	/// <summary>Drops a deleted facet from its owner's live Components, when this process holds the owner.</summary>
+	void RemoveLiveFacet(Guid ownerId, Guid componentId)
+	{
+		if (TryGetTracked(ownerId, out var model) && model is IComponentContainer container
+			&& container.Components.FirstOrDefault(c => c is IIdentifiable<Guid> identified && identified.Id == componentId) is { } component)
+		{
+			container.Components.BypassRemove(component);
+		}
 	}
 
 	/// <summary>
@@ -1246,7 +1269,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	/// in memory via <see cref="Link.StructuralKey"/> — sidesteps needing to translate <see cref="LinkKey"/>
 	/// into a Mongo filter.
 	/// </summary>
-	Guid? FindStructuralDuplicate(IMongoCollection<BsonDocument> linksMongo, Link link, Guid excludeId)
+	Guid? FindStructuralDuplicate(Link link, Guid excludeId)
 	{
 		var typeIdFilter = BuildLinkTypeFilter(link.GetType());
 		// SourceId/TargetId are native Link fields, serialized through Link's own class map (the
@@ -1260,7 +1283,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				Builders<BsonDocument>.Filter.Eq("SourceId", link.TargetId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", link.SourceId)));
 
-		foreach (var doc in FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, typeIdFilter, endpointFilter)))
+		foreach (var doc in FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, typeIdFilter, endpointFilter)))
 		{
 			var candidateId = doc["_id"].AsGuid;
 			if (candidateId == excludeId)
@@ -1464,19 +1487,23 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	Link LoadLink(BsonDocument doc)
 	{
 		var link = (Link)FromDocument(doc); // concrete type resolved from the "_t" discriminator
-		if (link is IBindableModel bindable && bindable.Store is null)
-		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(link.GetType()).CollectionId);
-		}
+		var bindable = (IBindableComponent)link;
+		// The component id is generated hidden state, not a serialized member — restore it from _id.
+		bindable.SetComponentId(doc["_id"].AsGuid);
+		var ownerId = doc[EntityIdField].AsGuid;
+		var ownerType = ResolveObject(ownerId)?.GetType();
+		bindable.AttachToContainer(this, ownerId, ownerType is null ? Guid.Empty : TypeMetadataProvider.GetTypeMetadata(ownerType).TypeId, Guid.Empty);
 		return link;
 	}
+
+	/// <summary>Every link document of the stream: any concrete type deriving from <see cref="Link"/>.</summary>
+	FilterDefinition<BsonDocument> AllLinksFilter => Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(typeof(Link)));
 
 	IReadOnlyCollection<Link> ILinkIndex.Links
 	{
 		get
 		{
-			var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-			return FindDocuments(linksMongo, StreamFilter)
+			return FindDocuments(Components, AllLinksFilter)
 				.Select(LoadLink)
 				.ToArray();
 		}
@@ -1484,7 +1511,6 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	IReadOnlyList<Link> ILinkIndex.LinksAt(Guid nodeId, LinkEnd end, Type linkType)
 	{
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		// Native Guid filter — see FindStructuralDuplicate's remark on why.
 		var endpointFilter = end switch
 		{
@@ -1495,18 +1521,17 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				Builders<BsonDocument>.Filter.Eq("SourceId", nodeId),
 				Builders<BsonDocument>.Filter.Eq("TargetId", nodeId)),
 		};
-		return FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
+		return FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
 			.Select(LoadLink)
 			.ToArray();
 	}
 
 	IReadOnlyList<Link> ILinkIndex.LinksBetween(Guid a, Guid b, Type linkType)
 	{
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", a), Builders<BsonDocument>.Filter.Eq("TargetId", b)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", b), Builders<BsonDocument>.Filter.Eq("TargetId", a)));
-		return FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
+		return FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter))
 			.Select(LoadLink)
 			.ToArray();
 	}
@@ -1514,12 +1539,11 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	bool ILinkIndex.TryGetByKey(LinkKey key, out Link? link)
 	{
 		var linkType = key.LinkType;
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
 		var endpointFilter = Builders<BsonDocument>.Filter.Or(
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.X), Builders<BsonDocument>.Filter.Eq("TargetId", key.Y)),
 			Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("SourceId", key.Y), Builders<BsonDocument>.Filter.Eq("TargetId", key.X)));
 
-		foreach (var doc in FindDocuments(linksMongo, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)))
+		foreach (var doc in FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, BuildLinkTypeFilter(linkType), endpointFilter)))
 		{
 			// StructuralKey only depends on SourceId/TargetId/type, all already on the raw document,
 			// so a bare FromDocument (no Attach) is enough just to evaluate it — LoadLink is reserved
@@ -1537,9 +1561,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 
 	bool ILinkIndex.TryGetById(Guid linkId, out Link? link)
 	{
-		var linksMongo = _database.GetCollection<BsonDocument>(LinksMongoCollectionName);
-		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), StreamFilter);
-		var doc = FindDocument(linksMongo, filter);
+		var filter = Builders<BsonDocument>.Filter.And(Builders<BsonDocument>.Filter.Eq("_id", linkId), AllLinksFilter);
+		var doc = FindDocument(Components, filter);
 		if (doc is null)
 		{
 			link = null;

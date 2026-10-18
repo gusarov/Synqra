@@ -30,7 +30,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// event MUST carry its own stream, or the per-stream <c>AppendStorageEventLog</c> — which
 /// isolates streams by filtering on <see cref="Event.StreamId"/> after reading them back —
 /// has nothing to filter on and every stream sees every stream's events. Mapping it here is
-/// a Mongo-only document convention (like <c>Link.LinkId → _id</c> below); the model itself
+/// a Mongo-only document convention; the model itself
 /// stays MongoDB-free.
 /// </para>
 /// </summary>
@@ -98,24 +98,6 @@ public static class MongoEventClassMaps
 				});
 			}
 
-			// Link.LinkId IS the document's own identity wherever a Link is stored natively as its
-			// own document — MongoProjection's "Links" read-model collection. Mapping it to _id (here,
-			// once, on the shared base class map every concrete Link subtype's AutoMap extends) avoids
-			// a redundant duplicate field (_id and LinkId carrying the exact same value). Not done via
-			// a [BsonId] attribute on the model itself: Synqra.Model has no MongoDB dependency, and
-			// every other storage backend (in-memory, SBX files) addresses a link by this same LinkId
-			// property without needing it singled out as "the" id — that's a Mongo-only document
-			// convention. LinkDataSerializer's own well-known-field strip (LinkAddedEvent.Data) accounts
-			// for this rename too — see its WellKnown list.
-			if (!BsonClassMap.IsClassMapRegistered(typeof(Link)))
-			{
-				BsonClassMap.RegisterClassMap<Link>(cm =>
-				{
-					cm.AutoMap();
-					cm.MapIdProperty(x => x.LinkId);
-				});
-			}
-
 			// Commands ride inside CommandCreatedEvent.Data. The driver learns a discriminator when it first serializes the
 			// type, so a process that only reads (a REST host after a redeploy) must be told every command up front.
 			RegisterDerived<ChangeObjectPropertyCommand>("ChangeObjectPropertyCommand");
@@ -123,8 +105,6 @@ public static class MongoEventClassMaps
 			RegisterDerived<AddComponentCommand>("AddComponentCommand");
 			RegisterDerived<ChangeComponentPropertyCommand>("ChangeComponentPropertyCommand");
 			RegisterDerived<DeleteComponentCommand>("DeleteComponentCommand");
-			RegisterDerived<AddLinkCommand>("AddLinkCommand");
-			RegisterDerived<RemoveLinkCommand>("RemoveLinkCommand");
 			RegisterDerived<BatchCommand>("BatchCommand");
 
 			RegisterDerived<ObjectPropertyChangedEvent>("ObjectPropertyChangedEvent");
@@ -133,16 +113,6 @@ public static class MongoEventClassMaps
 			RegisterDerived<ComponentAddedEvent>("ComponentAddedEvent");
 			RegisterDerived<ComponentPropertyChangedEvent>("ComponentPropertyChangedEvent");
 			RegisterDerived<ComponentDeletedEvent>("ComponentDeletedEvent");
-			RegisterDerived<LinkRemovedEvent>("LinkRemovedEvent");
-
-			// LinkAddedEvent gets a member-scoped serializer on Data so the embedded link drops the
-			// three well-known fields (_id/LinkId, SourceId, TargetId) it would otherwise duplicate
-			// (see LinkDataSerializer). This keeps the Link class map's own field SET untouched —
-			// unlike a global convention, so MongoProjection's native link collection can still persist
-			// _id/SourceId/TargetId for querying.
-			RegisterDerived<LinkAddedEvent>("LinkAddedEvent", cm =>
-				cm.GetMemberMap(e => e.Data).SetSerializer(new LinkDataSerializer()));
-
 			_registered = true;
 		}
 	}
@@ -154,7 +124,7 @@ public static class MongoEventClassMaps
 	/// <item>
 	/// Strips every <see cref="JsonIgnoreAttribute"/>-marked member. Without this, a dynamic
 	/// <c>object</c>-typed event member that carries a live model instance (e.g.
-	/// <see cref="LinkAddedEvent.Data"/> holding a concrete <c>Link</c> subclass) gets auto-mapped
+	/// <see cref="ComponentAddedEvent.Data"/> holding a concrete <c>Link</c> subclass) gets auto-mapped
 	/// <em>implicitly</em> the first time BSON encounters it, and that implicit auto-map never runs
 	/// <see cref="UnmapJsonIgnored"/> — only the types this class explicitly calls
 	/// <see cref="RegisterDerived{T}"/> for get that treatment. A consumer-defined Link subclass is
@@ -184,15 +154,6 @@ public static class MongoEventClassMaps
 	/// is unaffected and still gets the driver's strict defaults.
 	/// </item>
 	/// </list>
-	/// <para>
-	/// Note: the redundancy where <see cref="LinkAddedEvent.Data"/> (a concrete <c>Link</c>) would
-	/// duplicate the three well-known fields the event already carries explicitly is handled NOT here
-	/// (a global Link-class-map strip would also clobber <c>MongoProjection</c>'s native link storage,
-	/// which needs those fields to query) but by a member-scoped <see cref="LinkDataSerializer"/> on the
-	/// <c>Data</c> member alone — see its registration in <see cref="Register"/>. That serializer reuses
-	/// this same scoped, wide-open <see cref="ObjectSerializer"/> instance (<see cref="ScopedOpenObjectSerializer"/>)
-	/// rather than looking one up ambiently.
-	/// </para>
 	/// </summary>
 	static void RegisterSynqraConventions()
 	{
@@ -228,7 +189,7 @@ public static class MongoEventClassMaps
 	/// <c>MongoProjection.ToDocument</c> — since that path has no class-map member to scope a
 	/// convention to, and the driver's own ambient default rejects any type it doesn't recognize.
 	/// </summary>
-	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(new SynqraDiscriminatorConvention(), static _ => true);
+	public static readonly IBsonSerializer ScopedOpenObjectSerializer = new ObjectSerializer(new SynqraDiscriminatorConvention(), GuidRepresentation.Standard, static _ => true); // a boxed Guid (a link's TargetId change) is written Standard too
 
 	/// <summary>
 	/// Resolves an object-typed member's <c>_t</c> through Synqra's own model registry first (the one JSON and
@@ -298,54 +259,6 @@ public static class MongoEventClassMaps
 				}
 			}
 		}
-	}
-
-	/// <summary>
-	/// Member-scoped BSON serializer for <see cref="LinkAddedEvent.Data"/> (the link instance).
-	/// Serializes the link natively through the normal <c>object</c> serializer — so a consumer's
-	/// concrete <c>Link</c> subtype keeps its own extra fields and its <c>_t</c> discriminator — then
-	/// drops the three well-known fields (<see cref="Link.LinkId"/> — written as <c>_id</c>, since the
-	/// shared <c>Link</c> class map maps it as the id member, see <see cref="Register"/> —
-	/// <see cref="Link.SourceId"/>/<see cref="Link.TargetId"/>) from the resulting sub-document,
-	/// because the event already carries them as explicit top-level fields. Because it's attached to
-	/// this one member rather than the <c>Link</c> class map, it never affects how a <c>Link</c> is
-	/// serialized anywhere else — notably <c>MongoProjection</c>'s native "Links" collection, which
-	/// must keep those very fields to query by endpoint. On replay the materialized link re-stamps
-	/// LinkId/SourceId/TargetId from the event's own explicit fields, so the stripped fields are never
-	/// read back from Data.
-	/// </summary>
-	sealed class LinkDataSerializer : SerializerBase<object>
-	{
-		static readonly string[] WellKnown = ["_id", nameof(Link.SourceId), nameof(Link.TargetId)];
-
-		// Reuses the same scoped, wide-open instance the GuidAndObjectSerializerConvention attaches
-		// elsewhere — never the driver's restrictive process-wide default.
-		static IBsonSerializer ObjectSerializer => ScopedOpenObjectSerializer;
-
-		public override void Serialize(BsonSerializationContext context, BsonSerializationArgs args, object value)
-		{
-			if (value is null)
-			{
-				context.Writer.WriteNull();
-				return;
-			}
-
-			// Serialize the link to a throwaway document (carries _t + every mapped field), then strip
-			// the three the event already owns and write what's left to the real output.
-			var doc = new BsonDocument();
-			using (var docWriter = new BsonDocumentWriter(doc))
-			{
-				ObjectSerializer.Serialize(BsonSerializationContext.CreateRoot(docWriter), args, value);
-			}
-			foreach (var name in WellKnown)
-			{
-				doc.Remove(name);
-			}
-			BsonDocumentSerializer.Instance.Serialize(context, args, doc);
-		}
-
-		public override object Deserialize(BsonDeserializationContext context, BsonDeserializationArgs args)
-			=> ObjectSerializer.Deserialize(context, args);
 	}
 
 	static void RegisterDerived<T>(string discriminator, Action<BsonClassMap<T>>? configure = null)

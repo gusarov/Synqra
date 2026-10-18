@@ -7,9 +7,9 @@ namespace Synqra;
 /// Shared base for the live, store-backed collections returned by generated link-navigation
 /// properties. It never holds a snapshot: every enumeration re-queries the store's
 /// <see cref="ILinkIndex"/> for links incident to the owning node at the relevant
-/// <see cref="LinkEnd"/>, so the view always reflects current state. <see cref="Add"/> submits
-/// <see cref="AddLinkCommand"/> — there is no separate <c>Link</c> call. <see cref="Remove"/>/
-/// <see cref="Clear"/> submit <see cref="RemoveLinkCommand"/>.
+/// <see cref="LinkEnd"/>, so the view always reflects current state. <see cref="Add"/> adds the link
+/// as a component of its owner — there is no separate <c>Link</c> call. <see cref="Remove"/>/
+/// <see cref="Clear"/> delete that component.
 /// </summary>
 public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, IReadOnlyList<TItem>
 	where TItem : class
@@ -188,33 +188,13 @@ public abstract class LinkNavCollectionBase<TItem, TLink> : ICollection<TItem>, 
 	/// <summary>Submit a freshly-built link, skipping creation when an equivalent link already exists (idempotent link).</summary>
 	protected void SubmitNewLink(TLink link)
 	{
-		if (Index is { } index && index.TryGetByKey(link.StructuralKey, out _))
+		if (Index is not { } index || !index.TryGetByKey(link.StructuralKey, out _))
 		{
-			return;
+			Store.SubmitAddLink(link);
 		}
-		var store = Store;
-		if (link.LinkId == default)
-		{
-			link.LinkId = store.IdProvider.CreateLinkId();
-		}
-		store.SubmitCommand(new AddLinkCommand
-		{
-			LinkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TLink)).TypeId,
-			LinkId = link.LinkId,
-			SourceId = link.SourceId,
-			TargetId = link.TargetId,
-			Data = link,
-		});
 	}
 
-	void SubmitRemoveLink(TLink link)
-	{
-		Store.SubmitCommand(new RemoveLinkCommand
-		{
-			LinkId = link.LinkId,
-		});
-	}
-
+	void SubmitRemoveLink(TLink link) => Store.SubmitRemoveLink(link);
 }
 
 /// <summary>

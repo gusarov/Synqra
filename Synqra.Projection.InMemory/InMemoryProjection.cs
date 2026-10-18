@@ -66,16 +66,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	private readonly ConditionalWeakTable<object, AttachedObjectData> _attachedObjects = new();
 	private byte _attachedMaintain;
 
-	// Links: by-id (RemoveLinkCommand addressing), by structural key (dedup), and an incidence
-	// index keyed by node identity (navigation queries). Maintained from LinkAddedEvent/
-	// LinkRemovedEvent — links have their own dedicated command/event pair, not the generic
-	// object lifecycle. See plans/links.md.
+	// Links are components of their source entity (docs/model.md §4); on top of the owner's Components the
+	// store keeps them by id, by structural key (dedup) and by either endpoint (navigation and the reverse
+	// side, which is a view here, never a second stored record).
 	private readonly ConcurrentDictionary<Guid, Link> _linksById = new();
 	// facet id -> the entity it hangs off: IComponentIndex.FindComponent without walking every object
 	private readonly ConcurrentDictionary<Guid, Guid> _componentOwners = new();
 	private readonly ConcurrentDictionary<LinkKey, Link> _linksByKey = new();
 	// The outer ConcurrentDictionary only ever made the *lookup* safe — the values were plain lists that
-	// LinkAdded/LinkRemoved mutated while LinksAt/LinksBetween read them. Append-ordered concurrent
+	// link adds/removes mutated while LinksAt/LinksBetween read them. Append-ordered concurrent
 	// lists instead, so navigation enumerates safely without copying and link order is still the order
 	// links were added (nav collections are user-visible, e.g. a node's children).
 	private readonly ConcurrentDictionary<Guid, ConcurrentAppendList<Link>> _linksByNode = new();
@@ -745,29 +744,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx)
-	{
-		// Structural dedup happens during event apply (where the live link index lives) —
-		// same pattern as AddComponentCommand's uniqueness check.
-		// The id is minted here, not at apply, so the persisted event carries it and every replica agrees.
-		if (cmd.LinkId == default)
-		{
-			cmd.LinkId = _ids.CreateLinkId();
-		}
-		ctx.Events.Add(new LinkAddedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId<LinkAddedEvent>(cmd.CommandId, 1),
-			LinkTypeId = cmd.LinkTypeId,
-			LinkId = cmd.LinkId,
-			SourceId = cmd.SourceId,
-			TargetId = cmd.TargetId,
-			Data = cmd.Data,
-		});
-		return Task.CompletedTask;
-	}
-
 	/// <summary>
 	/// A batch is its children's events applied in one submit: the expectations are checked first,
 	/// then each child produces its events in order and they are applied and stored together. The
@@ -811,18 +787,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			ResolveTargetIds(child);
 			await child.AcceptAsync(this, inner);
 		}
-	}
-
-	public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx)
-	{
-		ctx.Events.Add(new LinkRemovedEvent
-		{
-			StreamId = cmd.StreamId,
-			CommandId = cmd.CommandId,
-			EventId = _ids.CreateEventId<LinkRemovedEvent>(cmd.CommandId, 1),
-			LinkId = cmd.LinkId,
-		});
-		return Task.CompletedTask;
 	}
 
 	#endregion
@@ -869,80 +833,6 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		if (sequence != default && sequence.CompareBigEndian(Cursor) > 0)
 		{
 			Cursor = sequence;
-		}
-	}
-
-	/// <summary>
-	/// Materializes the link from <see cref="AddLinkCommand.Data"/> the same way
-	/// <see cref="ComponentApplyHelpers.MaterializeComponent"/> does for a component (live instance / json-shaped dict /
-	/// fall back to reflection), attaches it to the store, and indexes it — rejecting a structural
-	/// duplicate (same concrete type + endpoint pair) before it can be persisted. Both endpoints are
-	/// always already set by the time this runs (the command carries the whole link, unlike a plain
-	/// object's properties which trickle in across separate events), so there is no deferred-
-	/// indexing step the way the generic object lifecycle would need.
-	/// <see cref="LinkAddedEvent.SourceId"/>/<see cref="LinkAddedEvent.TargetId"/> are authoritative —
-	/// stamped onto the materialized link explicitly, not read off whatever <see cref="LinkAddedEvent.Data"/>
-	/// happened to carry.
-	/// </summary>
-	Task VisitLinkAddedCore(LinkAddedEvent ev)
-	{
-		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.LinkTypeId).Type;
-		var link = LinkApplyHelpers.MaterializeLink(linkType, ev.Data);
-		link.LinkId = ev.LinkId != default ? ev.LinkId : throw new InvalidOperationException($"LinkAddedEvent {ev.EventId} carries no LinkId; ids are minted at command time, so every replica must agree on it.");
-		link.SourceId = ev.SourceId;
-		link.TargetId = ev.TargetId;
-
-		var key = link.StructuralKey;
-		if (!_linksByKey.TryAdd(key, link))
-		{
-			throw new InvalidOperationException(
-				$"LinkAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link already exists between the same endpoints.");
-		}
-		_linksById[link.LinkId] = link;
-		_linksByNode.GetOrAdd(link.SourceId, _ => new ConcurrentAppendList<Link>()).Add(link);
-		if (link.TargetId != link.SourceId)
-		{
-			_linksByNode.GetOrAdd(link.TargetId, _ => new ConcurrentAppendList<Link>()).Add(link);
-		}
-
-		if (link is IBindableModel bindable && bindable.Store is null)
-		{
-			bindable.Attach(this, TypeMetadataProvider.GetTypeMetadata(linkType).CollectionId);
-		}
-
-		NotifyLinkChanged(link, LinkEnd.Source);
-		NotifyLinkChanged(link, LinkEnd.Target);
-		return Task.CompletedTask;
-	}
-
-	Task VisitLinkRemovedCore(LinkRemovedEvent ev)
-	{
-		if (!_linksById.TryRemove(ev.LinkId, out var link))
-		{
-			return Task.CompletedTask; // already gone — idempotent
-		}
-		_linksByKey.TryRemove(link.StructuralKey, out _);
-		if (_linksByNode.TryGetValue(link.SourceId, out var fromLinks))
-		{
-			fromLinks.Remove(link);
-		}
-		if (link.TargetId != link.SourceId && _linksByNode.TryGetValue(link.TargetId, out var toLinks))
-		{
-			toLinks.Remove(link);
-		}
-
-		NotifyLinkChanged(link, LinkEnd.Source);
-		NotifyLinkChanged(link, LinkEnd.Target);
-		return Task.CompletedTask;
-	}
-
-	/// <summary>Resolves the endpoint object at <paramref name="selfEnd"/> and, if it implements <see cref="ILinkAware"/>, tells it this link's type changed.</summary>
-	void NotifyLinkChanged(Link link, LinkEnd selfEnd)
-	{
-		var endpointId = selfEnd == LinkEnd.Source ? link.SourceId : link.TargetId;
-		if (TryGetModel(endpointId).Model is ILinkAware aware)
-		{
-			aware.OnLinkChanged(link.GetType(), selfEnd);
 		}
 	}
 
@@ -1146,6 +1036,12 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			return Task.CompletedTask;
 		}
 
+		if (TypeMetadataProvider.IsLinkComponent(ev.ComponentTypeId))
+		{
+			ApplyLinkAdded(ev);
+			return Task.CompletedTask;
+		}
+
 		var container = ResolveContainer(ev.TargetId);
 
 		// Instantiate the component. Lookup the concrete type via the type registry,
@@ -1209,8 +1105,15 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx)
 	{
 		TryGetModel(ev.TargetId, out var data);
-		var target = ComponentApplyHelpers.ResolveTarget(data.Model, ev, TypeMetadataProvider);
-		ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
+		if (ev.ComponentId != ev.TargetId && _linksById.TryGetValue(ev.ComponentId, out var link))
+		{
+			ApplyLinkChanged(ev, link);
+		}
+		else
+		{
+			var target = ComponentApplyHelpers.ResolveTarget(data.Model, ev, TypeMetadataProvider);
+			ComponentApplyHelpers.ApplyPropertyChange(target, ev.PropertyName, ev.NewValue);
+		}
 
 		if (data.Attached is not null)
 		{
@@ -1223,10 +1126,11 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	{
 		if (ev.ComponentId == ev.TargetId)
 		{
-			// Root entity single-delete: drop it from its collection + tracking. Cascade of its
-			// facet components / incident links is Phase 4.
+			// Root entity delete: drop it from its collection + tracking, with its facets and every
+			// link incident to it (owned ones go with it; a link pointing at it is removed from its owner).
 			if (TryGetModel(ev.TargetId, out var rd) && rd.Model is not null)
 			{
+				RemoveIncidentLinks(ev.TargetId);
 				var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
 				GetCollection(rootType, "").RemoveByEvent(rd.Model);
 				if (rd.Model is IComponentContainer deleted)
@@ -1237,6 +1141,16 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 					}
 				}
 				Untrack(ev.TargetId, rd.Model);
+			}
+			return Task.CompletedTask;
+		}
+
+		if (_linksById.ContainsKey(ev.ComponentId))
+		{
+			RemoveLink(ev.ComponentId);
+			if (TryGetModel(ev.TargetId, out var linkOwner) && linkOwner.Attached is not null)
+			{
+				linkOwner.Attached.LastEventId = ev.EventId;
 			}
 			return Task.CompletedTask;
 		}
@@ -1262,9 +1176,153 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return Task.CompletedTask;
 	}
 
-	public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => VisitLinkAddedCore(ev);
+	// ---- Link apply helpers ----
 
-	public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => VisitLinkRemovedCore(ev);
+	/// <summary>
+	/// A link component lands on its owner (the source): the owner is stamped as <see cref="Link.SourceId"/>,
+	/// a structural duplicate is refused, a container's Components enforce arity, and both endpoints are told.
+	/// </summary>
+	void ApplyLinkAdded(ComponentAddedEvent ev)
+	{
+		var linkType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+		if (ev.ComponentId == default)
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} carries no id for its '{linkType.Name}' link; ids are minted at command time, so every replica must agree on it.");
+		}
+		var link = (Link)ComponentApplyHelpers.MaterializeComponent(linkType, ev.Data, ev.ComponentId);
+		link.SourceId = ev.TargetId;
+		if (!TryGetModel(ev.TargetId, out var owner) || owner.Model is null)
+		{
+			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId}: no entity {ev.TargetId} to own a '{linkType.Name}' link.");
+		}
+		var key = link.StructuralKey;
+		if (!_linksByKey.TryAdd(key, link))
+		{
+			throw new InvalidOperationException(
+				$"ComponentAddedEvent {ev.EventId} could not register a '{linkType.Name}' link — an equivalent link already exists between the same endpoints.");
+		}
+		if (owner.Model is IComponentContainer container && !container.Components.TryAdd(link))
+		{
+			_linksByKey.TryRemove(key, out _);
+			throw new InvalidOperationException(
+				$"ComponentAddedEvent {ev.EventId} could not attach a '{linkType.Name}' link to {ev.TargetId} — uniqueness or veto check rejected it.");
+		}
+		_componentOwners[ev.ComponentId] = ev.TargetId;
+		_linksById[ev.ComponentId] = link;
+		IndexLinkEnd(link.SourceId, link);
+		if (link.TargetId != link.SourceId)
+		{
+			IndexLinkEnd(link.TargetId, link);
+		}
+		((IBindableComponent)link).AttachToContainer(this, ev.TargetId, ev.TargetTypeId, ev.CollectionId);
+		if (owner.Attached is not null)
+		{
+			owner.Attached.LastEventId = ev.EventId;
+		}
+		NotifyLinkChanged(link.SourceId, link, LinkEnd.Source);
+		NotifyLinkChanged(link.TargetId, link, LinkEnd.Target);
+	}
+
+	/// <summary>A link edit is in place; retargeting moves it between endpoint indexes and re-checks its structural key.</summary>
+	void ApplyLinkChanged(ComponentPropertyChangedEvent ev, Link link)
+	{
+		LinkApplyHelpers.GuardSourceUnchanged(ev);
+		if (ev.PropertyName == nameof(Link.TargetId))
+		{
+			RetargetLink(ev, link);
+		}
+		else
+		{
+			ComponentApplyHelpers.ApplyPropertyChange(link, ev.PropertyName, ev.NewValue);
+		}
+	}
+
+	void RetargetLink(ComponentPropertyChangedEvent ev, Link link)
+	{
+		var oldTarget = link.TargetId;
+		var oldKey = link.StructuralKey;
+		ComponentApplyHelpers.ApplyPropertyChange(link, ev.PropertyName, ev.NewValue);
+		var newKey = link.StructuralKey;
+		if (!newKey.Equals(oldKey) && !_linksByKey.TryAdd(newKey, link))
+		{
+			ComponentApplyHelpers.ApplyPropertyChange(link, ev.PropertyName, oldTarget);
+			throw new InvalidOperationException(
+				$"ComponentPropertyChangedEvent {ev.EventId} could not retarget '{link.GetType().Name}' link {link.LinkId} — an equivalent link already exists between the new endpoints.");
+		}
+		if (!newKey.Equals(oldKey))
+		{
+			_linksByKey.TryRemove(oldKey, out _);
+		}
+		if (oldTarget != link.SourceId)
+		{
+			UnindexLinkEnd(oldTarget, link);
+		}
+		if (link.TargetId != link.SourceId)
+		{
+			IndexLinkEnd(link.TargetId, link);
+		}
+		NotifyLinkChanged(oldTarget, link, LinkEnd.Target);
+		NotifyLinkChanged(link.TargetId, link, LinkEnd.Target);
+		NotifyLinkChanged(link.SourceId, link, LinkEnd.Source);
+	}
+
+	/// <summary>Drops a link from every index and from its owner's Components; neither endpoint entity is touched.</summary>
+	void RemoveLink(Guid linkId)
+	{
+		if (_linksById.TryRemove(linkId, out var link))
+		{
+			_linksByKey.TryRemove(link.StructuralKey, out _);
+			_componentOwners.TryRemove(linkId, out _);
+			UnindexLinkEnd(link.SourceId, link);
+			if (link.TargetId != link.SourceId)
+			{
+				UnindexLinkEnd(link.TargetId, link);
+			}
+			if (TryGetModel(link.SourceId).Model is IComponentContainer owner)
+			{
+				owner.Components.BypassRemove(link);
+			}
+			NotifyLinkChanged(link.SourceId, link, LinkEnd.Source);
+			NotifyLinkChanged(link.TargetId, link, LinkEnd.Target);
+		}
+	}
+
+	/// <summary>The cascade of an entity delete: every link it owns or that points at it.</summary>
+	void RemoveIncidentLinks(Guid entityId)
+	{
+		if (_linksByNode.TryGetValue(entityId, out var incident))
+		{
+			var snapshot = new List<Guid>();
+			foreach (var link in incident)
+			{
+				snapshot.Add(link.LinkId);
+			}
+			foreach (var linkId in snapshot)
+			{
+				RemoveLink(linkId);
+			}
+		}
+	}
+
+	void IndexLinkEnd(Guid endpointId, Link link)
+		=> _linksByNode.GetOrAdd(endpointId, _ => new ConcurrentAppendList<Link>()).Add(link);
+
+	void UnindexLinkEnd(Guid endpointId, Link link)
+	{
+		if (_linksByNode.TryGetValue(endpointId, out var links))
+		{
+			links.Remove(link);
+		}
+	}
+
+	/// <summary>Tells the endpoint object, if it implements <see cref="ILinkAware"/>, that a link of this type changed at its end.</summary>
+	void NotifyLinkChanged(Guid endpointId, Link link, LinkEnd selfEnd)
+	{
+		if (TryGetModel(endpointId).Model is ILinkAware aware)
+		{
+			aware.OnLinkChanged(link.GetType(), selfEnd);
+		}
+	}
 
 	// ---- Component apply helpers ----
 
