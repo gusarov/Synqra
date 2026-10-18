@@ -244,11 +244,8 @@ public class SbxSerializer : ISbxSerializer
 		Map(-69, typeof(DeleteComponentCommand));
 		Map(-70, typeof(ComponentDeletedEvent));
 		Map(-71, 2026.170, typeof(ObjectDeletedEvent)); // inherits SingleObjectEvent's schema, has none of its own
-		Map(-72, typeof(LinkRemovedEvent));
-		Map(-73, typeof(LinkAddedEvent));
+		// -72 (LinkRemovedEvent) / -73 (LinkAddedEvent) / -75 (AddLinkCommand) / -76 (RemoveLinkCommand) retired — links are components.
 		Map(-74, typeof(Link));
-		Map(-75, typeof(AddLinkCommand));
-		Map(-76, typeof(RemoveLinkCommand));
 		Map(-77, typeof(DeleteObjectCommand));
 		Map(-78, typeof(SubscribeRequest));
 		Map(-79, typeof(UnsubscribeRequest));

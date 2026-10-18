@@ -115,42 +115,36 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
-	public async Task Should_not_duplicate_LinkId_SourceId_TargetId_inside_Data()
+	public async Task Should_carry_a_link_as_component_data_with_its_target()
 	{
-		// LinkAddedEvent already carries LinkId/SourceId/TargetId as its own explicit fields (see
-		// AddLinkCommand's remarks on why) — Data should only ever add a concrete subtype's own
-		// extra properties (a primitive link like HierarchyLink has none, so Data should come back
-		// essentially empty: just its own discriminator, nothing from the Link base).
+		// A link is a component: its add event is a ComponentAddedEvent whose owner is the source, and
+		// the link's own data — the target included — rides in Data. Its id is the event's ComponentId,
+		// never a serialized member of the link.
 		var linkId   = new Guid("C0DE0000-0000-8000-9003-0000000000C3");
 		var sourceId = new Guid("C0DE0000-0000-8000-9001-0000000000C4");
 		var targetId = new Guid("C0DE0000-0000-8000-9001-0000000000C5");
-		var ev = new LinkAddedEvent
+		var ev = new ComponentAddedEvent
 		{
-			EventId    = new Guid("C0DE0000-0000-8000-9E03-0000000000C6"),
-			CommandId  = new Guid("C0DE0000-0000-8000-9C03-0000000000C7"),
-			LinkTypeId = new Guid("C0DE0000-0000-8000-90C8-000000000000"),
-			LinkId     = linkId,
-			SourceId   = sourceId,
-			TargetId   = targetId,
-			Data       = new HierarchyLink { LinkId = linkId, SourceId = sourceId, TargetId = targetId },
+			EventId         = new Guid("C0DE0000-0000-8000-9E03-0000000000C6"),
+			CommandId       = new Guid("C0DE0000-0000-8000-9C03-0000000000C7"),
+			TargetId        = sourceId,
+			TargetTypeId    = new Guid("C0DE0000-0000-8000-90C9-000000000000"),
+			ComponentTypeId = new Guid("C0DE0000-0000-8000-90C8-000000000000"),
+			ComponentId     = linkId,
+			CollectionId    = Guid.Empty,
+			Data            = new HierarchyLink { SourceId = sourceId, TargetId = targetId },
 		};
 
 		var doc = ((Event)ev).ToBsonDocument(typeof(Event));
-		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("LinkAddedEvent");
-		// The event's own explicit fields are untouched.
-		await Assert.That(doc["LinkId"].AsGuid).IsEqualTo(linkId);
-		await Assert.That(doc["SourceId"].AsGuid).IsEqualTo(sourceId);
-		await Assert.That(doc["TargetId"].AsGuid).IsEqualTo(targetId);
-		// But the nested Data blob does not repeat them.
+		await Assert.That(DiscriminatorLeaf(doc)).IsEqualTo("ComponentAddedEvent");
+		await Assert.That(doc["ComponentId"].AsGuid).IsEqualTo(linkId);
 		var data = doc["Data"].AsBsonDocument;
 		await Assert.That(data.Contains("LinkId")).IsFalse();
-		await Assert.That(data.Contains("SourceId")).IsFalse();
-		await Assert.That(data.Contains("TargetId")).IsFalse();
+		await Assert.That(data["TargetId"].AsGuid).IsEqualTo(targetId);
 
-		var back = (LinkAddedEvent)BsonSerializer.Deserialize<Event>(doc);
-		await Assert.That(back.LinkId).IsEqualTo(linkId);
-		await Assert.That(back.SourceId).IsEqualTo(sourceId);
-		await Assert.That(back.TargetId).IsEqualTo(targetId);
+		var back = (ComponentAddedEvent)BsonSerializer.Deserialize<Event>(doc);
+		await Assert.That(back.ComponentId).IsEqualTo(linkId);
+		await Assert.That(((HierarchyLink)back.Data!).TargetId).IsEqualTo(targetId);
 	}
 
 	[Test]

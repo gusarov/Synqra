@@ -13,4 +13,6 @@ public abstract class UndirectedLink<TSource, TTarget> : Link<TSource, TTarget>
 {
 	[JsonIgnore]
 	internal override LinkKey StructuralKey => LinkKey.Undirected(GetType(), SourceId, TargetId);
+
+	internal override bool IsUndirected => true;
 }

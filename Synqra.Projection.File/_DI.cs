@@ -758,8 +758,6 @@ public static class FileSynqraExtensions
 			});
 			return Task.CompletedTask;
 		}
-		public Task VisitAsync(AddLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(RemoveLinkCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public async Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx)
 		{
 			// A batch is its children in order; this projection keeps no versions, so expectations cannot be honoured.
@@ -861,8 +859,6 @@ public static class FileSynqraExtensions
 			throw new NotSupportedException(
 				$"File projection cannot delete root entity {ev.TargetId}: the append-only Item store has no tombstone mechanism.");
 		}
-		public Task VisitAsync(LinkAddedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
-		public Task VisitAsync(LinkRemovedEvent ev, EventVisitorContext ctx) => Task.CompletedTask;
 
 		public async Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx)
 		{

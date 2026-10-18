@@ -33,7 +33,7 @@ public class JsonSerializationTests
 	public async Task Should_serialize_a_link_without_its_structural_key()
 	{
 		// StructuralKey is derived and carries a System.Type; the REST events feed serializes stored links.
-		var link = new HierarchyLink { LinkId = Guid.NewGuid(), SourceId = Guid.NewGuid(), TargetId = Guid.NewGuid() };
+		var link = new HierarchyLink { SourceId = Guid.NewGuid(), TargetId = Guid.NewGuid() };
 		// Read-only properties included: the sample options ignore them, a consumer's (Quotaly's Scene) do not.
 		var options = new JsonSerializerOptions(SampleJsonSerializerContext.DefaultOptions) { TypeInfoResolver = new SynqraJsonTypeInfoResolver(typeof(HierarchyLink)), IgnoreReadOnlyProperties = false };
 

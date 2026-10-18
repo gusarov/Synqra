@@ -87,6 +87,18 @@ Persisted component document shape (single collection): `{ _id, _t, _sid, _eid, 
   queries with no backing field).
 - **One domain event per link mutation** — the reverse side is a projection-maintained view, not a
   second event.
+- **Three kinds, one rule.** *Unidirectional* — a `DirectedLink` whose target declares no `[From]`;
+  *bidirectional directed* (parent/children) — the same `DirectedLink`, the target declares `[From]`;
+  *related* — an `UndirectedLink`, `[Related]` on both ends, owned by `min(A, B)`. Which ends get a
+  named navigation is a declaration on the models, never a storage difference: every link is indexed
+  by its target (`(_sid, TargetId)`), so the reverse side of a unidirectional link is still queryable.
+- **Arity** is `[Component(IsUnique = true)]` on the link type — at most one per owner (one parent, one
+  "runs on"); without it a link type is a collection on its owner.
+- **As built.** The target column is `TargetId`; `SourceId` is stored too and always equals the owner
+  `_eid`. A link is added, edited and removed with `AddComponentCommand` / `ChangeComponentPropertyCommand`
+  / `DeleteComponentCommand`; retargeting is an in-place `TargetId` change (same id, structural key
+  re-checked); `SourceId` never changes. Deleting an entity removes the links it owns and the links
+  pointing at it.
 
 ## 5. Commands & events (two logs)
 
@@ -411,8 +423,8 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `8C04` | `BatchCommand` | live | no paired event: its effect is its children's events; its one `CommandCreatedEvent` carries the children |
 | `9C01` | `ChangeObjectPropertyCommand` | dying | ↔ `9E01` |
 | `9C02` | `DeleteObjectCommand` | dying | (no paired event) |
-| `9C03` | `AddLinkCommand` | dying | ↔ `9E03` |
-| `9C04` | `RemoveLinkCommand` | dying | ↔ `9E04` |
+| `9C03` | `AddLinkCommand` | retired | links ride `AddComponentCommand` (§4) |
+| `9C04` | `RemoveLinkCommand` | retired | links ride `DeleteComponentCommand` (§4) |
 | `8E00` | `Event` | live | event base |
 | `8E0F` | `SingleObjectEvent` | live | abstract shared base |
 | `8E0E` | `CommandCreatedEvent` | live | framework wrapper, ordinal 0 of every command |
@@ -421,9 +433,9 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `8E03` | `ComponentDeletedEvent` | live | ↔ `8C03` |
 | `9E01` | `ObjectPropertyChangedEvent` | dying | ↔ `9C01` |
 | `9E02` | `ObjectDeletedEvent` | dying | ↔ `9C02`; had no id at all until 2026-08-18 — carries a `[SynqraLegacyTypeId]` for the v5 id it resolved to |
-| `9E03` | `LinkAddedEvent` | dying | ↔ `9C03` |
-| `9E04` | `LinkRemovedEvent` | dying | ↔ `9C04` |
-| `9300` | `Link` | dying | link base |
+| `9E03` | `LinkAddedEvent` | retired | links ride `ComponentAddedEvent` (§4) |
+| `9E04` | `LinkRemovedEvent` | retired | links ride `ComponentDeletedEvent` (§4) |
+| `9300` | `Link` | live | link base — a component (§4); its id is the component id |
 | `8A00` | `Item` | live | File-store envelope |
 | `9A00` | `TransportOperation` | staging | wire base — local code `00`, matching `8C00`/`8E00` |
 | `9A02` | `EventEnvelope` | staging | carries one event either direction |
@@ -441,8 +453,8 @@ gap is expected.
 > transport messages whose peers deploy together, so the window is now. Per §8.10 they would need fresh
 > committed local codes (`8A00` is `Item`); a promotion does not carry the number across.
 
-> **Open question — the `9Cxx`/`9Exx` "dying" built-ins.** `ObjectPropertyChangedEvent`,
-> `ObjectDeletedEvent`, `LinkAddedEvent` and `LinkRemovedEvent` are shipped, persisted types sitting in
+> **Open question — the `9Cxx`/`9Exx` "dying" built-ins.** `ObjectPropertyChangedEvent` and
+> `ObjectDeletedEvent` are shipped, persisted types sitting in
 > the *staging* registry, which is now load-bearing: their generated instances derive as `B…` rather
 > than `A…`. They are on the way out with the object/link vocabulary, so they are left alone;
 > re-allocating them into the committed registry would change persisted identity and needs

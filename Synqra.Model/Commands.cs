@@ -13,8 +13,6 @@ namespace Synqra;
 [JsonDerivedType(typeof(AddComponentCommand), "AddComponentCommand")]
 [JsonDerivedType(typeof(ChangeComponentPropertyCommand), "ChangeComponentPropertyCommand")]
 [JsonDerivedType(typeof(DeleteComponentCommand), "DeleteComponentCommand")]
-[JsonDerivedType(typeof(AddLinkCommand), "AddLinkCommand")]
-[JsonDerivedType(typeof(RemoveLinkCommand), "RemoveLinkCommand")]
 [JsonDerivedType(typeof(BatchCommand), "BatchCommand")]
 [SynqraModel("C0DEADD0-1032-8000-8C00-000000000000")] // command family C, type 00 = the base kind (node 0 = type ref)
 [Schema(2025.1, "")]
