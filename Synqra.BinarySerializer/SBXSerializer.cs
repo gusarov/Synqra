@@ -107,6 +107,8 @@ public class SbxSerializer : ISbxSerializer
 		DictStrObj = -10,
 		DictStrStr = -11,
 
+		Boolean = -12, // one byte, 0x00 or 0x01
+
 		// Lists
 		ListTypeFrom = -17,
 		    List_R_E = -17, // List<RequestedType>(empty)
@@ -574,6 +576,10 @@ public class SbxSerializer : ISbxSerializer
 		{
 			Serialize(in buffer, ref pos, g);
 		}
+		else if (obj is bool b)
+		{
+			Serialize(in buffer, ref pos, b);
+		}
 		else if (obj is string s)
 		{
 			Serialize(in buffer, ref pos, s);
@@ -843,6 +849,10 @@ public class SbxSerializer : ISbxSerializer
 		else if (typeId == TypeId.DoubleFloating || type == typeof(double))
 		{
 			return DeserializeDouble(in buffer, ref pos);
+		}
+		else if (typeId == TypeId.Boolean || type == typeof(bool))
+		{
+			return DeserializeBoolean(in buffer, ref pos);
 		}
 		/*
 		else if ((typeId >= TypeId.ListTypeTo && typeId <= TypeId.ListTypeTo) || type.IsAssignableTo(typeof(IEnumerable))) // duplicate?
@@ -1346,6 +1356,8 @@ public class SbxSerializer : ISbxSerializer
 				return TypeId.SingleFloating;
 			case Type t when t == typeof(Double):
 				return TypeId.DoubleFloating;
+			case Type t when t == typeof(bool):
+				return TypeId.Boolean;
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, string>)):
 				return TypeId.DictStrStr; // artificial mark, requre a call to GetTypeIdForList
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, object>)):
@@ -1373,6 +1385,7 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.Guid => typeof(Guid),
 			TypeId.SingleFloating => typeof(float),
 			TypeId.DoubleFloating => typeof(double),
+			TypeId.Boolean => typeof(bool),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}
@@ -1702,6 +1715,54 @@ public class SbxSerializer : ISbxSerializer
 		var d = DeserializeDouble(buffer, ref pos);
 		// compare as uint bit state to avoid zero equality logic
 		return (*(ulong*)&d) == DoubleFloatNegativeZero ? null : d;
+	}
+
+	#endregion
+
+	#region Boolean
+
+	public void Serialize(in Span<byte> buffer, ref int pos, bool data)
+	{
+		if (pos >= buffer.Length)
+		{
+			throw new ArgumentException("Buffer too small for bool encoding.");
+		}
+		buffer[pos++] = data ? (byte)1 : (byte)0;
+	}
+
+	public void Serialize(in Span<byte> buffer, ref int pos, bool? data)
+	{
+		// the nullable +1 convention of ulong?: 0 = null, 1 = false, 2 = true
+		Serialize(buffer, ref pos, data == null ? 0UL : data.Value ? 2UL : 1UL);
+	}
+
+	public bool DeserializeBoolean(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		if (pos >= buffer.Length)
+		{
+			throw new ArgumentException("Buffer too small for bool decoding.");
+		}
+		var start = pos;
+		var raw = buffer[pos++];
+		return raw switch
+		{
+			0 => false,
+			1 => true,
+			_ => throw new FormatException($"Corrupt SBX bool at position {start}: 0x{raw:X2}, expected 0x00 or 0x01."),
+		};
+	}
+
+	public bool? DeserializeNullableBoolean(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var start = pos;
+		var raw = DeserializeUnsigned(buffer, ref pos);
+		return raw switch
+		{
+			0 => null,
+			1 => false,
+			2 => true,
+			_ => throw new FormatException($"Corrupt SBX bool? at position {start}: {raw}, expected 0 (null), 1 (false) or 2 (true)."),
+		};
 	}
 
 	#endregion

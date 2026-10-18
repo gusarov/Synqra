@@ -46,6 +46,41 @@ public class JsonSerializationTests
 	}
 
 	[Test]
+	public async Task Should_round_trip_bool_members_through_the_aot_context()
+	{
+		var json = JsonSerializer.Serialize(new TestFlagComponent { Done = true, Pinned = false }, SampleJsonSerializerContext.DefaultOptions);
+
+		var back = JsonSerializer.Deserialize<TestFlagComponent>(json, SampleJsonSerializerContext.DefaultOptions)!;
+
+		await Assert.That(back.Done).IsTrue();
+		await Assert.That(back.Pinned).IsEqualTo(false);
+	}
+
+	[Test]
+	public async Task Should_round_trip_a_bool_property_change_through_the_aot_context()
+	{
+		Event ev = new ComponentPropertyChangedEvent { EventId = Guid.NewGuid(), CommandId = Guid.NewGuid(), TargetId = Guid.NewGuid(), TargetTypeId = Guid.NewGuid(), CollectionId = Guid.NewGuid(), PropertyName = nameof(TestFlagComponent.Done), NewValue = true };
+
+		var json = JsonSerializer.Serialize(ev, SampleJsonSerializerContext.DefaultOptions);
+		var back = (ComponentPropertyChangedEvent)JsonSerializer.Deserialize<Event>(json, SampleJsonSerializerContext.DefaultOptions)!;
+
+		await Assert.That(back.NewValue is bool).IsTrue();
+		await Assert.That((bool)back.NewValue!).IsTrue();
+	}
+
+	[Test]
+	public async Task Should_round_trip_a_bool_in_a_dictionary()
+	{
+		var json = JsonSerializer.Serialize(new Dictionary<string, object?> { ["flag"] = true, ["off"] = false }, SampleJsonSerializerContext.DefaultOptions);
+
+		var back = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, SampleJsonSerializerContext.DefaultOptions)!;
+
+		await Assert.That(back["flag"] is bool).IsTrue();
+		await Assert.That((bool)back["flag"]!).IsTrue();
+		await Assert.That((bool)back["off"]!).IsFalse();
+	}
+
+	[Test]
 	public async Task Should_05_serialize()
 	{
 #if NET8_0_OR_GREATER
