@@ -57,12 +57,14 @@ file class TestBinarySerializer : ISbxSerializer
 	public void Serialize(in Span<byte> buffer, ref int pos, Guid data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, float data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, double data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, bool data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, long? value) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, ulong? value) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, string? data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, Guid? data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, float? data) => throw new NotImplementedException();
 	public void Serialize(in Span<byte> buffer, ref int pos, double? data) => throw new NotImplementedException();
+	public void Serialize(in Span<byte> buffer, ref int pos, bool? data) => throw new NotImplementedException();
 
 	//// DESERIALIZE
 	public long DeserializeSigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
@@ -71,6 +73,7 @@ file class TestBinarySerializer : ISbxSerializer
 	public Guid DeserializeGuid(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public float DeserializeSingle(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public double DeserializeDouble(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public bool DeserializeBoolean(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 
 	public long? DeserializeNullableSigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public ulong? DeserializeNullableUnsigned(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
@@ -78,6 +81,7 @@ file class TestBinarySerializer : ISbxSerializer
 	public Guid? DeserializeNullableGuid(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public float? DeserializeNullableSingle(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public double? DeserializeNullableDouble(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
+	public bool? DeserializeNullableBoolean(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 
 	public IList<T> DeserializeList<T>(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();
 	public IDictionary<TK, TV> DeserializeDict<TK, TV>(in ReadOnlySpan<byte> buffer, ref int pos) => throw new NotImplementedException();

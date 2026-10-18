@@ -67,6 +67,23 @@ public class MongoEventClassMapsTests
 	}
 
 	[Test]
+	public async Task Should_round_trip_a_bool_value_and_a_bool_in_a_dictionary_via_native_bson()
+	{
+		var changed = new ComponentPropertyChangedEvent { EventId = Guid.NewGuid(), CommandId = Guid.NewGuid(), TargetId = Guid.NewGuid(), TargetTypeId = Guid.NewGuid(), CollectionId = Guid.NewGuid(), SequenceId = Guid.NewGuid(), PropertyName = "Done", NewValue = true };
+		var added = new ComponentAddedEvent { EventId = Guid.NewGuid(), CommandId = Guid.NewGuid(), TargetId = Guid.NewGuid(), TargetTypeId = Guid.NewGuid(), CollectionId = Guid.NewGuid(), SequenceId = Guid.NewGuid(), Data = new Dictionary<string, object?> { ["flag"] = true, ["off"] = false } };
+
+		var changedBack = (ComponentPropertyChangedEvent)BsonSerializer.Deserialize<Event>(((Event)changed).ToBsonDocument(typeof(Event)));
+		var addedBack = (ComponentAddedEvent)BsonSerializer.Deserialize<Event>(((Event)added).ToBsonDocument(typeof(Event)));
+
+		await Assert.That(changedBack.NewValue is bool).IsTrue();
+		await Assert.That((bool)changedBack.NewValue!).IsTrue();
+		var bag = (IDictionary<string, object?>)addedBack.Data!;
+		await Assert.That(bag["flag"] is bool).IsTrue();
+		await Assert.That((bool)bag["flag"]!).IsTrue();
+		await Assert.That((bool)bag["off"]!).IsFalse();
+	}
+
+	[Test]
 	public async Task Should_not_persist_JsonIgnored_DataObject()
 	{
 		// DataObject is the in-memory materialized object, marked [JsonIgnore]; it must not be

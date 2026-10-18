@@ -93,12 +93,14 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			typeof(AddComponentCommand),
 			typeof(TestComponentNode),
 			typeof(TestUniqueComponent),
+			typeof(TestFlagComponent),
 		]);
 		hostBuilder.Services.AddSbxSerializer(ser =>
 		{
 			ser.Map(102, 3000.0, typeof(DemoModel));
 			ser.Map(224, typeof(TestComponentNode));
 			ser.Map(221, typeof(TestUniqueComponent));
+			ser.Map(225, typeof(TestFlagComponent));
 			ser.Map(210, typeof(TestGraphNode));
 			ser.Map(211, typeof(HierarchyLink));
 			ser.Map(212, typeof(DependsOn));
@@ -669,6 +671,58 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		return (id, facet);
 	}
 
+	/// <summary>A <see cref="TestComponentNode"/> with a <see cref="TestFlagComponent"/> added as Done = true, Pinned = null, then Pinned changed to false.</summary>
+	protected async Task<(Guid Id, Guid Facet)> CreateWithFlagAsync(IObjectStore store)
+	{
+		var id = Guid.NewGuid();
+		var facet = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		var flagTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestFlagComponent)).TypeId;
+		var batch = new BatchCommand();
+		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = "flagged" }));
+		batch.Commands.Add(new AddComponentCommand
+		{
+			TargetTypeId = container.TypeId,
+			CollectionId = container.GetCollectionId(""),
+			TargetId = id,
+			ComponentId = facet,
+			ComponentTypeId = flagTypeId,
+			Data = new TestFlagComponent { Done = true, Pinned = null },
+		});
+		await store.SubmitCommandAsync(batch);
+		await store.SubmitCommandAsync(new ChangeComponentPropertyCommand
+		{
+			TargetTypeId = container.TypeId,
+			CollectionId = container.GetCollectionId(""),
+			TargetId = id,
+			ComponentTypeId = flagTypeId,
+			ComponentId = facet,
+			PropertyName = nameof(TestFlagComponent.Pinned),
+			NewValue = false,
+		});
+		return (id, facet);
+	}
+
+	protected TestFlagComponent LoadFlag(IObjectStore store, Guid id)
+		=> (TestFlagComponent)store.GetCollection<TestComponentNode>().Single(n => store.GetId(n) == id).Components.Single();
+
+	[Test]
+	public async Task Should_57_carry_bool_members_and_a_bool_value_through_the_event_log()
+	{
+		var store = ResolveStore();
+		var (id, facet) = await CreateWithFlagAsync(store);
+
+		var changed = Events().GetAllAsync().ToBlockingEnumerable()
+			.OfType<ComponentPropertyChangedEvent>()
+			.Single(e => e.ComponentId == facet);
+
+		await Assert.That(changed.NewValue is bool).IsTrue(); // an object-typed bool reads back as a bool, not a number
+		await Assert.That((bool)changed.NewValue!).IsFalse();
+		var flag = LoadFlag(store, id);
+		await Assert.That(flag.Done).IsTrue();
+		await Assert.That(flag.Pinned).IsEqualTo(false);
+	}
+
 	[Test]
 	public async Task Should_57a_store_a_batch_as_one_command_event()
 	{
@@ -1047,6 +1101,7 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		await Assert.That(store2.GetId(b2.Children.Single())).IsEqualTo(idC);
 		await Assert.That(store2.GetId(c2.Children.Single())).IsEqualTo(idA);
 	}
+
 	[Test]
 	public async Task Should_82_retargeted_link_survives_restart()
 	{
@@ -1069,6 +1124,19 @@ public abstract class Cobra_DurableSynqraStoreContractTests : Cobra_SynqraStoreC
 		await Assert.That(reloaded.SourceId).IsEqualTo(parentId);
 		await Assert.That(reloaded.TargetId).IsEqualTo(secondId);
 		await Assert.That(((WeightedLink)reloaded).Order).IsEqualTo(2);
+	}
+
+	[Test]
+	public async Task Should_42_bool_members_survive_restart_via_replay()
+	{
+		var store = ResolveStore();
+		var (id, _) = await CreateWithFlagAsync(store);
+
+		Restart();
+
+		var flag = LoadFlag(ResolveStore(), id);
+		await Assert.That(flag.Done).IsTrue();
+		await Assert.That(flag.Pinned).IsEqualTo(false); // false, not null: bool? keeps all three states
 	}
 }
 

@@ -28,6 +28,8 @@ namespace Synqra.BinarySerializer.Tests;
 [JsonSerializable(typeof(SampleFieldDoubleModel))]
 [JsonSerializable(typeof(SampleFieldNullableFloatModel))]
 [JsonSerializable(typeof(SampleFieldNullableDoubleModel))]
+[JsonSerializable(typeof(SampleFieldBoolModel))]
+[JsonSerializable(typeof(SampleFieldNullableBoolModel))]
 [JsonSerializable(typeof(SampleFieldObjectModel))]
 [JsonSerializable(typeof(SampleFieldDictionaryStringObjectModel))]
 [JsonSerializable(typeof(SampleFieldBaseModel))]

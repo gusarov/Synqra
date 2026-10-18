@@ -612,6 +612,8 @@ gap is expected.
   serve a capability it must guard explicitly, not silently no-op.
 - **Ceremony:** every command/event/component/link type keeps its `[Schema(...)]` version chain
   and is registered for SBX (binary), Mongo class maps, and Native-AOT `JsonSerializerContext`.
+  A member may be any type SBX supports (`Synqra.BinarySerializer/readme.md`, "Supported types"),
+  `bool` and `bool?` included; JSON and Mongo carry them natively.
 
 ---
 

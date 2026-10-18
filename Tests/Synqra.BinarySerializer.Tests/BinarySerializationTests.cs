@@ -356,6 +356,130 @@ internal class BinarySerializationFloatingPointTests : SbxBaseTest
 
 }
 
+internal class BinarySerializationBooleanTests : SbxBaseTest
+{
+	[Test]
+	[Arguments(false, "00")]
+	[Arguments(true, "01")]
+	public async Task Should_serialize_bool_with_test_vectors(bool b, string hex)
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[10];
+		int pos = 0;
+		ser.Serialize(buffer, ref pos, b);
+		var pos2 = 0;
+		var deserialized = ser.DeserializeBoolean(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo(hex);
+		await Assert.That(deserialized).IsEqualTo(b);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	[Arguments(null, "00")]
+	[Arguments(false, "01")]
+	[Arguments(true, "02")]
+	public async Task Should_serialize_nullable_bool_with_test_vectors(bool? b, string hex)
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[10];
+		int pos = 0;
+		ser.Serialize(buffer, ref pos, b);
+		var pos2 = 0;
+		var deserialized = ser.DeserializeNullableBoolean(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo(hex);
+		await Assert.That(deserialized).IsEqualTo(b);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	[Arguments("02", 0, "position 0: 0x02")]
+	[Arguments("FF", 0, "position 0: 0xFF")]
+	[Arguments("0180", 1, "position 1: 0x80")]
+	public async Task Should_refuse_a_corrupt_bool(string hex, int at, string expected)
+	{
+		var ser = new SbxSerializer();
+		var buffer = Convert.FromHexString(hex);
+
+		var ex = Assert.Throws<FormatException>(() =>
+		{
+			var pos = at;
+			ser.DeserializeBoolean(buffer, ref pos);
+		});
+
+		await Assert.That(ex.Message).Contains(expected);
+	}
+
+	[Test]
+	[Arguments("03", 0, "position 0: 3")]
+	[Arguments("0105", 1, "position 1: 5")]
+	public async Task Should_refuse_a_corrupt_nullable_bool(string hex, int at, string expected)
+	{
+		var ser = new SbxSerializer();
+		var buffer = Convert.FromHexString(hex);
+
+		var ex = Assert.Throws<FormatException>(() =>
+		{
+			var pos = at;
+			ser.DeserializeNullableBoolean(buffer, ref pos);
+		});
+
+		await Assert.That(ex.Message).Contains(expected);
+	}
+
+	[Test]
+	[Arguments(false, "1700")]
+	[Arguments(true, "1701")]
+	public async Task Should_serialize_boxed_bool_with_its_type_id(bool b, string hex)
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[10];
+		int pos = 0;
+		ser.Serialize<object>(buffer, ref pos, b);
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo(hex); // -12 zigzag = 0x17
+		await Assert.That(deserialized is bool).IsTrue();
+		await Assert.That((bool)deserialized).IsEqualTo(b);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	public async Task Should_round_trip_a_list_of_bool()
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[64];
+		int pos = 0;
+		ser.Serialize<object>(buffer, ref pos, new List<bool> { true, false, true });
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
+
+		await Assert.That(deserialized is List<bool>).IsTrue();
+		await Assert.That((List<bool>)deserialized).IsEquivalentTo(new List<bool> { true, false, true });
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	[Arguments(true, null)]
+	[Arguments(false, false)]
+	[Arguments(true, true)]
+	public async Task Should_round_trip_bool_members_of_a_poco_by_name(bool flag, bool? maybe)
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[256];
+		int pos = 0;
+		ser.Serialize<object>(buffer, ref pos, new SampleFlagPoco { Flag = flag, Maybe = maybe });
+		var pos2 = 0;
+		var deserialized = (SampleFlagPoco)ser.Deserialize<object>(buffer, ref pos2);
+
+		await Assert.That(deserialized.Flag).IsEqualTo(flag);
+		await Assert.That(deserialized.Maybe).IsEqualTo(maybe);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+}
+
 internal class BinarySerializationSignedTests : SbxBaseTest
 {
 	[Test]
@@ -782,6 +906,14 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 
 		// Dictionary
 		yield return () => SP(() => (61, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", 1 }, { "B", new SampleSealedModel { Id = 5 } } } }, "1C 03 4100 0302 4200 040A"));
+		yield return () => SP(() => (62, new SampleFieldDictionaryStringObjectModel() { Data = new Dictionary<string, object> { { "A", true }, { "B", false } } }, "1C 03 4100 1701 4200 1700")); // bool is type id -12
+
+		// Bool models
+		yield return () => SP(() => (63, new SampleFieldBoolModel() { Data = false }, "2800"));
+		yield return () => SP(() => (64, new SampleFieldBoolModel() { Data = true }, "2801"));
+		yield return () => SP(() => (65, new SampleFieldNullableBoolModel() { Data = null }, "2A00"));
+		yield return () => SP(() => (66, new SampleFieldNullableBoolModel() { Data = false }, "2A01"));
+		yield return () => SP(() => (67, new SampleFieldNullableBoolModel() { Data = true }, "2A02"));
 
 		// Prod
 		yield return () => SP(() => (70, new EventEnvelope
@@ -898,6 +1030,8 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 		ser.Map(17 /* 22 */, typeof(SampleFieldDoubleModel));
 		ser.Map(18 /* 24 */, typeof(SampleFieldNullableFloatModel));
 		ser.Map(19 /* 26 */, typeof(SampleFieldNullableDoubleModel));
+		ser.Map(20 /* 28 */, typeof(SampleFieldBoolModel));
+		ser.Map(21 /* 2A */, typeof(SampleFieldNullableBoolModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;
