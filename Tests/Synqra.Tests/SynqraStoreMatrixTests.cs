@@ -89,6 +89,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			typeof(DependsOn),
 			typeof(RelatedTo),
 			typeof(WeightedLink),
+			typeof(TestUniqueParentLink),
 			typeof(AddComponentCommand),
 			typeof(TestComponentNode),
 			typeof(TestUniqueComponent),
@@ -103,6 +104,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			ser.Map(212, typeof(DependsOn));
 			ser.Map(213, typeof(RelatedTo));
 			ser.Map(214, typeof(WeightedLink));
+			ser.Map(215, typeof(TestUniqueParentLink));
 		});
 
 		RegisterAppendStorage(hostBuilder);
@@ -857,6 +859,79 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		await Assert.That(store.ResolveObject(store.GetId(a))).IsNotNull();
 		await Assert.That(store.ResolveObject(store.GetId(b))).IsNotNull();
 		await Assert.That(((TestGraphNode)store.ResolveObject(store.GetId(b))!).Name).IsEqualTo("b");
+	}
+
+	TestComponentNode AddContainer(IObjectStore store, string name)
+	{
+		var node = new TestComponentNode { Name = name };
+		store.GetCollection<TestComponentNode>().Add(node);
+		return node;
+	}
+
+	[Test]
+	public async Task Should_83_replace_a_unique_link_in_one_batch()
+	{
+		var store = ResolveStore();
+		var child = AddContainer(store, "child");
+		var oldParent = AddContainer(store, "old parent");
+		var newParent = AddContainer(store, "new parent");
+		var childId = store.GetId(child);
+		var nodeTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode)).TypeId;
+		var linkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueParentLink)).TypeId;
+		var oldLinkId = Guid.NewGuid();
+		await store.SubmitCommandAsync(new AddComponentCommand { TargetId = childId, TargetTypeId = nodeTypeId, ComponentTypeId = linkTypeId, ComponentId = oldLinkId, Data = new TestUniqueParentLink { TargetId = store.GetId(oldParent) }, });
+
+		var batch = new BatchCommand();
+		batch.Commands.Add(new DeleteComponentCommand { TargetId = childId, TargetTypeId = nodeTypeId, ComponentTypeId = linkTypeId, ComponentId = oldLinkId, });
+		batch.Commands.Add(new AddComponentCommand { TargetId = childId, TargetTypeId = nodeTypeId, ComponentTypeId = linkTypeId, Data = new TestUniqueParentLink { TargetId = store.GetId(newParent) }, });
+		await store.SubmitCommandAsync(batch);
+
+		var owned = child.Components.OfType<TestUniqueParentLink>().Single();
+		await Assert.That(owned.TargetId).IsEqualTo(store.GetId(newParent));
+		var index = (ILinkIndex)store;
+		await Assert.That(index.LinksAt(childId, LinkEnd.Source, typeof(TestUniqueParentLink)).Count).IsEqualTo(1);
+		await Assert.That(index.LinksAt(store.GetId(oldParent), LinkEnd.Target, typeof(TestUniqueParentLink)).Count).IsEqualTo(0);
+	}
+
+	[Test]
+	public async Task Should_84_still_refuse_a_second_unique_link_in_a_separate_command()
+	{
+		var store = ResolveStore();
+		var child = AddContainer(store, "child");
+		var firstParent = AddContainer(store, "first");
+		var secondParent = AddContainer(store, "second");
+		var nodeTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode)).TypeId;
+		var linkTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueParentLink)).TypeId;
+		AddComponentCommand AddLink(TestComponentNode parent) => new() { TargetId = store.GetId(child), TargetTypeId = nodeTypeId, ComponentTypeId = linkTypeId, Data = new TestUniqueParentLink { TargetId = store.GetId(parent) }, };
+		await store.SubmitCommandAsync(AddLink(firstParent));
+
+		var refused = await CaptureFailureAsync(() => store.SubmitCommandAsync(AddLink(secondParent)));
+
+		await Assert.That(refused).IsNotNull();
+		await Assert.That(child.Components.OfType<TestUniqueParentLink>().Single().TargetId).IsEqualTo(store.GetId(firstParent));
+	}
+
+	[Test]
+	public async Task Should_85_replace_a_unique_component_in_one_batch()
+	{
+		var store = ResolveStore();
+		var id = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		var facet = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent));
+		var oldFacetId = Guid.NewGuid();
+		var setup = new BatchCommand();
+		setup.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = "container" }));
+		setup.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.GetCollectionId(""), TargetId = id, ComponentTypeId = facet.TypeId, ComponentId = oldFacetId, Data = new TestUniqueComponent { Subject = "old" }, });
+		await store.SubmitCommandAsync(setup);
+
+		var batch = new BatchCommand();
+		batch.Commands.Add(new DeleteComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.GetCollectionId(""), TargetId = id, ComponentTypeId = facet.TypeId, ComponentId = oldFacetId, });
+		batch.Commands.Add(new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.GetCollectionId(""), TargetId = id, ComponentTypeId = facet.TypeId, Data = new TestUniqueComponent { Subject = "new" }, });
+		await store.SubmitCommandAsync(batch);
+
+		var node = store.GetCollection<TestComponentNode>().Single(n => store.GetId(n) == id);
+		await Assert.That(node.Components.Count).IsEqualTo(1);
+		await Assert.That(((TestUniqueComponent)node.Components.Single()).Subject).IsEqualTo("new");
 	}
 }
 
