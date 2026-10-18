@@ -7,6 +7,7 @@ using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.BinarySerializer.Tests;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
@@ -465,6 +466,7 @@ internal class BinarySerializationBooleanTests : SbxBaseTest
 	[Arguments(true, null)]
 	[Arguments(false, false)]
 	[Arguments(true, true)]
+	[DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(SampleFlagPoco))] // reached only by its name: the trimmed (AOT) run must keep its constructor and properties
 	public async Task Should_round_trip_bool_members_of_a_poco_by_name(bool flag, bool? maybe)
 	{
 		var ser = new SbxSerializer();
