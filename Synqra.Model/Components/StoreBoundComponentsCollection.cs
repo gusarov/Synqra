@@ -61,6 +61,7 @@ public sealed class StoreBoundComponentsCollection : IComponentsCollection
 	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 	public IComponent? GetUniqueComponent(Type uniqueComponentType) => _inner.GetUniqueComponent(uniqueComponentType);
 	public bool CanAddComponent(Type componentType) => _inner.CanAddComponent(componentType);
+	public bool CanAddComponent(Type componentType, IReadOnlyCollection<IComponent> removing) => _inner.CanAddComponent(componentType, removing);
 	public bool Contains(IComponent item) => _inner.Contains(item);
 	public void CopyTo(IComponent[] array, int arrayIndex) => _inner.CopyTo(array, arrayIndex);
 	public void Clear() => _inner.Clear();

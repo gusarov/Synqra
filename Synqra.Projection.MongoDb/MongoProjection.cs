@@ -321,6 +321,8 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		public IClientSessionHandle Session { get; } = session;
 		public List<Action> AfterCommit { get; } = [];
 		public List<Guid> Attached { get; } = [];
+		/// <summary>Ids of the facets and links this write deletes: gone from the stored state already, still on the live container until the commit.</summary>
+		public HashSet<Guid> Removed { get; } = [];
 	}
 
 	// Per async flow, so a reader or an inbound event on another flow never sees this write's session.
@@ -407,6 +409,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			Evict(id);
 		}
 		scope.Attached.Clear();
+		scope.Removed.Clear();
 		scope.AfterCommit.Clear();
 	}
 
@@ -518,6 +521,14 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 	{
 		var scope = _scope.Value ?? throw new InvalidOperationException("An event is being applied outside a write; every apply runs inside ApplyInWriteAsync.");
 		scope.AfterCommit.Add(apply);
+	}
+
+	/// <summary>Whether a <paramref name="componentType"/> may join the live container, counting what this write has already deleted from it as gone.</summary>
+	bool CanAddToLive(IComponentContainer container, Type componentType)
+	{
+		var removed = _scope.Value!.Removed;
+		var pending = container.Components.Where(c => c is IIdentifiable<Guid> identified && removed.Contains(identified.Id)).ToList();
+		return container.Components.CanAddComponent(componentType, pending);
 	}
 
 	// ---------------------------------------------------------------- tracking (internal)
@@ -1019,7 +1030,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		var component = ComponentApplyHelpers.MaterializeComponent(componentType, ev.Data, ev.ComponentId);
 		// Uniqueness is decided on the stored facets, read through the session, so a facet added earlier
 		// in the same write counts; the live collection answers for vetoes and for what it already holds.
-		if (!container.Components.CanAddComponent(componentType) || HasUniqueFacet(ev.TargetId, componentType))
+		if (!CanAddToLive(container, componentType) || HasUniqueFacet(ev.TargetId, componentType))
 		{
 			throw new InvalidOperationException(
 				$"ComponentAddedEvent {ev.EventId} could not attach a '{componentType.Name}' to container {ev.TargetId} — uniqueness or veto check rejected it.");
@@ -1139,6 +1150,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 			// Root delete: the entity, its facets and the links it owns go in one DeleteMany by _eid; the
 			// links pointing at it are removed from their owners too.
 			var incoming = DeleteLinksTargeting(ev.TargetId, ev.EventId);
+			_scope.Value!.Removed.UnionWith(incoming.Select(link => link.LinkId));
 			DeleteEntity(ev.TargetId);
 			RunAfterCommit(() =>
 			{
@@ -1158,6 +1170,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 				throw new InvalidOperationException($"ComponentDeletedEvent {ev.EventId}: no '{componentType.Name}' facet {ev.ComponentId} on {ev.TargetId} in stream {StreamId}.");
 			}
 			DeleteDocument(Components, filter);
+			_scope.Value!.Removed.Add(ev.ComponentId);
 			StampVersion(ev.TargetId, ev.EventId);
 			RunAfterCommit(() =>
 			{
@@ -1198,7 +1211,7 @@ public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, ICo
 		}
 		TryGetTracked(ev.TargetId, out var ownerModel);
 		var container = ownerModel as IComponentContainer;
-		if (HasUniqueFacet(ev.TargetId, linkType) || container?.Components.CanAddComponent(linkType) == false)
+		if (HasUniqueFacet(ev.TargetId, linkType) || (container is not null && !CanAddToLive(container, linkType)))
 		{
 			throw new InvalidOperationException($"ComponentAddedEvent {ev.EventId} could not attach a '{linkType.Name}' link to {ev.TargetId}: uniqueness or veto check rejected it.");
 		}

@@ -32,6 +32,13 @@ public interface IComponentsCollection : ICollection<IComponent>
 	bool CanAddComponent(Type componentType);
 
 	/// <summary>
+	/// Like <see cref="CanAddComponent(Type)"/>, as if the <paramref name="removing"/> members were already
+	/// gone: the answer for an add that follows their removal in the same batch, before the live
+	/// collection has been told.
+	/// </summary>
+	bool CanAddComponent(Type componentType, IReadOnlyCollection<IComponent> removing);
+
+	/// <summary>
 	/// Attempts to add a component. Returns <c>false</c> if uniqueness or veto
 	/// checks reject it — used by the projection's event-apply path to
 	/// distinguish acceptance from rejection without throwing.

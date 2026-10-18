@@ -44,7 +44,10 @@ public sealed class ComponentsCollection : IComponentsCollection
 	}
 
 	public bool CanAddComponent(Type componentType)
-		=> CanAddCore(componentType, out _);
+		=> CanAddCore(componentType, [], out _);
+
+	public bool CanAddComponent(Type componentType, IReadOnlyCollection<IComponent> removing)
+		=> CanAddCore(componentType, removing, out _);
 
 	void ICollection<IComponent>.Add(IComponent component)
 	{
@@ -61,7 +64,7 @@ public sealed class ComponentsCollection : IComponentsCollection
 		if (component is null) throw new ArgumentNullException(nameof(component));
 		lock (_writeGate)
 		{
-			if (!CanAddCore(component.GetType(), out var uniqueSlots)) return false;
+			if (!CanAddCore(component.GetType(), [], out var uniqueSlots)) return false;
 			foreach (var slot in uniqueSlots) _unique[slot] = component;
 			_components.Add(component);
 			return true;
@@ -99,7 +102,7 @@ public sealed class ComponentsCollection : IComponentsCollection
 	public void CopyTo(IComponent[] array, int arrayIndex)
 		=> _components.CopyTo(array, arrayIndex);
 
-	bool CanAddCore(Type componentType, out IReadOnlyList<Type> uniqueSlots)
+	bool CanAddCore(Type componentType, IReadOnlyCollection<IComponent> removing, out IReadOnlyList<Type> uniqueSlots)
 	{
 		var slots = EnumerateUniqueSlots(componentType).ToList();
 		uniqueSlots = slots;
@@ -107,13 +110,14 @@ public sealed class ComponentsCollection : IComponentsCollection
 		// Uniqueness check: no unique slot already filled.
 		foreach (var slot in slots)
 		{
-			if (_unique.ContainsKey(slot)) return false;
+			if (_unique.TryGetValue(slot, out var holder) && !removing.Contains(holder)) return false;
 		}
 
 		// Veto check: any existing component allowed to refuse this incoming type.
 		foreach (var existing in _components)
 		{
 			if (existing is ICanAddComponent guard
+				&& !removing.Contains(existing)
 				&& !guard.CanAddAnotherComponent(this, componentType))
 			{
 				return false;

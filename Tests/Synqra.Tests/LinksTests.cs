@@ -25,6 +25,14 @@ public partial class HierarchyLink : DirectedLink<TestGraphNode, TestGraphNode>
 {
 }
 
+/// <summary>A link a container can own at most one of (like a project's single parent): [Component(IsUnique)] on the link type. Between containers, so the owner's live Components enforce the slot.</summary>
+[SynqraModel]
+[Component(IsUnique = true)]
+[Schema(2026.801, "1 SourceId Guid TargetId Guid")]
+public partial class TestUniqueParentLink : DirectedLink<TestComponentNode, TestComponentNode>
+{
+}
+
 /// <summary>Pure marker link (IDependable's "blocks/blockedBy"). Primitive — adds no fields of
 /// its own, but still needs [SynqraModel]/[Schema] (unlike the framework's own plain marker
 /// subclasses, e.g. ObjectDeletedEvent): SbxSerializer.Map requires schema info on the specific
