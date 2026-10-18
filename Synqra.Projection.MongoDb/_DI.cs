@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MongoDB.Driver;
@@ -35,7 +36,8 @@ public static class MongoSynqraStoreExtensions
 			services.AddKeyedSingleton<IObjectStore>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 			services.AddKeyedSingleton<IProjection>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 		}
-		// The projection is a derivation source for the event-log upgrades (the runner itself comes with the event storage).
+		// The projection is a derivation source for the event-log upgrades, and gets its own upgrades when its event log is not Mongo (one runner per host either way).
+		services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SynqraMongoUpgradeService>());
 		services.Configure<SynqraMongoUpgradeOptions>(o => o.Projections.Add(serviceKey));
 		return services;
 	}

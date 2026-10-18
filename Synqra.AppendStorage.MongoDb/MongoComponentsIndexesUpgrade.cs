@@ -22,6 +22,8 @@ internal sealed class ComponentsIndexesUpgrade : ISynqraMongoUpgrade
 
 	public string Id => "components-indexes/3"; // 2: (_sid, _t, _id) pages a type in id order, (_sid, _t, _eid) finds the owners of a facet type; 3: (_sid, TargetId) for links
 
+	public SynqraUpgradeScope Scope => SynqraUpgradeScope.Projection;
+
 	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
 	{
 		if (projectionDatabase is null)

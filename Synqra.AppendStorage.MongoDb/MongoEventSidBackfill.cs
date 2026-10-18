@@ -30,6 +30,8 @@ internal sealed class EventSidBackfillUpgrade : ISynqraMongoUpgrade
 
 	public string Id => "event-sid-backfill/1";
 
+	public SynqraUpgradeScope Scope => SynqraUpgradeScope.Events;
+
 	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
 	{
 		var events = eventsDatabase.GetCollection<BsonDocument>(eventsCollectionName);

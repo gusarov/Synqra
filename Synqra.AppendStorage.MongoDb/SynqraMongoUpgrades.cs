@@ -21,12 +21,25 @@ public sealed class SynqraMongoUpgradeOptions
 	public HashSet<string?> Projections { get; } = [];
 }
 
+/// <summary>What an upgrade changes: decides where it can run and which database holds its claim.</summary>
+internal enum SynqraUpgradeScope
+{
+	/// <summary>Rewrites the event log (or needs it); runs only for keys with a Mongo event storage.</summary>
+	Events,
+
+	/// <summary>Touches only the projection database; also runs for a projection over a non-Mongo event log.</summary>
+	Projection,
+}
+
 /// <summary>A single, versioned, idempotent storage upgrade the runner can apply.</summary>
 internal interface ISynqraMongoUpgrade
 {
 	/// <summary>Stable identity — the claim key in <c>_synqra_upgrades</c>. Never reuse or rename.</summary>
 	string Id { get; }
 
+	SynqraUpgradeScope Scope { get; }
+
+	/// <summary>For a <see cref="SynqraUpgradeScope.Projection"/> upgrade on a key without Mongo event storage, <paramref name="events"/> is the projection database and the collection name is empty.</summary>
 	Task RunAsync(IMongoDatabase events, string eventsCollectionName, IMongoDatabase? projection, ILogger logger, CancellationToken cancellationToken);
 }
 
@@ -87,6 +100,18 @@ public sealed class SynqraMongoUpgradeService(
 			else
 			{
 				_logger.LogError("Storage upgrades skipped for '{Database}' (service key '{Key}'): events database unreachable — the store will fail on first use instead.", eventsDb.DatabaseNamespace.DatabaseName, key);
+			}
+		}
+		// A projection over a non-Mongo event log has no event storage above; it still needs its own upgrades (indexes), claimed in its own database.
+		foreach (var key in options.Value.Projections.Where(k => !options.Value.EventStorages.Contains(k)))
+		{
+			var projectionDb = await FindProjectionAsync(key, cancellationToken);
+			if (projectionDb is not null)
+			{
+				foreach (var upgrade in Upgrades.Where(u => u.Scope == SynqraUpgradeScope.Projection))
+				{
+					await RunOnceAsync(upgrade, projectionDb, "", projectionDb, cancellationToken);
+				}
 			}
 		}
 	}

@@ -18,6 +18,8 @@ internal sealed class ComponentsTextIndexUpgrade : ISynqraMongoUpgrade
 
 	public string Id => "components-text/1";
 
+	public SynqraUpgradeScope Scope => SynqraUpgradeScope.Projection;
+
 	public async Task RunAsync(IMongoDatabase eventsDatabase, string eventsCollectionName, IMongoDatabase? projectionDatabase, ILogger logger, CancellationToken cancellationToken)
 	{
 		if (projectionDatabase is not null)
