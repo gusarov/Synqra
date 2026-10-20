@@ -205,6 +205,19 @@ public static class SynqraReplicationEndpointExtensions
 				await target.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev, Watermark = watermark }, frameBuffer, ctx.RequestAborted);
 			}
 
+			// A replay frame that cannot be written ends this connection: the failure names the event, so the log says which one.
+			async Task ReplayFrameAsync(byte[] frameBuffer, Event ev, Guid watermark)
+			{
+				try
+				{
+					await SendEventFrameAsync(socket, frameBuffer, ev, watermark);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					throw new InvalidOperationException($"Synqra replication: replaying event {ev.EventId} of stream {ev.StreamId} to a client failed.", ex);
+				}
+			}
+
 			// A backlog frame carries the watermark taken under the gate BEFORE the read: anything committed after it is
 			// either in the read or queued behind the gate for this socket, so a client resuming from it misses nothing.
 			IReadOnlyDictionary<Guid, Guid> WatermarksOf(IEnumerable<Guid> streams)
@@ -309,7 +322,7 @@ public static class SynqraReplicationEndpointExtensions
 					await foreach (var ev in backlog)
 					{
 						knownEvents.TryAdd(ev.EventId);
-						await SendEventFrameAsync(socket, backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
+						await ReplayFrameAsync(backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
 					}
 				}
 				finally
@@ -365,7 +378,7 @@ public static class SynqraReplicationEndpointExtensions
 									await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
 									{
 										knownEvents.TryAdd(ev.EventId);
-										await SendEventFrameAsync(socket, subBuffer, ev, subWatermark);
+										await ReplayFrameAsync(subBuffer, ev, subWatermark);
 									}
 								}
 								finally

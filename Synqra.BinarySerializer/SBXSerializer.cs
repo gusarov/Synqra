@@ -1547,7 +1547,11 @@ public class SbxSerializer : ISbxSerializer
 		var glyph = Intern(data);
 		if (glyph == 0) // it is remembered for interning, but now we have to write it in full.
 		{
-			pos += _utf8.GetBytes(data, buffer[pos..]);
+			if (!_utf8.TryGetBytes(data, buffer[pos..], out var encoded))
+			{
+				throw new SbxBufferTooSmallException("string");
+			}
+			pos += encoded;
 			buffer[pos++] = 0; // null terminator
 		}
 		else if (glyph >= 0x80 && glyph <=0xC1) // it is known before, 64+2 positions possible
@@ -1725,7 +1729,7 @@ public class SbxSerializer : ISbxSerializer
 	{
 		if (pos >= buffer.Length)
 		{
-			throw new ArgumentException("Buffer too small for bool encoding.");
+			throw new SbxBufferTooSmallException("bool");
 		}
 		buffer[pos++] = data ? (byte)1 : (byte)0;
 	}
@@ -1786,12 +1790,12 @@ public class SbxSerializer : ISbxSerializer
 		while (zigzag >= 0x80UL)
 		{
 			if (pos >= buffer.Length)
-				throw new ArgumentException("Buffer too small for varint encoding.");
+				throw new SbxBufferTooSmallException("varint");
 			buffer[pos++] = (byte)(zigzag & 0x7F | 0x80);
 			zigzag >>= 7;
 		}
 		if (pos >= buffer.Length)
-			throw new ArgumentException("Buffer too small for varint encoding.");
+			throw new SbxBufferTooSmallException("varint");
 		buffer[pos++] = (byte)zigzag;
 	}
 
@@ -1842,12 +1846,12 @@ public class SbxSerializer : ISbxSerializer
 		while (zigzag >= 0x80UL)
 		{
 			if (pos >= buffer.Length)
-				throw new ArgumentException("Buffer too small for varint encoding.");
+				throw new SbxBufferTooSmallException("varint");
 			buffer[pos++] = (byte)(zigzag & 0x7F | 0x80);
 			zigzag >>= 7;
 		}
 		if (pos >= buffer.Length)
-			throw new ArgumentException("Buffer too small for varint encoding.");
+			throw new SbxBufferTooSmallException("varint");
 		buffer[pos++] = (byte)zigzag;
 	}
 
@@ -1860,12 +1864,12 @@ public class SbxSerializer : ISbxSerializer
 		while (zigzag >= 0x80UL)
 		{
 			if (count >= buffer.Length)
-				throw new ArgumentException("Buffer too small for varint encoding.");
+				throw new SbxBufferTooSmallException("varint");
 			buffer[count++] = (byte)(zigzag & 0x7FUL | 0x80UL);
 			zigzag >>= 7;
 		}
 		if (count >= buffer.Length)
-			throw new ArgumentException("Buffer too small for varint encoding.");
+			throw new SbxBufferTooSmallException("varint");
 		buffer[count++] = (byte)zigzag;
 		buffer = buffer[count..];
 	}
@@ -1933,12 +1937,12 @@ public class SbxSerializer : ISbxSerializer
 		while (value >= 0x80)
 		{
 			if (pos >= buffer.Length)
-				throw new ArgumentException("Buffer too small for varint encoding.");
+				throw new SbxBufferTooSmallException("varint");
 			buffer[pos++] = (byte)(value & 0x7F | 0x80);
 			value >>= 7;
 		}
 		if (pos >= buffer.Length)
-			throw new ArgumentException("Buffer too small for varint encoding.");
+			throw new SbxBufferTooSmallException("varint");
 		buffer[pos++] = (byte)value;
 	}
 
@@ -1950,12 +1954,12 @@ public class SbxSerializer : ISbxSerializer
 		while (value >= 0x80)
 		{
 			if (count >= buffer.Length)
-				throw new ArgumentException("Buffer too small for varint encoding.");
+				throw new SbxBufferTooSmallException("varint");
 			buffer[count++] = (byte)(value & 0x7F | 0x80);
 			value >>= 7;
 		}
 		if (count >= buffer.Length)
-			throw new ArgumentException("Buffer too small for varint encoding.");
+			throw new SbxBufferTooSmallException("varint");
 		buffer[count++] = (byte)value;
 		buffer = buffer[count..];
 	}

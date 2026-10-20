@@ -116,34 +116,27 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return _blobStorage.DisposeAsync();
 	}
 
+	// A small item is written from the stack; a larger one from a pooled array that grows until the frame fits.
 	private void WriteSync(T item)
 	{
 		var key = _getKeyFromItem(item);
-
 		Span<byte> stackBuffer = stackalloc byte[StackBufferSize];
-		if (TrySerialize(item, stackBuffer, out var bytesWritten))
+		_serializer.Reset();
+		if (_serializer.TrySerializeFrame(item, stackBuffer, out var bytesWritten))
 		{
 			_blobStorage.WriteBlob(key, stackBuffer[..bytesWritten]);
-			return;
 		}
-
-		byte[] rented = ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize);
-		try
+		else
 		{
-			while (true)
+			var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
+			try
 			{
-				if (TrySerialize(item, rented.AsSpan(), out bytesWritten))
-				{
-					_blobStorage.WriteBlob(key, rented.AsSpan(0, bytesWritten));
-					return;
-				}
-				ArrayPool<byte>.Shared.Return(rented);
-				rented = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
+				_blobStorage.WriteBlob(key, frame.AsSpan());
 			}
-		}
-		finally
-		{
-			ArrayPool<byte>.Shared.Return(rented);
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(frame.Array!);
+			}
 		}
 	}
 
@@ -151,33 +144,25 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	{
 		var key = _getKeyFromItem(item);
 		Span<byte> stackBuffer = stackalloc byte[StackBufferSize];
-		if (TrySerialize(item, stackBuffer, out var bytesWritten))
+		_serializer.Reset();
+		if (_serializer.TrySerializeFrame(item, stackBuffer, out var bytesWritten))
 		{
 			byte[] data = stackBuffer[..bytesWritten].ToArray();
 			await WriteBlobAsync(key, data, item, cancellationToken);
-			Attach(item);
-			return;
 		}
-
-		byte[] rented = ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize);
-		try
+		else
 		{
-			while (true)
+			var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
+			try
 			{
-				if (TrySerialize(item, rented.AsSpan(), out bytesWritten))
-				{
-					await WriteBlobAsync(key, rented.AsMemory(0, bytesWritten), item, cancellationToken);
-					Attach(item);
-					return;
-				}
-				ArrayPool<byte>.Shared.Return(rented);
-				rented = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
+				await WriteBlobAsync(key, frame, item, cancellationToken);
+			}
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(frame.Array!);
 			}
 		}
-		finally
-		{
-			ArrayPool<byte>.Shared.Return(rented);
-		}
+		Attach(item);
 	}
 
 	/// <summary>
@@ -201,29 +186,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 	}
 
-	private bool TrySerialize(T item, Span<byte> destination, out int bytesWritten)
-	{
-		try
-		{
-			bytesWritten = 0;
-			_serializer.Reset();
-			_serializer.Serialize(destination, ref bytesWritten, item);
-			return true;
-		}
-		catch (Exception ex) when (IsCapacityException(ex))
-		{
-			bytesWritten = 0;
-			return false;
-		}
-	}
-
-	private static bool IsCapacityException(Exception ex)
-	{
-		return ex is IndexOutOfRangeException
-			|| ex is ArgumentOutOfRangeException
-			|| ex is OverflowException;
-	}
-
 	private T Deserialize(ReadOnlySpan<byte> blob)
 	{
 		_deserializer.Reset();
@@ -234,20 +196,15 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	/// <summary>The item's SBX bytes: what <see cref="GetAsync"/> and <see cref="GetAllAsync"/> read back.</summary>
 	protected byte[] Serialize(T item)
 	{
-		byte[] rented = ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize);
+		_serializer.Reset();
+		var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
 		try
 		{
-			int bytesWritten;
-			while (!TrySerialize(item, rented.AsSpan(), out bytesWritten))
-			{
-				ArrayPool<byte>.Shared.Return(rented);
-				rented = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
-			}
-			return rented.AsSpan(0, bytesWritten).ToArray();
+			return frame.ToArray();
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(rented);
+			ArrayPool<byte>.Shared.Return(frame.Array!);
 		}
 	}
 

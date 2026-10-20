@@ -81,10 +81,8 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 	{
 		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
 
-		ArraySegment<byte> span = buffer == default ? new byte[EventReplicationService.DefaultFrameSize] : buffer; // stackalloc byte[EventReplicationService.DefaultFrameSize];
-		int pos = 0;
-		_sbxSerializerSender.Serialize(span, ref pos, obj);
-		span = span[..pos];
+		// The caller's buffer is the first try; a frame that outgrows it comes back in a larger array of its own.
+		var span = _sbxSerializerSender.SerializeFrame(obj, buffer == default ? new byte[EventReplicationService.DefaultFrameSize] : buffer);
 
 #if DEBUG
 		var json = JsonSerializer.Serialize(obj, AppJsonContext.Default.TransportOperation);
