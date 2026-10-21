@@ -406,7 +406,17 @@ public static class SynqraReplicationEndpointExtensions
 				}
 				if (!knownEvents.TryAdd(eventEnvelope.Event.EventId))
 				{
-					continue; // already applied/broadcast — e.g. an echo from this same client
+					// already applied/broadcast — an echo from this same client, or a resend after a lost ack: acknowledged again, never re-applied
+					await broadcastGate.WaitAsync(ctx.RequestAborted);
+					try
+					{
+						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = eventEnvelope.Event.EventId }, ctx.RequestAborted);
+					}
+					finally
+					{
+						broadcastGate.Release();
+					}
+					continue;
 				}
 
 				await broadcastGate.WaitAsync(ctx.RequestAborted);
@@ -438,6 +448,8 @@ public static class SynqraReplicationEndpointExtensions
 						? ctx.RequestServices.GetRequiredService<IEventLog>()
 						: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 					await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
+					// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
+					await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
 					if (!logBroadcasts)
 					{
 						var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);

@@ -35,6 +35,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	private Task? _readerTask;
 	private ClientWebSocket? _wsConnection;
+
+	// The last event written to the socket this run; the persisted cursor (LastEventIdFromMe) moves only when the master acknowledges one.
+	private Guid _lastSentEventId;
 	private volatile IReadOnlyCollection<Guid> _activeStreams = Array.Empty<Guid>();
 
 	/// <inheritdoc />
@@ -208,6 +211,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			logHoldsEvents = _skipSet.Count > 0;
 		}
 		await LoadStateAsync(logHoldsEvents); // the cursor of the last run: HELLO asks for the delta, not the stream
+		_lastSentEventId = _eventReplicationState.LastEventIdFromMe; // this run offers everything the master has not acknowledged
 
 		ClientWebSocket wsConnection;
 		for (int i = 0; ; i++)
@@ -271,6 +275,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						break;
 					case EventEnvelope envelope:
 						await ReceiveAsync(envelope);
+						break;
+					case EventAccepted accepted:
+						// Acks arrive in the order the events were sent, so the latest one is the cursor.
+						_eventReplicationState.LastEventIdFromMe = accepted.EventId;
+						await SaveStateAsync();
 						break;
 					default:
 						throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
@@ -336,6 +345,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 		}
 		#endregion
+		Wake(); // whatever the last run left unacknowledged goes now, not at the next local write
 
 		while (true)
 		{
@@ -349,7 +359,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
 			// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
 			// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
-			var sent = _eventReplicationState.LastEventIdFromMe;
+			var sent = _lastSentEventId;
 			var reached = sent == default;
 			await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
 			{
@@ -365,7 +375,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
 				if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
 				{
-					_eventReplicationState.LastEventIdFromMe = ev.EventId;
+					_lastSentEventId = ev.EventId;
 					continue;
 				}
 				lock (_skipSet)
@@ -391,7 +401,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					pool.Return(bytes);
 				}
 
-				_eventReplicationState.LastEventIdFromMe = ev.EventId;
+				_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
 			}
 			await SaveStateAsync();
 			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
