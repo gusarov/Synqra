@@ -52,7 +52,7 @@ public sealed class TempDatabaseSweeper(IMongoClient client, string prefix)
 		}
 		catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
 		{
-			Console.WriteLine($"EphemeralMongo: {databaseName} is being dropped by another sweep ({ex.WriteError.Message})"); // losing the race is expected: the winner drops it
+			Console.WriteLine($"EphemeralMongo: skipped stale {databaseName}, another test process claimed its drop first (expected when sweeps overlap; not an error)");
 			claimed = false;
 		}
 		return claimed;
@@ -78,7 +78,7 @@ public sealed class TempDatabaseSweeper(IMongoClient client, string prefix)
 				}
 				catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
 				{
-					Console.WriteLine($"EphemeralMongo: {databaseName} was stamped by another sweep ({ex.WriteError.Message})"); // fine, the next sweep compares against whatever timestamp won
+					Console.WriteLine($"EphemeralMongo: {databaseName} was already stamped by another test process (expected when sweeps overlap; not an error)");
 				}
 			}
 			else
