@@ -148,7 +148,11 @@ internal class SynqraTestNode
 	/// InMemory (it keeps <see cref="Event.StreamId"/> on the in-memory object; the JSON-lines log
 	/// drops it, since StreamId is [JsonIgnore] and only the Mongo log re-maps it to _sid).
 	/// </param>
-	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false, bool useRealEndpoint = false)
+	/// <param name="acknowledgeInbound">
+	/// Simulator master only. False makes the master a dying one: it reads a client's event frames and does nothing
+	/// with them, neither applying nor acknowledging, as the production endpoint did while its replay was broken.
+	/// </param>
+	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false, bool useRealEndpoint = false, bool acknowledgeInbound = true)
 	{
 		if (streamId == default)
 		{
@@ -470,9 +474,14 @@ internal class SynqraTestNode
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is EventEnvelope eventEnvelope)
 						{
+							if (!acknowledgeInbound)
+							{
+								continue; // a dying master: the frame arrived and nothing came of it
+							}
 							if (!knownEvents.TryAdd(eventEnvelope.Event.EventId, null))
 							{
-								// already known, ignore
+								// already known: acknowledged again, as the real endpoint does, never re-applied
+								await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = eventEnvelope.Event.EventId }, ctx.RequestAborted);
 								continue;
 							}
 							EmergencyLog.Default.Message($"Master Received: {eventEnvelope.Event}{Environment.NewLine}{JsonSerializer.Serialize(eventEnvelope.Event, AppJsonContext.Default.Options)}");
@@ -485,6 +494,7 @@ internal class SynqraTestNode
 								await ev.AcceptAsync(storeCtx, null);
 								var storage = app.Services.GetRequiredService<IEventLog>();
 								await storage.AppendAsync(ev);
+								await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted); // the sender's cursor moves on this
 								var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								try
 								{

@@ -442,6 +442,7 @@ all-zero = the type itself. Group-4 `<g4>` = `<mode><family><nn>`.
 | `9A03` | `SubscribeRequest` | staging | client → master, refusable |
 | `9A04` | `UnsubscribeRequest` | staging | client → master, refusable |
 | `9A05` | `SubscriptionState` | staging | master → client, authoritative set |
+| `9A06` | `EventAccepted` | staging | master → client, the sent event is in the log; the outbound cursor moves on it |
 
 `9A01` is **free**: it was `TransportOperation`'s slot before the abstract base moved to the family's
 conventional `00`. The concretes were deliberately left where they are rather than compacted, so the
