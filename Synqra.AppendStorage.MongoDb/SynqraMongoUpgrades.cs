@@ -83,7 +83,7 @@ public sealed class SynqraMongoUpgradeService(
 		{
 			var events = serviceProvider.GetRequiredKeyedService<IMongoCollection<Event>>(key);
 			var eventsDb = events.Database;
-			// Probe before claiming, with a short timeout. An UNREACHABLE database (server gone,
+			// Probe before claiming, within the driver's server-selection timeout. An UNREACHABLE database (server gone,
 			// wrong credentials — e.g. a test host that configures a store it never touches) must
 			// not fail startup: nothing can read an unreachable store, so there is nothing the
 			// upgrade needs to protect, and before upgrades existed such a host booted fine
@@ -134,8 +134,10 @@ public sealed class SynqraMongoUpgradeService(
 
 	static async Task<bool> IsReachableAsync(IMongoDatabase database, CancellationToken cancellationToken)
 	{
+		// The driver's own patience (30s unless the connection string sets serverSelectionTimeoutMS): a fixed 5s took a
+		// slow but live server (a loaded CI host) for a dead one and skipped its upgrades, leaving e.g. no text index.
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-		timeout.CancelAfter(TimeSpan.FromSeconds(5));
+		timeout.CancelAfter(database.Client.Settings.ServerSelectionTimeout);
 		try
 		{
 			await database.RunCommandAsync<BsonDocument>(new BsonDocument("ping", 1), readPreference: null, timeout.Token);
