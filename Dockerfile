@@ -31,6 +31,10 @@ mkdir -p /tmp/mdb
 # WiredTiger keeps a file per collection and index; at a 1024 soft limit mongod dies mid-suite (EMFILE).
 ulimit -n "$(ulimit -Hn)"
 echo "nofile soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
+# Linux 6.19 to 7.0.13 broke the rseq per-CPU caches of mongod's TCMalloc, and mongod refuses to start there
+# (SERVER-121912; an Ubuntu 26.04 agent reports 7.0.0). glibc keeping rseq for itself sends TCMalloc to its
+# per-thread caches; mongod then starts. Older kernels are unaffected.
+export GLIBC_TUNABLES=glibc.pthread.rseq=1
 mongod \
   --dbpath /tmp/mdb \
   --bind_ip 127.0.0.1 \
