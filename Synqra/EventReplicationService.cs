@@ -281,8 +281,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 						await SaveStateAsync();
 						break;
+					case EventRejected rejected:
+						// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
+						EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
+						_eventReplicationState.LastEventIdFromMe = rejected.EventId;
+						await SaveStateAsync();
+						break;
 					default:
-						throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
+						EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
+						break;
 				}
 			}
 		}

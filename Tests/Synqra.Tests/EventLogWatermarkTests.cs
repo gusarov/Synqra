@@ -41,7 +41,7 @@ public class EventLogWatermarkTests
 		await Assert.That(await lookup.ContainsAsync(Guid.NewGuid(), held)).IsFalse().Because("identity is per stream");
 	}
 
-	static ServiceProvider BuildServerLog()
+	ServiceProvider BuildServerLog()
 	{
 		var services = new ServiceCollection();
 		services.AddAppendStorageInMemory<Event, (Guid, Guid)>(ev => (ev.StreamId, ev.SequenceId));
@@ -49,7 +49,7 @@ public class EventLogWatermarkTests
 		return services.BuildServiceProvider();
 	}
 
-	static Event NewEvent(Guid stream, Guid eventId, Guid sequence) => new ObjectDeletedEvent
+	Event NewEvent(Guid stream, Guid eventId, Guid sequence) => new ObjectDeletedEvent
 	{
 		EventId = eventId,
 		SequenceId = sequence,

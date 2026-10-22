@@ -324,7 +324,7 @@ public static class SynqraReplicationEndpointExtensions
 					await foreach (var ev in backlog)
 					{
 						knownEvents.TryAdd(ev.EventId);
-						await ReplayFrameAsync(backlogBuffer, ev, CapAtWatermark(ev.SequenceId, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
+						await ReplayFrameAsync(backlogBuffer, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
 					}
 				}
 				finally
@@ -380,7 +380,7 @@ public static class SynqraReplicationEndpointExtensions
 									await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
 									{
 										knownEvents.TryAdd(ev.EventId);
-										await ReplayFrameAsync(subBuffer, ev, CapAtWatermark(ev.SequenceId, subWatermark));
+										await ReplayFrameAsync(subBuffer, ev, ev.SequenceId.CapAt(subWatermark));
 									}
 								}
 								finally
@@ -491,6 +491,13 @@ public static class SynqraReplicationEndpointExtensions
 						}
 					}
 				}
+				catch (InvalidOperationException refusal)
+				{
+					// The projection refused the event (a facet for a slot already filled, a link that exists): it will never be
+					// in this log, so the sender is told and moves its cursor past it instead of offering it on every connect.
+					logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", eventEnvelope.Event.EventId, connectionStream);
+					await socket.SendOperationAsync(networkSerializationService, new EventRejected { EventId = eventEnvelope.Event.EventId, Reason = refusal.Message }, ctx.RequestAborted);
+				}
 				catch (Exception eventEx)
 				{
 					// One bad event must not kill this whole connection (every other
@@ -568,7 +575,7 @@ public static class SynqraReplicationEndpointExtensions
 	/// it once it holds the frame, so a run that ends mid-replay resumes exactly there. The watermark itself, sent on every
 	/// frame, named the tail before the client held it (prod 2026-10-22: a reload mid-replay left a hole no connect filled).
 	/// </summary>
-	static Guid CapAtWatermark(Guid sequence, Guid watermark) => sequence.CompareBigEndian(watermark) < 0 ? sequence : watermark;
+	static Guid CapAt(this Guid sequence, Guid watermark) => sequence.CompareBigEndian(watermark) < 0 ? sequence : watermark;
 
 	/// <summary>Each stream's events strictly after the cursor, stream by stream.</summary>
 	static async IAsyncEnumerable<Event> ReadStreams(this IEventLog log, Guid[] streams, Guid cursor, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)

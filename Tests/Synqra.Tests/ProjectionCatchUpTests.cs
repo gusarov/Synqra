@@ -84,6 +84,106 @@ public class ProjectionCatchUpTests : TestsStateManagement
 		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == pushedId)).IsTrue();
 	}
 
+	/// <summary>
+	/// The log can hold what the projection cannot take: a facet this client added into a unique slot, and the master's own
+	/// facet for the same slot pushed later (prod 2026-10-22: objects recreated server-side with the same ids). The catch-up
+	/// steps over the refused event and applies what follows; stopping at it left every later event unapplied, on every
+	/// catch-up and every page load.
+	/// </summary>
+	[Test]
+	public async Task Should_step_over_an_event_the_projection_refuses_and_apply_the_rest()
+	{
+		var log = ServiceProvider.GetRequiredService<IEventLog>();
+		var provider = ServiceProvider.GetRequiredService<IProjectionProvider>();
+		var keeper = ServiceProvider.GetRequiredService<IProjectionKeeper>();
+		var streamId = Guid.NewGuid();
+		var projection = await provider.GetAsync(streamId);
+		var store = (IObjectStore)projection;
+		var id = Guid.NewGuid();
+		await WriteNodeWithUniqueComponentAsync(store, id); // this client's own facet fills the unique slot
+
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(), // the master's facet for the same slot, under its own event
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = id,
+			ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
+			ComponentId = Guid.NewGuid(),
+			Data = new TestUniqueComponent { Subject = "the master's" },
+		});
+		var laterId = Guid.NewGuid();
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(),
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = laterId,
+			ComponentTypeId = container.TypeId,
+			ComponentId = laterId,
+			Data = new TestComponentNode { Name = "after the refused one" },
+		});
+
+		await keeper.MaintainAsync(projection);
+
+		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == laterId)).IsTrue().Because("the event after the refused one is applied");
+		var cursor = projection.Cursor;
+		await keeper.MaintainAsync(projection);
+		await Assert.That(projection.Cursor).IsEqualTo(cursor).Because("the refused event is stepped over for good, not retried");
+	}
+
+	/// <summary>
+	/// A component whose container this client never got (its create fell into a replay hole) is refused by the fold. The
+	/// catch-up steps over it and still applies a later event: prod 2026-10-22 threw "Container ... not found" on every load
+	/// and nothing after it, live pushes included, was ever folded.
+	/// </summary>
+	[Test]
+	public async Task Should_apply_events_after_a_component_whose_container_is_missing()
+	{
+		var log = ServiceProvider.GetRequiredService<IEventLog>();
+		var provider = ServiceProvider.GetRequiredService<IProjectionProvider>();
+		var keeper = ServiceProvider.GetRequiredService<IProjectionKeeper>();
+		var streamId = Guid.NewGuid();
+		var projection = await provider.GetAsync(streamId);
+		var store = (IObjectStore)projection;
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(),
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = Guid.NewGuid(), // a container this log never held
+			ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
+			ComponentId = Guid.NewGuid(),
+			Data = new TestUniqueComponent { Subject = "orphan" },
+		});
+		var laterId = Guid.NewGuid();
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(),
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = laterId,
+			ComponentTypeId = container.TypeId,
+			ComponentId = laterId,
+			Data = new TestComponentNode { Name = "pushed after the orphan" },
+		});
+
+		await keeper.MaintainAsync(projection);
+
+		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == laterId)).IsTrue().Because("the event after the orphan is applied");
+	}
+
 	async Task WriteNodeWithUniqueComponentAsync(IObjectStore store, Guid id)
 	{
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));

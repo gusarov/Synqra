@@ -175,7 +175,18 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 				}
 				else
 				{
-					await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
+					try
+					{
+						await ev.AcceptAsync(this, new EventVisitorContext { IsReplay = isReplay });
+					}
+					catch (InvalidOperationException refused)
+					{
+						// The log holds what this projection cannot take (a local facet in a slot the master filled with its own
+						// event): stepped over, logged, never a wall. Stopping here left the cursor before it, so every catch-up
+						// and every page load hit it again and nothing after it was ever applied (prod 2026-10-22).
+						EmergencyLog.Default.LogError(refused, $"InMemoryProjection: event {ev.EventId} of stream {StreamId} refused during catch-up and stepped over; this projection differs from the log there.");
+						Advance(ev.SequenceId);
+					}
 				}
 			}
 		});
