@@ -9,6 +9,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 
 namespace Synqra;
 
@@ -234,37 +235,85 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 		}
 
+		// Frames read off the socket wait here for the processor. On a slow CPU they pile up while a batch is being stored, and
+		// the next batch takes all of them: the local log, the state store and the owner's catch-up are visited once per batch,
+		// not once per event, so a client replaying a long backlog catches up at the speed of the network rather than of
+		// its storage. A batch is only what has already arrived: a live event is handled as soon as the previous batch is done.
+		var maxBatch = Math.Max(1, _config.MaxReceiveBatch);
+		var received = Channel.CreateBounded<TransportOperation>(new BoundedChannelOptions(maxBatch)
+		{
+			SingleReader = true,
+			SingleWriter = true,
+			FullMode = BoundedChannelFullMode.Wait,
+		});
+
 		async Task Reader()
 		{
-			#region HELLO
-			var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
-			if (magicBytes == null || magicBytes.Length == 0)
+			try
 			{
-				IsOnline = false;
-				return;
-			}
-			if (magicBytes.Length != 8)
-			{
-				var sb = new System.Text.StringBuilder();
-				new HexDumpWriter().HexDump(magicBytes, s => sb.Append(s), c => sb.Append(c));
-				throw new Exception($"Protocol Negotiation Failed! Received {magicBytes.Length} bytes instead of 8. {Environment.NewLine}{sb}");
-			}
-			var magic = BitConverter.ToUInt64(magicBytes);
-			if (magic != _networkSerializationService.Magic)
-			{
-				throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
-			}
-			IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
-			#endregion
-			while (!_cts.IsCancellationRequested)
-			{
-				var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
-				if (bytes == null || bytes.Length == 0)
+				#region HELLO
+				var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+				if (magicBytes == null || magicBytes.Length == 0)
 				{
 					IsOnline = false;
-					break;
+					return;
 				}
-				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+				if (magicBytes.Length != 8)
+				{
+					var sb = new System.Text.StringBuilder();
+					new HexDumpWriter().HexDump(magicBytes, s => sb.Append(s), c => sb.Append(c));
+					throw new Exception($"Protocol Negotiation Failed! Received {magicBytes.Length} bytes instead of 8. {Environment.NewLine}{sb}");
+				}
+				var magic = BitConverter.ToUInt64(magicBytes);
+				if (magic != _networkSerializationService.Magic)
+				{
+					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
+				}
+				IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
+				#endregion
+				var open = true;
+				while (open && !_cts.IsCancellationRequested)
+				{
+					var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+					open = bytes != null && bytes.Length > 0;
+					if (open)
+					{
+						await received.Writer.WriteAsync(_networkSerializationService.Deserialize<TransportOperation>(bytes!), _cts.Token);
+					}
+				}
+			}
+			finally
+			{
+				received.Writer.TryComplete(); // the processor handles what came before the close, then the node is offline
+			}
+		}
+
+		async Task Processor()
+		{
+			var batch = new List<TransportOperation>(maxBatch);
+			while (!_cts.IsCancellationRequested && await received.Reader.WaitToReadAsync())
+			{
+				while (batch.Count < maxBatch && received.Reader.TryRead(out var operation))
+				{
+					batch.Add(operation);
+				}
+				await ReceiveBatchAsync(batch);
+				batch.Clear();
+			}
+			IsOnline = false;
+		}
+		_readerTask = Task.WhenAll(Processor(), Reader());
+
+		// A batch keeps the order of its frames: an event's stream is told by the subscription state that came before it, and
+		// the acks move LastEventIdFromMe in the order they came. Its new events go to the local log first; the state is then
+		// saved once, with the newest cursors; the owner is then told once.
+		async Task ReceiveBatchAsync(IReadOnlyList<TransportOperation> batch)
+		{
+			var arrived = new List<Event>();
+			var watermark = _eventReplicationState.ServerWatermark;
+			var acknowledged = false;
+			foreach (var operation in batch)
+			{
 				switch (operation)
 				{
 					case SubscriptionState state:
@@ -274,32 +323,46 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
 						break;
 					case EventEnvelope envelope:
-						await ReceiveAsync(envelope);
+						watermark = Receive(envelope, watermark, arrived);
 						break;
 					case EventAccepted accepted:
 						// Acks arrive in the order the events were sent, so the latest one is the cursor.
 						_eventReplicationState.LastEventIdFromMe = accepted.EventId;
-						await SaveStateAsync();
+						acknowledged = true;
 						break;
 					case EventRejected rejected:
 						// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
 						EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
 						_eventReplicationState.LastEventIdFromMe = rejected.EventId;
-						await SaveStateAsync();
+						acknowledged = true;
 						break;
 					default:
 						EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
 						break;
 				}
 			}
+			await AppendArrivedAsync(arrived);
+			var advanced = watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0;
+			if (advanced)
+			{
+				_eventReplicationState.ServerWatermark = watermark; // only now: a save from elsewhere persists no cursor past the local log
+			}
+			if (advanced || acknowledged)
+			{
+				await SaveStateAsync();
+			}
+			if (arrived.Count > 0)
+			{
+				EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
+			}
 		}
-		_readerTask = Reader();
 
 		// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
 		// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
-		// event is in the local log. The frame's own sequence caps it here as well: a master from before per-frame resume
-		// points sends the tail on every backlog frame, and a run ending mid-replay would resume past what it never got.
-		async Task ReceiveAsync(EventEnvelope envelope)
+		// events that moved it are in the local log. The frame's own sequence caps it here as well: a master from before
+		// per-frame resume points sends the tail on every backlog frame, and a run ending mid-replay would resume past what it
+		// never got. Returns the batch's watermark with this frame's resume point taken in.
+		Guid Receive(EventEnvelope envelope, Guid watermark, List<Event> arrived)
 		{
 			FramesReceived++;
 			var ev = envelope.Event;
@@ -317,17 +380,28 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			if (!known)
 			{
 				ev.StreamId = StreamOf(ev);
-				await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
+				arrived.Add(ev);
+			}
+			return resumePoint.CompareBigEndian(watermark) > 0 ? resumePoint : watermark;
+		}
+
+		// Each run of consecutive events of one stream is one append: a log's batch belongs to one stream.
+		async Task AppendArrivedAsync(List<Event> arrived)
+		{
+			var start = 0;
+			while (start < arrived.Count)
+			{
+				var end = start + 1;
+				while (end < arrived.Count && arrived[end].StreamId == arrived[start].StreamId)
+				{
+					end++;
+				}
+				await _storage.AppendBatchAsync(arrived.GetRange(start, end - start)); // the local log stamps its own arrival order over the server's sequence
+				start = end;
+			}
+			foreach (var ev in arrived)
+			{
 				EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
-			}
-			if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
-			{
-				_eventReplicationState.ServerWatermark = resumePoint;
-				await SaveStateAsync();
-			}
-			if (!known)
-			{
-				EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
 			}
 		}
 

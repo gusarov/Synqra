@@ -72,6 +72,14 @@ public class EventReplicationConfig
 	public Guid? StreamId { get; set; }
 
 	/// <summary>
+	/// The most received frames handled as one batch: appended to the local log together, the replication state saved once
+	/// and <see cref="IEventReplicationService.EventsReceived"/> raised once for all of them. A batch is only what already
+	/// arrived while the previous one was stored, so a live event is never held back waiting for more. The cap bounds how
+	/// long a catching-up client goes between visible updates; 1 handles every frame on its own.
+	/// </summary>
+	public virtual int MaxReceiveBatch { get; set; } = 512;
+
+	/// <summary>
 	/// Hook to configure the outgoing <see cref="ClientWebSocket"/> before it connects — the only
 	/// seam a host has to attach auth to the replication socket. A native client (MAUI/desktop) sets
 	/// <see cref="ClientWebSocketOptions.Cookies"/> to the same <see cref="System.Net.CookieContainer"/>
