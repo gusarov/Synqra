@@ -12,7 +12,7 @@ namespace Synqra.AppendStorage.MongoDb;
 /// again is a no-op. The <see cref="ServerEventLog"/> over it stamps the sequence; registered by
 /// <see cref="MongoEventStorageExtensions.AddMongoEventStorage"/>.
 /// </summary>
-public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail, IEventStreamReader
+public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail, IEventStreamReader, IEventLookup
 {
 	const string IdField = "_id";
 	const string StreamField = MongoEventClassMaps.StreamIdField;
@@ -125,6 +125,13 @@ public sealed class MongoEventStorage : IAppendStorage<Event, (Guid Stream, Guid
 			.Limit(1)
 			.FirstOrDefaultAsync(cancellationToken);
 		return last is null ? default : last.SequenceId;
+	}
+
+	/// <summary>One lookup on the unique EventId index, bounded to the stream; nothing is deserialized.</summary>
+	public async Task<bool> ContainsAsync(Guid streamId, Guid eventId, CancellationToken cancellationToken = default)
+	{
+		var filter = Builders<Event>.Filter.And(Builders<Event>.Filter.Eq(StreamField, streamId), Builders<Event>.Filter.Eq(nameof(Event.EventId), eventId));
+		return await _collection.CountDocumentsAsync(filter, new CountOptions { Limit = 1 }, cancellationToken) > 0;
 	}
 
 	public Task FlushAsync(CancellationToken cancellationToken = default) => Task.CompletedTask; // Mongo writes are durable on ack

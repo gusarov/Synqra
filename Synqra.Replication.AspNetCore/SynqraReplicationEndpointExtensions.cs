@@ -218,14 +218,16 @@ public static class SynqraReplicationEndpointExtensions
 				}
 			}
 
-			// A backlog frame carries the watermark taken under the gate BEFORE the read: anything committed after it is
-			// either in the read or queued behind the gate for this socket, so a client resuming from it misses nothing.
-			IReadOnlyDictionary<Guid, Guid> WatermarksOf(IEnumerable<Guid> streams)
+			// The watermark taken under the gate BEFORE the read caps every backlog frame's resume point: anything committed
+			// after it is either in the read or queued behind the gate for this socket, so a client resuming from it misses
+			// nothing. Seeded from the log's tail, so a process that has not written the stream since it started hands out a
+			// real position (an empty one would leave the client replaying the same backlog on every connect).
+			async Task<IReadOnlyDictionary<Guid, Guid>> ReadWatermarksAsync(IEnumerable<Guid> streams)
 			{
 				var taken = new Dictionary<Guid, Guid>();
 				foreach (var stream in streams)
 				{
-					taken[stream] = watermarks?.ReadWatermark(stream) ?? default;
+					taken[stream] = watermarks is null ? default : await watermarks.ReadWatermarkAsync(stream, ctx.RequestAborted);
 				}
 				return taken;
 			}
@@ -310,7 +312,7 @@ public static class SynqraReplicationEndpointExtensions
 					? ctx.RequestServices.GetRequiredService<IEventLog>()
 					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-				var backlogWatermarks = WatermarksOf(socketScope.Active);
+				var backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
 				try
 				{
 					// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark: a
@@ -322,7 +324,7 @@ public static class SynqraReplicationEndpointExtensions
 					await foreach (var ev in backlog)
 					{
 						knownEvents.TryAdd(ev.EventId);
-						await ReplayFrameAsync(backlogBuffer, ev, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default);
+						await ReplayFrameAsync(backlogBuffer, ev, CapAtWatermark(ev.SequenceId, backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
 					}
 				}
 				finally
@@ -372,13 +374,13 @@ public static class SynqraReplicationEndpointExtensions
 									? ctx.RequestServices.GetRequiredService<IEventLog>()
 									: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-								var subWatermark = watermarks?.ReadWatermark(target) ?? default;
+								var subWatermark = watermarks is null ? default : await watermarks.ReadWatermarkAsync(target, ctx.RequestAborted);
 								try
 								{
 									await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
 									{
 										knownEvents.TryAdd(ev.EventId);
-										await ReplayFrameAsync(subBuffer, ev, subWatermark);
+										await ReplayFrameAsync(subBuffer, ev, CapAtWatermark(ev.SequenceId, subWatermark));
 									}
 								}
 								finally
@@ -404,53 +406,58 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
-				if (!knownEvents.TryAdd(eventEnvelope.Event.EventId))
-				{
-					// already applied/broadcast — an echo from this same client, or a resend after a lost ack: acknowledged again, never re-applied
-					await broadcastGate.WaitAsync(ctx.RequestAborted);
-					try
-					{
-						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = eventEnvelope.Event.EventId }, ctx.RequestAborted);
-					}
-					finally
-					{
-						broadcastGate.Release();
-					}
-					continue;
-				}
-
 				await broadcastGate.WaitAsync(ctx.RequestAborted);
 				try
 				{
 					var ev = eventEnvelope.Event;
-					// The event's stream is set authoritatively from THIS connection's authorized
-					// stream — never trusted from the wire (Event.StreamId is not even on the SBX
-					// wire format; it arrives default). This both stamps _sid correctly on the
-					// durable append and forbids a client from injecting an event into any other
-					// stream: whatever it claims, the event is filed under the stream it connected as.
-					if (connectionStream is Guid stream)
-					{
-						ev.StreamId = stream;
-					}
-					ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
-					var projection = serviceKey is null
-						? ctx.RequestServices.GetRequiredService<IProjection>()
-						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
-					if (projection is IReplayProjection replay)
-					{
-						await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
-					}
-					else
-					{
-						await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
-					}
 					var storage = serviceKey is null
 						? ctx.RequestServices.GetRequiredService<IEventLog>()
 						: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
-					await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
-					// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
-					await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
-					if (!logBroadcasts)
+					// Already applied/broadcast: an echo from this same client, or a resend after a lost ack. The in-memory set is
+					// empty after a restart, so the log is asked too: an event it holds was applied by the process that stored it,
+					// and applying it again is refused by the projection (prod 2026-10-22: a facet re-added to a filled slot, on
+					// every connect, since a refusal gets no ack). Either way it is acknowledged again, never re-applied.
+					var known = !knownEvents.TryAdd(ev.EventId);
+					if (!known && connectionStream is Guid heldStream && storage is IEventLookup lookup)
+					{
+						known = await lookup.ContainsAsync(heldStream, ev.EventId, ctx.RequestAborted);
+						if (known)
+						{
+							logger?.LogInformation("Synqra replication: event {EventId} of stream {Stream} is in the log already; acknowledged, not applied again.", ev.EventId, heldStream);
+						}
+					}
+					if (known)
+					{
+						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
+					}
+					else
+					{
+						// The event's stream is set authoritatively from THIS connection's authorized
+						// stream — never trusted from the wire (Event.StreamId is not even on the SBX
+						// wire format; it arrives default). This both stamps _sid correctly on the
+						// durable append and forbids a client from injecting an event into any other
+						// stream: whatever it claims, the event is filed under the stream it connected as.
+						if (connectionStream is Guid stream)
+						{
+							ev.StreamId = stream;
+						}
+						ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
+						var projection = serviceKey is null
+							? ctx.RequestServices.GetRequiredService<IProjection>()
+							: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
+						if (projection is IReplayProjection replay)
+						{
+							await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
+						}
+						else
+						{
+							await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
+						}
+						await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
+						// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
+						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
+					}
+					if (!known && !logBroadcasts)
 					{
 						var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 						try
@@ -555,6 +562,13 @@ public static class SynqraReplicationEndpointExtensions
 		public IReadOnlySet<Guid> Grantable { get; }
 		public HashSet<Guid> Active { get; }
 	}
+
+	/// <summary>
+	/// A backlog frame's resume point: the frame's own sequence, capped by the watermark taken at connect. A client persists
+	/// it once it holds the frame, so a run that ends mid-replay resumes exactly there. The watermark itself, sent on every
+	/// frame, named the tail before the client held it (prod 2026-10-22: a reload mid-replay left a hole no connect filled).
+	/// </summary>
+	static Guid CapAtWatermark(Guid sequence, Guid watermark) => sequence.CompareBigEndian(watermark) < 0 ? sequence : watermark;
 
 	/// <summary>Each stream's events strictly after the cursor, stream by stream.</summary>
 	static async IAsyncEnumerable<Event> ReadStreams(this IEventLog log, Guid[] streams, Guid cursor, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
