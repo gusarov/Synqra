@@ -146,6 +146,35 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		await Assert.That(refusing.Applied).IsEqualTo(0).Because("an event the log holds is never applied again");
 	}
 
+	/// <summary>
+	/// An event the master's projection refuses will never be in its log: the master says so (EventRejected) and the
+	/// client's cursor moves past it, so it is not offered again on every connect (prod 2026-10-22: ~100 refused applies
+	/// per connect under the broadcast gate).
+	/// </summary>
+	[Test]
+	public async Task The_cursor_moves_past_an_event_the_master_refuses()
+	{
+		var streamId = Guid.NewGuid();
+		var refusing = new RefusingProjection();
+		var nodeMaster = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IProjection>(refusing), masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "refused by the master" });
+		var lastWritten = default(Guid);
+		await foreach (var ev in nodeA.Events.GetAllAsync())
+		{
+			lastWritten = ev.EventId;
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.LastEventIdFromMe == lastWritten), "the cursor moves past what the master refused");
+		await Assert.That(refusing.Applied).IsGreaterThan(0).Because("the master tried and refused");
+		await Assert.That(await CountEventsAsync(nodeMaster)).IsEqualTo(0).Because("a refused event is not in the master's log");
+	}
+
 	async Task<HashSet<Guid>> EventIdsAsync(IEventLog log)
 	{
 		var ids = new HashSet<Guid>();

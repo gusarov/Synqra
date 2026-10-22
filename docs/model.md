@@ -570,7 +570,9 @@ gap is expected.
   SBX all read one registry, so a second model with the same name is refused when it registers.
 - **A catch-up is one write.** The in-memory projection reads its cursor and enumerates the log under its
   gate (`CatchUpAsync`), so a command landing meanwhile waits for it; otherwise the command's events, applied
-  once by the submit, were applied again from the log (a unique facet refused the second time).
+  once by the submit, were applied again from the log (a unique facet refused the second time). An event the projection refuses
+  during a catch-up (a component whose container never arrived, a facet in a slot already filled) is logged at Error and
+  stepped over: stopping there left every later event, live pushes included, unapplied on every load.
 - **An event log is an append storage keyed by `(StreamId, SequenceId)`.** `IEventLog : IAppendStorage<Event, (Guid Stream,
   Guid Sequence)>`; the sequence is the event's position in THAT log and the log stamps it on append, so a key always means
   order, never identity (EventId is the identity everywhere and a unique field for dedup). A stream is a key prefix:
@@ -611,7 +613,8 @@ gap is expected.
   real position. A client keeps the highest it saw (`EventReplicationState.ServerWatermark`, persisted by the host through
   `IEventReplicationStateStore` after the frame's event is in its log), sends it in HELLO, and the backlog is each subscribed
   stream strictly after it (a known id is never appended twice). An inbound event the log already holds (`IEventLookup`:
-  a resend after a lost acknowledgement, offered to a process restarted since) is acknowledged, never applied again. One broadcaster:
+  a resend after a lost acknowledgement, offered to a process restarted since) is acknowledged, never applied again; one its
+  projection refuses gets `EventRejected`, and the client moves its outbound cursor past it as on an acknowledgement. One broadcaster:
   the push loop fed by the log's committed signal, socket-borne events included (echoed to the sender), so frames reach a
   socket in commit order and a resumed client misses nothing. Ids order by their bytes (`CompareBigEndian`, explicit and
   the same on every target; the Framework's `Guid.CompareTo` is signed per group).
