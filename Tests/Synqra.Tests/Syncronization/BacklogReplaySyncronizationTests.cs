@@ -1,7 +1,10 @@
-using Synqra.Tests.SampleModels.Syncronization;
+﻿using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Synqra.AppendStorage;
+using Synqra.AppendStorage.InMemory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using System;
@@ -103,7 +106,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
 		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterC, "the second write reaches the master");
-		var delta = await CountEventsAsync(nodeMaster) - afterC;
+		var delta = await CountWhenSettledAsync(nodeMaster) - afterC; // the write's events land one by one: counted once all have
 
 		// D is C's next run: C's log and C's state. It holds both tasks and was sent only the second write's events.
 		var nodeD = NextRun(nodeMaster, streamId, logC, remembered.Saved);
@@ -144,6 +147,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		var afterC = await CountEventsAsync(nodeMaster);
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
 		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterC, "the second write reaches the master");
+		await CountWhenSettledAsync(nodeMaster); // the write's events land one by one: counted once all have
 		var afterWatermark = 0;
 		await foreach (var ev in nodeMaster.Events.ReadStreamAsync(streamId))
 		{
@@ -185,8 +189,17 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		var total = await CountWhenSettledAsync(nodeMaster);
 
 		// C's run ends while the state of its first frame is being saved: it holds that frame's event and the cursor it persisted.
+		// One frame per batch, so the first save is the first frame's and the run ends with the rest of the backlog unreceived.
 		var interrupted = new InterruptingStateStore();
-		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(interrupted)) { Port = nodeMaster.Port };
+		var nodeC = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Services.AddSingleton<IEventReplicationStateStore>(interrupted);
+			builder.Services.AddSingleton(new EventReplicationConfig
+			{
+				Endpoint = $"ws://localhost:{nodeMaster.Port}/api/synqra/ws?stream={streamId:D}",
+				MaxReceiveBatch = 1,
+			});
+		}) { Port = nodeMaster.Port };
 		await nodeC.Started;
 		await interrupted.FirstWatermarkSave.Task.WaitAsync(TimeSpan.FromMilliseconds(PropagationTimeoutMs));
 		var heldByC = await CountEventsAsync(nodeC);
@@ -202,6 +215,83 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await Task.Delay(500); // nothing more may follow
 
 		await Assert.That(FramesReceived(nodeD)).IsEqualTo(total - heldByC);
+	}
+
+	/// <summary>
+	/// A fresh client replaying a long backlog takes the frames that piled up while it stored the previous ones as one batch:
+	/// one append, one state save and one <see cref="IEventReplicationService.EventsReceived"/> per batch. Each save here
+	/// costs 50 ms, a stand-in for a slow browser's storage: a save per event would need minutes, far over the bound. Quotaly's
+	/// Case_65 on a one-core agent: a fresh browser took minutes to replay the demo user's stream before seeing a new write.
+	/// </summary>
+	[Test]
+	public async Task Should_replay_a_long_backlog_to_a_fresh_client_in_batches()
+	{
+		const int Tasks = 1500;
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var tasks = nodeMaster.StoreContext.GetCollection<SampleTaskModel>();
+		for (var i = 0; i < Tasks; i++)
+		{
+			tasks.Add(new SampleTaskModel { Subject = $"task {i}" });
+		}
+		var total = await CountEventsAsync(nodeMaster);
+		var tail = default(Guid);
+		await foreach (var ev in nodeMaster.Events.ReadStreamAsync(streamId))
+		{
+			tail = ev.SequenceId;
+		}
+		await Assert.That(total).IsGreaterThanOrEqualTo(Tasks);
+
+		var slow = new SlowStateStore(TimeSpan.FromMilliseconds(50));
+		var nodeC = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Services.AddSingleton<IEventReplicationStateStore>(slow);
+			// The JSON-lines log scans its whole file on every append; in memory, the time measured is the replication's.
+			builder.Services.RemoveAll<IAppendStorage<Event, (Guid, Guid)>>();
+			builder.Services.AddAppendStorageInMemory<Event, (Guid, Guid)>(x => (x.StreamId, x.SequenceId));
+		}) { Port = nodeMaster.Port };
+		var raised = 0;
+		nodeC.Host.Services.GetRequiredService<IEventReplicationService>().EventsReceived += () => Interlocked.Increment(ref raised);
+		await nodeC.Started;
+		var sw = Stopwatch.StartNew();
+		await WaitForOnlineAsync(nodeC);
+		var collectionC = nodeC.StoreContext.GetCollection<SampleTaskModel>();
+		await WaitUntilAsync(async () => collectionC.Count == Tasks && await CountEventsAsync(nodeC) == total, "C holds the whole backlog");
+		var elapsed = sw.Elapsed;
+		await Task.Delay(500); // nothing more may follow
+
+		var ids = new HashSet<Guid>();
+		await foreach (var ev in nodeC.Events.GetAllAsync())
+		{
+			ids.Add(ev.EventId);
+		}
+		await Assert.That(FramesReceived(nodeC)).IsEqualTo(total);
+		await Assert.That(await CountEventsAsync(nodeC)).IsEqualTo(total).Because("a known id is never appended twice");
+		await Assert.That(ids).HasCount(total);
+		await Assert.That(slow.Saved?.ServerWatermark).IsEqualTo(tail).Because("the persisted watermark is the last frame's");
+		await Assert.That(slow.Saves).IsLessThanOrEqualTo(total / 10).Because($"the state is saved once per batch, not per event ({slow.Saves} saves for {total} events)");
+		await Assert.That(raised).IsLessThanOrEqualTo(total / 10).Because($"the owner is told once per batch, not per event ({raised} signals for {total} events)");
+		await Assert.That(elapsed).IsLessThan(TimeSpan.FromMilliseconds(PropagationTimeoutMs)).Because($"a save per event alone would take {total * 50 / 1000}s");
+	}
+
+	/// <summary>Records like <see cref="RecordingStateStore"/>, counts the saves, and takes <paramref name="delay"/> for each: a slow client's storage.</summary>
+	sealed class SlowStateStore(TimeSpan delay) : IEventReplicationStateStore
+	{
+		int _saves;
+
+		public int Saves => Volatile.Read(ref _saves);
+
+		public EventReplicationState? Saved { get; private set; }
+
+		public Task<EventReplicationState?> LoadAsync(Guid streamId, CancellationToken cancellationToken = default) => Task.FromResult<EventReplicationState?>(null);
+
+		public async Task SaveAsync(Guid streamId, EventReplicationState state, CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _saves);
+			Saved = new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
+			await Task.Delay(delay, cancellationToken);
+		}
 	}
 
 	/// <summary>The master's event count once two reads half a second apart agree: the writes in flight have landed.</summary>
