@@ -603,9 +603,15 @@ gap is expected.
     `AddMongoProjection(serviceKey)` read the host's `IMongoDatabase` by key. Under one feature key the types keep two
     databases apart: the storage takes `IMongoCollection<Event>`, the projection `IMongoDatabase`.
   **The watermark** is the highest committed sequence below the lowest stamp still in flight, read under the commit's own
-  lock. Every `EventEnvelope` carries the watermark its event was committed under; a client keeps the highest it saw
-  (`EventReplicationState.ServerWatermark`, persisted by the host through `IEventReplicationStateStore`), sends it in
-  HELLO, and the backlog is each subscribed stream strictly after it (a known id is never appended twice). One broadcaster:
+  lock. Every `EventEnvelope` carries the point a client may resume from once it holds that frame: a live push carries the
+  watermark its event was committed under; a backlog frame carries its own sequence, capped by the watermark taken at
+  connect (the tail on every frame let a run that ended mid-replay persist a position past events it never got, a hole no
+  later connect filled: prod 2026-10-22). The endpoint seeds the watermark from the log's tail before a replay
+  (`IEventWatermarks.ReadWatermarkAsync`), so a process that has not written the stream since it started still hands out a
+  real position. A client keeps the highest it saw (`EventReplicationState.ServerWatermark`, persisted by the host through
+  `IEventReplicationStateStore` after the frame's event is in its log), sends it in HELLO, and the backlog is each subscribed
+  stream strictly after it (a known id is never appended twice). An inbound event the log already holds (`IEventLookup`:
+  a resend after a lost acknowledgement, offered to a process restarted since) is acknowledged, never applied again. One broadcaster:
   the push loop fed by the log's committed signal, socket-borne events included (echoed to the sender), so frames reach a
   socket in commit order and a resumed client misses nothing. Ids order by their bytes (`CompareBigEndian`, explicit and
   the same on every target; the Framework's `Guid.CompareTo` is signed per group).

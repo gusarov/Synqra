@@ -289,11 +289,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		_readerTask = Reader();
 
 		// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
-		// watermark on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves.
+		// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
+		// event is in the local log. The frame's own sequence caps it here as well: a master from before per-frame resume
+		// points sends the tail on every backlog frame, and a run ending mid-replay would resume past what it never got.
 		async Task ReceiveAsync(EventEnvelope envelope)
 		{
 			FramesReceived++;
 			var ev = envelope.Event;
+			var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
+			var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
 			bool known;
 			lock (_skipSet)
 			{
@@ -309,9 +313,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
 				EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
 			}
-			if (envelope.Watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+			if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 			{
-				_eventReplicationState.ServerWatermark = envelope.Watermark;
+				_eventReplicationState.ServerWatermark = resumePoint;
 				await SaveStateAsync();
 			}
 			if (!known)

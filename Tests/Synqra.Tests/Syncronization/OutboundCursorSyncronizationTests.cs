@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Synqra.AppendStorage;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -85,6 +86,64 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		var stranded = await EventIdsAsync(nodeB.Events);
 		await Assert.That(stranded.Count).IsGreaterThan(0);
 		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(stranded), "the stranded events reach the healthy master with no new write");
+	}
+
+	/// <summary>
+	/// An event the master's log already holds is acknowledged, not applied again: after a restart the master's in-memory
+	/// set is empty, and prod 2026-10-22 applied such re-offers to the projection, which refused them (a facet in a slot
+	/// already filled), so the client's cursor never moved and it offered them on every connect, forever.
+	/// </summary>
+	[Test]
+	public async Task The_cursor_moves_for_an_event_the_masters_log_already_holds()
+	{
+		var streamId = Guid.NewGuid();
+		var firstMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await firstMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = firstMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "held by the master" });
+		var written = await EventIdsAsync(nodeA.Events);
+		await WaitUntilAsync(async () => (await EventIdsAsync(firstMaster.Events)).IsSupersetOf(written), "the first master holds every event A wrote");
+		var logA = await EndRunAsync(nodeA);
+		var held = new List<Event>();
+		await foreach (var ev in firstMaster.Events.GetAllAsync())
+		{
+			held.Add(ev);
+		}
+
+		// The master restarts: the same stored log, nothing in memory (its storage is filled below the log, so no commit is
+		// reported and nothing is marked known), and a projection that refuses every apply since the state these events
+		// produced is there already.
+		var refusing = new RefusingProjection();
+		var restartedMaster = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IProjection>(refusing), masterHost: true, useRealEndpoint: true);
+		await restartedMaster.Started;
+		var storedLog = restartedMaster.Host.Services.GetRequiredService<IAppendStorage<Event, (Guid, Guid)>>();
+		var tail = default(Guid);
+		foreach (var ev in held)
+		{
+			await storedLog.AppendAsync(ev);
+			tail = ev.SequenceId.CompareBigEndian(tail) > 0 ? ev.SequenceId : tail;
+		}
+
+		// A's next run lost the acknowledgement (a cold outbound cursor) but holds the tail: no backlog comes down, and every event goes up again.
+		var offeredAgain = new RecordingStateStore(new EventReplicationState { MyNodeId = remembered.Saved!.MyNodeId, ServerWatermark = tail, LastEventIdFromMe = default });
+		var nodeB = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Configuration[LogFileKey] = logA;
+			builder.Services.AddSingleton<IEventReplicationStateStore>(offeredAgain);
+		}) { Port = restartedMaster.Port };
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeB);
+		var lastOffered = default(Guid);
+		await foreach (var ev in nodeB.Events.GetAllAsync())
+		{
+			lastOffered = ev.EventId;
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(offeredAgain.Saved?.LastEventIdFromMe == lastOffered), "the restarted master acknowledges what its log already holds");
+		await Assert.That(refusing.Applied).IsEqualTo(0).Because("an event the log holds is never applied again");
 	}
 
 	async Task<HashSet<Guid>> EventIdsAsync(IEventLog log)

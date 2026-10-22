@@ -162,6 +162,86 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await Assert.That(FramesReceived(nodeD)).IsEqualTo(afterWatermark);
 	}
 
+	/// <summary>
+	/// A client whose run ends in the middle of a backlog replay resumes where it stopped, never past events it has not
+	/// received. Prod 2026-10-22: every backlog frame carried the watermark taken at connect, the browser persisted it on
+	/// the first frame, a reload mid-replay then asked for the delta after the tail, and the events in between (47 nodes
+	/// written through the MCP connector) never came again.
+	/// </summary>
+	[Test]
+	public async Task Should_resume_an_interrupted_replay_without_a_hole()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		for (var i = 0; i < 20; i++)
+		{
+			nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = $"task {i}" });
+		}
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) >= 20, "the writes reach the master");
+		var total = await CountWhenSettledAsync(nodeMaster);
+
+		// C's run ends while the state of its first frame is being saved: it holds that frame's event and the cursor it persisted.
+		var interrupted = new InterruptingStateStore();
+		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(interrupted)) { Port = nodeMaster.Port };
+		await nodeC.Started;
+		await interrupted.FirstWatermarkSave.Task.WaitAsync(TimeSpan.FromMilliseconds(PropagationTimeoutMs));
+		var heldByC = await CountEventsAsync(nodeC);
+		var logC = await EndRunAsync(nodeC);
+		interrupted.Release(); // the reader sees the cancelled run and stops; nothing more lands in C's log
+		await Assert.That(heldByC).IsLessThan(total).Because("the run ended mid-replay");
+
+		// D is C's next run: C's log and C's state. It must end up with the whole stream, sent the part C never got.
+		var nodeD = NextRun(nodeMaster, streamId, logC, interrupted.Saved);
+		await nodeD.Started;
+		await WaitForOnlineAsync(nodeD);
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeD) == total, "D holds every event of the stream");
+		await Task.Delay(500); // nothing more may follow
+
+		await Assert.That(FramesReceived(nodeD)).IsEqualTo(total - heldByC);
+	}
+
+	/// <summary>The master's event count once two reads half a second apart agree: the writes in flight have landed.</summary>
+	async Task<int> CountWhenSettledAsync(SynqraTestNode master)
+	{
+		var count = await CountEventsAsync(master);
+		var settled = false;
+		while (!settled)
+		{
+			await Task.Delay(500);
+			var again = await CountEventsAsync(master);
+			settled = again == count;
+			count = again;
+		}
+		return count;
+	}
+
+	/// <summary>Records like <see cref="RecordingStateStore"/>, and holds the first save that carries a server watermark until released: a run is ended in that window.</summary>
+	sealed class InterruptingStateStore : IEventReplicationStateStore
+	{
+		readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public TaskCompletionSource FirstWatermarkSave { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public EventReplicationState? Saved { get; private set; }
+
+		public Task<EventReplicationState?> LoadAsync(Guid streamId, CancellationToken cancellationToken = default) => Task.FromResult<EventReplicationState?>(null);
+
+		public async Task SaveAsync(Guid streamId, EventReplicationState state, CancellationToken cancellationToken = default)
+		{
+			Saved = new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
+			if (state.ServerWatermark != default && FirstWatermarkSave.TrySetResult())
+			{
+				await _release.Task;
+			}
+		}
+
+		public void Release() => _release.TrySetResult();
+	}
+
 	const string LogFileKey = "Storage:JsonLinesStorage:FileName";
 
 	/// <summary>Stops a client node and returns where its local log is, for its next run.</summary>

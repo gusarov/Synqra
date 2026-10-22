@@ -11,7 +11,7 @@ namespace Synqra;
 /// <see cref="ServerEventLog"/> keeps a client's proposal (commit order), <see cref="ClientEventLog"/> takes the next
 /// local stamp (arrival order). A stamp from another log is never kept: one log, one clock.
 /// </summary>
-public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks
+public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup
 {
 	readonly IAppendStorage<Event, (Guid Stream, Guid Sequence)> _inner;
 	readonly EventSequencer _sequencer;
@@ -25,6 +25,35 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 	public event Action<IEnumerable<Event>>? EventsCommitted;
 
 	public Guid ReadWatermark(Guid streamId) => _sequencer.ReadWatermark(streamId);
+
+	/// <summary>Seeds the stream from the log's tail first: a process that has not written it yet still hands out a real position.</summary>
+	public async ValueTask<Guid> ReadWatermarkAsync(Guid streamId, CancellationToken cancellationToken = default)
+	{
+		await SeedAsync(streamId, cancellationToken);
+		return ReadWatermark(streamId);
+	}
+
+	/// <summary>By the storage's identity index when it has one; a scan of the stream otherwise (in-memory and file logs are small).</summary>
+	public async Task<bool> ContainsAsync(Guid streamId, Guid eventId, CancellationToken cancellationToken = default)
+	{
+		bool contains;
+		if (_inner is IEventLookup lookup)
+		{
+			contains = await lookup.ContainsAsync(streamId, eventId, cancellationToken);
+		}
+		else
+		{
+			contains = false;
+			await foreach (var ev in ReadStreamAsync(streamId, default, cancellationToken))
+			{
+				if (ev.EventId == eventId)
+				{
+					contains = true;
+				}
+			}
+		}
+		return contains;
+	}
 
 	/// <summary>Stamps <paramref name="item"/>'s sequence for this log and returns it.</summary>
 	protected abstract Guid Stamp(Event item, EventSequencer sequencer);
