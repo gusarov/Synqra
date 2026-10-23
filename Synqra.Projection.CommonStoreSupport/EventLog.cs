@@ -11,7 +11,7 @@ namespace Synqra;
 /// <see cref="ServerEventLog"/> keeps a client's proposal (commit order), <see cref="ClientEventLog"/> takes the next
 /// local stamp (arrival order). A stamp from another log is never kept: one log, one clock.
 /// </summary>
-public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup
+public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup, IEventIdIndex
 {
 	readonly IAppendStorage<Event, (Guid Stream, Guid Sequence)> _inner;
 	readonly EventSequencer _sequencer;
@@ -31,6 +31,25 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 	{
 		await SeedAsync(streamId, cancellationToken);
 		return ReadWatermark(streamId);
+	}
+
+	/// <summary>The storage's own index when it keeps one; otherwise every event is read.</summary>
+	public async IAsyncEnumerable<Guid> EnumerateEventIdsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		if (_inner is IEventIdIndex index)
+		{
+			await foreach (var id in index.EnumerateEventIdsAsync(cancellationToken))
+			{
+				yield return id;
+			}
+		}
+		else
+		{
+			await foreach (var ev in _inner.GetAllAsync(default, cancellationToken))
+			{
+				yield return ev.EventId;
+			}
+		}
 	}
 
 	/// <summary>By the storage's identity index when it has one; a scan of the stream otherwise (in-memory and file logs are small).</summary>

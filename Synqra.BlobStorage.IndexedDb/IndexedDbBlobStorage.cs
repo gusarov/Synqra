@@ -13,7 +13,7 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>
+internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>, IUniqueTagIndex
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -178,6 +178,29 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 			var blob = packed.AsSpan(at + 4, blobLength).ToArray();
 			at += 4 + blobLength;
 			yield return (key, blob);
+		}
+	}
+
+	/// <summary>The store's unique tags, a page of keys per transaction; the module keeps them under "{store}#tag".</summary>
+	public async IAsyncEnumerable<string> EnumerateTagsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		const int pageSize = 4096;
+		var tagStore = _storeName + "#tag";
+		string? currentFrom = null;
+		var more = true;
+		while (more && !cancellationToken.IsCancellationRequested)
+		{
+			var page = await _indexedDbInterop.GetKeyPageAsync(_databaseName, _options.ObjectStoreName, tagStore, currentFrom, currentFrom is not null, pageSize);
+			foreach (var tag in page)
+			{
+				yield return tag;
+			}
+			more = page.Length == pageSize;
+			if (page.Length > 0)
+			{
+				currentFrom = page[^1];
+			}
 		}
 	}
 

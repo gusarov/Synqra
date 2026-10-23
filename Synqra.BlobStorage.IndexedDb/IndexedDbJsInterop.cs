@@ -68,6 +68,13 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		return await module.InvokeAsync<byte[]>("getBlobsPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
 	}
 
+	/// <summary>One transaction, keys only: up to <paramref name="pageSize"/> key texts of the store after the key.</summary>
+	public async Task<string[]> GetKeyPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText, bool fromExclusive, int pageSize)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<string[]>("getKeyPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
+	}
+
 	public async Task DeleteAsync(string databaseName, string objectStoreName, string storeName, string keyText)
 	{
 		var module = await _moduleTask.Value;
