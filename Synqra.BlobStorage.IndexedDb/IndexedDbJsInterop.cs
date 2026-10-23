@@ -13,7 +13,7 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	public IndexedDbJsInterop(IJSRuntime jsRuntime)
 	{
 		_moduleTask = new Lazy<Task<IJSObjectReference>>(() => jsRuntime
-			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js?v=2") // bump with the module: the path is not fingerprinted and Cloudflare caches it for hours
+			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js")
 			.AsTask());
 	}
 
