@@ -175,6 +175,70 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		await Assert.That(await CountEventsAsync(nodeMaster)).IsEqualTo(0).Because("a refused event is not in the master's log");
 	}
 
+	[Test]
+	public async Task A_client_does_not_echo_what_the_master_sent_it()
+	{
+		// Prod 2026-10-22: after a Force Resync the browser's cursor was empty, so it sent its whole received history back,
+		// one frame and one ack per event, and the page stopped responding while it did.
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		for (var i = 0; i < 5; i++)
+		{
+			nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = $"history {i}" });
+		}
+		var history = await EventIdsAsync(nodeA.Events);
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(history), "A's history reaches the master");
+
+		var nodeB = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeB);
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeB.Events)).IsSupersetOf(history), "the history reaches B");
+		await Task.Delay(1000); // a send loop that echoes would have done so by now
+
+		await Assert.That(Replication(nodeB).FramesSent).IsEqualTo(0).Because("B received the history; it must not send it back");
+		nodeB.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "B's own write" });
+		var own = (await EventIdsAsync(nodeB.Events)).Except(history).ToHashSet();
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(own), "B's own write reaches the master");
+		await Assert.That(Replication(nodeB).FramesSent).IsEqualTo(own.Count).Because("only B's own events are sent");
+	}
+
+	[Test]
+	public async Task A_cursor_missing_from_the_log_does_not_stop_sending()
+	{
+		// The handoff of 2026-10-22: a kept state naming an event the local log no longer holds made the send loop skip
+		// forever, so the owner's browser connected and sent nothing.
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "first run" });
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(await EventIdsAsync(nodeA.Events)), "A's first run reaches the master");
+		var logA = await EndRunAsync(nodeA);
+
+		var lost = new EventReplicationState { MyNodeId = Guid.NewGuid(), LastEventIdFromMe = Guid.NewGuid() }; // not in A's log
+		var nodeB = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Configuration[LogFileKey] = logA;
+			builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(lost));
+		}) { Port = nodeMaster.Port };
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeB);
+		var before = await EventIdsAsync(nodeB.Events);
+
+		nodeB.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "written under a lost cursor" });
+		var own = (await EventIdsAsync(nodeB.Events)).Except(before).ToHashSet();
+		await Assert.That(own.Count).IsGreaterThan(0);
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(own), "the write reaches the master despite the lost cursor");
+	}
+
+	EventReplicationService Replication(SynqraTestNode node) => node.Host.Services.GetRequiredService<EventReplicationService>();
+
 	async Task<HashSet<Guid>> EventIdsAsync(IEventLog log)
 	{
 		var ids = new HashSet<Guid>();
