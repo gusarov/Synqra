@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
 using System;
 using System.Buffers;
+using System.Diagnostics;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
 using System.Text.Json;
@@ -230,252 +231,264 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		await LoadStateAsync(logHoldsEvents); // the cursor of the last run: HELLO asks for the delta, not the stream
 		_lastSentEventId = _eventReplicationState.LastEventIdFromMe; // this run offers everything the master has not acknowledged
 
-		ClientWebSocket wsConnection;
-		for (int i = 0; ; i++)
+		// One pass per connection. A reader that fails or a socket that closes ends the pass; the next one resumes from the
+		// persisted cursor and offers again what the master has not acknowledged. The service stops only with the host.
+		for (var failures = 0; !_cts.IsCancellationRequested; )
 		{
-			try
-			{
-				wsConnection = new ClientWebSocket();
-				_config.ConfigureSocket?.Invoke(wsConnection.Options);
-				await wsConnection.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
-				_wsConnection = wsConnection;
-				_networkSerializationService.Reinitialize();
-				// Not online yet — that is declared only after the HELLO handshake completes,
-				// when the master is guaranteed to have registered this node for broadcasts.
-				break;
-			}
-			catch (Exception ex) when (i < 10)
-			{
-				EmergencyLog.Default.LogWarning(ex, $"EventReplicationService: connect attempt {i} failed: {ex.Message}");
-				await Task.Delay(1000);
-			}
-		}
+			var wsConnection = await ConnectAsync();
+			var connectedAt = Stopwatch.StartNew();
+			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
+			_lastSentSequence = default;
 
-		async Task Reader()
-		{
-			#region HELLO
-			var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
-			if (magicBytes == null || magicBytes.Length == 0)
+			async Task Reader()
 			{
-				IsOnline = false;
-				return;
-			}
-			if (magicBytes.Length != 8)
-			{
-				var sb = new System.Text.StringBuilder();
-				new HexDumpWriter().HexDump(magicBytes, s => sb.Append(s), c => sb.Append(c));
-				throw new Exception($"Protocol Negotiation Failed! Received {magicBytes.Length} bytes instead of 8. {Environment.NewLine}{sb}");
-			}
-			var magic = BitConverter.ToUInt64(magicBytes);
-			if (magic != _networkSerializationService.Magic)
-			{
-				throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
-			}
-			IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
-			#endregion
-			while (!_cts.IsCancellationRequested)
-			{
-				var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
-				if (bytes == null || bytes.Length == 0)
+				#region HELLO
+				var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+				if (magicBytes == null || magicBytes.Length == 0)
 				{
 					IsOnline = false;
-					break;
+					return;
 				}
-				var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
-				switch (operation)
+				if (magicBytes.Length != 8)
 				{
-					case SubscriptionState state:
-						// Master's authoritative snapshot of the streams this connection is now
-						// subscribed to. Lets the client detect an unexpected default and drive its
-						// own UI off the confirmed set. Sent after HELLO and every sub/unsub.
-						_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
-						break;
-					case EventEnvelope envelope:
-						await ReceiveAsync(envelope);
-						break;
-					case EventAccepted accepted:
-						// Acks arrive in the order the events were sent, so the latest one is the cursor.
-						_eventReplicationState.LastEventIdFromMe = accepted.EventId;
-						await SaveStateAsync();
-						break;
-					case EventRejected rejected:
-						// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
-						EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
-						_eventReplicationState.LastEventIdFromMe = rejected.EventId;
-						await SaveStateAsync();
-						break;
-					default:
-						EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
-						break;
+					var sb = new System.Text.StringBuilder();
+					new HexDumpWriter().HexDump(magicBytes, s => sb.Append(s), c => sb.Append(c));
+					throw new Exception($"Protocol Negotiation Failed! Received {magicBytes.Length} bytes instead of 8. {Environment.NewLine}{sb}");
 				}
-			}
-		}
-		_readerTask = Reader();
-
-		// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
-		// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
-		// event is in the local log. The frame's own sequence caps it here as well: a master from before per-frame resume
-		// points sends the tail on every backlog frame, and a run ending mid-replay would resume past what it never got.
-		async Task ReceiveAsync(EventEnvelope envelope)
-		{
-			FramesReceived++;
-			var ev = envelope.Event;
-			var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
-			var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
-			bool known;
-			lock (_skipSet)
-			{
-				known = !_skipSet.Add(ev.EventId);
-				if (!known)
+				var magic = BitConverter.ToUInt64(magicBytes);
+				if (magic != _networkSerializationService.Magic)
 				{
-					_skipList.AddLast(ev.EventId);
+					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
 				}
-				_heldByMaster.Add(ev.EventId);
-			}
-			if (!known && !_ended)
-			{
-				ev.StreamId = StreamOf(ev);
-				await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
-				EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
-			}
-			if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
-			{
-				_eventReplicationState.ServerWatermark = resumePoint;
-				await SaveStateAsync();
-			}
-			if (!known)
-			{
-				EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
-			}
-		}
-
-		#region HELLO
-		{
-			// 8 bytes magic + 16 bytes ServerWatermark (Guid.Empty = "send me everything") + the
-			// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
-			// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
-			var isSubscribeTo = _config.HelloKind == ReplicationHelloKind.SubscribeTo;
-			var helloSize = isSubscribeTo ? 41 : 25;
-			var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
-			try
-			{
-				BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
-				_eventReplicationState.ServerWatermark.TryWriteBytes(buffer.AsSpan(8, 16));
-				buffer[24] = (byte)_config.HelloKind;
-				if (isSubscribeTo)
+				IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
+				#endregion
+				while (!_cts.IsCancellationRequested)
 				{
-					(_config.InitialSubscribeStreamId ?? throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId.")).TryWriteBytes(buffer.AsSpan(25, 16));
-				}
-				await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
-			}
-			finally
-			{
-				ArrayPool<byte>.Shared.Return(buffer);
-			}
-		}
-		#endregion
-		Wake(); // whatever the last run left unacknowledged goes now, not at the next local write
-
-		while (true)
-		{
-			await _autoResetEvent.WaitAsync();
-			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> <TRIGGERED LOOP>");
-			if (_cts.IsCancellationRequested)
-			{
-				break;
-			}
-			// get new events from storage and send them to server
-			// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
-			// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
-			// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
-			// The first read of a run is a full one, walking to the last acknowledged id; once this run knows where that is in
-			// the log, a trigger reads only what follows, as the keeper does (a full read per local write cost seconds, WI 487).
-			var sent = _lastSentEventId;
-			var sendingStream = StreamKey != default ? StreamKey : _lastSentStream; // a client's log holds the one stream it serves
-			var incremental = _lastSentSequence != default && sendingStream != default;
-			var reached = sent == default || incremental;
-			var pending = incremental
-				? _storage.ReadStreamAsync(sendingStream, _lastSentSequence, _cts.Token)
-				: _storage.GetAllAsync(from: default, _cts.Token);
-			await foreach (var ev in pending)
-			{
-				if (!reached)
-				{
-					reached = ev.EventId == sent;
-					if (reached)
+					var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+					if (bytes == null || bytes.Length == 0)
 					{
-						Passed(ev);
+						IsOnline = false;
+						break;
 					}
-					continue;
+					var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+					switch (operation)
+					{
+						case SubscriptionState state:
+							// Master's authoritative snapshot of the streams this connection is now
+							// subscribed to. Lets the client detect an unexpected default and drive its
+							// own UI off the confirmed set. Sent after HELLO and every sub/unsub.
+							_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
+							break;
+						case EventEnvelope envelope:
+							await ReceiveAsync(envelope);
+							break;
+						case EventAccepted accepted:
+							// Acks arrive in the order the events were sent, so the latest one is the cursor.
+							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
+							await SaveStateAsync();
+							break;
+						case EventRejected rejected:
+							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
+							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
+							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
+							await SaveStateAsync();
+							break;
+						default:
+							EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
+							break;
+					}
 				}
-				bool held;
+			}
+			var reader = ObserveAsync(Reader());
+			_readerTask = reader;
+
+			// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
+			// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
+			// event is in the local log. The frame's own sequence caps it here as well: a master from before per-frame resume
+			// points sends the tail on every backlog frame, and a run ending mid-replay would resume past what it never got.
+			async Task ReceiveAsync(EventEnvelope envelope)
+			{
+				FramesReceived++;
+				var ev = envelope.Event;
+				var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
+				var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
+				bool known;
 				lock (_skipSet)
 				{
-					held = _heldByMaster.Contains(ev.EventId);
-				}
-				if (held)
-				{
-					// The master sent it, so it has it: stepped over, never echoed. With nothing of ours awaiting an ack the
-					// persisted cursor moves too, so the next run does not walk (or send) it again.
-					if (_lastSentEventId == _eventReplicationState.LastEventIdFromMe)
-					{
-						_eventReplicationState.LastEventIdFromMe = ev.EventId;
-					}
-					_lastSentEventId = ev.EventId;
-					Passed(ev);
-					continue;
-				}
-				// Single-stream connection: skip events belonging to any other stream that shares this
-				// local multitenant store (e.g. the primary stream's events when this connection only
-				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
-				// they are never re-examined, and they are never sent to — and mis-stamped by — the
-				// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
-				if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
-				{
-					_lastSentEventId = ev.EventId;
-					Passed(ev);
-					continue;
-				}
-				lock (_skipSet)
-				{
-					if (_skipSet.Add(ev.EventId))
+					known = !_skipSet.Add(ev.EventId);
+					if (!known)
 					{
 						_skipList.AddLast(ev.EventId);
 					}
+					_heldByMaster.Add(ev.EventId);
 				}
-				// await _connection.InvokeAsync("EventEnvelope", ev);
+				if (!known && !_ended)
+				{
+					ev.StreamId = StreamOf(ev);
+					await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
+					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
+				}
+				if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				{
+					_eventReplicationState.ServerWatermark = resumePoint;
+					await SaveStateAsync();
+				}
+				if (!known)
+				{
+					EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
+				}
+			}
 
-				var inv = new EventEnvelope() { Event = ev };
-
-				var pool = ArrayPool<byte>.Shared;
-				var bytes = pool.Rent(DefaultFrameSize);
+			#region HELLO
+			{
+				// 8 bytes magic + 16 bytes ServerWatermark (Guid.Empty = "send me everything") + the
+				// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
+				// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
+				var isSubscribeTo = _config.HelloKind == ReplicationHelloKind.SubscribeTo;
+				var helloSize = isSubscribeTo ? 41 : 25;
+				var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
 				try
 				{
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
-					await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
+					BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
+					_eventReplicationState.ServerWatermark.TryWriteBytes(buffer.AsSpan(8, 16));
+					buffer[24] = (byte)_config.HelloKind;
+					if (isSubscribeTo)
+					{
+						(_config.InitialSubscribeStreamId ?? throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId.")).TryWriteBytes(buffer.AsSpan(25, 16));
+					}
+					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+				}
+				catch (WebSocketException ex)
+				{
+					// The socket broke before the master heard us: the reader sees it too and ends this connection.
+					EmergencyLog.Default.LogError(ex, "EventReplicationService: the HELLO could not be sent; reconnecting.");
 				}
 				finally
 				{
-					pool.Return(bytes);
+					ArrayPool<byte>.Shared.Return(buffer);
 				}
-
-				FramesSent++;
-				_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
-				Passed(ev);
 			}
-			if (!reached)
+			#endregion
+			Wake(); // whatever the last run left unacknowledged goes now, not at the next local write
+
+			try
 			{
-				// The cursor names an event this log does not hold (a log cleared or rebuilt under a kept state): walking for
-				// it would never send again. Start over from the top; what the master already holds is stepped over above.
-				EmergencyLog.Default.LogWarning($"EventReplicationService: outbound cursor {sent} is not in the local log; offering the log from its start.");
-				_lastSentEventId = default;
-				_lastSentSequence = default;
-				Wake();
-			}
-			await SaveStateAsync();
-			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
+				while (!reader.IsCompleted)
+				{
+					await _autoResetEvent.WaitAsync();
+					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> <TRIGGERED LOOP>");
+					if (_cts.IsCancellationRequested || reader.IsCompleted)
+					{
+						break;
+					}
+					// get new events from storage and send them to server
+					// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
+					// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
+					// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
+					// The first read of a run is a full one, walking to the last acknowledged id; once this run knows where that is in
+					// the log, a trigger reads only what follows, as the keeper does (a full read per local write cost seconds, WI 487).
+					var sent = _lastSentEventId;
+					var sendingStream = StreamKey != default ? StreamKey : _lastSentStream; // a client's log holds the one stream it serves
+					var incremental = _lastSentSequence != default && sendingStream != default;
+					var reached = sent == default || incremental;
+					var pending = incremental
+						? _storage.ReadStreamAsync(sendingStream, _lastSentSequence, _cts.Token)
+						: _storage.GetAllAsync(from: default, _cts.Token);
+					await foreach (var ev in pending)
+					{
+						if (!reached)
+						{
+							reached = ev.EventId == sent;
+							if (reached)
+							{
+								Passed(ev);
+							}
+							continue;
+						}
+						bool held;
+						lock (_skipSet)
+						{
+							held = _heldByMaster.Contains(ev.EventId);
+						}
+						if (held)
+						{
+							// The master sent it, so it has it: stepped over, never echoed. With nothing of ours awaiting an ack the
+							// persisted cursor moves too, so the next run does not walk (or send) it again.
+							if (_lastSentEventId == _eventReplicationState.LastEventIdFromMe)
+							{
+								_eventReplicationState.LastEventIdFromMe = ev.EventId;
+							}
+							_lastSentEventId = ev.EventId;
+							Passed(ev);
+							continue;
+						}
+						// Single-stream connection: skip events belonging to any other stream that shares this
+						// local multitenant store (e.g. the primary stream's events when this connection only
+						// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
+						// they are never re-examined, and they are never sent to — and mis-stamped by — the
+						// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
+						if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
+						{
+							_lastSentEventId = ev.EventId;
+							Passed(ev);
+							continue;
+						}
+						lock (_skipSet)
+						{
+							if (_skipSet.Add(ev.EventId))
+							{
+								_skipList.AddLast(ev.EventId);
+							}
+						}
+						// await _connection.InvokeAsync("EventEnvelope", ev);
 
-			// get events from server and apply them locally
+						var inv = new EventEnvelope() { Event = ev };
+
+						var pool = ArrayPool<byte>.Shared;
+						var bytes = pool.Rent(DefaultFrameSize);
+						try
+						{
+							EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+							await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
+						}
+						finally
+						{
+							pool.Return(bytes);
+						}
+
+						FramesSent++;
+						_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+						Passed(ev);
+					}
+					if (!reached)
+					{
+						// The cursor names an event this log does not hold (a log cleared or rebuilt under a kept state): walking for
+						// it would never send again. Start over from the top; what the master already holds is stepped over above.
+						EmergencyLog.Default.LogWarning($"EventReplicationService: outbound cursor {sent} is not in the local log; offering the log from its start.");
+						_lastSentEventId = default;
+						_lastSentSequence = default;
+						Wake();
+					}
+					await SaveStateAsync();
+					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
+
+					// get events from server and apply them locally
+				}
+			}
+			catch (WebSocketException ex)
+			{
+				// The socket broke under a send: this pass is over, the next connection sends it again.
+				EmergencyLog.Default.LogError(ex, "EventReplicationService: a send failed; reconnecting.");
+			}
+			IsOnline = false;
+			wsConnection.Abort();
+			wsConnection.Dispose();
+			await reader; // it logged its own failure
+			failures = connectedAt.Elapsed > TimeSpan.FromSeconds(30) ? 0 : failures + 1; // a connection that held a while was not the problem
+			if (!_cts.IsCancellationRequested)
+			{
+				await Task.WhenAny(Task.Delay(CalculateBackoff(failures), _cts.Token)); // a stop ends the pause, not the service with an exception
+			}
 		}
 	}
 
@@ -527,6 +540,62 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 		}
 	}
+
+	/// <summary>Opens the socket, retrying with a growing pause while the master cannot be reached; only the host's stop ends the wait.</summary>
+	async Task<ClientWebSocket> ConnectAsync()
+	{
+		ClientWebSocket? connected = null;
+		for (var attempt = 0; connected is null; attempt++)
+		{
+			var socket = new ClientWebSocket();
+			_config.ConfigureSocket?.Invoke(socket.Options);
+			try
+			{
+				await socket.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
+				_wsConnection = socket;
+				_networkSerializationService.Reinitialize();
+				// Not online yet: that is declared only after the HELLO handshake completes,
+				// when the master is guaranteed to have registered this node for broadcasts.
+				connected = socket;
+			}
+			catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException)
+			{
+				socket.Dispose();
+				EmergencyLog.Default.LogWarning(ex, $"EventReplicationService: connect attempt {attempt} failed: {ex.Message}");
+				await Task.Delay(CalculateBackoff(attempt), _cts.Token);
+			}
+		}
+		return connected;
+	}
+
+	/// <summary>
+	/// Waits for a connection's reader. Whatever ends it ends the connection, which the service then opens again: its exception
+	/// was left in an unobserved task, so replication stalled with no trace and IsOnline stayed true (dev 2026-10-23).
+	/// </summary>
+	async Task ObserveAsync(Task reader)
+	{
+		try
+		{
+			await reader;
+		}
+		catch (OperationCanceledException ex) when (_cts.IsCancellationRequested)
+		{
+			EmergencyLog.Default.LogDebug(ex, "EventReplicationService: the reader stopped with the service.");
+		}
+		catch (Exception ex)
+		{
+			// Tolerable: the next connection resumes from the persisted cursor. A frame that fails every time shows as repeated errors.
+			EmergencyLog.Default.LogError(ex, "EventReplicationService: the reader stopped on an exception; reconnecting.");
+		}
+		finally
+		{
+			IsOnline = false;
+			Wake(); // the send loop ends this connection
+		}
+	}
+
+	/// <summary>The pause before connecting again: half a second, doubling with each failure in a row, at most half a minute.</summary>
+	TimeSpan CalculateBackoff(int failures) => TimeSpan.FromMilliseconds(Math.Min(30_000, 500 * (1 << Math.Min(failures, 6))));
 
 	/// <inheritdoc />
 	/// <remarks>
