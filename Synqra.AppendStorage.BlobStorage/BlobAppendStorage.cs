@@ -72,7 +72,28 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return item;
 	}
 
-	public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
+		=> _blobStorage is IPagedBlobReader<TKey> paged ? ReadPagedAsync(paged, from, cancellationToken) : ReadByKeyAsync(from, cancellationToken);
+
+	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
+	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
+		{
+			if (TryGetAttachedObject(key, out var attached))
+			{
+				yield return attached;
+			}
+			else
+			{
+				var item = Deserialize(blob);
+				Attach(key, item);
+				yield return item;
+			}
+		}
+	}
+
+	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		await foreach (var key in _blobStorage.EnumerateKeysAsync(from, cancellationToken))
 		{

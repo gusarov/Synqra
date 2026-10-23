@@ -13,7 +13,7 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage
+internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -140,6 +140,44 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 
 			currentFrom = page[^1];
 			fromExclusive = true;
+		}
+	}
+
+	public async IAsyncEnumerable<(TKey Key, byte[] Blob)> EnumerateBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		var currentFrom = from is null || Equals(from, default(TKey))
+			? null
+			: _getKeyFromItem(from);
+		const int pageSize = 512;
+		var more = true;
+		while (more && !cancellationToken.IsCancellationRequested)
+		{
+			var packed = await _indexedDbInterop.GetBlobsPageAsync(_databaseName, _options.ObjectStoreName, _storeName, currentFrom, fromExclusive: currentFrom is not null, pageSize);
+			var count = 0;
+			foreach (var (keyText, blob) in Unpack(packed))
+			{
+				count++;
+				currentFrom = keyText;
+				yield return (_getKeyFromText(keyText), blob);
+			}
+			more = count == pageSize;
+		}
+	}
+
+	/// <summary>The records of one getBlobsPage buffer.</summary>
+	IEnumerable<(string Key, byte[] Blob)> Unpack(byte[] packed)
+	{
+		var at = 0;
+		while (at < packed.Length)
+		{
+			var keyLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(packed.AsSpan(at, 4));
+			var key = System.Text.Encoding.UTF8.GetString(packed, at + 4, keyLength);
+			at += 4 + keyLength;
+			var blobLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(packed.AsSpan(at, 4));
+			var blob = packed.AsSpan(at + 4, blobLength).ToArray();
+			at += 4 + blobLength;
+			yield return (key, blob);
 		}
 	}
 
