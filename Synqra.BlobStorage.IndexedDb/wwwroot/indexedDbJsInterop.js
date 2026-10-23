@@ -192,6 +192,54 @@ export async function getKeys(databaseName, objectStoreName, storeName, fromKeyT
         };
     });
 }
+// One readonly transaction, two requests (getAllKeys, getAll): up to pageSize records of the store after the key, each key
+// text with its bytes. A cursor stepped once per record; this is one round trip per page.
+export async function getBlobPage(databaseName, objectStoreName, storeName, fromKeyText, fromExclusive = false, pageSize = 256) {
+    const opened = await initialize(databaseName, objectStoreName);
+    return await new Promise((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
+        const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText) : prefix;
+        const range = IDBKeyRange.bound(startKey, `${prefix}￿`, !!fromExclusive && hasFrom); // the store's own range, as storeRange
+        const keysRequest = collection.getAllKeys(range, pageSize);
+        const valuesRequest = collection.getAll(range, pageSize);
+        transaction.oncomplete = function () {
+            const compoundKeys = keysRequest.result;
+            const values = valuesRequest.result;
+            const keys = [];
+            const blobs = [];
+            for (let i = 0; i < compoundKeys.length; i++) {
+                const bin = values[i]?.bin ?? values[i]?.Bin ?? [];
+                keys.push(String(compoundKeys[i]).substring(prefix.length));
+                blobs.push(bin instanceof Uint8Array ? bin : new Uint8Array(bin)); // records written as number[] come back as bytes too
+            }
+            resolve({ keys, blobs });
+        };
+        transaction.onerror = function () {
+            reject(transaction.error);
+        };
+    });
+}
+// One readonly transaction, one request (getAllKeys): up to pageSize key texts of the store after the key, no values read.
+export async function getKeyPage(databaseName, objectStoreName, storeName, fromKeyText, fromExclusive = false, pageSize = 4096) {
+    const opened = await initialize(databaseName, objectStoreName);
+    return await new Promise((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
+        const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText) : prefix;
+        const request = collection.getAllKeys(IDBKeyRange.bound(startKey, `${prefix}￿`, !!fromExclusive && hasFrom), pageSize);
+        request.onsuccess = function () {
+            resolve(request.result.map(key => String(key).substring(prefix.length)));
+        };
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
 export async function deleteByKey(databaseName, objectStoreName, storeName, keyText) {
     const opened = await initialize(databaseName, objectStoreName);
     const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");

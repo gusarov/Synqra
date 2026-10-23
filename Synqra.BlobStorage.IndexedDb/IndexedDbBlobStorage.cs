@@ -13,7 +13,7 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage
+internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IBlobPageReader<TKey>, IUniqueTagIndex
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -140,6 +140,56 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 
 			currentFrom = page[^1];
 			fromExclusive = true;
+		}
+	}
+
+	/// <summary>
+	/// The records after the key a page per interop call and transaction, each key with its bytes. A page is bounded by
+	/// count, so a page of the largest events (hundreds of KB) stays a few MB.
+	/// </summary>
+	public async IAsyncEnumerable<KeyValuePair<TKey, byte[]>> EnumerateBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		const int pageSize = 256;
+		var currentFrom = from is null || Equals(from, default(TKey))
+			? null
+			: _getKeyFromItem(from);
+		var more = true;
+		while (more && !cancellationToken.IsCancellationRequested)
+		{
+			var page = await _indexedDbInterop.GetBlobPageAsync(_databaseName, _options.ObjectStoreName, _storeName, currentFrom, currentFrom is not null, pageSize);
+			for (var i = 0; i < page.Keys.Length; i++)
+			{
+				yield return new KeyValuePair<TKey, byte[]>(_getKeyFromText(page.Keys[i]), page.Blobs[i]);
+			}
+			more = page.Keys.Length == pageSize; // a short page ends at the store's last record or its prefix
+			if (page.Keys.Length > 0)
+			{
+				currentFrom = page.Keys[^1];
+			}
+		}
+	}
+
+	/// <summary>The store's unique tags, a page of keys per transaction; the module keeps them under "{store}#tag".</summary>
+	public async IAsyncEnumerable<string> EnumerateTagsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		const int pageSize = 4096;
+		var tagStore = _storeName + "#tag";
+		string? currentFrom = null;
+		var more = true;
+		while (more && !cancellationToken.IsCancellationRequested)
+		{
+			var page = await _indexedDbInterop.GetKeyPageAsync(_databaseName, _options.ObjectStoreName, tagStore, currentFrom, currentFrom is not null, pageSize);
+			foreach (var tag in page)
+			{
+				yield return tag;
+			}
+			more = page.Length == pageSize;
+			if (page.Length > 0)
+			{
+				currentFrom = page[^1];
+			}
 		}
 	}
 

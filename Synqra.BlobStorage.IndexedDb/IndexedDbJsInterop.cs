@@ -13,7 +13,7 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	public IndexedDbJsInterop(IJSRuntime jsRuntime)
 	{
 		_moduleTask = new Lazy<Task<IJSObjectReference>>(() => jsRuntime
-			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js")
+			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js?v=4") // bump with the module: the path is not fingerprinted and Cloudflare caches it for hours
 			.AsTask());
 	}
 
@@ -59,6 +59,20 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	{
 		var module = await _moduleTask.Value;
 		return await module.InvokeAsync<IEnumerable<string>>("getKeys", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
+	}
+
+	/// <summary>One transaction: up to <paramref name="pageSize"/> records of the store after the key, each key with its bytes.</summary>
+	public async Task<BlobPage> GetBlobPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText, bool fromExclusive, int pageSize)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<BlobPage>("getBlobPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
+	}
+
+	/// <summary>One transaction, keys only: up to <paramref name="pageSize"/> key texts of the store after the key.</summary>
+	public async Task<string[]> GetKeyPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText, bool fromExclusive, int pageSize)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<string[]>("getKeyPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
 	}
 
 	public async Task DeleteAsync(string databaseName, string objectStoreName, string storeName, string keyText)

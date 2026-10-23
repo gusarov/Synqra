@@ -599,6 +599,12 @@ gap is expected.
     store decide: an append stamps after the store's tail and lands once per EventId, checked and written in one IndexedDB
     transaction (`ITailAppendBlobStorage`), so tabs agree on one arrival order and one copy. A projection never jumps its
     cursor to its own write's stamp (another tab may have appended just before it): it catches up, stepping over its own.
+  - **A page load reads the browser's log once.** The projection's cold fold is the one full read: the replication client
+    seeds its dedup from the store's EventId tags (`IEventIdIndex` over `IUniqueTagIndex`, keys only), the log is read a
+    page per IndexedDB transaction (`IBlobPageReader`), and the send loop reads only what follows the last event it passed.
+    An event received from the master is never sent back; the outbound cursor moves past it once nothing sent is still
+    unacknowledged. Every click waits for the fold, so each extra full read (three per load, one per local write, and an echo
+    of every received event, its large frames grown through exceptions) left the UI dead for minutes on a large stream.
   - **Registration is explicit, no decoration:** register the storage keyed by `x => (x.StreamId, x.SequenceId)`, then
     `AddServerEventLog()` / `AddClientEventLog()` (optionally keyed); consumers ask for `IEventLog`.
   - **The host owns the Mongo database.** Synqra never opens a client: `AddMongoEventStorage(serviceKey, databaseKey)` and
