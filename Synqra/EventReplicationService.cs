@@ -49,6 +49,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <summary>Event frames this run received from the server, known ones included: what a resumed client was sent again.</summary>
 	public long FramesReceived { get; private set; }
 
+	/// <summary>Event frames this run wrote to the server: a client never echoes what the master sent it.</summary>
+	public long FramesSent { get; private set; }
+
+	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
+	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
+
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
 		=> SendOperationAsync(new SubscribeRequest { StreamId = streamId }, ct);
@@ -313,6 +319,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				{
 					_skipList.AddLast(ev.EventId);
 				}
+				_heldByMaster.Add(ev.EventId);
 			}
 			if (!known)
 			{
@@ -379,6 +386,22 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					reached = ev.EventId == sent;
 					continue;
 				}
+				bool held;
+				lock (_skipSet)
+				{
+					held = _heldByMaster.Contains(ev.EventId);
+				}
+				if (held)
+				{
+					// The master sent it, so it has it: stepped over, never echoed. With nothing of ours awaiting an ack the
+					// persisted cursor moves too, so the next run does not walk (or send) it again.
+					if (_lastSentEventId == _eventReplicationState.LastEventIdFromMe)
+					{
+						_eventReplicationState.LastEventIdFromMe = ev.EventId;
+					}
+					_lastSentEventId = ev.EventId;
+					continue;
+				}
 				// Single-stream connection: skip events belonging to any other stream that shares this
 				// local multitenant store (e.g. the primary stream's events when this connection only
 				// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
@@ -412,7 +435,16 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					pool.Return(bytes);
 				}
 
+				FramesSent++;
 				_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+			}
+			if (!reached)
+			{
+				// The cursor names an event this log does not hold (a log cleared or rebuilt under a kept state): walking for
+				// it would never send again. Start over from the top; what the master already holds is stepped over above.
+				EmergencyLog.Default.LogWarning($"EventReplicationService: outbound cursor {sent} is not in the local log; offering the log from its start.");
+				_lastSentEventId = default;
+				Wake();
 			}
 			await SaveStateAsync();
 			EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
@@ -473,6 +505,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		_eventReplicationState.ServerWatermark = default;
 		_eventReplicationState.LastEventIdFromMe = default;
+		lock (_skipSet)
+		{
+			_heldByMaster.Clear();
+		}
 		if (_storage is IClearableAppendStorage clearable)
 		{
 			await clearable.ClearAllAsync();
