@@ -38,11 +38,10 @@ public interface IEventReplicationService
 	void Trigger(Command command, IReadOnlyList<Event> events);
 
 	/// <summary>
-	/// Wipes this client's local durable event log, if the underlying storage supports it
-	/// (see <see cref="Synqra.AppendStorage.IClearableAppendStorage"/>) — a no-op otherwise.
-	/// Does not itself reconnect or reload anything: this is Synqra core and has no Blazor
-	/// dependency, so a caller (e.g. a "Force Resync" button) is responsible for reloading
-	/// the app afterward to actually rebuild state from the server's fully-synced backlog.
+	/// Wipes this client's local durable event log and its replication cursors, and ends this run: nothing it receives or
+	/// sends afterwards is stored, so the next start replays the whole stream into an empty log. A log whose storage cannot
+	/// be wiped throws (see <see cref="Synqra.AppendStorage.IClearableAppendStorage"/>). Does not reload anything: this is
+	/// Synqra core and has no Blazor dependency, so a caller (e.g. a "Force Resync" button) reloads the app afterward.
 	/// </summary>
 	Task ClearLocalStorageAsync();
 }

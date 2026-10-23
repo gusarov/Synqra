@@ -132,9 +132,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 	}
 
+	// Set by a Force Resync: this run has ended, and nothing it receives or sends is stored any more.
+	volatile bool _ended;
+
 	async Task SaveStateAsync()
 	{
-		if (_stateStore is not null)
+		if (_stateStore is not null && !_ended)
 		{
 			await _stateStore.SaveAsync(StreamKey, _eventReplicationState, _cts.Token);
 		}
@@ -216,7 +219,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		catch (Exception ex)
 		{
 			EmergencyLog.Default.LogWarning(ex, "EventReplicationService: local durable log failed to replay — clearing it and resyncing fresh from the server.");
-			await ClearLocalStorageAsync();
+			await WipeLocalAsync();
 		}
 
 		bool logHoldsEvents;
@@ -329,7 +332,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 				_heldByMaster.Add(ev.EventId);
 			}
-			if (!known)
+			if (!known && !_ended)
 			{
 				ev.StreamId = StreamOf(ev);
 				await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
@@ -526,7 +529,24 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// The run ends first: a frame received or a send loop pass after the wipe persisted a server watermark again, so the
+	/// reload resumed near the tail instead of replaying the stream, and a hole in the log was never filled (WI 487).
+	/// </remarks>
 	public async Task ClearLocalStorageAsync()
+	{
+		_ended = true;
+		_cts.Cancel();
+		Wake();
+		await WipeLocalAsync();
+		if (_stateStore is not null)
+		{
+			await _stateStore.SaveAsync(StreamKey, _eventReplicationState, CancellationToken.None); // the cursors of an empty log
+		}
+	}
+
+	/// <summary>Empties the local log, the dedup and the cursors in memory; the caller decides whether the run goes on.</summary>
+	async Task WipeLocalAsync()
 	{
 		lock (_skipSet)
 		{
