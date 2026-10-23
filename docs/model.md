@@ -601,7 +601,7 @@ gap is expected.
     cursor to its own write's stamp (another tab may have appended just before it): it catches up, stepping over its own.
   - **A page load reads the browser's log once.** The projection's cold fold is the one full read: the replication client
     seeds its dedup from the store's EventId tags (`IEventIdIndex` over `IUniqueTagIndex`, keys only), the log is read a
-    page per IndexedDB transaction (`IBlobPageReader`), and the send loop reads only what follows the last event it passed.
+    page per IndexedDB transaction (`IPagedBlobReader`), and the send loop reads only what follows the last event it passed.
     An event received from the master is never sent back; the outbound cursor moves past it once nothing sent is still
     unacknowledged. Every click waits for the fold, so each extra full read (three per load, one per local write, and an echo
     of every received event, its large frames grown through exceptions) left the UI dead for minutes on a large stream.

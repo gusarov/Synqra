@@ -256,43 +256,73 @@ export async function getKeys(
     });
 }
 
-// One readonly transaction, two requests (getAllKeys, getAll): up to pageSize records of the store after the key, each key
-// text with its bytes. A cursor stepped once per record; this is one round trip per page.
-export async function getBlobPage(
+// One page of records in one readonly transaction, packed into a single buffer so the whole page crosses to .NET as one
+// byte array: per record a 4-byte little-endian key length, the key's UTF-8, a 4-byte blob length, the blob. Reading
+// a log with getKeys + one getBlob per key costs a transaction per record (minutes for a 14k-event browser log).
+export async function getBlobsPage(
     databaseName: string,
     objectStoreName: string,
     storeName: string,
     fromKeyText?: string | null,
     fromExclusive = false,
-    pageSize = 256
-): Promise<{ keys: string[]; blobs: Uint8Array[] }> {
+    pageSize = 1024
+): Promise<Uint8Array> {
     const opened = await initialize(databaseName, objectStoreName);
 
-    return await new Promise<{ keys: string[]; blobs: Uint8Array[] }>((resolve, reject) => {
+    return await new Promise<Uint8Array>((resolve, reject) => {
         const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
         const collection = transaction.objectStore(opened.objectStoreName);
         const prefix = `${storeName}${separator}`;
         const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
         const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText as string) : prefix;
-        const range = IDBKeyRange.bound(startKey, `${prefix}￿`, !!fromExclusive && hasFrom); // the store's own range, as storeRange
-        const keysRequest = collection.getAllKeys(range, pageSize);
-        const valuesRequest = collection.getAll(range, pageSize);
+        const request = collection.openCursor(IDBKeyRange.lowerBound(startKey, !!fromExclusive && hasFrom));
+        const encoder = new TextEncoder();
+        const parts: { key: Uint8Array; blob: Uint8Array }[] = [];
+        let total = 0;
 
-        transaction.oncomplete = function () {
-            const compoundKeys = keysRequest.result as IDBValidKey[];
-            const values = valuesRequest.result as { bin?: Uint8Array | number[] | null; Bin?: Uint8Array | number[] | null }[];
-            const keys: string[] = [];
-            const blobs: Uint8Array[] = [];
-            for (let i = 0; i < compoundKeys.length; i++) {
-                const bin = values[i]?.bin ?? values[i]?.Bin ?? [];
-                keys.push(String(compoundKeys[i]).substring(prefix.length));
-                blobs.push(bin instanceof Uint8Array ? bin : new Uint8Array(bin)); // records written as number[] come back as bytes too
+        const finish = () => {
+            const packed = new Uint8Array(total);
+            const view = new DataView(packed.buffer);
+            let at = 0;
+            for (const part of parts) {
+                view.setUint32(at, part.key.length, true);
+                packed.set(part.key, at + 4);
+                at += 4 + part.key.length;
+                view.setUint32(at, part.blob.length, true);
+                packed.set(part.blob, at + 4);
+                at += 4 + part.blob.length;
             }
-            resolve({ keys, blobs });
+            resolve(packed);
         };
 
-        transaction.onerror = function () {
-            reject(transaction.error);
+        request.onsuccess = function (event) {
+            const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+            if (!cursor) {
+                finish();
+                return;
+            }
+
+            const compoundKey = String(cursor.primaryKey);
+            if (!compoundKey.startsWith(prefix)) {
+                finish();
+                return;
+            }
+
+            const value = cursor.value;
+            const bin = value ? (value.bin ?? value.Bin ?? null) : null;
+            const blob = bin instanceof Uint8Array ? bin : bin ? new Uint8Array(bin) : new Uint8Array(0);
+            const key = encoder.encode(compoundKey.substring(prefix.length));
+            parts.push({ key, blob });
+            total += 8 + key.length + blob.length;
+            if (parts.length >= pageSize) {
+                finish();
+                return;
+            }
+
+            cursor.continue();
+        };
+        request.onerror = function () {
+            reject(request.error);
         };
     });
 }

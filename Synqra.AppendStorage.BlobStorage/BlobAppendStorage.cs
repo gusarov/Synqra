@@ -72,45 +72,42 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return item;
 	}
 
-	/// <summary>
-	/// Every item after <paramref name="from"/> in key order. A store that reads pages (<see cref="IBlobPageReader{TKey}"/>)
-	/// serves it a page per round trip; otherwise one read per key. IndexedDB took about a millisecond per event that way,
-	/// and a page load reads the whole log more than once (prod 2026-10-22: no click worked for minutes on a large stream).
-	/// </summary>
-	public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
+		=> _blobStorage is IPagedBlobReader<TKey> paged ? ReadPagedAsync(paged, from, cancellationToken) : ReadByKeyAsync(from, cancellationToken);
+
+	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
+	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
-		if (_blobStorage is IBlobPageReader<TKey> pages)
+		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
 		{
-			await foreach (var entry in pages.EnumerateBlobsAsync(from, cancellationToken))
+			if (TryGetAttachedObject(key, out var attached))
 			{
-				yield return Resolve(entry.Key, entry.Value);
+				yield return attached;
 			}
-		}
-		else
-		{
-			await foreach (var key in _blobStorage.EnumerateKeysAsync(from, cancellationToken))
+			else
 			{
-				if (TryGetAttachedObject(key, out var attached))
-				{
-					yield return attached;
-				}
-				else
-				{
-					yield return Resolve(key, await _blobStorage.ReadBlobAsync(key, cancellationToken));
-				}
+				var item = Deserialize(blob);
+				Attach(key, item);
+				yield return item;
 			}
 		}
 	}
 
-	/// <summary>The instance still attached under the key, else the blob deserialized and attached.</summary>
-	T Resolve(TKey key, byte[] blob)
+	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
-		if (!TryGetAttachedObject(key, out var item))
+		await foreach (var key in _blobStorage.EnumerateKeysAsync(from, cancellationToken))
 		{
-			item = Deserialize(blob);
+			if (TryGetAttachedObject(key, out var attached))
+			{
+				yield return attached;
+				continue;
+			}
+
+			var blob = await _blobStorage.ReadBlobAsync(key, cancellationToken);
+			var item = Deserialize(blob);
 			Attach(key, item);
+			yield return item;
 		}
-		return item;
 	}
 
 	public Task FlushAsync(CancellationToken cancellationToken = default)

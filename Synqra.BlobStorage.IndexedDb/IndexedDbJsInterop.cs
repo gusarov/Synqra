@@ -13,7 +13,7 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	public IndexedDbJsInterop(IJSRuntime jsRuntime)
 	{
 		_moduleTask = new Lazy<Task<IJSObjectReference>>(() => jsRuntime
-			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js?v=4") // bump with the module: the path is not fingerprinted and Cloudflare caches it for hours
+			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js?v=2") // bump with the module: the path is not fingerprinted and Cloudflare caches it for hours
 			.AsTask());
 	}
 
@@ -61,11 +61,11 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		return await module.InvokeAsync<IEnumerable<string>>("getKeys", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
 	}
 
-	/// <summary>One transaction: up to <paramref name="pageSize"/> records of the store after the key, each key with its bytes.</summary>
-	public async Task<BlobPage> GetBlobPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText, bool fromExclusive, int pageSize)
+	/// <summary>One page of records packed by getBlobsPage: per record a 4-byte key length, the key's UTF-8, a 4-byte blob length, the blob.</summary>
+	public async Task<byte[]> GetBlobsPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText = default, bool fromExclusive = false, int pageSize = 1024)
 	{
 		var module = await _moduleTask.Value;
-		return await module.InvokeAsync<BlobPage>("getBlobPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
+		return await module.InvokeAsync<byte[]>("getBlobsPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
 	}
 
 	/// <summary>One transaction, keys only: up to <paramref name="pageSize"/> key texts of the store after the key.</summary>
