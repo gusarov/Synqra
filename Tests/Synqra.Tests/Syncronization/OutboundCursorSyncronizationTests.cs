@@ -239,6 +239,83 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 
 	EventReplicationService Replication(SynqraTestNode node) => node.Host.Services.GetRequiredService<EventReplicationService>();
 
+	/// <summary>
+	/// A local write wakes the send loop, which used to read the whole local log again to find what follows the last sent
+	/// event: seconds per click on a large stream (WI 487). After its first pass a run reads only what follows.
+	/// </summary>
+	[Test]
+	public async Task A_local_write_reads_only_what_follows_the_last_sent_event()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
+		await nodeMaster.Started;
+		var log = new CountingLog();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(log)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "first" });
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > 0, "the first write reaches the master");
+		var afterFirst = await CountEventsAsync(nodeMaster);
+		var fullReads = log.FullReads;
+
+		for (var i = 0; i < 3; i++)
+		{
+			nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = $"more {i}" });
+		}
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) >= afterFirst * 4, "the later writes reach the master");
+
+		await Assert.That(log.FullReads).IsEqualTo(fullReads).Because("later writes read only what follows the last sent event");
+	}
+
+	/// <summary>An in-memory local log, keyed like a client's, that counts reads from the start.</summary>
+	sealed class CountingLog : IAppendStorage<Event, (Guid, Guid)>
+	{
+		readonly SortedDictionary<(Guid, Guid), Event> _events = new(Comparer<(Guid, Guid)>.Create((a, b) => a.Item1.CompareBigEndian(b.Item1) is var first && first != 0 ? first : a.Item2.CompareBigEndian(b.Item2)));
+
+		public int FullReads { get; private set; }
+
+		public Task AppendAsync(Event item, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				_events.Add((item.StreamId, item.SequenceId), item);
+			}
+			return Task.CompletedTask;
+		}
+
+		public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				return Task.FromResult(_events[key]);
+			}
+		}
+
+		public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			List<Event> after;
+			lock (_events)
+			{
+				if (from == default)
+				{
+					FullReads++;
+				}
+				after = [.. _events.Where(e => from == default || _events.Comparer.Compare(e.Key, from) > 0).Select(e => e.Value)];
+			}
+			foreach (var ev in after)
+			{
+				await Task.Yield();
+				yield return ev;
+			}
+		}
+
+		public void Dispose()
+		{
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
 	async Task<HashSet<Guid>> EventIdsAsync(IEventLog log)
 	{
 		var ids = new HashSet<Guid>();

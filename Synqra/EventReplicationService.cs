@@ -38,6 +38,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	// The last event written to the socket this run; the persisted cursor (LastEventIdFromMe) moves only when the master acknowledges one.
 	private Guid _lastSentEventId;
+	// Its position in the local log once this run has passed it, and its stream: later sends read only what follows.
+	private Guid _lastSentSequence;
+	private Guid _lastSentStream;
 	private volatile IReadOnlyCollection<Guid> _activeStreams = Array.Empty<Guid>();
 
 	/// <inheritdoc />
@@ -194,13 +197,18 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		// LastEventIdFromServer, which is a correct and safe "send me everything" signal, not a bug.
 		try
 		{
-			await foreach (var ev in _storage.GetAllAsync(from: default))
+			// The ids alone: a log that indexes them (IndexedDB's tags) is not read at all. Reading and deserializing every
+			// event here, beside the projection's own cold fold, held every click for seconds on a large stream (WI 487).
+			var ids = _storage is IEventIdIndex index
+				? index.EnumerateEventIdsAsync(_cts.Token)
+				: _storage.GetAllAsync(from: default, _cts.Token).Select(ev => ev.EventId);
+			await foreach (var id in ids)
 			{
 				lock (_skipSet)
 				{
-					if (_skipSet.Add(ev.EventId))
+					if (_skipSet.Add(id))
 					{
-						_skipList.AddLast(ev.EventId);
+						_skipList.AddLast(id);
 					}
 				}
 			}
@@ -377,13 +385,24 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
 			// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
 			// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
+			// The first read of a run is a full one, walking to the last acknowledged id; once this run knows where that is in
+			// the log, a trigger reads only what follows, as the keeper does (a full read per local write cost seconds, WI 487).
 			var sent = _lastSentEventId;
-			var reached = sent == default;
-			await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
+			var sendingStream = StreamKey != default ? StreamKey : _lastSentStream; // a client's log holds the one stream it serves
+			var incremental = _lastSentSequence != default && sendingStream != default;
+			var reached = sent == default || incremental;
+			var pending = incremental
+				? _storage.ReadStreamAsync(sendingStream, _lastSentSequence, _cts.Token)
+				: _storage.GetAllAsync(from: default, _cts.Token);
+			await foreach (var ev in pending)
 			{
 				if (!reached)
 				{
 					reached = ev.EventId == sent;
+					if (reached)
+					{
+						Passed(ev);
+					}
 					continue;
 				}
 				bool held;
@@ -400,6 +419,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_eventReplicationState.LastEventIdFromMe = ev.EventId;
 					}
 					_lastSentEventId = ev.EventId;
+					Passed(ev);
 					continue;
 				}
 				// Single-stream connection: skip events belonging to any other stream that shares this
@@ -410,6 +430,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
 				{
 					_lastSentEventId = ev.EventId;
+					Passed(ev);
 					continue;
 				}
 				lock (_skipSet)
@@ -437,6 +458,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 				FramesSent++;
 				_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+				Passed(ev);
 			}
 			if (!reached)
 			{
@@ -444,6 +466,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// it would never send again. Start over from the top; what the master already holds is stepped over above.
 				EmergencyLog.Default.LogWarning($"EventReplicationService: outbound cursor {sent} is not in the local log; offering the log from its start.");
 				_lastSentEventId = default;
+				_lastSentSequence = default;
 				Wake();
 			}
 			await SaveStateAsync();
@@ -477,6 +500,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	public void Trigger(Command command, IReadOnlyList<Event> events) => Wake();
 
+	/// <summary>Remembers where the send loop is in the local log, so its next read starts there.</summary>
+	void Passed(Event ev)
+	{
+		_lastSentSequence = ev.SequenceId;
+		_lastSentStream = ev.StreamId;
+	}
+
 	/// <summary>Wakes the send loop.</summary>
 	void Wake()
 	{
@@ -509,6 +539,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			_heldByMaster.Clear();
 		}
+		_lastSentEventId = default;
+		_lastSentSequence = default;
+		_lastSentStream = default;
 		if (_storage is IClearableAppendStorage clearable)
 		{
 			await clearable.ClearAllAsync();

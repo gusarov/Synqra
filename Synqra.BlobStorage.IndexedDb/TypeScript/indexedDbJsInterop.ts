@@ -327,6 +327,35 @@ export async function getBlobsPage(
     });
 }
 
+// One readonly transaction, one request (getAllKeys): up to pageSize key texts of the store after the key, no values read.
+export async function getKeyPage(
+    databaseName: string,
+    objectStoreName: string,
+    storeName: string,
+    fromKeyText?: string | null,
+    fromExclusive = false,
+    pageSize = 4096
+): Promise<string[]> {
+    const opened = await initialize(databaseName, objectStoreName);
+
+    return await new Promise<string[]>((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
+        const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText as string) : prefix;
+        const request = collection.getAllKeys(IDBKeyRange.bound(startKey, `${prefix}￿`, !!fromExclusive && hasFrom), pageSize);
+
+        request.onsuccess = function () {
+            resolve((request.result as IDBValidKey[]).map(key => String(key).substring(prefix.length)));
+        };
+
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
+
 export async function deleteByKey(
     databaseName: string,
     objectStoreName: string,

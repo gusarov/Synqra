@@ -11,15 +11,17 @@ namespace Synqra.AppendStorage.BlobStorage;
 /// <see cref="Event.EventId"/>, checked and written in one transaction. Tabs sharing the store then agree on one arrival
 /// order and keep one copy of each event without talking to each other. Over any other blob store it appends as the base.
 /// </summary>
-public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail
+public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequence)>, IEventSequenceTail, IEventIdIndex
 {
 	readonly ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>? _tailAppend;
+	readonly IUniqueTagIndex? _tags;
 	readonly GuidExtensions.Generator _stamps = new();
 
 	public BlobEventStorage(IBlobStorage<(Guid Stream, Guid Sequence)> blobStorage, ISbxSerializerFactory serializerFactory, JsonSerializerOptions? jsonMirrorOptions = null)
 		: base(blobStorage, serializerFactory, ev => (ev.StreamId, ev.SequenceId), jsonMirrorOptions)
 	{
 		_tailAppend = blobStorage as ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>;
+		_tags = _tailAppend as IUniqueTagIndex;
 	}
 
 	/// <summary>
@@ -46,6 +48,28 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 			if (outcome == TailAppendResult.Appended)
 			{
 				Attach(item);
+			}
+		}
+	}
+
+	/// <summary>
+	/// The EventIds held: over a tail-append store they are its unique tags, read by key alone (one event's tag is its
+	/// EventId); otherwise every event is read.
+	/// </summary>
+	public async IAsyncEnumerable<Guid> EnumerateEventIdsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		if (_tags is not null)
+		{
+			await foreach (var tag in _tags.EnumerateTagsAsync(cancellationToken))
+			{
+				yield return Guid.ParseExact(tag, "N");
+			}
+		}
+		else
+		{
+			await foreach (var ev in GetAllAsync(default, cancellationToken))
+			{
+				yield return ev.EventId;
 			}
 		}
 	}
