@@ -184,6 +184,66 @@ public class ProjectionCatchUpTests : TestsStateManagement
 		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == laterId)).IsTrue().Because("the event after the orphan is applied");
 	}
 
+	/// <summary>
+	/// A root added again for an entity already here: a device that seeded a deterministic id before its replay caught up
+	/// (pr.quotaly.com 2026-10-23, the stream's own thing). The server keeps the entity it has; so does the fold, once,
+	/// with what was added to it. It threw "This id is already used", which no catch-up steps over, and every fresh
+	/// replay of the stream stopped there: the page never opened.
+	/// </summary>
+	[Test]
+	public async Task Should_keep_an_entity_whose_root_is_added_again()
+	{
+		var log = ServiceProvider.GetRequiredService<IEventLog>();
+		var provider = ServiceProvider.GetRequiredService<IProjectionProvider>();
+		var keeper = ServiceProvider.GetRequiredService<IProjectionKeeper>();
+		var streamId = Guid.NewGuid();
+		var projection = await provider.GetAsync(streamId);
+		var store = (IObjectStore)projection;
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		var id = Guid.NewGuid();
+		var laterId = Guid.NewGuid();
+
+		await log.AppendAsync(BuildRootAdd(store, streamId, id, "first"));
+		await log.AppendAsync(new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(),
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = id,
+			ComponentTypeId = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestUniqueComponent)).TypeId,
+			ComponentId = Guid.NewGuid(),
+			Data = new TestUniqueComponent { Subject = "kept" },
+		});
+		await log.AppendAsync(BuildRootAdd(store, streamId, id, "seeded again"));
+		await log.AppendAsync(BuildRootAdd(store, streamId, laterId, "after it"));
+
+		await keeper.MaintainAsync(projection);
+
+		var nodes = store.GetCollection<TestComponentNode>().Where(n => store.GetId(n) == id).ToList();
+		await Assert.That(nodes.Count).IsEqualTo(1).Because("the entity is listed once");
+		await Assert.That(nodes[0].Components.Count).IsEqualTo(1).Because("what was added to it stays");
+		await Assert.That(store.GetCollection<TestComponentNode>().Any(n => store.GetId(n) == laterId)).IsTrue().Because("the fold goes on past it");
+	}
+
+	ComponentAddedEvent BuildRootAdd(IObjectStore store, Guid streamId, Guid id, string name)
+	{
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		return new ComponentAddedEvent
+		{
+			EventId = Guid.NewGuid(),
+			CommandId = Guid.NewGuid(),
+			StreamId = streamId,
+			TargetTypeId = container.TypeId,
+			CollectionId = container.CollectionId,
+			TargetId = id,
+			ComponentTypeId = container.TypeId,
+			ComponentId = id,
+			Data = new TestComponentNode { Name = name },
+		};
+	}
+
 	async Task WriteNodeWithUniqueComponentAsync(IObjectStore store, Guid id)
 	{
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
