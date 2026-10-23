@@ -1031,18 +1031,26 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 			// Phase 2 (ECS): a self-owned ROOT COMPONENT is the entity's own data (the collapsed
 			// "object", _id == _eid == entityId). Materialize + track it as the entity and add it to
 			// its collection — the object-lifecycle path, reached through the component vocabulary.
-			var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
-			var rootCollection = GetCollection(rootType, "");
-			object rootItem = ev.Data ?? Activator.CreateInstance(rootType)!;
-			var rootAttached = GetAttachedData(rootItem, ev.TargetId, rootCollection, GetMode.GetOrCreate);
-			if (rootItem is IBindableModel ribm && ribm.Store == null)
+			if (TryGetModel(ev.TargetId, out var existing) && !ReferenceEquals(existing.Model, ev.Data))
 			{
-				ribm.Attach(this, rootCollection.CollectionId);
+				// Added again under another event (a device seeded this id before its replay caught up): the entity stays as it is, as MongoProjection keeps it.
+				existing.Attached!.LastEventId = ev.EventId;
 			}
-			rootCollection.AddByEvent(rootItem);
-			if (rootAttached is not null)
+			else
 			{
-				rootAttached.LastEventId = ev.EventId;
+				var rootType = TypeMetadataProvider.GetTypeMetadata(ev.ComponentTypeId).Type;
+				var rootCollection = GetCollection(rootType, "");
+				object rootItem = ev.Data ?? Activator.CreateInstance(rootType)!;
+				var rootAttached = GetAttachedData(rootItem, ev.TargetId, rootCollection, GetMode.GetOrCreate);
+				if (rootItem is IBindableModel ribm && ribm.Store == null)
+				{
+					ribm.Attach(this, rootCollection.CollectionId);
+				}
+				rootCollection.AddByEvent(rootItem);
+				if (rootAttached is not null)
+				{
+					rootAttached.LastEventId = ev.EventId;
+				}
 			}
 			return Task.CompletedTask;
 		}
