@@ -11,7 +11,7 @@ namespace Synqra;
 /// <see cref="ServerEventLog"/> keeps a client's proposal (commit order), <see cref="ClientEventLog"/> takes the next
 /// local stamp (arrival order). A stamp from another log is never kept: one log, one clock.
 /// </summary>
-public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup, IEventIdIndex
+public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup, IEventIdIndex, IClearableAppendStorage
 {
 	readonly IAppendStorage<Event, (Guid Stream, Guid Sequence)> _inner;
 	readonly EventSequencer _sequencer;
@@ -185,6 +185,15 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 	public IAsyncEnumerable<Event> GetAllAsync((Guid Stream, Guid Sequence) from = default, CancellationToken cancellationToken = default) => _inner.GetAllAsync(from, cancellationToken);
 
 	public Task FlushAsync(CancellationToken cancellationToken = default) => _inner.FlushAsync(cancellationToken);
+
+	/// <summary>
+	/// Wipes the storage under this log. A log is what a replication client holds, so it must pass the wipe on: it did not,
+	/// and a browser's Force Resync kept its whole log, holes included (WI 487). A storage that cannot be wiped says so.
+	/// </summary>
+	public Task ClearAllAsync(CancellationToken cancellationToken = default)
+		=> _inner is IClearableAppendStorage clearable
+			? clearable.ClearAllAsync(cancellationToken)
+			: throw new NotSupportedException($"{_inner.GetType().Name} cannot be cleared: it is a durable store, not a client's local copy.");
 
 	public void Dispose() => _inner.Dispose();
 
