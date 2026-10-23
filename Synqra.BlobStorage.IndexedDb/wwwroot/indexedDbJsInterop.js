@@ -192,6 +192,63 @@ export async function getKeys(databaseName, objectStoreName, storeName, fromKeyT
         };
     });
 }
+// One page of records in one readonly transaction, packed into a single buffer so the whole page crosses to .NET as one
+// byte array: per record a 4-byte little-endian key length, the key's UTF-8, a 4-byte blob length, the blob. Reading
+// a log with getKeys + one getBlob per key costs a transaction per record (minutes for a 14k-event browser log).
+export async function getBlobsPage(databaseName, objectStoreName, storeName, fromKeyText, fromExclusive = false, pageSize = 1024) {
+    const opened = await initialize(databaseName, objectStoreName);
+    return await new Promise((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
+        const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText) : prefix;
+        const request = collection.openCursor(IDBKeyRange.lowerBound(startKey, !!fromExclusive && hasFrom));
+        const encoder = new TextEncoder();
+        const parts = [];
+        let total = 0;
+        const finish = () => {
+            const packed = new Uint8Array(total);
+            const view = new DataView(packed.buffer);
+            let at = 0;
+            for (const part of parts) {
+                view.setUint32(at, part.key.length, true);
+                packed.set(part.key, at + 4);
+                at += 4 + part.key.length;
+                view.setUint32(at, part.blob.length, true);
+                packed.set(part.blob, at + 4);
+                at += 4 + part.blob.length;
+            }
+            resolve(packed);
+        };
+        request.onsuccess = function (event) {
+            const cursor = event.target.result;
+            if (!cursor) {
+                finish();
+                return;
+            }
+            const compoundKey = String(cursor.primaryKey);
+            if (!compoundKey.startsWith(prefix)) {
+                finish();
+                return;
+            }
+            const value = cursor.value;
+            const bin = value ? (value.bin ?? value.Bin ?? null) : null;
+            const blob = bin instanceof Uint8Array ? bin : bin ? new Uint8Array(bin) : new Uint8Array(0);
+            const key = encoder.encode(compoundKey.substring(prefix.length));
+            parts.push({ key, blob });
+            total += 8 + key.length + blob.length;
+            if (parts.length >= pageSize) {
+                finish();
+                return;
+            }
+            cursor.continue();
+        };
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
 export async function deleteByKey(databaseName, objectStoreName, storeName, keyText) {
     const opened = await initialize(databaseName, objectStoreName);
     const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
