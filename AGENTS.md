@@ -206,6 +206,17 @@ long branch into its own well-named method rather than flattening it with guard 
   accumulated. `[NotInParallel]` is the actual constraint that still applies, since every
   Mongo-backed test in the suite shares that one mongod instance.)
 
+- **Browser tests:** `Contoso/Contoso.Playwright` (NUnit + Playwright). The `Seeding` category runs in CI (the Dockerfile's
+  `browser` stage starts `Contoso.WebHost` and runs headless Chromium); locally, start the host
+  (`dotnet run --project Contoso/Contoso.WebHost --launch-profile http`) and `dotnet test Contoso/Contoso.Playwright --filter Category=Seeding`.
+  Everything else there stays `[Explicit]`.
+
+## Stream seeding (owner rule)
+
+A client seeds a stream only when it can **prove** the stream is new: it created that stream itself (offline included), or
+the master found its log empty. An empty local log proves nothing: no timeout, no "probably caught up", no offline
+fallback. Seed through `IStreamSeeder` + `StreamSeeding` (docs/model.md §10), never from a page or a component.
+
 ## AOT And Serialization Constraints
 
 - Keep **System.Text.Json** compatibility in mind when changing models, events, or storage formats.

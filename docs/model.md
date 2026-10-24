@@ -631,6 +631,36 @@ gap is expected.
   A member may be any type SBX supports (`Synqra.BinarySerializer/readme.md`, "Supported types"),
   `bool` and `bool?` included; JSON and Mongo carry them natively.
 
+## 10. Seeding a new stream
+
+A stream's first objects (a home view, a welcome item) are written by its **creator** only, once. A client that merely starts
+with an empty local log (a fresh browser, a cleared IndexedDB, a Force Resync, a new device) has no proof the stream is new:
+its replay may simply not have arrived, and a seed written then duplicates what the stream already holds (prod 2026-10-23: a
+second primary Home view, written after an 8 s replay wait). So no replication path ever seeds on a client: no timeout, no
+"probably caught up", no offline fallback.
+
+- **The hook.** A host registers `IStreamSeeder`s (`AddStreamSeeder<T>(serviceKey)`); `StreamSeeding` runs them. A seeder
+  says *what*, and for which streams, from `StreamSeedContext` (the stream, and its `StreamOrigin`); Synqra says *when*. One
+  that has nothing for a stream writes nothing. Its writes should be one command, so a failure leaves no partial seed; a
+  failure is a `StreamSeedingException` carrying the seeder's own, and whatever it committed stays, so the stream is not
+  seeded again.
+- **The master's seed** (`StreamOrigin.EmptyOnMaster`). The replication endpoint calls `SeedIfEmptyAsync` for each stream a
+  connection subscribes to (HELLO and `SubscribeRequest`), under the broadcast gate and before reading the stream for that
+  subscriber, so the subscriber's replay carries the seed. `StreamSeeding` checks the log and seeds under one lock, so racing
+  subscribers seed a new stream once; a stream seeded or found holding events is not read again. The master writes through
+  the host's `IObjectStore` (Mongo, multitenant, in the stream's `SynqraStreamContext`), else the stream's projection from
+  `IProjectionProvider`. One master process serves a stream (as it does for commit order, §9): the lock is in process, the
+  log's emptiness is the proof across restarts.
+- **The creator's seed** (`StreamOrigin.CreatedHere`). A node that creates a stream seeds it itself with `SeedCreatedAsync`,
+  offline as well: nobody else knows the new id. It is refused (`StreamNotNewException`) for a stream whose log holds events.
+  The seed reaches the master as ordinary events with the stream's first connection.
+- **A stream has one creator.** A stream a client created reaches the master empty at the client's HELLO (its events are sent
+  after it), so a master seeder must not claim it: master seeders serve the streams the server creates (Quotaly: the user's
+  main stream), and tell the two apart by stream id and `StreamOrigin`.
+- **Proof of creation on a client is the client's own.** Contoso's browser records a stream it creates in that tab's
+  `sessionStorage` and reloads on it; that load, on the stream's own log, consumes the record (record removed first: a
+  failure leaves the stream unseeded, never seeded twice) and seeds. Another tab or browser opening the URL has no record.
+
 ---
 
 ## Historical / superseded ideas
