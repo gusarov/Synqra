@@ -102,7 +102,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
 		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterC, "the second write reaches the master");
-		var delta = await CountEventsAsync(nodeMaster) - afterC;
+		var delta = await CountWhenSettledAsync(nodeMaster) - afterC; // the write is two events: counted once both have landed
 
 		// D is C's next run: C's log and C's state. It holds both tasks and was sent only the second write's events.
 		var nodeD = NextRun(nodeMaster, streamId, logC, remembered.Saved);
@@ -143,6 +143,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		var afterC = await CountEventsAsync(nodeMaster);
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "second" });
 		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > afterC, "the second write reaches the master");
+		await CountWhenSettledAsync(nodeMaster); // the write is two events: both land before they are counted
 		var afterWatermark = 0;
 		await foreach (var ev in nodeMaster.Events.ReadStreamAsync(streamId))
 		{
