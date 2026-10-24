@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- Browser tests stay local-first because the tests themselves are explicit and marked CI=false. -->
+    <!-- The Seeding category runs in CI (the Dockerfile's browser stage, against Contoso.WebHost); the rest are explicit and marked CI=false. -->
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 

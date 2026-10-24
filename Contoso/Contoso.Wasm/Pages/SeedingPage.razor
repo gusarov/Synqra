@@ -1,0 +1,152 @@
+@page "/seeding"
+@implements IDisposable
+@using Contoso.Model
+@using Contoso.Projection.InMemory
+@using Synqra
+
+<PageTitle>Synqra stream seeding</PageTitle>
+
+<h1>Stream seeding</h1>
+
+@* A stream is seeded only by its creator: the server for a stream it made, this browser for one it made here. Opening any other
+   stream, however empty this browser's log, writes nothing. *@
+@if (!SeedingStream.IsSelected)
+{
+    <p data-testid="no-stream">No stream: open <code>seeding?stream=&lt;id&gt;</code>, or create one here.</p>
+}
+else if (_projection is null)
+{
+    <p>Loading stream…</p>
+}
+else
+{
+    <dl>
+        <dt>Stream</dt>
+        <dd><code data-testid="stream">@SeedingStream.StreamId</code></dd>
+        <dt>Connection</dt>
+        <dd data-testid="online">@(Replication.IsOnline ? "online" : "offline")</dd>
+        <dt>Welcome items</dt>
+        <dd data-testid="welcome-count">@Welcomes</dd>
+        <dt>Items</dt>
+        <dd data-testid="item-count">@Items.Count</dd>
+    </dl>
+    <div data-testid="ready">ready</div>
+
+    <InputText @bind-Value="_itemName" data-testid="itemName" />
+    <button @onclick="AddItemAsync" data-testid="btnAdd">Add item</button>
+
+    <ul>
+        @foreach (var item in Items)
+        {
+            <li data-testid="item">@item.ItemName</li>
+        }
+    </ul>
+}
+
+<button @onclick="CreateStreamAsync" data-testid="btnCreateStream">Create a new stream in this browser</button>
+
+@code {
+    [Inject]
+    private SeedingStream SeedingStream { get; set; } = default!;
+
+    [Inject]
+    private IProjectionProvider ProjectionProvider { get; set; } = default!;
+
+    [Inject]
+    private IEventReplicationService Replication { get; set; } = default!;
+
+    [Inject]
+    private StreamSeeding Seeding { get; set; } = default!;
+
+    [Inject]
+    private IEventLog Log { get; set; } = default!;
+
+    [Inject]
+    private NavigationManager Navigation { get; set; } = default!;
+
+    [Inject]
+    private IJSRuntime JS { get; set; } = default!;
+
+    private ContosoInMemoryProjection? _projection;
+    private Timer? _statusRefresh;
+    private string _itemName = string.Empty;
+
+    private List<ContosoItem> Items => _projection?.GetCollection<ContosoItem>().ToList() ?? [];
+
+    private int Welcomes => Items.Count(i => i.ItemName == ContosoWelcomeSeeder.ItemName);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (SeedingStream.IsSelected)
+        {
+            _projection = (ContosoInMemoryProjection)await ProjectionProvider.GetAsync(SeedingStream.StreamId);
+            _projection.CommandProcessed += OnCommandProcessed;
+            if (await JS.InvokeAsync<string?>("sessionStorage.getItem", SeedingStream.CreationRecordKey) is not null)
+            {
+                await SeedCreatedStreamAsync();
+            }
+            Replication.EventsReceived += OnEventsReceived;
+            _statusRefresh = new Timer(_ => _ = InvokeAsync(StateHasChanged), null, 250, 250); // the connection state is polled
+        }
+    }
+
+    private void OnCommandProcessed(object? sender, EventArgs args) => _ = InvokeAsync(StateHasChanged);
+
+    // What the server sent is in the log: the provider folds it into the projection.
+    private void OnEventsReceived() => _ = InvokeAsync(async () =>
+    {
+        await ProjectionProvider.GetAsync(SeedingStream.StreamId);
+        StateHasChanged();
+    });
+
+    private async Task AddItemAsync()
+    {
+        var store = (IObjectStore)_projection!;
+        var item = store.TypeMetadataProvider.GetTypeMetadata(typeof(ContosoItem));
+        var id = store.IdProvider.CreateComponentId();
+        await store.SubmitCommandAsync(new AddComponentCommand
+        {
+            TargetTypeId = item.TypeId,
+            CollectionId = item.CollectionId,
+            TargetId = id,
+            ComponentTypeId = item.TypeId,
+            ComponentId = id,
+            Data = new ContosoItem { ItemName = _itemName },
+        });
+    }
+
+    // This browser makes the stream, so it is new by construction. The id is recorded here, in this tab only (sessionStorage), and the stream's
+    // own page load (its own log) seeds it: offline as well, sent with the stream's first connection. Another tab or browser opening the
+    // same URL has no record and seeds nothing.
+    private async Task CreateStreamAsync()
+    {
+        var created = SynqraIdProvider.Default.CreateStreamId();
+        await JS.InvokeVoidAsync("sessionStorage.setItem", SeedingStream.ComposeCreationRecordKey(created), "created here");
+        Navigation.NavigateTo($"seeding?stream={created:D}", forceLoad: true);
+    }
+
+    // The record goes first: a load that fails halfway leaves the stream unseeded, never seeded twice.
+    private async Task SeedCreatedStreamAsync()
+    {
+        await JS.InvokeVoidAsync("sessionStorage.removeItem", SeedingStream.CreationRecordKey);
+        try
+        {
+            await Seeding.SeedCreatedAsync(SeedingStream.StreamId, Log, (IObjectStore)_projection!);
+        }
+        catch (StreamNotNewException ex)
+        {
+            // A stale or copied record for a stream that holds events already: refusing it is the guarantee, the page goes on.
+            EmergencyLog.Default.LogWarning(ex, $"Contoso: a creation record for stream {ex.StreamId} was refused: {ex.Message}");
+        }
+    }
+
+    public void Dispose()
+    {
+        _statusRefresh?.Dispose();
+        Replication.EventsReceived -= OnEventsReceived;
+        if (_projection is not null)
+        {
+            _projection.CommandProcessed -= OnCommandProcessed;
+        }
+    }
+}

@@ -5,10 +5,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- The framework's web assets (blazor.web.js) are a package the SDK restores only when it sees .razor content; a restore
+         of the project files alone (the Dockerfile's) sees none, and no page boots. Declared, so every restore brings it. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Contoso.Wasm\Contoso.Wasm.csproj" />
+    <ProjectReference Include="..\Contoso.Projection.InMemory\Contoso.Projection.InMemory.csproj" />
+    <ProjectReference Include="..\..\Synqra.AppendStorage.InMemory\Synqra.AppendStorage.InMemory.csproj" />
+    <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
+    <ProjectReference Include="..\..\Synqra.Replication.AspNetCore\Synqra.Replication.AspNetCore.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
   </ItemGroup>
 
