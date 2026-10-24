@@ -14,7 +14,6 @@ namespace Synqra.Tests.Syncronization;
 /// keep the log (the event log the client holds did not pass the wipe on to its storage) and, while the page ran on, to
 /// persist a server watermark again: the reload resumed near the tail and a hole in the log was never filled (WI 487).
 /// </summary>
-[NotInParallel]
 internal class ForceResyncSyncronizationTests : BaseTest
 {
 	const int PropagationTimeoutMs = 30_000;
