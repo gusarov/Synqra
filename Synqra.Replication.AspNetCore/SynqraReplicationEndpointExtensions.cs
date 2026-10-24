@@ -70,6 +70,9 @@ public static class SynqraReplicationEndpointExtensions
 			: app.Services.GetKeyedService<IEventLog>(serviceKey);
 		var watermarks = log as IEventWatermarks;
 		var logBroadcasts = log is ICommittedEventSource;
+		var seeding = serviceKey is null
+			? app.Services.GetService<StreamSeeding>()
+			: app.Services.GetKeyedService<StreamSeeding>(serviceKey);
 		var projectionSource = (serviceKey is null
 			? app.Services.GetService<IProjection>()
 			: app.Services.GetKeyedService<IProjection>(serviceKey)) as ICommittedEventSource;
@@ -232,6 +235,33 @@ public static class SynqraReplicationEndpointExtensions
 				return taken;
 			}
 
+			// The master seeds a stream it finds empty before a subscriber reads it, so that subscriber's replay carries the seed and no
+			// client ever writes one for a stream it did not create (docs/model.md §10). Called under the broadcast gate, like the read.
+			async Task SeedIfEmptyAsync(IEventLog storage, Guid stream)
+			{
+				if (seeding is { HasSeeders: true })
+				{
+					await seeding.SeedIfEmptyAsync(stream, storage, await ResolveSeedStoreAsync(stream), ctx.RequestAborted);
+				}
+			}
+
+			// The host's store for the stream: its multitenant IObjectStore (Mongo), else the stream's projection from the provider.
+			async Task<IObjectStore> ResolveSeedStoreAsync(Guid stream)
+			{
+				var store = serviceKey is null
+					? ctx.RequestServices.GetService<IObjectStore>()
+					: ctx.RequestServices.GetKeyedService<IObjectStore>(serviceKey);
+				if (store is null)
+				{
+					var provider = (serviceKey is null
+						? ctx.RequestServices.GetService<IProjectionProvider>()
+						: ctx.RequestServices.GetKeyedService<IProjectionProvider>(serviceKey))
+						?? throw new InvalidOperationException("Synqra replication: stream seeders are registered, but the host has no IObjectStore or IProjectionProvider to write a seed through.");
+					store = await provider.GetAsync(stream, ctx.RequestAborted);
+				}
+				return store;
+			}
+
 			#region HELLO — from client
 			// 8 bytes magic + 16 bytes the client's own "last event id it already received from a
 			// server" cursor (Guid.Empty means "never synced, send me everything") — see
@@ -311,6 +341,10 @@ public static class SynqraReplicationEndpointExtensions
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IEventLog>()
 					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
+				foreach (var stream in socketScope.Active)
+				{
+					await SeedIfEmptyAsync(storage, stream);
+				}
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 				var backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
 				try
@@ -373,6 +407,7 @@ public static class SynqraReplicationEndpointExtensions
 								var storage = serviceKey is null
 									? ctx.RequestServices.GetRequiredService<IEventLog>()
 									: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
+								await SeedIfEmptyAsync(storage, target);
 								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								var subWatermark = watermarks is null ? default : await watermarks.ReadWatermarkAsync(target, ctx.RequestAborted);
 								try
