@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Synqra.AppendStorage.BlobStorage.IndexedDb\Synqra.AppendStorage.BlobStorage.IndexedDb.csproj" />
     <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
+    <ProjectReference Include="..\..\Synqra\Synqra.csproj" />
     <ProjectReference Include="..\Contoso.Projection.InMemory\Contoso.Projection.InMemory.csproj" />
   </ItemGroup>
 

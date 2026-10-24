@@ -1,4 +1,5 @@
 using Contoso.Wasm.Pages;
+using Contoso.WebHost;
 using Contoso.WebHost.Components;
 using System.Collections;
 using System.Runtime.InteropServices;
@@ -43,6 +44,7 @@ builder.Services
 	.AddRazorComponents()
 	.AddInteractiveWebAssemblyComponents()
 	;
+builder.Services.AddContosoMaster();
 
 var app = builder.Build();
 
@@ -69,6 +71,7 @@ app.UseHttpsRedirection();
 
 app.UseAntiforgery();
 
+app.MapContosoMaster();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
 	.AddInteractiveWebAssemblyRenderMode()

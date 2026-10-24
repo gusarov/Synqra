@@ -86,6 +86,18 @@ RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.T
     withmongo Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
 COPY --from=buildaot-serializer /src/global.json /stage/buildaot-serializer/
 
+# The browser suite: headless Chromium against the Contoso master, a real WASM client over IndexedDB (docs/model.md §10).
+# The suite runs on VSTest (NUnit), which the 10.0.302 `dotnet test` exit-code fault above does not touch.
+FROM build AS browser
+RUN pwsh Contoso/Contoso.Playwright/bin/$BUILD_CONFIGURATION/net10.0/playwright.ps1 install --with-deps chromium
+RUN cd Contoso/Contoso.WebHost \
+ && (ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5063 dotnet bin/$BUILD_CONFIGURATION/net10.0/Contoso.WebHost.dll > /tmp/contoso.log 2>&1 &) \
+ && for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:5063/seeding && break; sleep 1; done \
+ && curl -sf -o /dev/null http://127.0.0.1:5063/_framework/blazor.web.js \
+ && cd /src \
+ && SYNQRA_CONTOSO_TEST_HOST=http://127.0.0.1:5063/ dotnet test Contoso/Contoso.Playwright -c $BUILD_CONFIGURATION --no-restore --no-build --filter "Category=Seeding" \
+ || (tail -n 200 /tmp/contoso.log; exit 1)
+
 FROM scratch AS art
 COPY --from=pack /out /
 
@@ -94,3 +106,4 @@ COPY --from=pack /out /
 FROM scratch AS log
 COPY --from=test /src/global.json /stage/test/
 COPY --from=buildaot /src/global.json /stage/buildaot/
+COPY --from=browser /src/global.json /stage/browser/
