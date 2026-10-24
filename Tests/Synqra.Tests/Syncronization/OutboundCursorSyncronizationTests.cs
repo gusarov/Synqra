@@ -14,7 +14,6 @@ namespace Synqra.Tests.Syncronization;
 /// still unacknowledged is offered on connect without waiting for a new local write. Prod 2026-10-20: a browser wrote
 /// 104 events into a socket whose server side had already died, marked them sent, and never offered them again.
 /// </summary>
-[NotInParallel]
 internal class OutboundCursorSyncronizationTests : BaseTest
 {
 	const int PropagationTimeoutMs = 30_000;

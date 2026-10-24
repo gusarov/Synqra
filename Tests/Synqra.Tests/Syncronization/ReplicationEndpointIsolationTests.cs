@@ -20,7 +20,6 @@ namespace Synqra.Tests.Syncronization;
 /// backlog-replay paths, so a client on stream A never sees stream B's data on the wire.
 /// net10-only — the production endpoint targets net10.
 /// </summary>
-[NotInParallel]
 internal class ReplicationEndpointIsolationTests : BaseTest
 {
 	// Matches the 30s online-wait budget (see WaitForOnlineAsync): under docker CPU contention a

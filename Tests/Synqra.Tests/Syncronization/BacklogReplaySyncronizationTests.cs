@@ -19,7 +19,6 @@ namespace Synqra.Tests.Syncronization;
 /// These pin the fix: the master now replays a stream's full backlog (via the client's HELLO
 /// cursor) to any (re)connecting client, keyed by what that specific client has already seen.
 /// </summary>
-[NotInParallel]
 internal class BacklogReplaySyncronizationTests : BaseTest
 {
 	// Matches the 30s online-wait budget (see WaitForOnlineAsync): under docker CPU contention a
@@ -190,8 +189,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await nodeC.Started;
 		await interrupted.FirstWatermarkSave.Task.WaitAsync(TimeSpan.FromMilliseconds(PropagationTimeoutMs));
 		var heldByC = await CountEventsAsync(nodeC);
-		var logC = await EndRunAsync(nodeC);
-		interrupted.Release(); // the reader sees the cancelled run and stops; nothing more lands in C's log
+		var logC = await EndRunAsync(nodeC); // the held save sees the cancelled run and the reader stops; nothing more lands in C's log
 		await Assert.That(heldByC).IsLessThan(total).Because("the run ended mid-replay");
 
 		// D is C's next run: C's log and C's state. It must end up with the whole stream, sent the part C never got.
@@ -219,11 +217,9 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		return count;
 	}
 
-	/// <summary>Records like <see cref="RecordingStateStore"/>, and holds the first save that carries a server watermark until released: a run is ended in that window.</summary>
+	/// <summary>Records like <see cref="RecordingStateStore"/>, and holds the first save that carries a server watermark until the run is cancelled: a run is ended in that window.</summary>
 	sealed class InterruptingStateStore : IEventReplicationStateStore
 	{
-		readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
 		public TaskCompletionSource FirstWatermarkSave { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		public EventReplicationState? Saved { get; private set; }
@@ -235,11 +231,11 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 			Saved = new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
 			if (state.ServerWatermark != default && FirstWatermarkSave.TrySetResult())
 			{
-				await _release.Task;
+				// Held on the run's own token: the stop that ends the run releases it. A hold that ignored it kept the host's stop
+				// waiting out its 30 s shutdown timeout, since the service now awaits its reader.
+				await Task.Delay(Timeout.Infinite, cancellationToken);
 			}
 		}
-
-		public void Release() => _release.TrySetResult();
 	}
 
 	const string LogFileKey = "Storage:JsonLinesStorage:FileName";

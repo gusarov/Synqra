@@ -72,19 +72,25 @@ ARG BUILD_BUILDNUMBER
 RUN dotnet pack -o /out                -c $BUILD_CONFIGURATION --no-restore --no-build -clp:ErrorsOnly -nologo -tl:off
 RUN printenv > /out/env.txt
 
+# Its own stage, so BuildKit publishes it beside Synqra.Tests rather than after it.
+FROM build AS buildaot-serializer
+RUN dotnet nuget enable source nuget.org
+RUN dotnet publish Tests/Synqra.BinarySerializer.Tests -c Release -r linux-x64
+RUN chmod +777 Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests; \
+    Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+
 FROM build AS buildaot
 RUN dotnet nuget enable source nuget.org
 RUN dotnet publish -f net10.0 Tests/Synqra.Tests -c Release -r linux-x64
 RUN chmod +777 Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests; \
     withmongo Tests/Synqra.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
-RUN dotnet publish Tests/Synqra.BinarySerializer.Tests -c Release -r linux-x64
-RUN chmod +777 Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests; \
-    Tests/Synqra.BinarySerializer.Tests/bin/Release/net10.0/linux-x64/publish/Synqra.BinarySerializer.Tests --treenode-filter "/*/*/*[(Category!=Performance)&(CI!=false)]/*[(Category!=Performance)&(CI!=false)]"
+COPY --from=buildaot-serializer /src/global.json /stage/buildaot-serializer/
 
 FROM scratch AS art
 COPY --from=pack /out /
 
 #Sync parallel builds here (should be last stage)
+# One small file per stage is enough to run it; copying all of /src made exporting the image take about 35 s.
 FROM scratch AS log
-COPY --from=test /src /stage/test
-COPY --from=buildaot /src /stage/buildaot
+COPY --from=test /src/global.json /stage/test/
+COPY --from=buildaot /src/global.json /stage/buildaot/

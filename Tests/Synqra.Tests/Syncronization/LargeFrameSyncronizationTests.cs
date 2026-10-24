@@ -12,7 +12,6 @@ namespace Synqra.Tests.Syncronization;
 /// backlog replay. Prod 2026-10-19: a 450-command batch did not fit the frame, the replay died on it for every
 /// reconnect, and the browser stayed two days behind without a word.
 /// </summary>
-[NotInParallel]
 internal class LargeFrameSyncronizationTests : BaseTest
 {
 	const int PropagationTimeoutMs = 30_000;
