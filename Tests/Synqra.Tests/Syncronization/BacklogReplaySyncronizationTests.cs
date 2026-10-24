@@ -19,7 +19,6 @@ namespace Synqra.Tests.Syncronization;
 /// These pin the fix: the master now replays a stream's full backlog (via the client's HELLO
 /// cursor) to any (re)connecting client, keyed by what that specific client has already seen.
 /// </summary>
-[NotInParallel]
 internal class BacklogReplaySyncronizationTests : BaseTest
 {
 	// Matches the 30s online-wait budget (see WaitForOnlineAsync): under docker CPU contention a

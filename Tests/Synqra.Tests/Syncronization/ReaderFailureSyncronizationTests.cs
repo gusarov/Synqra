@@ -14,7 +14,6 @@ namespace Synqra.Tests.Syncronization;
 /// vanished, IsOnline stayed true and nothing was received again until the page reloaded (dev 2026-10-23: the cursor stopped
 /// one frame short of an MCP batch, with only a stackless first-chance exception in the console).
 /// </summary>
-[NotInParallel]
 internal class ReaderFailureSyncronizationTests : BaseTest
 {
 	const int PropagationTimeoutMs = 30_000;
