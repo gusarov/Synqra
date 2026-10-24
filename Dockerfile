@@ -57,6 +57,10 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY --parents **/*.*proj *.sln global.json *.targets *.props ./
 RUN dotnet restore "-clp:ErrorsOnly;NoSummary" -tl:false -nologo
+# Chromium for the browser stage, with the driver the restored Microsoft.Playwright package ships: cached like the restore,
+# installed again only when a project file or a package version changes.
+RUN pw=$(echo /root/.nuget/packages/microsoft.playwright/*/.playwright) \
+ && "$pw/node/linux-x64/node" "$pw/package/cli.js" install --with-deps chromium
 COPY . .
 RUN dotnet build Synqra.CodeGeneration -c $BUILD_CONFIGURATION --no-restore "-clp:ErrorsOnly;NoSummary" -nologo -tl:off
 RUN dotnet build                       -c $BUILD_CONFIGURATION --no-restore "-clp:ErrorsOnly;NoSummary" -nologo -tl:off
@@ -89,7 +93,6 @@ COPY --from=buildaot-serializer /src/global.json /stage/buildaot-serializer/
 # The browser suite: headless Chromium against the Contoso master, a real WASM client over IndexedDB (docs/model.md §10).
 # The suite runs on VSTest (NUnit), which the 10.0.302 `dotnet test` exit-code fault above does not touch.
 FROM build AS browser
-RUN pwsh Contoso/Contoso.Playwright/bin/$BUILD_CONFIGURATION/net10.0/playwright.ps1 install --with-deps chromium
 RUN cd Contoso/Contoso.WebHost \
  && (ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5063 dotnet bin/$BUILD_CONFIGURATION/net10.0/Contoso.WebHost.dll > /tmp/contoso.log 2>&1 &) \
  && for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:5063/seeding && break; sleep 1; done \
