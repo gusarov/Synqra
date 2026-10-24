@@ -38,7 +38,7 @@
     <!-- Microsoft.NET packages -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
     <!-- Microsoft.TypeScript -->
-    <PackageVersion Include="Microsoft.TypeScript.MSBuild" Version="6.0.3" />
+    <PackageVersion Include="Microsoft.TypeScript.MSBuild" Version="7.0.1" />
     <!-- MongoDB packages -->
     <PackageVersion Include="MongoDB.Bson" Version="3.9.0" />
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
