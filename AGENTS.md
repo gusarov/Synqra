@@ -41,6 +41,12 @@ This repository is also used as a **submodule of Quotaly**.
   base to confirm it's pure-addition (`git diff <merged-commit> <base-tip> --stat` should be empty,
   confirming the merge captured exactly that commit's content, just rebased to a new SHA), then
   cherry-pick the missing commits onto a fresh branch off the new base and open a new PR.
+- **A merge always changes the commit ids.** `main` takes rebase merges only, so a PR head's id
+  never lands on `main`. A Quotaly PR that pins an unmerged Synqra head is a proof pin: it tests the
+  change on a preview or pr.quotaly.com and is never offered to the owner for merge. After the owner
+  merges the Synqra PR, re-pin a Quotaly PR to the new `main` tip (one commit on the existing pin PR
+  is enough), confirm `git diff --stat <proof-pin> <main-tip>` is empty, then show it. Close any pin
+  PR that another one supersedes.
 
 The main runtime flow is:
 
