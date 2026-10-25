@@ -619,12 +619,27 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 
 	private EmergencyLoggerProvider()
 	{
-		
+#if NET8_0_OR_GREATER
+		if (OperatingSystem.IsBrowser())
+		{
+			BrowserConsole = Console.Out;
+			Ring = new EmergencyLogRing(new LocalStorageEmergencyLogStorage(), Console.Out);
+		}
+#endif
 	}
+
+	/// <summary>
+	/// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything. Null off the browser.
+	/// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
+	/// </summary>
+	internal TextWriter? BrowserConsole { get; }
+
+	/// <summary>The browser's last lines in localStorage, shared by every category; null off the browser.</summary>
+	internal EmergencyLogRing? Ring { get; }
 
 	public ILogger CreateLogger(string categoryName)
 	{
-		return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName));
+		return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName, BrowserConsole, Ring));
 	}
 
 	public void Dispose()
@@ -635,26 +650,19 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 internal class EmergencyLogger : ILogger
 {
 	private readonly string _tags;
-	// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything.
-	// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
 	private readonly TextWriter? _browserConsole;
+	private readonly EmergencyLogRing? _ring;
 
-	public EmergencyLogger(string categoryName)
-#if NET8_0_OR_GREATER
-		: this(categoryName, OperatingSystem.IsBrowser() ? Console.Out : null)
-#else
-		: this(categoryName, null)
-#endif
-	{
-	}
-
-	internal EmergencyLogger(string categoryName, TextWriter? browserConsole)
+	/// <param name="browserConsole">The browser's console; null off the browser, where the log has a file.</param>
+	/// <param name="ring">The browser's last lines in localStorage, written beside the console.</param>
+	internal EmergencyLogger(string categoryName, TextWriter? browserConsole, EmergencyLogRing? ring = null)
 	{
 		if (!string.IsNullOrEmpty(categoryName))
 		{
 			_tags += $" [{ShortCat(categoryName)}]";
 		}
 		_browserConsole = browserConsole;
+		_ring = ring;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -688,6 +696,7 @@ internal class EmergencyLogger : ILogger
 			else
 			{
 				_browserConsole.WriteLine("SynqraEmergencyLog " + line);
+				_ring?.Append(line);
 			}
 		}
 	}
