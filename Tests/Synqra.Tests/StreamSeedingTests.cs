@@ -290,6 +290,149 @@ public class StreamSeedingTests : TestsStateManagement
 		await Assert.That(provider.GetKeyedService<StreamSeeding>("B")).IsNull();
 	}
 
+	// ---------------------------------------------------------------- evolving a seed
+
+	[Test]
+	public async Task Should_seed_an_empty_stream_at_the_current_version()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		var seeding = new StreamSeeding([new VersionedSeeder(2)]);
+
+		var outcome = await seeding.SeedOrUpgradeAsync(stream, Log, store);
+
+		await Assert.That(outcome).IsEqualTo(StreamSeedOutcome.Seeded);
+		await Assert.That(ReadMarkers(store)).IsEquivalentTo([2]);
+	}
+
+	[Test]
+	public async Task Should_evolve_an_older_seed_once_and_not_again_after_a_restart()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		await new StreamSeeding([new VersionedSeeder(1)]).SeedOrUpgradeAsync(stream, Log, store); // seeded by the build before
+
+		var upgraded = await new StreamSeeding([new VersionedSeeder(3)]).SeedOrUpgradeAsync(stream, Log, store);
+		var restarted = await new StreamSeeding([new VersionedSeeder(3)]).SeedOrUpgradeAsync(stream, Log, store);
+
+		await Assert.That(upgraded).IsEqualTo(StreamSeedOutcome.Upgraded);
+		await Assert.That(restarted).IsEqualTo(StreamSeedOutcome.None);
+		await Assert.That(ReadMarkers(store)).IsEquivalentTo([1, 3]);
+	}
+
+	[Test]
+	public async Task Should_evolve_once_when_many_subscribers_race()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		var log = Log;
+		await new StreamSeeding([new VersionedSeeder(1)]).SeedOrUpgradeAsync(stream, log, store);
+		var seeding = new StreamSeeding([new VersionedSeeder(2)]);
+		var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var racers = Enumerable.Range(0, 16).Select(_ => Task.Run(async () =>
+		{
+			await start.Task;
+			return await seeding.SeedOrUpgradeAsync(stream, log, store);
+		})).ToArray();
+		start.SetResult();
+
+		var outcomes = await Task.WhenAll(racers);
+
+		await Assert.That(outcomes.Count(o => o == StreamSeedOutcome.Upgraded)).IsEqualTo(1);
+		await Assert.That(ReadMarkers(store)).IsEquivalentTo([1, 2]);
+	}
+
+	[Test]
+	public async Task Should_leave_alone_a_stream_whose_seed_the_seeder_does_not_find()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		await WriteNodeAsync(store, "history someone else wrote");
+
+		var outcome = await new StreamSeeding([new VersionedSeeder(5)]).SeedOrUpgradeAsync(stream, Log, store);
+
+		await Assert.That(outcome).IsEqualTo(StreamSeedOutcome.None);
+		await Assert.That(ReadMarkers(store)).IsEmpty();
+	}
+
+	[Test]
+	public async Task Should_wrap_a_failing_upgrade_and_try_it_again_on_the_next_subscriber()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		await new StreamSeeding([new VersionedSeeder(1)]).SeedOrUpgradeAsync(stream, Log, store);
+		var seeding = new StreamSeeding([new VersionedSeeder(2) { FailuresLeft = 1 }]);
+
+		var failure = await Assert.ThrowsAsync<StreamSeedingException>(() => seeding.SeedOrUpgradeAsync(stream, Log, store));
+		var retried = await seeding.SeedOrUpgradeAsync(stream, Log, store);
+
+		await Assert.That(failure!.Message).Contains("version 2");
+		await Assert.That(retried).IsEqualTo(StreamSeedOutcome.Upgraded);
+		await Assert.That(ReadMarkers(store)).IsEquivalentTo([1, 2]);
+	}
+
+	[Test]
+	public async Task Should_not_evolve_from_a_seeder_that_does_not_version_its_seed()
+	{
+		var stream = Guid.NewGuid();
+		var store = await OpenStoreAsync(stream);
+		await Seeding.SeedIfEmptyAsync(stream, Log, store);
+
+		var outcome = await new StreamSeeding([new RecordingSeeder(_recorder)]).SeedOrUpgradeAsync(stream, Log, store);
+
+		await Assert.That(outcome).IsEqualTo(StreamSeedOutcome.None);
+		await Assert.That(await CountSeedsAsync(stream)).IsEqualTo(1);
+	}
+
+	/// <summary>The version markers a <see cref="VersionedSeeder"/> wrote into the stream.</summary>
+	List<int> ReadMarkers(IObjectStore store) => new VersionedSeeder(0).ReadMarkers(store);
+
+	/// <summary>Seeds a "version:N" marker node at its version; an upgrade adds the marker of the version it brings the stream to.</summary>
+	public sealed class VersionedSeeder(int version) : IStreamSeeder
+	{
+		public int FailuresLeft { get; set; }
+
+		public int Version => version;
+
+		public Task SeedAsync(StreamSeedContext context, IObjectStore store) => AddMarkerAsync(store, version);
+
+		public Task<int?> ReadVersionAsync(StreamSeedContext context, IObjectStore store)
+		{
+			var markers = ReadMarkers(store);
+			return Task.FromResult<int?>(markers.Count == 0 ? null : markers.Max());
+		}
+
+		public Task UpgradeAsync(StreamSeedContext context, IObjectStore store, int fromVersion)
+		{
+			if (FailuresLeft-- > 0)
+			{
+				throw new InvalidOperationException($"upgrade from {fromVersion} failed");
+			}
+			return AddMarkerAsync(store, version);
+		}
+
+		public List<int> ReadMarkers(IObjectStore store) => store.GetCollection<TestComponentNode>()
+			.Select(n => n.Name)
+			.Where(n => n?.StartsWith("version:", StringComparison.Ordinal) == true)
+			.Select(n => int.Parse(n!["version:".Length..]))
+			.ToList();
+
+		async Task AddMarkerAsync(IObjectStore store, int markerVersion)
+		{
+			var node = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+			var id = Guid.NewGuid();
+			await store.SubmitCommandAsync(new AddComponentCommand
+			{
+				TargetTypeId = node.TypeId,
+				CollectionId = node.CollectionId,
+				TargetId = id,
+				ComponentTypeId = node.TypeId,
+				ComponentId = id,
+				Data = new TestComponentNode { Name = "version:" + markerVersion },
+			});
+		}
+	}
+
 	async Task WriteNodeAsync(IObjectStore store, string name)
 	{
 		var node = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));

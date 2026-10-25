@@ -657,6 +657,15 @@ second primary Home view, written after an 8 s replay wait). So no replication p
 - **A stream has one creator.** A stream a client created reaches the master empty at the client's HELLO (its events are sent
   after it), so a master seeder must not claim it: master seeders serve the streams the server creates (Quotaly: the user's
   main stream), and tell the two apart by stream id and `StreamOrigin`.
+- **A seed evolves.** A seeder has a `Version` (1 until it changes); `SeedAsync` writes the current one. On subscribe the master
+  calls `SeedOrUpgradeAsync`: an empty stream is seeded; a populated one (`StreamOrigin.PopulatedOnMaster`) is asked, per
+  seeder, where its seed stands (`ReadVersionAsync`, from the seeder's own objects: Synqra keeps no record of its own, so no host
+  registers a Synqra type for it) and brought to the current version (`UpgradeAsync`), under the seeding lock, once per process.
+  `null` from `ReadVersionAsync` leaves the stream alone. An upgrade writes its steps and its new version as one command, so a
+  failure is tried again by the next subscriber and a success is never repeated. Only the master evolves a seed, from its log.
+- **Guards.** The endpoint asks every `IInboundEventGuard` (`AddInboundEventGuard<T>(serviceKey)`) before applying a peer's event; a
+  reason refuses it with `EventRejected`, and it is never applied or stored. The server's own writes (seeders, jobs, the host's
+  API) do not pass through a guard: what only automation may change (a system object, its counters) stays changeable by it.
 - **Proof of creation on a client is the client's own.** Contoso's browser records a stream it creates in that tab's
   `sessionStorage` and reloads on it; that load, on the stream's own log, consumes the record (record removed first: a
   failure leaves the stream unseeded, never seeded twice) and seeds. Another tab or browser opening the URL has no record.

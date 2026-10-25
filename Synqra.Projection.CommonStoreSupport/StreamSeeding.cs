@@ -58,6 +58,43 @@ public sealed class StreamSeeding
 	}
 
 	/// <summary>
+	/// The master's seeding of a stream a connection subscribes to: seeds it when its log is empty; otherwise evolves an older seed to
+	/// each seeder's current <see cref="IStreamSeeder.Version"/>. Call it before reading the stream for the subscriber, so the replay
+	/// carries what it wrote. A stream is checked once per process; an upgrade that fails is tried again by the next subscriber.
+	/// </summary>
+	public async Task<StreamSeedOutcome> SeedOrUpgradeAsync(Guid streamId, IEventLog log, IObjectStore store, CancellationToken cancellationToken = default)
+	{
+		var outcome = StreamSeedOutcome.None;
+		if (HasSeeders && !_settled.ContainsKey(streamId))
+		{
+			await _gate.WaitAsync(cancellationToken);
+			try
+			{
+				if (!_settled.ContainsKey(streamId))
+				{
+					if (await HoldsEventsAsync(log, streamId, cancellationToken))
+					{
+						outcome = await UpgradeSeedsAsync(new StreamSeedContext { StreamId = streamId, Origin = StreamOrigin.PopulatedOnMaster }, store)
+							? StreamSeedOutcome.Upgraded
+							: StreamSeedOutcome.None;
+					}
+					else
+					{
+						await RunSeedersAsync(new StreamSeedContext { StreamId = streamId, Origin = StreamOrigin.EmptyOnMaster }, store);
+						outcome = StreamSeedOutcome.Seeded;
+					}
+					_settled.TryAdd(streamId, 0);
+				}
+			}
+			finally
+			{
+				_gate.Release();
+			}
+		}
+		return outcome;
+	}
+
+	/// <summary>
 	/// The creator's seed: runs the seeders on a stream this node has just created. A stream whose log already holds events was not
 	/// created here, and is refused.
 	/// </summary>
@@ -99,6 +136,31 @@ public sealed class StreamSeeding
 				}
 			}
 		}
+	}
+
+	// Each seeder says where its seed stands in this stream; one behind its version is brought up to it.
+	async Task<bool> UpgradeSeedsAsync(StreamSeedContext context, IObjectStore store)
+	{
+		var upgraded = false;
+		using (SynqraStreamContext.Enter(context.StreamId)) // a multitenant store reads and writes the stream in scope
+		{
+			foreach (var seeder in _seeders)
+			{
+				try
+				{
+					if (await seeder.ReadVersionAsync(context, store) is int from && from < seeder.Version)
+					{
+						await seeder.UpgradeAsync(context, store, from);
+						upgraded = true;
+					}
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					throw new StreamSeedingException($"Seeder {seeder.GetType().FullName} failed to evolve stream {context.StreamId} to version {seeder.Version}.", ex);
+				}
+			}
+		}
+		return upgraded;
 	}
 
 	async Task<bool> HoldsEventsAsync(IEventLog log, Guid streamId, CancellationToken cancellationToken)
