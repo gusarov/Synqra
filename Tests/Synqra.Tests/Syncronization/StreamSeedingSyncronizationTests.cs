@@ -4,6 +4,8 @@ using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Synqra.AppendStorage;
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -212,6 +214,190 @@ internal class StreamSeedingSyncronizationTests : BaseTest
 		await Assert.That(await CountWelcomesAsync(master)).IsEqualTo(1);
 		await Assert.That(CountWelcomes(later)).IsEqualTo(1);
 		await Assert.That(CountWelcomes(creator)).IsEqualTo(1);
+	}
+
+	/// <summary>
+	/// A deploy that evolves the seed: the next master process, over the same log, brings the stream's seed to its new version for
+	/// its first subscriber, once; later subscribers and later processes leave it.
+	/// </summary>
+	[Test]
+	public async Task Should_evolve_a_seed_for_the_first_subscriber_of_the_next_master_process()
+	{
+		var streamId = Guid.NewGuid();
+		var log = new SharedLog();
+		var before = new SynqraTestNode(streamId, builder => AddVersionedMaster(builder, log, 1), masterHost: true, useRealEndpoint: true);
+		await before.Started;
+		var early = new SynqraTestNode(streamId) { Port = before.Port };
+		await early.Started;
+		await WaitForOnlineAsync(early);
+		await WaitUntilAsync(() => CountMarkers(early, 1) == 1, "the first client holds the version 1 seed");
+
+		var after = new SynqraTestNode(streamId, builder => AddVersionedMaster(builder, log, 2), masterHost: true, useRealEndpoint: true); // the new build
+		await after.Started;
+		var later = new SynqraTestNode(streamId) { Port = after.Port };
+		await later.Started;
+		await WaitForOnlineAsync(later);
+		await WaitUntilAsync(() => CountMarkers(later, 2) == 1, "the next client holds the evolved seed");
+		var again = new SynqraTestNode(streamId) { Port = after.Port };
+		await again.Started;
+		await WaitForOnlineAsync(again);
+		await WaitUntilAsync(() => CountMarkers(again, 2) == 1, "a third client holds it too");
+		await Task.Delay(QuietPeriodMs);
+
+		await Assert.That(CountMarkers(later, 1)).IsEqualTo(1);
+		await Assert.That(CountMarkers(again, 2)).IsEqualTo(1);
+		await Assert.That(await CountMarkersAsync(after, 1)).IsEqualTo(1);
+		await Assert.That(await CountMarkersAsync(after, 2)).IsEqualTo(1);
+	}
+
+	/// <summary>The host's guard refuses a peer's event: the sender is told, the master's log never holds it; other events pass.</summary>
+	[Test]
+	public async Task Should_refuse_a_peers_event_a_guard_forbids_and_let_the_others_through()
+	{
+		var streamId = Guid.NewGuid();
+		var guard = new SubjectGuard("locked");
+		var master = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IInboundEventGuard>(guard), masterHost: true, useRealEndpoint: true);
+		await master.Started;
+		var client = new SynqraTestNode(streamId) { Port = master.Port };
+		await client.Started;
+		await WaitForOnlineAsync(client);
+
+		client.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "locked" });
+		client.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "free" });
+		await WaitUntilAsync(async () => await CountSubjectsAsync(master, "free") == 1, "the allowed write reaches the master");
+		await Task.Delay(QuietPeriodMs);
+
+		await Assert.That(await CountSubjectsAsync(master, "locked")).IsEqualTo(0);
+		await Assert.That(guard.Refused).IsGreaterThan(0);
+	}
+
+	void AddVersionedMaster(IHostApplicationBuilder builder, SharedLog log, int version)
+	{
+		builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(log.Storage); // one log across both master processes
+		builder.Services.AddSingleton(new MarkerSeeder(version));
+		builder.Services.AddSingleton<IStreamSeeder>(sp => sp.GetRequiredService<MarkerSeeder>());
+		builder.Services.AddSingleton<StreamSeeding>();
+	}
+
+	int CountMarkers(SynqraTestNode node, int version) => node.StoreContext.GetCollection<SampleTaskModel>().Count(t => t.Subject == "version:" + version);
+
+	Task<int> CountMarkersAsync(SynqraTestNode node, int version) => CountSubjectsAsync(node, "version:" + version);
+
+	async Task<int> CountSubjectsAsync(SynqraTestNode node, string subject)
+	{
+		var count = 0;
+		await foreach (var ev in node.Events.GetAllAsync())
+		{
+			if (ev is ComponentAddedEvent { Data: SampleTaskModel { Subject: var s } } && s == subject)
+			{
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/// <summary>
+	/// One event log two master processes share, as a deploy shares the database: events are kept serialized and read back as new
+	/// objects, their stream and sequence restored from the key, so neither process sees the other's live instances.
+	/// </summary>
+	public sealed class SharedLog
+	{
+		public IAppendStorage<Event, (Guid, Guid)> Storage { get; } = new SerializedStorage();
+
+		sealed class SerializedStorage : IAppendStorage<Event, (Guid, Guid)>
+		{
+			readonly SortedDictionary<(Guid Stream, Guid Sequence), string> _rows = new(Comparer<(Guid Stream, Guid Sequence)>.Create((a, b) => a.Stream.CompareBigEndian(b.Stream) is var first && first != 0 ? first : a.Sequence.CompareBigEndian(b.Sequence)));
+			readonly System.Text.Json.JsonSerializerOptions _json = SampleJsonSerializerContext.DefaultOptions;
+
+			public Task AppendAsync(Event item, CancellationToken cancellationToken = default)
+			{
+				lock (_rows)
+				{
+					_rows.Add((item.StreamId, item.SequenceId), System.Text.Json.JsonSerializer.Serialize(item, _json));
+				}
+				return Task.CompletedTask;
+			}
+
+			public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default)
+			{
+				string row;
+				lock (_rows)
+				{
+					row = _rows[key];
+				}
+				return Task.FromResult(Read(key, row));
+			}
+
+			public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+			{
+				KeyValuePair<(Guid Stream, Guid Sequence), string>[] rows;
+				lock (_rows)
+				{
+					rows = _rows.ToArray();
+				}
+				var hasCursor = from != default;
+				foreach (var row in rows.SkipWhile(r => hasCursor && _rows.Comparer.Compare(r.Key, from) <= 0))
+				{
+					yield return Read(row.Key, row.Value);
+				}
+				await Task.CompletedTask;
+			}
+
+			Event Read((Guid Stream, Guid Sequence) key, string row)
+			{
+				var ev = System.Text.Json.JsonSerializer.Deserialize<Event>(row, _json)!;
+				ev.StreamId = key.Stream;
+				ev.SequenceId = key.Sequence;
+				return ev;
+			}
+
+			public void Dispose()
+			{
+			}
+
+			public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+		}
+	}
+
+	/// <summary>Seeds a "version:N" task; reads the highest version seeded; an upgrade adds the task of the version it brings.</summary>
+	public sealed class MarkerSeeder(int version) : IStreamSeeder
+	{
+		public int Version => version;
+
+		public Task SeedAsync(StreamSeedContext context, IObjectStore store) => AddMarkerAsync(store, version);
+
+		public Task<int?> ReadVersionAsync(StreamSeedContext context, IObjectStore store)
+		{
+			var versions = store.GetCollection<SampleTaskModel>().Select(t => t.Subject).Where(s => s?.StartsWith("version:", StringComparison.Ordinal) == true).Select(s => int.Parse(s!["version:".Length..])).ToList();
+			return Task.FromResult<int?>(versions.Count == 0 ? null : versions.Max());
+		}
+
+		public Task UpgradeAsync(StreamSeedContext context, IObjectStore store, int fromVersion) => AddMarkerAsync(store, version);
+
+		Task AddMarkerAsync(IObjectStore store, int markerVersion)
+		{
+			store.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "version:" + markerVersion });
+			return Task.CompletedTask;
+		}
+	}
+
+	/// <summary>Refuses any event that adds a task with the locked subject, as a host refuses edits to its system objects.</summary>
+	public sealed class SubjectGuard(string locked) : IInboundEventGuard
+	{
+		int _refused;
+
+		public int Refused => _refused;
+
+		public ValueTask<string?> RefuseAsync(Event ev, CancellationToken cancellationToken = default)
+		{
+			string? reason = null;
+			if (ev is ComponentAddedEvent { Data: SampleTaskModel { Subject: var subject } } && subject == locked)
+			{
+				Interlocked.Increment(ref _refused);
+				reason = $"'{locked}' is not for a peer to write";
+			}
+			return ValueTask.FromResult(reason);
+		}
 	}
 
 	SynqraTestNode StartMaster(Guid streamId, WelcomeRecorder recorder)

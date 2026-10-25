@@ -73,6 +73,9 @@ public static class SynqraReplicationEndpointExtensions
 		var seeding = serviceKey is null
 			? app.Services.GetService<StreamSeeding>()
 			: app.Services.GetKeyedService<StreamSeeding>(serviceKey);
+		var guards = (serviceKey is null
+			? app.Services.GetServices<IInboundEventGuard>()
+			: app.Services.GetKeyedServices<IInboundEventGuard>(serviceKey)).ToArray();
 		var projectionSource = (serviceKey is null
 			? app.Services.GetService<IProjection>()
 			: app.Services.GetKeyedService<IProjection>(serviceKey)) as ICommittedEventSource;
@@ -235,14 +238,25 @@ public static class SynqraReplicationEndpointExtensions
 				return taken;
 			}
 
-			// The master seeds a stream it finds empty before a subscriber reads it, so that subscriber's replay carries the seed and no
-			// client ever writes one for a stream it did not create (docs/model.md §10). Called under the broadcast gate, like the read.
-			async Task SeedIfEmptyAsync(IEventLog storage, Guid stream)
+			// The master seeds a stream it finds empty, or evolves an older seed, before a subscriber reads it, so that subscriber's replay
+			// carries it and no client ever writes a seed for a stream it did not create (docs/model.md §10). Under the broadcast gate, like the read.
+			async Task SeedOrUpgradeAsync(IEventLog storage, Guid stream)
 			{
 				if (seeding is { HasSeeders: true })
 				{
-					await seeding.SeedIfEmptyAsync(stream, storage, await ResolveSeedStoreAsync(stream), ctx.RequestAborted);
+					await seeding.SeedOrUpgradeAsync(stream, storage, await ResolveSeedStoreAsync(stream), ctx.RequestAborted);
 				}
+			}
+
+			// The first guard that refuses a peer's event names why; none refusing lets it through.
+			async Task<string?> AskGuardsAsync(Event ev)
+			{
+				string? reason = null;
+				for (var i = 0; i < guards.Length && reason is null; i++)
+				{
+					reason = await guards[i].RefuseAsync(ev, ctx.RequestAborted);
+				}
+				return reason;
 			}
 
 			// The host's store for the stream: its multitenant IObjectStore (Mongo), else the stream's projection from the provider.
@@ -353,7 +367,7 @@ public static class SynqraReplicationEndpointExtensions
 					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 				foreach (var stream in socketScope.Active)
 				{
-					await SeedIfEmptyAsync(storage, stream);
+					await SeedOrUpgradeAsync(storage, stream);
 				}
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 				var backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
@@ -417,7 +431,7 @@ public static class SynqraReplicationEndpointExtensions
 								var storage = serviceKey is null
 									? ctx.RequestServices.GetRequiredService<IEventLog>()
 									: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
-								await SeedIfEmptyAsync(storage, target);
+								await SeedOrUpgradeAsync(storage, target);
 								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 								var subWatermark = watermarks is null ? default : await watermarks.ReadWatermarkAsync(target, ctx.RequestAborted);
 								try
@@ -487,6 +501,13 @@ public static class SynqraReplicationEndpointExtensions
 							ev.StreamId = stream;
 						}
 						ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
+						if (await AskGuardsAsync(ev) is { } refused)
+						{
+							// The host forbids this change from a peer (a system object, say): refused for good, never applied or stored.
+							logger?.LogInformation("Synqra replication: event {EventId} on stream {Stream} refused by a guard: {Reason}", ev.EventId, connectionStream, refused);
+							await socket.SendOperationAsync(networkSerializationService, new EventRejected { EventId = ev.EventId, Reason = refused }, ctx.RequestAborted);
+							continue;
+						}
 						var projection = serviceKey is null
 							? ctx.RequestServices.GetRequiredService<IProjection>()
 							: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
