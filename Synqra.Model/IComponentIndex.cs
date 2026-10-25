@@ -11,4 +11,11 @@ public interface IComponentIndex
 
 	/// <summary>The stream's objects matching <paramref name="query"/>, in id order, read lazily.</summary>
 	IEnumerable<object> FindObjects(ObjectQuery query);
+
+	/// <summary>
+	/// The object each id belongs to, keyed by that id: an object owns itself, a facet or a link the object that holds it.
+	/// The owners come tracked with their facets; an id the stream lacks is left out. Answers many ids at once, so a caller
+	/// resolving a batch pays for the batch, not for each id.
+	/// </summary>
+	IReadOnlyDictionary<Guid, object> FindOwners(IEnumerable<Guid> ids);
 }
