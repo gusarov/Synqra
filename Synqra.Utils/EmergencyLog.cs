@@ -623,13 +623,25 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 internal class EmergencyLogger : ILogger
 {
 	private readonly string _tags;
+	// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything.
+	private readonly TextWriter? _browserConsole;
 
 	public EmergencyLogger(string categoryName)
+#if NET8_0_OR_GREATER
+		: this(categoryName, OperatingSystem.IsBrowser() ? Console.Error : null)
+#else
+		: this(categoryName, null)
+#endif
+	{
+	}
+
+	internal EmergencyLogger(string categoryName, TextWriter? browserConsole)
 	{
 		if (!string.IsNullOrEmpty(categoryName))
 		{
 			_tags += $" [{ShortCat(categoryName)}]";
 		}
+		_browserConsole = browserConsole;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -637,25 +649,34 @@ internal class EmergencyLogger : ILogger
 		return null;
 	}
 
-	public bool IsEnabled(LogLevel logLevel)
-	{
-		return true;
-	}
+	/// <summary>In the browser only warnings and errors are kept: per-event chatter written to the console would cost a replay seconds.</summary>
+	public bool IsEnabled(LogLevel logLevel) => _browserConsole is null || logLevel >= LogLevel.Warning;
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
 	{
-		var msg = formatter(state, exception);
-		if (exception != null)
+		if (IsEnabled(logLevel))
 		{
-			var exStr = exception.ToString();
-			if (!msg.Contains(exStr))
+			var msg = formatter(state, exception);
+			if (exception != null)
 			{
-				msg += $": {exStr}";
+				var exStr = exception.ToString();
+				if (!msg.Contains(exStr))
+				{
+					msg += $": {exStr}";
+				}
+			}
+
+			var eventIdStr = eventId.Id != 0 ? $" [{eventId.Id}{(eventId.Name != null ? $":{eventId.Name}" : string.Empty)}]" : string.Empty;
+			var line = $"[{Level(logLevel)}]{_tags}{eventIdStr} {msg}";
+			if (_browserConsole is null)
+			{
+				EmergencyLogImplementation.Default.Message(line);
+			}
+			else
+			{
+				_browserConsole.WriteLine("SynqraEmergencyLog " + line);
 			}
 		}
-
-		var eventIdStr = eventId.Id != 0 ? $" [{eventId.Id}{(eventId.Name != null ? $":{eventId.Name}" : string.Empty)}]" : string.Empty;
-		EmergencyLogImplementation.Default.Message($"[{Level(logLevel)}]{_tags}{eventIdStr} {msg}");
 	}
 
 	private string ShortCat(string categoryName)
