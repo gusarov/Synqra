@@ -636,11 +636,12 @@ internal class EmergencyLogger : ILogger
 {
 	private readonly string _tags;
 	// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything.
+	// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
 	private readonly TextWriter? _browserConsole;
 
 	public EmergencyLogger(string categoryName)
 #if NET8_0_OR_GREATER
-		: this(categoryName, OperatingSystem.IsBrowser() ? Console.Error : null)
+		: this(categoryName, OperatingSystem.IsBrowser() ? Console.Out : null)
 #else
 		: this(categoryName, null)
 #endif
