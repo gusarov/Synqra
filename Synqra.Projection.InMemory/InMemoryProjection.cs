@@ -167,8 +167,18 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 	public Task CatchUpAsync(Func<Guid, IAsyncEnumerable<Event>> readAfter, bool isReplay = false, CancellationToken cancellationToken = default)
 		=> _gate.RunAsync(async () =>
 		{
+			var staging = EmergencyLog.Default.IsStaging();
+			var applied = 0;
+			if (staging)
+			{
+				EmergencyLog.Default.Stage($"projection {StreamId}: catch-up from {Cursor} (replay {isReplay})");
+			}
 			await foreach (var ev in readAfter(Cursor).WithCancellation(cancellationToken))
 			{
+				if (staging && ++applied % 512 == 0)
+				{
+					EmergencyLog.Default.Stage($"projection {StreamId}: catch-up at {applied} events");
+				}
 				if (_ownAhead.Remove(ev.EventId))
 				{
 					Advance(ev.SequenceId);
@@ -188,6 +198,10 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 						Advance(ev.SequenceId);
 					}
 				}
+			}
+			if (staging)
+			{
+				EmergencyLog.Default.Stage($"projection {StreamId}: catch-up done, {applied} events, cursor {Cursor}");
 			}
 		});
 

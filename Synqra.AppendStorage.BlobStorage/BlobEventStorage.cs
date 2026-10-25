@@ -38,8 +38,13 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 		else
 		{
 			var outcome = TailAppendResult.TailMoved;
+			var attempts = 0;
 			while (outcome == TailAppendResult.TailMoved)
 			{
+				if (++attempts > 1)
+				{
+					EmergencyLog.Default.Stage($"log: the tail moved under event {item.EventId}, attempt {attempts}");
+				}
 				var tail = await _tailAppend.ReadTailAsync(cancellationToken);
 				_stamps.CreateVersion7OrApprove(tail.Sequence); // the clock follows the store's tail, whichever writer put it there
 				item.SequenceId = _stamps.CreateVersion7();

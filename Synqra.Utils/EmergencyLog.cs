@@ -573,6 +573,18 @@ public static class EmergencyLogExtensions
 		log.LogTrace($"{message}");
 	}
 
+	/// <summary>Whether stage tracing is on: the "Synqra.Trace.Stages" switch, which a host turns on per browser to see where a startup stops.</summary>
+	public static bool IsStaging(this EmergencyLog log) => AppContext.TryGetSwitch("Synqra.Trace.Stages", out var on) && on;
+
+	/// <summary>A timestamped step of a startup or catch-up path, written only while stage tracing is on.</summary>
+	public static void Stage(this EmergencyLog log, string stage)
+	{
+		if (log.IsStaging())
+		{
+			log.LogWarning($"[stage {DateTime.UtcNow:HH:mm:ss.fff}] {stage}");
+		}
+	}
+
 	[Obsolete("Use LogInformation instead")]
 	public static void Message(this EmergencyLog log, string message)
 	{

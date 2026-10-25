@@ -236,6 +236,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		for (var failures = 0; !_cts.IsCancellationRequested; )
 		{
 			var wsConnection = await ConnectAsync();
+			EmergencyLog.Default.Stage($"replication: connected (cursor {_eventReplicationState.ServerWatermark}, log ids {_skipList.Count})");
 			var connectedAt = Stopwatch.StartNew();
 			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
 			_lastSentSequence = default;
@@ -261,6 +262,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {_networkSerializationService.Magic:X16}.");
 				}
 				IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
+				EmergencyLog.Default.Stage("replication: online");
 				#endregion
 				while (!_cts.IsCancellationRequested)
 				{
@@ -309,6 +311,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			async Task ReceiveAsync(EventEnvelope envelope)
 			{
 				FramesReceived++;
+				if (FramesReceived <= 3 || FramesReceived % 100 == 0)
+				{
+					EmergencyLog.Default.Stage($"replication: frame {FramesReceived} ({envelope.Event.GetType().Name} {envelope.Event.EventId})");
+				}
 				var ev = envelope.Event;
 				var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
 				var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
@@ -369,6 +375,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 			}
 			#endregion
+			EmergencyLog.Default.Stage("replication: HELLO sent");
 			Wake(); // whatever the last run left unacknowledged goes now, not at the next local write
 
 			try
@@ -590,6 +597,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		finally
 		{
 			IsOnline = false;
+			EmergencyLog.Default.Stage($"replication: reader ended after {FramesReceived} frames");
 			Wake(); // the send loop ends this connection
 		}
 	}

@@ -24,6 +24,10 @@ internal sealed class ReentrantGate
 		}
 		else
 		{
+			if (EmergencyLog.Default.IsStaging() && _gate.CurrentCount == 0)
+			{
+				EmergencyLog.Default.Stage("gate: waiting for the holder");
+			}
 			await _gate.WaitAsync();
 			var hold = new Hold();
 			try

@@ -89,7 +89,9 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 			throw new ArgumentException("A non-default stream id is required.", nameof(streamId));
 		}
 		var entry = _byStream.GetOrAdd(streamId, _ => new Entry());
+		EmergencyLog.Default.Stage($"provider {streamId}: waiting for the stream's gate (free {entry.Gate.CurrentCount == 1})");
 		await entry.Gate.WaitAsync(cancellationToken);
+		EmergencyLog.Default.Stage($"provider {streamId}: gate held");
 		try
 		{
 			entry.Projection ??= _factory.Create(streamId);
@@ -103,6 +105,7 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 		finally
 		{
 			entry.Gate.Release();
+			EmergencyLog.Default.Stage($"provider {streamId}: gate released");
 		}
 	}
 }
