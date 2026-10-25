@@ -875,6 +875,21 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		return hit;
 	}
 
+	/// <summary>The maps answer each id: an object owns itself, a facet or a link its owner.</summary>
+	public IReadOnlyDictionary<Guid, object> FindOwners(IEnumerable<Guid> ids)
+	{
+		var found = new Dictionary<Guid, object>();
+		foreach (var id in ids.Where(id => id != default).Distinct())
+		{
+			var ownerId = _componentOwners.TryGetValue(id, out var owner) ? owner : _linksById.TryGetValue(id, out var link) ? link.SourceId : id;
+			if (TryGetModel(ownerId, out var data) && data.Model is { } model)
+			{
+				found[id] = model;
+			}
+		}
+		return found;
+	}
+
 	/// <summary>The typed collections of every registered concrete type the query names, filtered and put in id order (in memory the collections are the index).</summary>
 	public IEnumerable<object> FindObjects(ObjectQuery query)
 	{
