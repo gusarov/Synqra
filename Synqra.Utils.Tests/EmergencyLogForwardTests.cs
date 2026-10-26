@@ -10,7 +10,7 @@ internal class EmergencyLogForwardTests
 {
 	readonly StringWriter _console = new StringWriter();
 
-	EmergencyLog CreateLog() => new EmergencyLog(new EmergencyLogger(string.Empty, _console));
+	EmergencyLog CreateLog(bool isOn = true) => new EmergencyLog(new EmergencyLoggerProvider(_console, isOn));
 
 	[Test]
 	public async Task Should_hand_an_entry_to_the_host_provider_under_the_synqra_category()

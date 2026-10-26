@@ -161,7 +161,10 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 		}
 
 		key = Path.Combine(_folderPath, key);
-		EmergencyLog.Default.LogDebug("GetFileNameFor: " + originalKey + " -> " + key);
+		if (EmergencyLog.Default.IsEnabled(LogLevel.Debug)) // the message is built per call; off, nothing is
+		{
+			EmergencyLog.Default.LogDebug("GetFileNameFor: " + originalKey + " -> " + key);
+		}
 		if (create)
 		{
 			Directory.CreateDirectory(Path.GetDirectoryName(key)!);
