@@ -17,7 +17,15 @@ public sealed class EmergencyLog : ILogger
 
 	public string LogPath => EmergencyLogImplementation.Default.LogPath;
 
-	EmergencyLog(ILogger logger)
+	/// <summary>The category entries carry when forwarded to a host's provider.</summary>
+	public string ForwardedCategory => "Synqra";
+
+	/// <summary>The event id <see cref="EmergencyLogExtensions.Stage"/> writes with, so a host can tell stage tracing from a real warning.</summary>
+	public EventId StageEventId { get; } = new EventId(9001, "Stage");
+
+	volatile ILogger? _forward;
+
+	internal EmergencyLog(ILogger logger)
 	{
 		Logger = logger;
 	}
@@ -26,10 +34,34 @@ public sealed class EmergencyLog : ILogger
 		=> Logger.BeginScope(state);
 
 	public bool IsEnabled(LogLevel logLevel)
-		=> Logger.IsEnabled(logLevel);
+		=> Logger.IsEnabled(logLevel) || (_forward?.IsEnabled(logLevel) ?? false);
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-		=> Logger.Log(logLevel, eventId, state, exception, formatter);
+	{
+		Logger.Log(logLevel, eventId, state, exception, formatter);
+		var forward = _forward;
+		if (forward is not null && forward.IsEnabled(logLevel))
+		{
+			try
+			{
+				forward.Log(logLevel, eventId, state, exception, formatter);
+			}
+			catch (Exception ex)
+			{
+				// Tolerable: the entry is already in this log. A host's provider must not take a Synqra catch block down with it.
+				Logger.LogError(ex, "EmergencyLog: the forwarded provider failed; the entry above is in this log only.");
+			}
+		}
+	}
+
+	/// <summary>
+	/// Also hands every entry to a host's provider, under <see cref="ForwardedCategory"/>; null stops it. The browser has no
+	/// file to keep, so this is how a host gets Synqra's warnings and errors into its own DI logging (an error reporter).
+	/// </summary>
+	public void ForwardTo(ILoggerProvider? provider)
+	{
+		_forward = provider?.CreateLogger(ForwardedCategory);
+	}
 
 	internal ILogger Logger { get; }
 }
@@ -581,7 +613,7 @@ public static class EmergencyLogExtensions
 	{
 		if (log.IsStaging())
 		{
-			log.LogWarning($"[stage {DateTime.UtcNow:HH:mm:ss.fff}] {stage}");
+			log.LogWarning(log.StageEventId, $"[stage {DateTime.UtcNow:HH:mm:ss.fff}] {stage}");
 		}
 	}
 
