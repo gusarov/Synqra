@@ -25,21 +25,13 @@ public sealed class EmergencyLog : ILogger
 
 	volatile ILogger? _forward;
 
+	/// <remarks>
+	/// The AppContext switch "Synqra.EmergencyLog.Enabled" (a host sets it in its runtimeconfig) turns writing off: no file,
+	/// no browser console, nothing formatted. <see cref="ForwardTo"/> and stage tracing still work while it is off.
+	/// </remarks>
 	internal EmergencyLog(EmergencyLoggerProvider provider)
 	{
-		Provider = provider;
 		Logger = (EmergencyLogger)provider.CreateLogger(string.Empty);
-	}
-
-	/// <summary>
-	/// Whether entries are written to the file (the console in a browser). Off unless turned on: by the runtimeconfig switch
-	/// "Synqra.EmergencyLog.Enabled", or by Synqra:EmergencyLog:Enabled in app settings (AddEmergencyLogSettings). Off, nothing
-	/// is formatted or written; <see cref="ForwardTo"/> and stage tracing still work.
-	/// </summary>
-	public bool IsOn
-	{
-		get => Provider.IsOn;
-		set => Provider.IsOn = value;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -74,8 +66,6 @@ public sealed class EmergencyLog : ILogger
 	{
 		_forward = provider?.CreateLogger(ForwardedCategory);
 	}
-
-	internal EmergencyLoggerProvider Provider { get; }
 
 	internal EmergencyLogger Logger { get; }
 }
@@ -691,14 +681,17 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 	// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
 	readonly TextWriter? _browserConsole;
 
-	volatile bool _isOn;
+	readonly bool _isOn;
 
 	private EmergencyLoggerProvider()
 	{
 #if NET8_0_OR_GREATER
 		_browserConsole = OperatingSystem.IsBrowser() ? Console.Out : null;
 #endif
-		_isOn = AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var on) && on; // off by default: it costs every caller
+		if (!AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out _isOn))
+		{
+			_isOn = true;
+		}
 	}
 
 	internal EmergencyLoggerProvider(TextWriter? browserConsole, bool isOn)
@@ -707,12 +700,8 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 		_isOn = isOn;
 	}
 
-	/// <summary>Whether its loggers write; see <see cref="EmergencyLog.IsOn"/>.</summary>
-	public bool IsOn
-	{
-		get => _isOn;
-		set => _isOn = value;
-	}
+	/// <summary>The "Synqra.EmergencyLog.Enabled" switch, read once: whether its loggers write anywhere.</summary>
+	internal bool IsOn => _isOn;
 
 	public ILogger CreateLogger(string categoryName)
 	{

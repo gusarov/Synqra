@@ -6,18 +6,10 @@ using System.Threading.Tasks;
 
 namespace Synqra.Utils.Tests;
 
-/// <summary>Off by default (it cost every caller, and a dev box held a 512 MiB file); errors still reach the host's ILogger.</summary>
+/// <summary>The "Synqra.EmergencyLog.Enabled" switch off: nothing formatted or written, and errors still reach the host's ILogger.</summary>
 internal class EmergencyLogSwitchTests
 {
 	readonly StringWriter _console = new StringWriter();
-
-	[Test]
-	[NotInParallel(nameof(EmergencyLog.IsOn))]
-	public async Task Should_be_off_by_default()
-	{
-		await Assert.That(EmergencyLog.Default.IsOn).IsFalse();
-		await Assert.That(EmergencyLog.Default.IsEnabled(LogLevel.Critical)).IsFalse();
-	}
 
 	[Test]
 	public async Task Should_neither_format_nor_write_while_off()
@@ -36,13 +28,13 @@ internal class EmergencyLogSwitchTests
 	}
 
 	[Test]
-	public async Task Should_write_once_turned_on()
+	public async Task Should_write_when_switched_on()
 	{
-		var log = new EmergencyLog(new EmergencyLoggerProvider(_console, isOn: false));
+		var log = new EmergencyLog(new EmergencyLoggerProvider(_console, isOn: true));
 
-		log.IsOn = true;
 		log.LogWarning("connect attempt failed");
 
+		await Assert.That(log.IsEnabled(LogLevel.Warning)).IsTrue();
 		await Assert.That(_console.ToString()).Contains("connect attempt failed");
 	}
 
