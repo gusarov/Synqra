@@ -185,7 +185,10 @@ public class ObjectConverter : JsonConverter<object>
 		else
 		{
 			var typeName = type.Name;
-			EmergencyLog.Default.LogDebug($"ObjectConverter.JsonSerializer.Serialize: {typeName} ({rootType.Name})");
+			if (EmergencyLog.Default.IsEnabled(LogLevel.Debug)) // the message is built per call; off, nothing is
+			{
+				EmergencyLog.Default.LogDebug($"ObjectConverter.JsonSerializer.Serialize: {typeName} ({rootType.Name})");
+			}
 			if (rootType == type) // it will not produce discriminator, but we need one
 			{
 				w.WriteStartObject();
@@ -432,7 +435,10 @@ public class SynqraJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 						if (typeof(IBindableModel).IsAssignableFrom(knownType))
 						{
 							jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(knownType, knownType.Name));
-							EmergencyLog.Default.LogDebug($"jsonTypeInfo.PolymorphismOptions.DerivedTypes Added {knownType.Name}");
+							if (EmergencyLog.Default.IsEnabled(LogLevel.Debug)) // the message is built per call; off, nothing is
+							{
+								EmergencyLog.Default.LogDebug($"jsonTypeInfo.PolymorphismOptions.DerivedTypes Added {knownType.Name}");
+							}
 						}
 					}
 					jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(ConfiguredMarker), nameof(ConfiguredMarker)));

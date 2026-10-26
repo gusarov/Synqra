@@ -332,7 +332,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				{
 					ev.StreamId = StreamOf(ev);
 					await _storage.AppendAsync(ev); // the local log stamps its own arrival order over the server's sequence
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
+					if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
+					{
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
+					}
 				}
 				if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 				{
@@ -383,7 +386,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				while (!reader.IsCompleted)
 				{
 					await _autoResetEvent.WaitAsync();
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> <TRIGGERED LOOP>");
+					if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
+					{
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> <TRIGGERED LOOP>");
+					}
 					if (_cts.IsCancellationRequested || reader.IsCompleted)
 					{
 						break;
@@ -455,7 +461,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						var bytes = pool.Rent(DefaultFrameSize);
 						try
 						{
-							EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+							if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
+							{
+								EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+							}
 							await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
 						}
 						finally
@@ -477,7 +486,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						Wake();
 					}
 					await SaveStateAsync();
-					EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
+					if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
+					{
+						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
+					}
 
 					// get events from server and apply them locally
 				}

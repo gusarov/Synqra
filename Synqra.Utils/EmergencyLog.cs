@@ -13,7 +13,7 @@ namespace Synqra;
 
 public sealed class EmergencyLog : ILogger
 {
-	public static EmergencyLog Default { get; } = new EmergencyLog(EmergencyLoggerProvider.DefaultLogger);
+	public static EmergencyLog Default { get; } = new EmergencyLog(EmergencyLoggerProvider.DefaultProvider);
 
 	public string LogPath => EmergencyLogImplementation.Default.LogPath;
 
@@ -21,13 +21,25 @@ public sealed class EmergencyLog : ILogger
 	public string ForwardedCategory => "Synqra";
 
 	/// <summary>The event id <see cref="EmergencyLogExtensions.Stage"/> writes with, so a host can tell stage tracing from a real warning.</summary>
-	public EventId StageEventId { get; } = new EventId(9001, "Stage");
+	public EventId StageEventId { get; } = new EventId(EmergencyLogger.StageId, "Stage");
 
 	volatile ILogger? _forward;
 
-	internal EmergencyLog(ILogger logger)
+	internal EmergencyLog(EmergencyLoggerProvider provider)
 	{
-		Logger = logger;
+		Provider = provider;
+		Logger = (EmergencyLogger)provider.CreateLogger(string.Empty);
+	}
+
+	/// <summary>
+	/// Whether entries are written to the file (the console in a browser). Off unless turned on: by the runtimeconfig switch
+	/// "Synqra.EmergencyLog.Enabled", or by Synqra:EmergencyLog:Enabled in app settings (AddEmergencyLogSettings). Off, nothing
+	/// is formatted or written; <see cref="ForwardTo"/> and stage tracing still work.
+	/// </summary>
+	public bool IsOn
+	{
+		get => Provider.IsOn;
+		set => Provider.IsOn = value;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -48,8 +60,8 @@ public sealed class EmergencyLog : ILogger
 			}
 			catch (Exception ex)
 			{
-				// Tolerable: the entry is already in this log. A host's provider must not take a Synqra catch block down with it.
-				Logger.LogError(ex, "EmergencyLog: the forwarded provider failed; the entry above is in this log only.");
+				// Tolerable: a host's provider must not take a Synqra catch block down with it. Written even while off, so it is never silent.
+				Logger.Write(LogLevel.Error, default, "EmergencyLog: the forwarded provider failed to take an entry.", ex, (message, _) => message);
 			}
 		}
 	}
@@ -63,7 +75,9 @@ public sealed class EmergencyLog : ILogger
 		_forward = provider?.CreateLogger(ForwardedCategory);
 	}
 
-	internal ILogger Logger { get; }
+	internal EmergencyLoggerProvider Provider { get; }
+
+	internal EmergencyLogger Logger { get; }
 }
 
 /// <summary>
@@ -86,71 +100,95 @@ internal class EmergencyLogImplementation
 
 	private EmergencyLogImplementation()
 	{
-		if (!AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var isEnabled))
-		{
-			isEnabled = true;
-		}
-#if NET8_0_OR_GREATER || BROWSER
-		if (OperatingSystem.IsBrowser())
+		if (IsBrowser)
 		{
 			_processName = "browser_process";
-			return;
 		}
-#endif
-
-		_processName = Process.GetCurrentProcess().ProcessName
-#if !NETSTANDARD
-		+ (OperatingSystem.IsWindows() ? ".exe" : null)
-#endif
-		+ $":{Process.GetCurrentProcess().Id}"
-		;
-
-		if (isEnabled)
+		else
 		{
-			var dir = Path.Combine(Path.GetTempPath(), "Synqra");
-			Directory.CreateDirectory(dir);
-			_logFilePath = Path.Combine(dir, "Emergency.log");
-			_logFilePathTemplate = Path.Combine(dir, "Emergency_{0}.log");
-			var mutexName = _logFilePath.ToUpperInvariant();
-			foreach (var c in Path.GetInvalidFileNameChars())
+			_processName = Process.GetCurrentProcess().ProcessName
+#if !NETSTANDARD
+			+ (OperatingSystem.IsWindows() ? ".exe" : null)
+#endif
+			+ $":{Process.GetCurrentProcess().Id}"
+			;
+		}
+	}
+
+	bool IsBrowser
+#if NET8_0_OR_GREATER || BROWSER
+		=> OperatingSystem.IsBrowser();
+#else
+		=> false;
+#endif
+
+	readonly object _openLock = new object();
+	volatile bool _opened;
+
+	/// <summary>Creates the folder and the named mutex on the first write, so a log that stays off touches nothing.</summary>
+	void EnsureOpen()
+	{
+		if (!_opened)
+		{
+			lock (_openLock)
 			{
-				mutexName = mutexName.Replace(c, '_');
+				if (!_opened)
+				{
+					if (!IsBrowser)
+					{
+						Open();
+					}
+					_opened = true;
+				}
 			}
-			// mutex name uniquiness should corelate with temp folder uniquiness.
-			// When TMP configured per-user, or per-session, or per-machine same would be with mutex name
-			_mutexName = $"Global\\SynqraEmergencyLog_{mutexName}";
+		}
+	}
+
+	void Open()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Synqra");
+		Directory.CreateDirectory(dir);
+		_logFilePath = Path.Combine(dir, "Emergency.log");
+		_logFilePathTemplate = Path.Combine(dir, "Emergency_{0}.log");
+		var mutexName = _logFilePath.ToUpperInvariant();
+		foreach (var c in Path.GetInvalidFileNameChars())
+		{
+			mutexName = mutexName.Replace(c, '_');
+		}
+		// mutex name uniquiness should corelate with temp folder uniquiness.
+		// When TMP configured per-user, or per-session, or per-machine same would be with mutex name
+		_mutexName = $"Global\\SynqraEmergencyLog_{mutexName}";
 
 
 #if NET8_0_OR_GREATER
-			if (OperatingSystem.IsWindows())
+		if (OperatingSystem.IsWindows())
+		{
+			try
 			{
-				try
-				{
-					var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
-					var security = new MutexSecurity();
-					security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
-					bool createdNew;
-					_mutex = MutexAcl.Create(
-						initiallyOwned: false,
-						name: _mutexName,
-						createdNew: out createdNew,
-						mutexSecurity: security);
-				}
-				catch
-				{
-					// It will fall back to general approach below. Unfortunately, can't log this here to avoid loops.
+				var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+				var security = new MutexSecurity();
+				security.AddAccessRule(new MutexAccessRule(everyone, MutexRights.FullControl, AccessControlType.Allow));//| MutexRights.ReadPermissions | MutexRights.TakeOwnership
+				bool createdNew;
+				_mutex = MutexAcl.Create(
+					initiallyOwned: false,
+					name: _mutexName,
+					createdNew: out createdNew,
+					mutexSecurity: security);
+			}
+			catch
+			{
+				// It will fall back to general approach below. Unfortunately, can't log this here to avoid loops.
 #if DEBUG
-					// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
-					Debugger.Break();
-					throw;
+				// WARNING! If you got exception and break here - take a good care about the cause, think it thoroughly, there are zero exceptions expected.
+				Debugger.Break();
+				throw;
 #endif
-				}
 			}
+		}
 #endif
-			if (_mutex == null)
-			{
-				_mutex = new Mutex(false, _mutexName);
-			}
+		if (_mutex == null)
+		{
+			_mutex = new Mutex(false, _mutexName);
 		}
 	}
 
@@ -173,6 +211,7 @@ internal class EmergencyLogImplementation
 	{
 		try
 		{
+			EnsureOpen();
 			if (_logFilePath == null || _logFilePathTemplate == null)
 			{
 				return;
@@ -645,18 +684,39 @@ public static class EmergencyLogExtensions
 internal class EmergencyLoggerProvider : ILoggerProvider
 {
 	public static EmergencyLoggerProvider DefaultProvider { get; } = new EmergencyLoggerProvider();
-	public static EmergencyLogger DefaultLogger { get; } = (EmergencyLogger)DefaultProvider.CreateLogger(string.Empty);
 
 	private ConcurrentDictionary<string, EmergencyLogger> _loggers = new ConcurrentDictionary<string, EmergencyLogger>();
 
+	// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything.
+	// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
+	readonly TextWriter? _browserConsole;
+
+	volatile bool _isOn;
+
 	private EmergencyLoggerProvider()
 	{
-		
+#if NET8_0_OR_GREATER
+		_browserConsole = OperatingSystem.IsBrowser() ? Console.Out : null;
+#endif
+		_isOn = AppContext.TryGetSwitch("Synqra.EmergencyLog.Enabled", out var on) && on; // off by default: it costs every caller
+	}
+
+	internal EmergencyLoggerProvider(TextWriter? browserConsole, bool isOn)
+	{
+		_browserConsole = browserConsole;
+		_isOn = isOn;
+	}
+
+	/// <summary>Whether its loggers write; see <see cref="EmergencyLog.IsOn"/>.</summary>
+	public bool IsOn
+	{
+		get => _isOn;
+		set => _isOn = value;
 	}
 
 	public ILogger CreateLogger(string categoryName)
 	{
-		return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName));
+		return _loggers.GetOrAdd(categoryName, _ => new EmergencyLogger(categoryName, _browserConsole, this));
 	}
 
 	public void Dispose()
@@ -666,27 +726,21 @@ internal class EmergencyLoggerProvider : ILoggerProvider
 
 internal class EmergencyLogger : ILogger
 {
+	/// <summary>The event id of stage tracing, written while the log is off: the per-browser switch asked for it.</summary>
+	internal const int StageId = 9001;
+
 	private readonly string _tags;
-	// The browser has no file to append to: there the console is the record, and EmergencyLogImplementation drops everything.
-	// Stdout, not stderr: Blazor raises its "unhandled error" bar on anything written to stderr.
 	private readonly TextWriter? _browserConsole;
+	private readonly EmergencyLoggerProvider _provider;
 
-	public EmergencyLogger(string categoryName)
-#if NET8_0_OR_GREATER
-		: this(categoryName, OperatingSystem.IsBrowser() ? Console.Out : null)
-#else
-		: this(categoryName, null)
-#endif
-	{
-	}
-
-	internal EmergencyLogger(string categoryName, TextWriter? browserConsole)
+	internal EmergencyLogger(string categoryName, TextWriter? browserConsole, EmergencyLoggerProvider provider)
 	{
 		if (!string.IsNullOrEmpty(categoryName))
 		{
 			_tags += $" [{ShortCat(categoryName)}]";
 		}
 		_browserConsole = browserConsole;
+		_provider = provider;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull
@@ -694,33 +748,42 @@ internal class EmergencyLogger : ILogger
 		return null;
 	}
 
-	/// <summary>In the browser only warnings and errors are kept: per-event chatter written to the console would cost a replay seconds.</summary>
-	public bool IsEnabled(LogLevel logLevel) => _browserConsole is null || logLevel >= LogLevel.Warning;
+	/// <summary>
+	/// Only while the log is on. In the browser only warnings and errors are kept: per-event chatter written to the console
+	/// would cost a replay seconds.
+	/// </summary>
+	public bool IsEnabled(LogLevel logLevel) => _provider.IsOn && (_browserConsole is null || logLevel >= LogLevel.Warning);
 
 	public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
 	{
-		if (IsEnabled(logLevel))
+		if (IsEnabled(logLevel) || eventId.Id == StageId)
 		{
-			var msg = formatter(state, exception);
-			if (exception != null)
-			{
-				var exStr = exception.ToString();
-				if (!msg.Contains(exStr))
-				{
-					msg += $": {exStr}";
-				}
-			}
+			Write(logLevel, eventId, state, exception, formatter);
+		}
+	}
 
-			var eventIdStr = eventId.Id != 0 ? $" [{eventId.Id}{(eventId.Name != null ? $":{eventId.Name}" : string.Empty)}]" : string.Empty;
-			var line = $"[{Level(logLevel)}]{_tags}{eventIdStr} {msg}";
-			if (_browserConsole is null)
+	/// <summary>Writes whether the log is on or not.</summary>
+	internal void Write<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+	{
+		var msg = formatter(state, exception);
+		if (exception != null)
+		{
+			var exStr = exception.ToString();
+			if (!msg.Contains(exStr))
 			{
-				EmergencyLogImplementation.Default.Message(line);
+				msg += $": {exStr}";
 			}
-			else
-			{
-				_browserConsole.WriteLine("SynqraEmergencyLog " + line);
-			}
+		}
+
+		var eventIdStr = eventId.Id != 0 ? $" [{eventId.Id}{(eventId.Name != null ? $":{eventId.Name}" : string.Empty)}]" : string.Empty;
+		var line = $"[{Level(logLevel)}]{_tags}{eventIdStr} {msg}";
+		if (_browserConsole is null)
+		{
+			EmergencyLogImplementation.Default.Message(line);
+		}
+		else
+		{
+			_browserConsole.WriteLine("SynqraEmergencyLog " + line);
 		}
 	}
 

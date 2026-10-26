@@ -27,10 +27,19 @@ internal class EmergencyLoggerTests : BaseTest
 	*/
 
 	[Test]
+	[NotInParallel(nameof(EmergencyLog.IsOn))]
 	public async Task Should_10_save_emergency_log()
 	{
 		var keyData = Guid.NewGuid().ToString();
-		EmergencyLog.Default.Message("Should_10_save_emergency_log test " + keyData);
+		EmergencyLog.Default.IsOn = true; // off by default
+		try
+		{
+			EmergencyLog.Default.Message("Should_10_save_emergency_log test " + keyData);
+		}
+		finally
+		{
+			EmergencyLog.Default.IsOn = false;
+		}
 		Console.WriteLine(keyData);
 		await Assert.That(ReadAllLogs()).Contains(keyData);
 	}
@@ -112,12 +121,21 @@ internal class EmergencyLoggerTests : BaseTest
 	}
 
 	[Test]
+	[NotInParallel(nameof(EmergencyLog.IsOn))]
 	public async Task Should_11_format_ilog_properly()
 	{
 		var keyData = Guid.NewGuid().ToString();
 		ServiceCollection.AddEmergencyLogger();
 		var logger = ServiceProvider.GetRequiredService<ILogger<EmergencyLoggerTests>>();
-		logger.LogWarning(new EventId(1001, "TheTestEeventId"), "Should_11_format_ilog_properly " + keyData);
+		EmergencyLog.Default.IsOn = true; // off by default
+		try
+		{
+			logger.LogWarning(new EventId(1001, "TheTestEeventId"), "Should_11_format_ilog_properly " + keyData);
+		}
+		finally
+		{
+			EmergencyLog.Default.IsOn = false;
+		}
 		var log = ReadAllLines();
 		var line = log.FirstOrDefault(l => l.Contains(keyData));
 		Console.WriteLine(line);

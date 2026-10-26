@@ -13,7 +13,7 @@ public class EmergencyLogBrowserTests
 	public async Task A_browser_logger_writes_an_error_with_its_exception_to_the_console()
 	{
 		var console = new StringWriter();
-		var logger = new EmergencyLogger("Synqra.EventReplicationService", console);
+		var logger = new EmergencyLoggerProvider(console, isOn: true).CreateLogger("Synqra.EventReplicationService");
 
 		logger.LogError(new IndexOutOfRangeException("frame too short"), "the reader stopped on an exception; reconnecting");
 
@@ -27,7 +27,7 @@ public class EmergencyLogBrowserTests
 	public async Task A_browser_logger_keeps_per_event_chatter_off_the_console()
 	{
 		var console = new StringWriter();
-		var logger = new EmergencyLogger("Synqra.EventReplicationService", console);
+		var logger = new EmergencyLoggerProvider(console, isOn: true).CreateLogger("Synqra.EventReplicationService");
 
 		logger.LogInformation("<<< an event");
 
