@@ -25,6 +25,12 @@ public sealed class EmergencyLog : ILogger
 
 	volatile ILogger? _forward;
 
+	/// <summary>
+	/// Set while this thread is inside the host's provider. A provider that logs back into this log (directly, or through a
+	/// logger factory that includes it) gets that entry written here, not forwarded again: no recursion, no stack overflow.
+	/// </summary>
+	readonly ThreadLocal<bool> _forwarding = new ThreadLocal<bool>();
+
 	/// <remarks>
 	/// The AppContext switch "Synqra.EmergencyLog.Enabled" (a host sets it in its runtimeconfig) turns writing off: no file,
 	/// no browser console, nothing formatted. <see cref="ForwardTo"/> and stage tracing still work while it is off.
@@ -44,8 +50,9 @@ public sealed class EmergencyLog : ILogger
 	{
 		Logger.Log(logLevel, eventId, state, exception, formatter);
 		var forward = _forward;
-		if (forward is not null && forward.IsEnabled(logLevel))
+		if (forward is not null && !_forwarding.Value && forward.IsEnabled(logLevel))
 		{
+			_forwarding.Value = true;
 			try
 			{
 				forward.Log(logLevel, eventId, state, exception, formatter);
@@ -54,6 +61,10 @@ public sealed class EmergencyLog : ILogger
 			{
 				// Tolerable: a host's provider must not take a Synqra catch block down with it. Written even while off, so it is never silent.
 				Logger.Write(LogLevel.Error, default, "EmergencyLog: the forwarded provider failed to take an entry.", ex, (message, _) => message);
+			}
+			finally
+			{
+				_forwarding.Value = false;
 			}
 		}
 	}
