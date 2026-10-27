@@ -173,7 +173,10 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 			records += count;
 			more = count == pageSize;
 		}
-		EmergencyLog.Default.Stage($"indexeddb {_storeName}: {records} records, {pages} pages, {bytes / 1024} KB, waited {Stopwatch.GetElapsedTime(0, waited).TotalMilliseconds:F0} ms");
+		if (EmergencyLog.Default.IsStaging())
+		{
+			EmergencyLog.Default.Stage($"indexeddb {_storeName}: {records} records, {pages} pages, {bytes / 1024} KB, waited {Stopwatch.GetElapsedTime(0, waited).TotalMilliseconds:F0} ms");
+		}
 	}
 
 	/// <summary>The records of one getBlobsPage buffer.</summary>
