@@ -72,6 +72,31 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 	}
 
 #if NET10_0_OR_GREATER
+	/// <summary>
+	/// A cold client that asks for a snapshot (HELLO kind 4) from a master that serves none is declined and gets the ordinary
+	/// backlog, the same history a kind 3 client gets (plans/snapshot.md §1).
+	/// </summary>
+	[Test]
+	public async Task Should_decline_a_snapshot_and_replay_the_backlog_instead()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "before the cold client" });
+		await WaitUntilAsync(async () => await CountEventsAsync(nodeMaster) > 0, "the write reaches the master");
+
+		var nodeC = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, HelloKind = ReplicationHelloKind.SubscribeToSnapshot };
+		await nodeC.Started;
+		await WaitForOnlineAsync(nodeC);
+		var collectionC = nodeC.StoreContext.GetCollection<SampleTaskModel>();
+		await WaitUntilAsync(() => Task.FromResult(collectionC.Count == 1), "C holds the task from the backlog");
+
+		await Assert.That(collectionC.First().Subject).IsEqualTo("before the cold client");
+	}
+
 	// Only the real endpoint (net10) sends watermarks; on older targets the test node falls back to a master that does not.
 	/// <summary>
 	/// A client that remembers the server's watermark (docs/model.md §9) resumes with the delta: on its next run, with its

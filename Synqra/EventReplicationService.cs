@@ -289,6 +289,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
 							break;
+						case SnapshotDeclined declined:
+							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
+							break;
 						case EventRejected rejected:
 							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
 							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
@@ -356,7 +359,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// 8 bytes magic + 16 bytes ServerWatermark (Guid.Empty = "send me everything") + the
 				// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
 				// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
-				var isSubscribeTo = _config.HelloKind == ReplicationHelloKind.SubscribeTo;
+				var isSubscribeTo = _config.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot;
 				var helloSize = isSubscribeTo ? 41 : 25;
 				var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
 				try
