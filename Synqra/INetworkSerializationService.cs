@@ -59,6 +59,7 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 	private ISbxSerializer _sbxSerializerSenderVerify;
 	private ISbxSerializer _sbxSerializerSender;
 	private ISbxSerializer _sbxSerializerReceiver;
+	private int _frameSize = EventReplicationService.DefaultFrameSize; // the largest frame array so far: a frame starts there, not in a buffer it already outgrew
 
 	public bool IsTextOrBinary => false;
 
@@ -81,8 +82,10 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 	{
 		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
 
-		// The caller's buffer is the first try; a frame that outgrows it comes back in a larger array of its own.
-		var span = _sbxSerializerSender.SerializeFrame(obj, buffer == default ? new byte[EventReplicationService.DefaultFrameSize] : buffer);
+		// The caller's buffer is the first try unless an earlier frame outgrew its size; a frame that outgrows it comes back
+		// in a larger array of its own. Every overflow is a thrown exception, so each size is outgrown only once.
+		var span = _sbxSerializerSender.SerializeFrame(obj, buffer.Count >= _frameSize ? buffer : new byte[_frameSize]);
+		_frameSize = Math.Max(_frameSize, span.Array!.Length);
 
 #if DEBUG
 		var json = JsonSerializer.Serialize(obj, AppJsonContext.Default.TransportOperation);
