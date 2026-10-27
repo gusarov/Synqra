@@ -59,6 +59,28 @@ internal class BinarySerializationGuidTests : SbxBaseTest
 	}
 
 	[Test]
+	[Arguments(null, "03")] // glyph 3 - null object
+	[Arguments("00000000-0000-0000-0000-000000000000", "00")]
+	[Arguments("DB7196E3-FD0C-4C15-8D5A-94ABC2D5DFDC", "8D E39671DB 0CFD 154C 5A 94ABC2D5DFDC")] // a value is the guid's own encoding, glyph included
+	[Arguments("0199bf3f-deae-77bb-8631-335347819f65", "07 5EBB46 31335347819F65")]
+	[Arguments("DB7196E3-FD0C-AC15-0D5A-94ABC2D5DFDC", "02 E39671DB 0CFD 15AC 0D5A 94ABC2D5DFDC")]
+	public async Task Should_serialize_nullable_guid_with_test_vectors(string? guidString, string hex)
+	{
+		Guid? guid = guidString == null ? null : new Guid(guidString);
+		var buffer = new byte[20];
+		var ser = new SbxSerializer();
+		ser.SetTimeBase(new DateTime(2025, 10, 7, 15, 17, 38, DateTimeKind.Utc));
+		int pos = 0;
+		ser.Serialize(buffer, ref pos, guid);
+		var pos2 = 0;
+		var deserialized = ser.DeserializeNullableGuid(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo(hex.Replace(" ", ""));
+		await Assert.That(deserialized).IsEqualTo(guid);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
 	public void Should_compress_time()
 	{
 		var ser = new SbxSerializer();
@@ -479,6 +501,113 @@ internal class BinarySerializationBooleanTests : SbxBaseTest
 		await Assert.That(deserialized.Flag).IsEqualTo(flag);
 		await Assert.That(deserialized.Maybe).IsEqualTo(maybe);
 		await Assert.That(pos2).IsEqualTo(pos);
+	}
+}
+
+internal class BinarySerializationBytesTests : SbxBaseTest
+{
+	[Test]
+	[Arguments(null, "00")]
+	[Arguments("", "01")]
+	[Arguments("AB", "02AB")]
+	[Arguments("000180FF", "05000180FF")]
+	public async Task Should_serialize_bytes_with_test_vectors(string? data, string hex)
+	{
+		var bytes = data == null ? null : Convert.FromHexString(data);
+		var ser = new SbxSerializer();
+		var buffer = new byte[16];
+		int pos = 0;
+		ser.Serialize(buffer, ref pos, bytes);
+		var pos2 = 0;
+		var deserialized = ser.DeserializeBytes(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo(hex);
+		await Assert.That(deserialized == null ? null : Convert.ToHexString(deserialized)).IsEqualTo(data);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	public async Task Should_write_a_long_payload_raw_after_a_two_byte_length()
+	{
+		var bytes = Enumerable.Range(0, 300).Select(i => (byte)i).ToArray();
+		var ser = new SbxSerializer();
+		var buffer = new byte[400];
+		int pos = 0;
+		ser.Serialize(buffer, ref pos, bytes);
+		var pos2 = 0;
+		var deserialized = ser.DeserializeBytes(buffer, ref pos2);
+
+		await Assert.That(pos).IsEqualTo(2 + 300); // 301 needs a two-byte varint
+		await Assert.That(deserialized).IsEquivalentTo(bytes);
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	public async Task Should_serialize_boxed_bytes_with_their_type_id()
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[16];
+		int pos = 0;
+		ser.Serialize<object>(buffer, ref pos, new byte[] { 0x01, 0x02 });
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<object>(buffer, ref pos2);
+
+		await Assert.That(Convert.ToHexString(buffer, 0, pos)).IsEqualTo("19030102"); // -13 zigzag = 0x19
+		await Assert.That(deserialized is byte[]).IsTrue();
+		await Assert.That((byte[])deserialized).IsEquivalentTo(new byte[] { 0x01, 0x02 });
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	public async Task Should_round_trip_bytes_in_a_data_dictionary()
+	{
+		var ser = new SbxSerializer();
+		var buffer = new byte[64];
+		int pos = 0;
+		ser.Serialize<IDictionary<string, object>>(buffer, ref pos, new Dictionary<string, object> { ["blob"] = new byte[] { 0xCA, 0xFE } });
+		var pos2 = 0;
+		var deserialized = ser.Deserialize<IDictionary<string, object>>(buffer, ref pos2);
+
+		await Assert.That(deserialized["blob"] is byte[]).IsTrue();
+		await Assert.That((byte[])deserialized["blob"]).IsEquivalentTo(new byte[] { 0xCA, 0xFE });
+		await Assert.That(pos2).IsEqualTo(pos);
+	}
+
+	[Test]
+	[Arguments("03AB", 0, "position 0: 2 bytes declared, 1 left")]
+	[Arguments("FF0602", 1, "position 1: 5 bytes declared, 1 left")]
+	public async Task Should_refuse_a_truncated_payload(string hex, int at, string expected)
+	{
+		var ser = new SbxSerializer();
+		var buffer = Convert.FromHexString(hex);
+
+		var ex = Assert.Throws<FormatException>(() =>
+		{
+			var pos = at;
+			ser.DeserializeBytes(buffer, ref pos);
+		});
+
+		await Assert.That(ex.Message).Contains(expected);
+	}
+
+	[Test]
+	public async Task Should_grow_the_frame_for_a_payload_larger_than_its_buffer()
+	{
+		SbxSerializer CreateMapped()
+		{
+			var ser = new SbxSerializer();
+			ser.Map(22, typeof(SampleFieldBytesModel));
+			ser.Snapshot(); // what the factory does: a frame retry resets to here
+			return ser;
+		}
+		var bytes = Enumerable.Range(0, 100_000).Select(i => (byte)(i * 7)).ToArray();
+
+		var frame = CreateMapped().SerializeFrame<object>(new SampleFieldBytesModel { Data = bytes }, new byte[8192]);
+		var pos = 0;
+		var deserialized = (SampleFieldBytesModel)CreateMapped().Deserialize<object>(frame.AsSpan(), ref pos);
+
+		await Assert.That(deserialized.Data).IsEquivalentTo(bytes);
+		await Assert.That(pos).IsEqualTo(frame.Count);
 	}
 }
 
@@ -917,6 +1046,11 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 		yield return () => SP(() => (66, new SampleFieldNullableBoolModel() { Data = false }, "2A01"));
 		yield return () => SP(() => (67, new SampleFieldNullableBoolModel() { Data = true }, "2A02"));
 
+		// Bytes models: length + 1, 0 = null, then raw
+		yield return () => SP(() => (68, new SampleFieldBytesModel() { Data = null }, "2C00"));
+		yield return () => SP(() => (69, new SampleFieldBytesModel() { Data = [] }, "2C01"));
+		yield return () => SP(() => (73, new SampleFieldBytesModel() { Data = [0xAB, 0x80, 0x00] }, "2C04 AB8000"));
+
 		// Prod
 		yield return () => SP(() => (70, new EventEnvelope
 		{
@@ -1034,6 +1168,7 @@ internal class BinarySerializationObjectPropertyTests : SbxBaseTest
 		ser.Map(19 /* 26 */, typeof(SampleFieldNullableDoubleModel));
 		ser.Map(20 /* 28 */, typeof(SampleFieldBoolModel));
 		ser.Map(21 /* 2A */, typeof(SampleFieldNullableBoolModel));
+		ser.Map(22 /* 2C */, typeof(SampleFieldBytesModel));
 
 		Span<byte> buffer = stackalloc byte[1024];
 		int pos = 0;

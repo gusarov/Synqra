@@ -219,6 +219,28 @@ public partial class SampleModel
 	}
 
 	[Test]
+	public void Should_generate_compilable_sbx_bindings_for_byte_array_members()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Payload byte[]?"")]
+public partial class SampleModel
+{
+	public partial byte[]? Payload { get; set; }
+}
+";
+
+		var result = RunBothGenerators(source);
+		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
+
+		Assert.That(generated, Does.Contain("serializer.DeserializeBytes(in buffer, ref pos)"));
+		Assert.That(result.Errors, Is.Empty, string.Join(Environment.NewLine, result.Errors));
+	}
+
+	[Test]
 	public void Should_compare_floats_safely()
 	{
 		for (int i = 0; i < 1000; i++)

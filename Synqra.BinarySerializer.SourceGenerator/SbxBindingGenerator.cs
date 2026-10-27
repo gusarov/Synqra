@@ -252,7 +252,9 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	static string? DeserializeMethod(ITypeSymbol type, string debug)
 	{
 		DebugLog($"[Type {debug}] <DeserializeMethod>: {type} ({type.GetType().Name})");
-		var res = DeserializeMethodCore(type, debug: debug);
+		var res = type is IArrayTypeSymbol { Rank: 1, ElementType.SpecialType: SpecialType.System_Byte }
+			? "Bytes" // raw, not a list of varints
+			: DeserializeMethodCore(type, debug: debug);
 		DebugLog($"[Type {debug}] </DeserializeMethod>: {type} => {res}");
 		return res;
 	}

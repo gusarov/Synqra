@@ -29,6 +29,7 @@ public interface ISbxSerializer
 	void Serialize(in Span<byte> buffer, ref int pos, float? data);
 	void Serialize(in Span<byte> buffer, ref int pos, double? data);
 	void Serialize(in Span<byte> buffer, ref int pos, bool? data);
+	void Serialize(in Span<byte> buffer, ref int pos, byte[]? data);
 
 	#endregion
 
@@ -55,6 +56,7 @@ public interface ISbxSerializer
 	float? DeserializeNullableSingle(in ReadOnlySpan<byte> buffer, ref int pos);
 	double? DeserializeNullableDouble(in ReadOnlySpan<byte> buffer, ref int pos);
 	bool? DeserializeNullableBoolean(in ReadOnlySpan<byte> buffer, ref int pos);
+	byte[]? DeserializeBytes(in ReadOnlySpan<byte> buffer, ref int pos);
 
 	#endregion
 
