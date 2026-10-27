@@ -169,12 +169,20 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 		{
 			var staging = EmergencyLog.Default.IsStaging();
 			var applied = 0;
+			// Ticks spent waiting for the next event (read and deserialize) and applying it, so a slow catch-up names its half.
+			long reading = 0;
+			long applying = 0;
 			if (staging)
 			{
 				EmergencyLog.Default.Stage($"projection {StreamId}: catch-up from {Cursor} (replay {isReplay})");
 			}
-			await foreach (var ev in readAfter(Cursor).WithCancellation(cancellationToken))
+			await using var events = readAfter(Cursor).GetAsyncEnumerator(cancellationToken);
+			var mark = Stopwatch.GetTimestamp();
+			while (await events.MoveNextAsync())
 			{
+				var ev = events.Current;
+				var read = Stopwatch.GetTimestamp();
+				reading += read - mark;
 				if (staging && ++applied % 512 == 0)
 				{
 					EmergencyLog.Default.Stage($"projection {StreamId}: catch-up at {applied} events");
@@ -198,10 +206,13 @@ public class InMemoryProjection : IObjectStore, IProjection, ICommandVisitor<Com
 						Advance(ev.SequenceId);
 					}
 				}
+				mark = Stopwatch.GetTimestamp();
+				applying += mark - read;
 			}
+			reading += Stopwatch.GetTimestamp() - mark;
 			if (staging)
 			{
-				EmergencyLog.Default.Stage($"projection {StreamId}: catch-up done, {applied} events, cursor {Cursor}");
+				EmergencyLog.Default.Stage($"projection {StreamId}: catch-up done, {applied} events, cursor {Cursor}, read {Stopwatch.GetElapsedTime(0, reading).TotalMilliseconds:F0} ms, applied {Stopwatch.GetElapsedTime(0, applying).TotalMilliseconds:F0} ms");
 			}
 		});
 
