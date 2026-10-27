@@ -300,9 +300,10 @@ public static class SynqraReplicationEndpointExtensions
 					}
 					break;
 				case ReplicationHelloKind.SubscribeTo:
+				case ReplicationHelloKind.SubscribeToSnapshot:
 					if (helloBytes.Length != 41)
 					{
-						throw new InvalidOperationException("Protocol negotiation failed: Hello_SubscribeTo requires a 16-byte stream id (41-byte HELLO).");
+						throw new InvalidOperationException($"Protocol negotiation failed: Hello_{helloKind} requires a 16-byte stream id (41-byte HELLO).");
 					}
 					var helloTarget = new Guid(helloBytes.AsSpan(25, 16));
 					// Authorize against the ceiling — an unscoped host (no connectionStream) admits any
@@ -337,6 +338,15 @@ public static class SynqraReplicationEndpointExtensions
 				// Auto-ack the HELLO with the authoritative active set, so the client can immediately
 				// tell whether the server's default matched what it expected (see SubscriptionState).
 				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
+
+				if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
+				{
+					// No snapshot source yet: an explicit answer, then the ordinary backlog below.
+					foreach (var stream in socketScope.Active)
+					{
+						await socket.SendOperationAsync(networkSerializationService, new SnapshotDeclined { StreamId = stream, Reason = "this master serves no snapshots" }, ctx.RequestAborted);
+					}
+				}
 
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IEventLog>()

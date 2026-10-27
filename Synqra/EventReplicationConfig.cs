@@ -30,6 +30,11 @@ public enum ReplicationHelloKind : byte
 	/// <summary>Hello_SubscribeTo — start subscribed to one specific stream named in the HELLO (see
 	/// <see cref="EventReplicationConfig.InitialSubscribeStreamId"/>), if the host ceiling authorizes it.</summary>
 	SubscribeTo = 3,
+
+	/// <summary>Hello_SubscribeToSnapshot — as <see cref="SubscribeTo"/>, from a fully cold client (no watermark, empty local
+	/// log) that asks for a stream snapshot first. The master answers with <see cref="SnapshotBegin"/> … <see cref="SnapshotEnd"/>
+	/// or <see cref="SnapshotDeclined"/>, then the backlog (plans/snapshot.md).</summary>
+	SubscribeToSnapshot = 4,
 }
 
 public class EventReplicationConfig

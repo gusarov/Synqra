@@ -129,6 +129,9 @@ internal class SynqraTestNode
 
 	public ushort Port { get; set; }
 
+	/// <summary>A client's HELLO kind; the default subscribes to its own stream as the server's default.</summary>
+	public ReplicationHelloKind HelloKind { get; init; } = ReplicationHelloKind.UserDefaultMainStream;
+
 	/// <summary>
 	/// Completes when the node's web host is listening. For the master node this is also
 	/// the moment <see cref="Port"/> carries the real OS-assigned port — await it before
@@ -615,6 +618,8 @@ internal class SynqraTestNode
 		private readonly SynqraTestNode _node;
 		public TestNodeReplicationConfig(SynqraTestNode node) => _node = node;
 		public override ushort Port => _node.Port;
+		public override ReplicationHelloKind HelloKind => _node.HelloKind;
+		public override Guid? InitialSubscribeStreamId => _node.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot ? _node.StreamId : null;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}

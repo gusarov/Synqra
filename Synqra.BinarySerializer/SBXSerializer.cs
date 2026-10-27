@@ -255,6 +255,11 @@ public class SbxSerializer : ISbxSerializer
 		Map(-80, typeof(SubscriptionState));
 		Map(-81, typeof(EventAccepted));
 		Map(-82, typeof(EventRejected));
+		Map(-83, typeof(SnapshotBegin));
+		Map(-84, typeof(SnapshotChunk));
+		Map(-85, typeof(SnapshotEnd));
+		Map(-86, typeof(SnapshotDeclined));
+		Map(-87, typeof(SnapshotType));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
