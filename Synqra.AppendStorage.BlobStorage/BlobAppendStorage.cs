@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Synqra.BinarySerializer;
@@ -78,19 +79,27 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
 	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
+		var read = 0;
+		var deserialized = 0;
+		long deserializing = 0;
 		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
 		{
+			read++;
 			if (TryGetAttachedObject(key, out var attached))
 			{
 				yield return attached;
 			}
 			else
 			{
+				var started = Stopwatch.GetTimestamp();
 				var item = Deserialize(blob);
 				Attach(key, item);
+				deserializing += Stopwatch.GetTimestamp() - started;
+				deserialized++;
 				yield return item;
 			}
 		}
+		EmergencyLog.Default.Stage($"append storage {typeof(T).Name}: {read} read, {deserialized} deserialized in {Stopwatch.GetElapsedTime(0, deserializing).TotalMilliseconds:F0} ms");
 	}
 
 	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Synqra;
 using Synqra.BlobStorage;
@@ -151,9 +152,17 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 			: _getKeyFromItem(from);
 		const int pageSize = 512;
 		var more = true;
+		var pages = 0;
+		var records = 0;
+		long bytes = 0;
+		long waited = 0;
 		while (more && !cancellationToken.IsCancellationRequested)
 		{
+			var asked = Stopwatch.GetTimestamp();
 			var packed = await _indexedDbInterop.GetBlobsPageAsync(_databaseName, _options.ObjectStoreName, _storeName, currentFrom, fromExclusive: currentFrom is not null, pageSize);
+			waited += Stopwatch.GetTimestamp() - asked;
+			pages++;
+			bytes += packed.Length;
 			var count = 0;
 			foreach (var (keyText, blob) in Unpack(packed))
 			{
@@ -161,8 +170,10 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 				currentFrom = keyText;
 				yield return (_getKeyFromText(keyText), blob);
 			}
+			records += count;
 			more = count == pageSize;
 		}
+		EmergencyLog.Default.Stage($"indexeddb {_storeName}: {records} records, {pages} pages, {bytes / 1024} KB, waited {Stopwatch.GetElapsedTime(0, waited).TotalMilliseconds:F0} ms");
 	}
 
 	/// <summary>The records of one getBlobsPage buffer.</summary>
