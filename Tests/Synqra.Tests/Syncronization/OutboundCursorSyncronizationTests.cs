@@ -206,6 +206,43 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 	}
 
 	[Test]
+	public async Task A_client_does_not_echo_on_its_next_run_what_the_master_sent_it()
+	{
+		// pr1246 2026-10-27: 5326 events written over REST came down to an open page that wrote nothing, so its cursor never
+		// passed them; the next page load sent them all back, and its warm load took 23 s instead of 1.5.
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		var remembered = new RecordingStateStore();
+		var nodeB = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeB);
+
+		for (var i = 0; i < 5; i++)
+		{
+			nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = $"written elsewhere {i}" });
+		}
+		var history = await EventIdsAsync(nodeA.Events);
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeB.Events)).IsSupersetOf(history), "the history reaches B while it is open");
+		await Task.Delay(1000); // the cursor is saved as it moves
+		var logB = await EndRunAsync(nodeB);
+
+		var nextRun = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Configuration[LogFileKey] = logB;
+			builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(remembered.Saved));
+		}) { Port = nodeMaster.Port };
+		await nextRun.Started;
+		await WaitForOnlineAsync(nextRun);
+		await Task.Delay(1000); // a send loop that echoes would have done so by now
+
+		await Assert.That(Replication(nextRun).FramesSent).IsEqualTo(0).Because("B's last run received the history; the next one must not send it back");
+	}
+
+	[Test]
 	public async Task A_cursor_missing_from_the_log_does_not_stop_sending()
 	{
 		// The handoff of 2026-10-22: a kept state naming an event the local log no longer holds made the send loop skip

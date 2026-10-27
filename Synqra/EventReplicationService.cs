@@ -346,6 +346,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				{
 					EventsReceived?.Invoke(); // the owner folds the delta in through the keeper
 				}
+				// The send loop steps over it and saves the cursor past it in this run: the held set dies with the run, so a page
+				// that wrote nothing sent everything it received back on its next load (pr1246: 5326 events, a 23 s warm load).
+				Wake();
 			}
 
 			#region HELLO

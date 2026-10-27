@@ -99,7 +99,10 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 				yield return item;
 			}
 		}
-		EmergencyLog.Default.Stage($"append storage {typeof(T).Name}: {read} read, {deserialized} deserialized in {Stopwatch.GetElapsedTime(0, deserializing).TotalMilliseconds:F0} ms");
+		if (EmergencyLog.Default.IsStaging())
+		{
+			EmergencyLog.Default.Stage($"append storage {typeof(T).Name}: {read} read, {deserialized} deserialized in {Stopwatch.GetElapsedTime(0, deserializing).TotalMilliseconds:F0} ms");
+		}
 	}
 
 	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
