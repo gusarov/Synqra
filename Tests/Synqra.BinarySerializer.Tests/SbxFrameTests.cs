@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Reflection;
 using Synqra.BinarySerializer;
 using Synqra.BinarySerializer.Tests;
 using TUnit.Assertions.Extensions;
@@ -80,6 +81,24 @@ public class SbxFrameTests : SbxBaseTest
 		{
 			pool.Return(frame.Array!);
 		}
+	}
+
+	/// <summary>
+	/// Mono's WASM AOT runs the exception filter of a generic method through the interpreter, and that trapped with
+	/// "memory access out of bounds" on every browser page load that sent a frame over 8 KB (dev and prod 2026-10-26).
+	/// </summary>
+	[Test]
+	public async Task No_generic_method_of_the_serializer_catches_through_an_exception_filter()
+	{
+		var filtered = new[] { typeof(SbxFrameExtensions).Assembly, typeof(SbxSerializer).Assembly }
+			.SelectMany(a => a.GetTypes())
+			.SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+				.Where(m => m.IsGenericMethodDefinition || t.IsGenericTypeDefinition)
+				.Where(m => m.GetMethodBody()?.ExceptionHandlingClauses.Any(c => c.Flags == ExceptionHandlingClauseOptions.Filter) == true)
+				.Select(m => $"{t.FullName}.{m.Name}"))
+			.ToList();
+
+		await Assert.That(filtered).IsEmpty();
 	}
 
 	[Test]

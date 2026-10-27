@@ -20,29 +20,45 @@ public static class SbxFrameExtensions
 	/// One attempt into the caller's span: false when the frame does not fit. An overflow resets the serializer, so
 	/// the next attempt starts clean: a partial frame already interned strings it never carried.
 	/// </summary>
+	/// <remarks>
+	/// The overflow is caught by type, never by an exception filter: Mono's WASM AOT runs the filter of a generic method
+	/// through the interpreter, which trapped with "memory access out of bounds" and hung every browser page load that
+	/// sent a frame over 8 KB (dev and prod, 2026-10-26).
+	/// </remarks>
 	public static bool TrySerializeFrame<T>(this ISbxSerializer serializer, in T value, Span<byte> destination, out int written)
 	{
-		bool fits;
+		Exception? overflow = null;
 		written = 0;
 		try
 		{
 			serializer.Serialize(destination, ref written, value);
-			fits = true;
 		}
-		catch (Exception ex) when (ex.IsBufferOverflow())
+		catch (SbxBufferTooSmallException ex)
+		{
+			overflow = ex;
+		}
+		catch (IndexOutOfRangeException ex)
+		{
+			overflow = ex;
+		}
+		catch (ArgumentOutOfRangeException ex)
+		{
+			overflow = ex;
+		}
+		if (overflow is not null)
 		{
 			// not a failure: the caller retries in a larger buffer
 			written = 0;
 			serializer.Reset();
-			fits = false;
 		}
-		return fits;
+		return overflow is null;
 	}
 
 	/// <summary>
 	/// The frame, written into <paramref name="buffer"/> when it fits, else into a larger array of its own. With a
 	/// <paramref name="pool"/>, every outgrown array (the first one included) goes back to it and the array the frame
 	/// came back in is the caller's to return; without one, the frame's array is a plain allocation.
+	/// The overflow is caught by type, not by a filter (see <see cref="TrySerializeFrame{T}"/>).
 	/// </summary>
 	public static ArraySegment<byte> SerializeFrame<T>(this ISbxSerializer serializer, in T value, ArraySegment<byte> buffer, ArrayPool<byte>? pool = null, int maxFrameSize = DefaultMaxFrameSize)
 	{
@@ -52,18 +68,34 @@ public static class SbxFrameExtensions
 		while (!fits)
 		{
 			var written = 0;
+			Exception? overflow = null;
 			try
 			{
 				serializer.Serialize(current, ref written, value);
+			}
+			catch (SbxBufferTooSmallException ex)
+			{
+				overflow = ex;
+			}
+			catch (IndexOutOfRangeException ex)
+			{
+				overflow = ex;
+			}
+			catch (ArgumentOutOfRangeException ex)
+			{
+				overflow = ex;
+			}
+			if (overflow is null)
+			{
 				frame = current.Slice(0, written);
 				fits = true;
 			}
-			catch (Exception ex) when (ex.IsBufferOverflow())
+			else
 			{
 				pool?.Return(current.Array!);
 				if (current.Count >= maxFrameSize)
 				{
-					throw new SbxFrameTooLargeException(maxFrameSize, ex);
+					throw new SbxFrameTooLargeException(maxFrameSize, overflow);
 				}
 				serializer.Reset(); // a partial frame already interned strings it never carried
 				var larger = Math.Min(Math.Max(current.Count, 1) * 2, maxFrameSize);
