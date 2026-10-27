@@ -108,6 +108,7 @@ public class SbxSerializer : ISbxSerializer
 		DictStrStr = -11,
 
 		Boolean = -12, // one byte, 0x00 or 0x01
+		Bytes = -13, // byte[]: varint length + 1 (0 = null), then the raw bytes
 
 		// Lists
 		ListTypeFrom = -17,
@@ -311,6 +312,12 @@ public class SbxSerializer : ISbxSerializer
 			model = new KeyValuePair<TK, TV>(serializer.Deserialize<TK>(buffer, ref pos), serializer.Deserialize<TV>(buffer, ref pos));
 		}
 	}
+
+	/// <summary>Every type this serializer maps, with the schema version it writes and reads that type at.</summary>
+	public IReadOnlyCollection<SbxMapping> Mappings => _typeById.Select(x => new SbxMapping(x.Key, x.Value.type, x.Value.schemaVersion, x.Value.Binder)).ToArray();
+
+	/// <summary>The epoch v7 guids and times are compressed against.</summary>
+	public DateTime TimeBase => _streamBaseTime;
 
 	public void SetTimeBase(DateTime streamBaseTime)
 	{
@@ -582,6 +589,10 @@ public class SbxSerializer : ISbxSerializer
 		{
 			Serialize(in buffer, ref pos, b);
 		}
+		else if (obj is byte[] bytes) // before IEnumerable: raw, not a list of varints
+		{
+			Serialize(in buffer, ref pos, bytes);
+		}
 		else if (obj is string s)
 		{
 			Serialize(in buffer, ref pos, s);
@@ -821,6 +832,10 @@ public class SbxSerializer : ISbxSerializer
 		else if (typeId == TypeId.Utf8String || type == typeof(string))
 		{
 			return DeserializeString(in buffer, ref pos);
+		}
+		else if (typeId == TypeId.Bytes || type == typeof(byte[])) // before IEnumerable
+		{
+			return DeserializeBytes(in buffer, ref pos);
 		}
 		else if (type.IsAssignableTo(typeof(IDictionary<string, object>)))
 		{
@@ -1360,6 +1375,8 @@ public class SbxSerializer : ISbxSerializer
 				return TypeId.DoubleFloating;
 			case Type t when t == typeof(bool):
 				return TypeId.Boolean;
+			case Type t when t == typeof(byte[]):
+				return TypeId.Bytes;
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, string>)):
 				return TypeId.DictStrStr; // artificial mark, requre a call to GetTypeIdForList
 			case Type t when t.IsAssignableTo(typeof(IDictionary<string, object>)):
@@ -1388,6 +1405,7 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.SingleFloating => typeof(float),
 			TypeId.DoubleFloating => typeof(double),
 			TypeId.Boolean => typeof(bool),
+			TypeId.Bytes => typeof(byte[]),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}
@@ -1769,6 +1787,43 @@ public class SbxSerializer : ISbxSerializer
 			2 => true,
 			_ => throw new FormatException($"Corrupt SBX bool? at position {start}: {raw}, expected 0 (null), 1 (false) or 2 (true)."),
 		};
+	}
+
+	#endregion
+
+	#region Bytes
+
+	public void Serialize(in Span<byte> buffer, ref int pos, byte[]? data)
+	{
+		// the nullable +1 convention of ulong?: 0 = null, n + 1 = n raw bytes follow
+		Serialize(buffer, ref pos, data == null ? 0UL : (ulong)data.Length + 1);
+		if (data != null)
+		{
+			if (pos + data.Length > buffer.Length)
+			{
+				throw new SbxBufferTooSmallException("byte[]");
+			}
+			data.CopyTo(buffer.Slice(pos));
+			pos += data.Length;
+		}
+	}
+
+	public byte[]? DeserializeBytes(in ReadOnlySpan<byte> buffer, ref int pos)
+	{
+		var start = pos;
+		var raw = DeserializeUnsigned(buffer, ref pos);
+		byte[]? data = null;
+		if (raw > 0)
+		{
+			var length = raw - 1;
+			if (length > (ulong)(buffer.Length - pos))
+			{
+				throw new FormatException($"Corrupt SBX byte[] at position {start}: {length} bytes declared, {buffer.Length - pos} left.");
+			}
+			data = buffer.Slice(pos, (int)length).ToArray();
+			pos += (int)length;
+		}
+		return data;
 	}
 
 	#endregion
@@ -2188,12 +2243,17 @@ public class SbxSerializer : ISbxSerializer
 
 	public Guid? DeserializeNullableGuid(in ReadOnlySpan<byte> buffer, ref int pos)
 	{
-		var glyph = buffer[pos++];
-		if (glyph == 0x03) // glyph for null object
+		Guid? data;
+		if (buffer[pos] == 0x03) // glyph for null object
 		{
-			return null;
+			pos++;
+			data = null;
 		}
-		return DeserializeGuid(buffer, ref pos);
+		else
+		{
+			data = DeserializeGuid(buffer, ref pos); // the glyph is the guid's own: not consumed here
+		}
+		return data;
 	}
 
 	public unsafe Guid DeserializeGuid(in ReadOnlySpan<byte> buffer, ref int pos)

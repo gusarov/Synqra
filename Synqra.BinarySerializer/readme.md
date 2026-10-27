@@ -13,11 +13,12 @@
 | `Guid` | compressed (v7 against the stream time base, presence mask) | -5 |
 | `float` / `double` | 4 / 8 bytes little-endian | -8 / -9 |
 | `bool` | one byte: `0x00` false, `0x01` true | -12 |
+| `byte[]` | varint length + 1 (0 = null), then the raw bytes | -13 |
 | lists, `IDictionary<string, object>` / `<string, string>` | count, then items | -17..-32 / -10 / -11 |
 | a mapped model | its generated binding | its `Map(...)` id |
 | anything else | by name (Level 3, below) | 0 |
 
-Nullable forms: `long?` and `ulong?` shift by one so that 0 is null; `bool?` follows them as an unsigned varint, 0 null, 1 false, 2 true; `float?` / `double?` use negative zero for null; `string?` and `Guid?` have their own null marks. A `bool` byte other than `0x00`/`0x01`, or a `bool?` value above 2, is corrupt data: decoding throws a `FormatException` naming the position and the value, and never reads "non-zero" as true. An object-typed position (a `Data` dictionary value, a heterogeneous list item, an `object` member) writes the type id first, so a boxed `true` is `17 01` and reads back as a `bool`.
+Nullable forms: `long?` and `ulong?` shift by one so that 0 is null; `bool?` follows them as an unsigned varint, 0 null, 1 false, 2 true; `float?` / `double?` use negative zero for null; `string?` and `Guid?` have their own null marks (a `Guid?` value is the `Guid`'s own encoding, its glyph included; null is glyph `0x03`). `byte[]` is always nullable and never a list of varints: a truncated payload throws a `FormatException` naming the position. A `bool` byte other than `0x00`/`0x01`, or a `bool?` value above 2, is corrupt data: decoding throws a `FormatException` naming the position and the value, and never reads "non-zero" as true. An object-typed position (a `Data` dictionary value, a heterogeneous list item, an `object` member) writes the type id first, so a boxed `true` is `17 01` and reads back as a `bool`.
 
 **Schema Automation**
 I want to have a system that tracks historical formats/schemas of binary serialization. It can be automated similar to EF migrations. Ideally the schema history should be right there where class is, so let's try [Schema] attribute.
