@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Synqra;
 using Synqra.AppendStorage;
+using Synqra.BinarySerializer;
 
 namespace Synqra.Replication.AspNetCore;
 
@@ -79,6 +80,10 @@ public static class SynqraReplicationEndpointExtensions
 		var projectionSource = (serviceKey is null
 			? app.Services.GetService<IProjection>()
 			: app.Services.GetKeyedService<IProjection>(serviceKey)) as ICommittedEventSource;
+		// A cold client asks for the stream's state (plans/snapshot.md); a host with no source declines and the client replays.
+		var snapshots = serviceKey is null
+			? app.Services.GetService<IStreamSnapshotSource>()
+			: app.Services.GetKeyedService<IStreamSnapshotSource>(serviceKey);
 		var committedSources = new[] { log as ICommittedEventSource, projectionSource }.OfType<ICommittedEventSource>().Distinct().ToArray();
 		if (committedSources.Length > 0)
 		{
@@ -259,6 +264,82 @@ public static class SynqraReplicationEndpointExtensions
 				return reason;
 			}
 
+			// The stream's state cut at a watermark (plans/snapshot.md): SnapshotBegin (the schema header), its chunks, SnapshotEnd. Declined,
+			// with the reason, when the host serves none, the connection is unscoped, the stream holds nothing or the cut fails: the client
+			// then takes the ordinary backlog. Returns the watermark the backlog resumes after.
+			async Task<Guid?> SendSnapshotAsync(Guid stream)
+			{
+				Guid? sent = null;
+				var declined = snapshots is null ? "this master serves no snapshots"
+					: connectionStream is null ? "an unscoped connection replays its streams"
+					: null;
+				if (declined is null)
+				{
+					try
+					{
+						var cut = await snapshots!.CutAsync(stream, ctx.RequestAborted);
+						if (cut is null)
+						{
+							declined = "the stream holds nothing to snapshot";
+						}
+						else
+						{
+							await using (cut)
+							{
+								if (cut.Watermark == default)
+								{
+									declined = "the stream's log reports no watermark to resume after";
+								}
+								else
+								{
+									await SendCutAsync(stream, cut);
+									sent = cut.Watermark;
+								}
+							}
+						}
+					}
+					catch (Exception ex) when (ex is not OperationCanceledException)
+					{
+						// The client drops whatever part it got on the decline and replays: slower, never wrong.
+						logger?.LogError(ex, "Synqra replication: the snapshot of stream {Stream} failed; the client replays the stream instead.", stream);
+						declined = $"the snapshot failed: {ex.Message}";
+					}
+				}
+				if (declined is not null)
+				{
+					await socket.SendOperationAsync(networkSerializationService, new SnapshotDeclined { StreamId = stream, Reason = declined }, ctx.RequestAborted);
+				}
+				return sent;
+			}
+
+			async Task SendCutAsync(Guid stream, SnapshotCut cut)
+			{
+				var schema = new SnapshotSchema(ctx.RequestServices.GetRequiredService<ISbxSerializerFactory>());
+				var writer = schema.CreateWriter();
+				var snapshotId = Guid.CreateVersion7();
+				var chunks = new SnapshotChunkWriter(writer, snapshotId);
+				await socket.SendOperationAsync(networkSerializationService, schema.DescribeSnapshot(writer, stream, snapshotId, cut.Watermark, entityCount: 0), ctx.RequestAborted);
+				await foreach (var record in cut.Records.WithCancellation(ctx.RequestAborted))
+				{
+					if (chunks.Write(record) is { } chunk)
+					{
+						await socket.SendOperationAsync(networkSerializationService, chunk, ctx.RequestAborted);
+					}
+				}
+				if (chunks.Complete() is { } last)
+				{
+					await socket.SendOperationAsync(networkSerializationService, last, ctx.RequestAborted);
+				}
+				await socket.SendOperationAsync(networkSerializationService, new SnapshotEnd
+				{
+					SnapshotId = snapshotId,
+					Watermark = cut.Watermark,
+					ChunkCount = chunks.ChunkCount,
+					RecordCount = chunks.RecordCount,
+				}, ctx.RequestAborted);
+				logger?.LogInformation("Synqra replication: snapshot {SnapshotId} of stream {Stream} at {Watermark}: {Records} records in {Chunks} chunks.", snapshotId, stream, cut.Watermark, chunks.RecordCount, chunks.ChunkCount);
+			}
+
 			// The host's store for the stream: its multitenant IObjectStore (Mongo), else the stream's projection from the provider.
 			async Task<IObjectStore> ResolveSeedStoreAsync(Guid stream)
 			{
@@ -353,15 +434,6 @@ public static class SynqraReplicationEndpointExtensions
 				// tell whether the server's default matched what it expected (see SubscriptionState).
 				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
 
-				if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
-				{
-					// No snapshot source yet: an explicit answer, then the ordinary backlog below.
-					foreach (var stream in socketScope.Active)
-					{
-						await socket.SendOperationAsync(networkSerializationService, new SnapshotDeclined { StreamId = stream, Reason = "this master serves no snapshots" }, ctx.RequestAborted);
-					}
-				}
-
 				var storage = serviceKey is null
 					? ctx.RequestServices.GetRequiredService<IEventLog>()
 					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
@@ -369,16 +441,31 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					await SeedOrUpgradeAsync(storage, stream);
 				}
+
+				// A cold client gets each stream's state as of a watermark, and the backlog after it below. Cut under this gate: no
+				// peer's event is applied meanwhile, so the state and the log agree at the watermark.
+				var snapshotted = new Dictionary<Guid, Guid>();
+				if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
+				{
+					foreach (var stream in socketScope.Active)
+					{
+						if (await SendSnapshotAsync(stream) is Guid cutAt)
+						{
+							snapshotted[stream] = cutAt;
+						}
+					}
+				}
+
 				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
 				var backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
 				try
 				{
-					// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark: a
-					// stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own streams.
-					// An unscoped host (connectionStream null) sends every stream's events after the watermark.
+					// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark (or the
+					// snapshot's): a stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own
+					// streams. An unscoped host (connectionStream null) sends every stream's events after the watermark.
 					var backlog = connectionStream is null
 						? AfterCursor(storage.GetAllAsync(default, ctx.RequestAborted), clientCursor)
-						: ReadStreams(storage, socketScope.Active.ToArray(), clientCursor, ctx.RequestAborted);
+						: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, ctx.RequestAborted);
 					await foreach (var ev in backlog)
 					{
 						knownEvents.TryAdd(ev.EventId);
@@ -501,7 +588,7 @@ public static class SynqraReplicationEndpointExtensions
 							ev.StreamId = stream;
 						}
 						ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
-						if (await AskGuardsAsync(ev) is { } refused)
+						if ((ev is StreamSnapshotEvent ? "a stream snapshot is a client's own record, never an event of the stream" : await AskGuardsAsync(ev)) is { } refused)
 						{
 							// The host forbids this change from a peer (a system object, say): refused for good, never applied or stored.
 							logger?.LogInformation("Synqra replication: event {EventId} on stream {Stream} refused by a guard: {Reason}", ev.EventId, connectionStream, refused);
@@ -643,12 +730,12 @@ public static class SynqraReplicationEndpointExtensions
 	/// </summary>
 	static Guid CapAt(this Guid sequence, Guid watermark) => sequence.CompareBigEndian(watermark) < 0 ? sequence : watermark;
 
-	/// <summary>Each stream's events strictly after the cursor, stream by stream.</summary>
-	static async IAsyncEnumerable<Event> ReadStreams(this IEventLog log, Guid[] streams, Guid cursor, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+	/// <summary>Each stream's events strictly after its cursor, stream by stream.</summary>
+	static async IAsyncEnumerable<Event> ReadStreams(this IEventLog log, Guid[] streams, Func<Guid, Guid> cursorOf, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		foreach (var stream in streams)
 		{
-			await foreach (var ev in log.ReadStreamAsync(stream, cursor, cancellationToken))
+			await foreach (var ev in log.ReadStreamAsync(stream, cursorOf(stream), cancellationToken))
 			{
 				yield return ev;
 			}

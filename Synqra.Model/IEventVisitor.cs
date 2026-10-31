@@ -13,6 +13,9 @@ public interface IEventVisitor<in T>
 	Task VisitAsync(ComponentPropertyChangedEvent ev, T ctx);
 	Task VisitAsync(ComponentDeletedEvent ev, T ctx);
 
+	/// <summary>A stream snapshot a client keeps in its own log (plans/snapshot.md §5); only a client's projection folds one.</summary>
+	Task VisitAsync(StreamSnapshotEvent ev, T ctx) => Task.CompletedTask;
+
 
 	/*
 	Task VisitAsync(CommandPatched ev, T ctx);

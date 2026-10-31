@@ -13,6 +13,7 @@
     <InternalsVisibleTo Include="Synqra.Projection.Sqlite"/>
     <InternalsVisibleTo Include="Synqra.Projection.MongoDb"/>
     <ProjectReference Include="..\Synqra.AppendStorage.Abstractions\Synqra.AppendStorage.Abstractions.csproj" />
+    <ProjectReference Include="..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\Synqra.Model\Synqra.Model.csproj" />
   </ItemGroup>
 

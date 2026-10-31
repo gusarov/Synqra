@@ -49,4 +49,13 @@ public static class InMemorySynqraExtensions
 		services.TryAddSingleton<IProjectionProvider, InMemoryProjectionProvider>();
 		services.TryAddSingleton<IProjectionKeeper, ProjectionKeeper>();
 	}
+
+	/// <summary>
+	/// A master built on in-memory projections serves stream snapshots (plans/snapshot.md) from them: a cold client then loads
+	/// the stream's state instead of replaying its history. A client never registers this.
+	/// </summary>
+	public static void AddInMemoryStreamSnapshots(this IServiceCollection services)
+	{
+		services.TryAddSingleton<IStreamSnapshotSource, InMemoryStreamSnapshotSource>();
+	}
 }
