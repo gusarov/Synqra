@@ -115,33 +115,37 @@ gate. (Its `Cursor` is the local log's own sequence, not a server watermark, so 
 A projection *behind* its log (a failed final commit, §9) yields a snapshot missing that event — the same gap every
 reader of that projection has today; the repair is the projection rebuild, not the snapshot.
 
-### 5. Client apply
+### 5. Client apply (as built)
 
-- `EventReplicationService` stays transport-only. It hands `SnapshotBegin/Chunk/End` to an `IStreamSnapshotSink`
-  (registered by the projection area), keeping the raw `Payload` bytes.
-- `InMemoryProjectionProvider` implements the sink. On `SnapshotBegin` it validates the header (§2), creates the stream's
-  projection and holds the stream's provider gate, so `GetAsync` waits instead of folding an empty log. Each chunk is
-  applied through the existing visit path — a `ComponentAddedEvent` built in memory per record, `IsReplay = true` (no
-  activator side effects, same materialization, link index and uniqueness checks as replay) — then the entity's
-  `LastEventId = Version`. The provider yields to the UI between chunks and reports progress.
-- `SnapshotEnd`: counts checked; the projection's cursor stays at the local log's head (empty); the provider marks the
-  stream `ColdLoaded`; `ServerWatermark = Watermark` is persisted **only now**. Then the gate opens and the backlog after
-  `W` flows into the local log and through the keeper as usual.
-- A connection lost mid-snapshot leaves `ServerWatermark` empty and the local log empty: the next connection asks for a
-  snapshot again. The half-built projection is discarded.
-- `SnapshotDeclined`, a refused header, or a count mismatch: discard, and let the replay path run (`SubscribeTo` on refusal).
-- The local log no longer holds the stream's full history — only what arrives after `W` and the node's own writes. That
-  is fine for the projection (it never replays below its snapshot) and for replication (dedup by `EventId`; the master
-  never resends below `W`).
+- `EventReplicationService` stays transport-only. A fully cold client (no `ServerWatermark`, nothing in its log) that knows
+  its stream (`EventReplicationConfig.StreamId` or `InitialSubscribeStreamId`) sends kind 4; `RequestSnapshot` (on by default)
+  turns it off.
+- `SnapshotBegin`: the header is checked at once (`SnapshotSchema.CreateReader`). A refused header ends the connection; the
+  next one, for the rest of that run, asks for the ordinary replay. `SnapshotChunk`s are collected in order; one out of place
+  ends the connection.
+- `SnapshotEnd`: the counts are checked, then the whole snapshot is appended to the client's own log as **one record**, a
+  `StreamSnapshotEvent` (header + chunks as received, SBX id -88). Only then does `ServerWatermark` become `W` and get
+  persisted, and `EventsReceived` is raised. A connection lost before that leaves the log empty and the watermark unset: the
+  next connection asks again.
+- The projection folds that record like any event of the log: `InMemoryProjection.VisitAsync(StreamSnapshotEvent)` decodes
+  the chunks with the header's reader and applies each record as an in-memory `ComponentAddedEvent` (`IsReplay = true`; same
+  materialization, link index and uniqueness checks as replay), roots first, each entity at its master version. Its cursor
+  then moves past the record, and the backlog after `W` follows through the keeper as usual.
+- The send loop never offers the record, and the endpoint refuses one if a client sends it anyway.
+- An event the master stamped at or before `W` is never applied again: a live push of an event committed before the cut can
+  arrive after the newer backlog (found by the concurrent-writes test). At startup a log that begins with a snapshot sets `W`
+  as the floor of the resume point too, so a client that keeps no replication state (Contoso's browser) is not sent the
+  history to fold over its snapshot.
+- `SnapshotDeclined`, before or after a `SnapshotBegin`: whatever part came is dropped, and the backlog that follows is the
+  whole stream.
 
-### 6. Phase 2 — persisted snapshot (warm loads)
+### 6. Phase 2 — warm loads, compaction
 
-Same format, stored: an IndexedDB `Snapshot` store keyed `(SnapshotId, Index)` holding the chunk payloads as received,
-plus a manifest `{ SnapshotId, Watermark, header, localCursorAtCut }`. A warm load decodes the stored chunks with the
-stored header (the header is what makes a months-old snapshot readable), then folds only the local log after
-`localCursorAtCut`. The client rewrites its own snapshot from its in-memory state (same writer, §3) when the log past the
-cut grows beyond a threshold, and only then truncates the log below the new cut — the "compaction horizon" of
-docs/model.md. A stored snapshot whose header this build refuses is dropped and re-fetched from the master.
+Warm loads are covered by §5: the snapshot is the first record of the client's log, so every load folds it and then the events
+after it, and the header kept with it is what makes a months-old snapshot readable. What remains of phase 2 is **compaction**:
+the client rewrites its snapshot from its in-memory state (same writer, §3) when the log past it grows beyond a threshold, and
+only then truncates the log below the new one — the "compaction horizon" of docs/model.md. A stored snapshot whose header a
+later build refuses must be dropped and fetched again (today the fold steps over it and logs an error). Tracked in TODO.md.
 
 ### 7. Follow-ups and open points
 
@@ -161,9 +165,14 @@ docs/model.md. A stored snapshot whose header this build refuses is dropped and 
    and declines it until a snapshot source exists (Synqra.Model, Synqra, Synqra.Replication.AspNetCore).
 3. DONE — `SnapshotSchema`: the header lists every mapping of the writer (system and consumer), the reader is built from it,
    refusal rules + tests for amended schemas, unknown versions and types, and reading an older schema.
-4. `IStreamSnapshotSource` + chunk writer; `MongoProjection` cut (§4) + `InMemoryProjection` source.
-5. Endpoint: kind 4 path, snapshot before backlog, decline fallback (Synqra.Replication.AspNetCore).
-6. Client: `IStreamSnapshotSink`, `InMemoryProjectionProvider` apply + gate + progress, cold detection in `EventReplicationService`.
-7. Tests: cold client == replayed client (entity-for-entity), mid-snapshot disconnect, refused header falls back, writes
-   during the cut are not lost.
+4. DONE — `IStreamSnapshotSource`, `SnapshotRecord`/`SnapshotCut`, `SnapshotChunkWriter`/`Reader` (CommonStoreSupport, where
+   `SnapshotSchema` moved); the `MongoProjection` cut (§4, registered by `AddMongoProjection`) and the `InMemoryProjection` one
+   (`AddInMemoryStreamSnapshots`).
+5. DONE — Endpoint: kind 4 sends the snapshot, then the backlog after its watermark; declines with the reason otherwise.
+6. DONE — Client (§5): cold detection, header check, the snapshot kept as a `StreamSnapshotEvent` in the local log and folded
+   by `InMemoryProjection`; the watermark floor and the covered-event rule.
+7. DONE — Tests: `StreamSnapshotSyncronizationTests` against an in-memory and a Mongo-backed master (snapshot client ==
+   replaying client == master, writes both ways after it, warm reload with and without a state store, writes during the cut,
+   a cut that breaks off, a refused header); Contoso browser tests (`SceneReplicationBrowserTests`) against a Mongo-backed
+   Contoso master: a browser creates a scene, a fresh browser loads it on its first load from a snapshot, both together.
 8. Quotaly: pin bump, prove on pr.quotaly.com, then phase 2.
