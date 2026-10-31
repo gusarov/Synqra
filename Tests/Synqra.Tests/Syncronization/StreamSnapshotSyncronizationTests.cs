@@ -141,8 +141,8 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 
 		using var stop = new CancellationTokenSource();
 		var writes = 0;
-		// Paced and capped: the writes have to land during the cuts, not flood the clients. Unpaced, a loaded agent made thousands,
-		// and a client appending each to its JSON-lines log (a scan of the whole file per append) fell further behind than the budget.
+		// Paced and capped: the writes have to land during the cuts, not flood the clients. Unpaced, a loaded agent made thousands
+		// while four clients connected, more than a client takes in within the budget.
 		var writer = Task.Run(async () =>
 		{
 			while (!stop.IsCancellationRequested && writes < 400)

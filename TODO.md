@@ -31,7 +31,3 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
 - [ ] **Header names every mapping.** `SnapshotSchema.DescribeSnapshot` lists the writer's full map, so a client lacking
   any one mapped type (even one the stream never uses) refuses the whole snapshot and replays. Collect the ids the chunks
   actually wrote instead, if that becomes a deployment problem.
-- [ ] **JSON-lines append is O(file size).** `JsonLinesStorage.AppendAsync` (the `#define LOCK` path) reads the whole file
-  byte by byte on every append to blank an earlier record with the same key, so appending N events is quadratic: a test
-  client that receives thousands of events falls behind (StreamSnapshotSyncronizationTests paces its writer for that). Keep
-  a key → offset index, or drop the replace path for logs that never rewrite a key.
