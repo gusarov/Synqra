@@ -96,6 +96,9 @@ public static class AppendStorageJsonLinesExtensions
 		private readonly string _keyFieldName;
 #if LOCK
 		private readonly object _lock = new object();
+		// The keys the file holds, read once on the first append: only an append under a key already there scans the file to blank
+		// the old record. Scanning on every append made appending N records quadratic (an event log never repeats a key).
+		private HashSet<string>? _storedKeys;
 #elif SEMAPHORE
 		private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
 #endif
@@ -525,44 +528,48 @@ public static class AppendStorageJsonLinesExtensions
 				}
 #if LOCK
 				var keyStr = _getPathFromKey(key);
+				_storedKeys ??= ReadStoredKeys();
 
 				#region Delete old record
 
-				using var streamR = new FileStream(FileName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write, bufferSize: 1024 * 64, options: FileOptions.SequentialScan);
-
-				long lineStart = 0;
-				var lineBytes = new MemoryStream();
-				int b;
-				while ((b = streamR.ReadByte()) != -1)
+				if (!_storedKeys.Add(keyStr))
 				{
-					if (b == '\n')
-					{
-						var lineData = lineBytes.ToArray();
-						int len = lineData.Length;
-						if (len > 0 && lineData[len - 1] == (byte)'\r') len--;
+					using var streamR = new FileStream(FileName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write, bufferSize: 1024 * 64, options: FileOptions.SequentialScan);
 
-						var line = _utf8NoBom.GetString(lineData, 0, len);
-						var parts = line.Split(new[] { '§' }, 2);
-						if (parts.Length >= 2)
-						{
-							var keyStrR = parts[0];
-							if (keyStrR == keyStr)
-							{
-								var orig = _stream.Position;
-								_stream.Seek(lineStart, SeekOrigin.Begin);
-								var zeroBytes = _utf8NoBom.GetBytes(new string('0', keyStrR.Length));
-								_stream.Write(zeroBytes, 0, zeroBytes.Length);
-								_stream.Flush();
-								_stream.Seek(orig, SeekOrigin.Begin);
-								break;
-							}
-						}
-						lineBytes.SetLength(0);
-						lineStart = streamR.Position;
-					}
-					else
+					long lineStart = 0;
+					var lineBytes = new MemoryStream();
+					int b;
+					while ((b = streamR.ReadByte()) != -1)
 					{
-						lineBytes.WriteByte((byte)b);
+						if (b == '\n')
+						{
+							var lineData = lineBytes.ToArray();
+							int len = lineData.Length;
+							if (len > 0 && lineData[len - 1] == (byte)'\r') len--;
+
+							var line = _utf8NoBom.GetString(lineData, 0, len);
+							var parts = line.Split(new[] { '§' }, 2);
+							if (parts.Length >= 2)
+							{
+								var keyStrR = parts[0];
+								if (keyStrR == keyStr)
+								{
+									var orig = _stream.Position;
+									_stream.Seek(lineStart, SeekOrigin.Begin);
+									var zeroBytes = _utf8NoBom.GetBytes(new string('0', keyStrR.Length));
+									_stream.Write(zeroBytes, 0, zeroBytes.Length);
+									_stream.Flush();
+									_stream.Seek(orig, SeekOrigin.Begin);
+									break;
+								}
+							}
+							lineBytes.SetLength(0);
+							lineStart = streamR.Position;
+						}
+						else
+						{
+							lineBytes.WriteByte((byte)b);
+						}
 					}
 				}
 
@@ -584,6 +591,25 @@ public static class AppendStorageJsonLinesExtensions
 			}
 #endif
 		}
+
+#if LOCK
+		/// <summary>The key of every record in the file (blanked ones too: harmless, never asked for).</summary>
+		HashSet<string> ReadStoredKeys()
+		{
+			var keys = new HashSet<string>(StringComparer.Ordinal);
+			using var stream = new FileStream(FileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1024 * 64, options: FileOptions.SequentialScan);
+			using var reader = new StreamReader(stream, _utf8NoBom, detectEncodingFromByteOrderMarks: false);
+			for (var line = reader.ReadLine(); line is not null; line = reader.ReadLine())
+			{
+				var separator = line.IndexOf('§');
+				if (separator > 0)
+				{
+					keys.Add(line[..separator]);
+				}
+			}
+			return keys;
+		}
+#endif
 
 		public void Dispose()
 		{
