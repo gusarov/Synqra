@@ -37,6 +37,8 @@ using Synqra.AppendStorage.InMemory;
 #if NET10_0_OR_GREATER
 using Synqra.Projection.Sqlite;
 using Synqra.Replication.AspNetCore;
+using Synqra.Projection.MongoDb;
+using Synqra.AppendStorage.MongoDb;
 #endif
 
 namespace Synqra.Tests.Simulator;
@@ -114,7 +116,7 @@ internal class SynqraTestNode
 #if NETFRAMEWORK
 		throw new NotImplementedException();
 #else
-		_projection ?? throw new InvalidOperationException("Projection not initialized yet — await node.Started first.");
+		_masterStore ?? _projection ?? throw new InvalidOperationException("Projection not initialized yet — await node.Started first.");
 #endif
 
 	public IEventLog Events
@@ -131,6 +133,15 @@ internal class SynqraTestNode
 
 	/// <summary>A client's HELLO kind; the default subscribes to its own stream as the server's default.</summary>
 	public ReplicationHelloKind HelloKind { get; init; } = ReplicationHelloKind.UserDefaultMainStream;
+
+	/// <summary>Whether a cold client asks for its stream's state (it does with a <see cref="ReplicationHelloKind.SubscribeTo"/> kind, which names the stream).</summary>
+	public bool RequestSnapshot { get; init; } = true;
+
+	/// <summary>A Mongo-backed master's store: one instance serves every stream, so a caller enters this node's stream around its use.</summary>
+	IObjectStore? _masterStore;
+
+	/// <summary>Scopes the calling flow to this node's stream, as a host's auth scopes a request: a Mongo-backed master's store reads it.</summary>
+	public IDisposable EnterStream() => SynqraStreamContext.Enter(StreamId);
 
 	/// <summary>
 	/// Completes when the node's web host is listening. For the master node this is also
@@ -155,7 +166,13 @@ internal class SynqraTestNode
 	/// Simulator master only. False makes the master a dying one: it reads a client's event frames and does nothing
 	/// with them, neither applying nor acknowledging, as the production endpoint did while its replay was broken.
 	/// </param>
-	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false, bool useRealEndpoint = false, bool acknowledgeInbound = true)
+	/// <param name="mongoMaster">
+	/// Master only (net10), with <paramref name="useRealEndpoint"/>: the production configuration — the log and the projection in
+	/// the test Mongo (a database of its own per node), the projection serving snapshots. Its <see cref="StoreContext"/> is the
+	/// multitenant Mongo store: enter <see cref="EnterStream"/> around its use.
+	/// </param>
+	/// <param name="serveSnapshots">In-memory master only, with <paramref name="useRealEndpoint"/>: its projections serve stream snapshots.</param>
+	public SynqraTestNode(Guid streamId, Action<IHostApplicationBuilder>? configureHost = null, bool masterHost = false, bool useRealEndpoint = false, bool acknowledgeInbound = true, bool mongoMaster = false, bool serveSnapshots = false)
 	{
 		if (streamId == default)
 		{
@@ -223,12 +240,21 @@ internal class SynqraTestNode
 
 		builder.Services.AddInMemorySynqraStore();
 #if NET10_0_OR_GREATER
-		if (masterHost && useRealEndpoint)
+		if (masterHost && useRealEndpoint && mongoMaster)
+		{
+			builder.Services.AddTestMongoDatabase(EphemeralMongo.ConnectionString).AddMongoEventStorage();
+			builder.Services.AddMongoProjection(); // the projection a Quotaly master runs; it serves snapshots
+		}
+		else if (masterHost && useRealEndpoint)
 		{
 			// The real endpoint reads events back from its own log to replay a stream's backlog and
 			// filters by Event.StreamId — so the log must preserve it. InMemory does (it holds the
 			// object); JSON-lines does not ([JsonIgnore]). See the useRealEndpoint remarks above.
 			builder.Services.AddAppendStorageInMemory<Event, (Guid, Guid)>(x => (x.StreamId, x.SequenceId));
+			if (serveSnapshots)
+			{
+				builder.Services.AddInMemoryStreamSnapshots();
+			}
 		}
 		else
 #endif
@@ -320,7 +346,7 @@ internal class SynqraTestNode
 		{
 			builder.Services.AddControllers();
 #if NET10_0_OR_GREATER
-			if (useRealEndpoint)
+			if (useRealEndpoint && !mongoMaster)
 			{
 				// The real endpoint resolves IProjection from DI and Accepts every inbound event.
 				// This test only asserts socket-level routing, so a do-nothing projection suffices.
@@ -541,12 +567,12 @@ internal class SynqraTestNode
 			});
 		}
 
-		Started = StartHostAsync(app, masterHost);
+		Started = StartHostAsync(app, masterHost, mongoMaster);
 #endif
 	}
 
 #if !NETFRAMEWORK
-	async Task StartHostAsync(Microsoft.AspNetCore.Builder.WebApplication app, bool masterHost)
+	async Task StartHostAsync(Microsoft.AspNetCore.Builder.WebApplication app, bool masterHost, bool mongoMaster)
 	{
 		await app.StartAsync();
 		if (masterHost)
@@ -560,7 +586,14 @@ internal class SynqraTestNode
 		// head via the keeper, so this single instance is what StoreContext, the master apply loop,
 		// and the client catch-up below all share — no DI-registered projection singleton.
 		var provider = app.Services.GetRequiredService<IProjectionProvider>();
-		_projection = await provider.GetAsync(StreamId);
+		if (mongoMaster)
+		{
+			_masterStore = app.Services.GetRequiredService<IObjectStore>(); // the Mongo store the endpoint applies peers' events to
+		}
+		else
+		{
+			_projection = await provider.GetAsync(StreamId);
+		}
 
 		if (!masterHost)
 		{
@@ -620,6 +653,7 @@ internal class SynqraTestNode
 		public override ushort Port => _node.Port;
 		public override ReplicationHelloKind HelloKind => _node.HelloKind;
 		public override Guid? InitialSubscribeStreamId => _node.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot ? _node.StreamId : null;
+		public override bool RequestSnapshot => _node.RequestSnapshot;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}
