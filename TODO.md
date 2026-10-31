@@ -11,3 +11,23 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
   before yielding anything. Switch to lazy cursor streaming (e.g. `Find(Scope).ToEnumerable()`, or
   explicit `ToCursor()` iteration) so `yield return` pulls documents on demand and large
   collections aren't fully materialized. Mind cursor lifetime/disposal across the `yield`.
+
+## Replication / stream snapshots (plans/snapshot.md)
+
+- [ ] **Client log compaction.** A client's log starts with the snapshot it loaded (`StreamSnapshotEvent`) and then grows
+  with every event after it. Rewrite the snapshot from the in-memory state (`SnapshotChunkWriter`, the same record format)
+  once the log past it grows beyond a threshold, append it, and only then truncate the log below it; the client's IndexedDB
+  log then stays proportional to state, not history (plans/snapshot.md §6).
+- [ ] **Server log retention.** Nothing truncates the master's Mongo log. Snapshots make a cold client independent of
+  history, so a retention policy (keep N days, or everything after the oldest watermark a client still resumes from) is now
+  possible; decide it with the undo/audit needs of the command log.
+- [ ] **A stored snapshot a later build refuses.** `InMemoryProjection` steps over a `StreamSnapshotEvent` whose header it
+  cannot read (logged as an error), and the projection then lacks that state. Drop the local log and its replication state
+  instead, and fetch a fresh snapshot.
+- [ ] **Per-socket send queues.** The endpoint sends a snapshot, like a backlog, under the global `broadcastGate`: every
+  other connection's broadcasts wait while one cold client's snapshot is written. Give each socket its own send queue.
+- [ ] **Missing events in a browser log.** A prod browser log held 12,928 of the master's 14,594 events after a full
+  catch-up (plans/snapshot.md §7). A snapshot load bypasses the cause; it is still unknown.
+- [ ] **Header names every mapping.** `SnapshotSchema.DescribeSnapshot` lists the writer's full map, so a client lacking
+  any one mapped type (even one the stream never uses) refuses the whole snapshot and replays. Collect the ids the chunks
+  actually wrote instead, if that becomes a deployment problem.
