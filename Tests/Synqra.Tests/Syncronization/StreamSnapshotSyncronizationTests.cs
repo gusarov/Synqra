@@ -360,7 +360,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var text = new StringBuilder();
 		await RunOnMasterAsync(node, store =>
 		{
-			foreach (var scene in store.GetCollection<SnapshotSceneNode>().ToList().OrderBy(store.GetId))
+			foreach (var scene in ReadNodes(store).OrderBy(store.GetId))
 			{
 				var components = ((IComponentContainer)scene).Components.ToList();
 				var position = components.OfType<SnapshotScenePosition>().SingleOrDefault();
@@ -372,6 +372,10 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		});
 		return text.ToString();
 	}
+
+	// Enumerated once: a Mongo collection's Count is a query of its own, so a copy sized by it misses or overruns a root a peer
+	// adds or deletes in between.
+	List<SnapshotSceneNode> ReadNodes(IObjectStore store) => store.GetCollection<SnapshotSceneNode>().Where(node => node is not null).ToList();
 
 	// ---------------------------------------------------------------- logs and runs
 
