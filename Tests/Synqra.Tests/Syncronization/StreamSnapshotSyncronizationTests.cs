@@ -342,9 +342,11 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 	/// <summary>The node's scene as text, one line per node in id order: its data, its position, its tags and its edges.</summary>
 	async Task<string> DescribeAsync(SynqraTestNode node)
 	{
-		if (node.StoreContext is IReplayProjection)
+		if (node.StoreContext is IReplayProjection && node.Host.Services.GetService<EventReplicationService>() is null)
 		{
-			await node.Host.Services.GetRequiredService<IProjectionProvider>().GetAsync(node.StreamId); // an in-memory projection folds the log on demand
+			// An in-memory master folds peers' events into its projection on demand. A client folds on every EventsReceived already;
+			// reading its JSON-lines log here as well would race the replication's appends to it (TODO.md).
+			await node.Host.Services.GetRequiredService<IProjectionProvider>().GetAsync(node.StreamId);
 		}
 		var text = new StringBuilder();
 		await RunOnMasterAsync(node, store =>

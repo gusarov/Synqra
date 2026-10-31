@@ -31,3 +31,6 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
 - [ ] **Header names every mapping.** `SnapshotSchema.DescribeSnapshot` lists the writer's full map, so a client lacking
   any one mapped type (even one the stream never uses) refuses the whole snapshot and replays. Collect the ids the chunks
   actually wrote instead, if that becomes a deployment problem.
+- [ ] **JSON-lines reads race appends.** `JsonLinesStorage`'s reader takes a line the writer has not finished (no newline
+  yet) and fails on it (`IndexOutOfRangeException` splitting it). A reader should stop at an unterminated last line. Tests
+  that read a client's JSON-lines log while it replicates hit it (StreamSnapshotSyncronizationTests reads only masters now).

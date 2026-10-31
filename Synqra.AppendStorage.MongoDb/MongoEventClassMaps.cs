@@ -113,6 +113,7 @@ public static class MongoEventClassMaps
 			RegisterDerived<ComponentAddedEvent>("ComponentAddedEvent");
 			RegisterDerived<ComponentPropertyChangedEvent>("ComponentPropertyChangedEvent");
 			RegisterDerived<ComponentDeletedEvent>("ComponentDeletedEvent");
+			RegisterDerived<StreamSnapshotEvent>("StreamSnapshotEvent"); // a client's own record, never in a master's log; known like every event
 			_registered = true;
 		}
 	}
