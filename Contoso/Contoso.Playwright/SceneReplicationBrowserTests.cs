@@ -117,7 +117,7 @@ public class SceneReplicationBrowserTests : BrowserTest
 		await page.GotoAsync(ComposeSceneUrl(null));
 		await Expect(page.GetByTestId("btnCreateStream")).ToBeVisibleAsync(new() { Timeout = 60_000 }); // a cold WASM start
 		await page.GetByTestId("btnCreateStream").ClickAsync();
-		await page.WaitForURLAsync(new Regex(@"scene\?stream="));
+		await page.WaitForURLAsync(new Regex(@"scene\?stream="), new() { Timeout = 60_000 }); // a full load: a cold WASM start
 		await WaitReadyAsync(page);
 		return Guid.Parse(await page.GetByTestId("stream").InnerTextAsync());
 	}

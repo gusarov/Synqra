@@ -461,7 +461,7 @@ public class StreamSeedingBrowserTests : BrowserTest
 	async Task<Guid> CreateStreamHereAsync(IPage page)
 	{
 		await page.GetByTestId("btnCreateStream").ClickAsync();
-		await page.WaitForURLAsync(new Regex(@"seeding\?stream="));
+		await page.WaitForURLAsync(new Regex(@"seeding\?stream="), new() { Timeout = 60_000 }); // a full load: a cold WASM start
 		await WaitReadyAsync(page);
 		return Guid.Parse(await page.GetByTestId("stream").InnerTextAsync());
 	}
