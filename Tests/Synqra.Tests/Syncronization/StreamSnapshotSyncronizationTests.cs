@@ -40,8 +40,8 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var loaded = await StartClientAsync(master, streamId);
 		var replayed = await StartClientAsync(master, streamId, requestSnapshot: false);
 
-		await WaitUntilAsync(async () => await DescribeAsync(loaded) == expected, "the snapshot-loaded client holds the master's scene");
-		await WaitUntilAsync(async () => await DescribeAsync(replayed) == expected, "the replaying client holds the master's scene");
+		await ExpectSameSceneAsync(loaded, master, "the snapshot-loaded client holds the master's scene");
+		await ExpectSameSceneAsync(replayed, master, "the replaying client holds the master's scene");
 		await Assert.That(Replication(loaded).SnapshotsLoaded).IsEqualTo(1);
 		await Assert.That(Replication(loaded).FramesReceived).IsEqualTo(0).Because("nothing was written after the snapshot's watermark");
 		await Assert.That(Replication(replayed).SnapshotsLoaded).IsEqualTo(0);
@@ -58,7 +58,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var master = await StartMasterAsync(streamId, mongo);
 		var ids = await BuildSceneAsync(master, SceneNodes);
 		var client = await StartClientAsync(master, streamId);
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
 
 		// The master writes after the snapshot: it reaches the client as an event.
 		await RunOnMasterAsync(master, store => RenameAsync(store, ids[0], "renamed on the master"));
@@ -66,7 +66,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		await RenameAsync(client.StoreContext, ids[1], "renamed on the client");
 		await AddEdgeAsync(client.StoreContext, ids[2], ids[7], 7.5); // ids[2] already links to ids[3]: the chain
 
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "both hold both writes");
+		await ExpectSameSceneAsync(client, master, "both hold both writes");
 		await Assert.That(await DescribeAsync(master)).Contains("renamed on the client");
 		await Assert.That(await DescribeAsync(client)).Contains("renamed on the master");
 		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(1);
@@ -82,7 +82,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var ids = await BuildSceneAsync(master, SceneNodes);
 		var state = new RecordingStateStore();
 		var client = await StartClientAsync(master, streamId, configure: builder => builder.Services.AddSingleton<IEventReplicationStateStore>(state));
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
 		await WaitUntilAsync(() => Task.FromResult(state.Saved?.ServerWatermark != default), "the client persisted the snapshot's watermark");
 		var log = await EndRunAsync(client);
 
@@ -95,7 +95,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 			builder.Configuration[LogFileKey] = log;
 			builder.Services.AddSingleton<IEventReplicationStateStore>(new RecordingStateStore(state.Saved));
 		});
-		await WaitUntilAsync(async () => await DescribeAsync(next) == await DescribeAsync(master), "the reloaded client holds the scene and the write it missed");
+		await ExpectSameSceneAsync(next, master, "the reloaded client holds the scene and the write it missed");
 		await Task.Delay(500); // nothing more may follow
 
 		await Assert.That(Replication(next).SnapshotsLoaded).IsEqualTo(0).Because("a warm client resumes from its watermark");
@@ -115,7 +115,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var master = await StartMasterAsync(streamId, mongo);
 		var ids = await BuildSceneAsync(master, SceneNodes);
 		var client = await StartClientAsync(master, streamId);
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
 		var cutAt = await CountEventsAsync(master);
 		var log = await EndRunAsync(client);
 
@@ -123,7 +123,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var delta = await CountEventsAsync(master) - cutAt;
 
 		var next = await StartClientAsync(master, streamId, configure: builder => builder.Configuration[LogFileKey] = log);
-		await WaitUntilAsync(async () => await DescribeAsync(next) == await DescribeAsync(master), "the reloaded client holds the scene once, and the write it missed");
+		await ExpectSameSceneAsync(next, master, "the reloaded client holds the scene once, and the write it missed");
 		await Task.Delay(500); // nothing more may follow
 
 		await Assert.That(await DescribeAsync(next)).IsEqualTo(await DescribeAsync(master));
@@ -184,7 +184,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 
 		var client = await StartClientAsync(master, streamId);
 
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
 		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(0);
 		await Assert.That(Replication(client).FramesReceived).IsEqualTo(await CountEventsAsync(master));
 	}
@@ -199,7 +199,7 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 
 		var client = await StartClientAsync(master, streamId);
 
-		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
 		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(0);
 		await Assert.That(await CountEventsAsync(client)).IsEqualTo(await CountEventsAsync(master)).Because("the client replayed the stream, with no snapshot record in its log");
 	}
@@ -403,6 +403,37 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 			// deleted while the scene was read
 		}
 		return id;
+	}
+
+	/// <summary>
+	/// Waits until the client holds the master's scene. On failure it says why: the client's counters, the logs' sizes, the first line
+	/// that differs, and what one more catch-up of the client's projection does (a catch-up that throws is otherwise never seen: a
+	/// client starts it fire-and-forget on each EventsReceived).
+	/// </summary>
+	async Task ExpectSameSceneAsync(SynqraTestNode client, SynqraTestNode master, string what)
+	{
+		var sw = Stopwatch.StartNew();
+		while (await DescribeAsync(client) != await DescribeAsync(master) && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
+		{
+			await Task.Delay(100);
+		}
+		var expected = await DescribeAsync(master);
+		var actual = await DescribeAsync(client);
+		if (actual != expected)
+		{
+			string catchUp;
+			try
+			{
+				await client.Host.Services.GetRequiredService<IProjectionProvider>().GetAsync(client.StreamId);
+				catchUp = await DescribeAsync(client) == expected ? "one more catch-up brought it level" : "one more catch-up changed nothing";
+			}
+			catch (Exception ex)
+			{
+				catchUp = $"one more catch-up threw {ex.GetType().Name}: {ex.Message}";
+			}
+			var replication = Replication(client);
+			await Assert.That(actual).IsEqualTo(expected).Because($"{what}: client online {replication.IsOnline}, {replication.SnapshotsLoaded} snapshots, {replication.FramesReceived} frames, {await CountEventsAsync(client)} log records; master {await CountEventsAsync(master)} events; {catchUp}");
+		}
 	}
 
 	// ---------------------------------------------------------------- logs and runs
