@@ -285,7 +285,13 @@ public static class AppendStorageJsonLinesExtensions
 
 			private int _state;
 			private string? _currentLine;
-			private StreamReader? _streamReader;
+			private FileStream? _stream;
+			// Lines are read up to their '\n' (a byte never inside a multi-byte UTF-8 sequence): the tail after the last one is a
+			// line the writer has not finished, read on the next enumeration, never parsed half-written.
+			private readonly byte[] _buffer = new byte[1024 * 64];
+			private readonly MemoryStream _pending = new MemoryStream();
+			private int _start;
+			private int _end;
 
 			public JsonLinesAsyncEnumerator(JsonLinesStorage<T, TKey> storage, TKey? from, string fileName, JsonSerializerOptions jsonSerializerOptions, CancellationToken? cancellationToken = default)
 			{
@@ -342,10 +348,38 @@ public static class AppendStorageJsonLinesExtensions
 				}
 			}
 
-			public ValueTask DisposeAsync()
+			public async ValueTask DisposeAsync()
 			{
-				_streamReader?.Dispose();
-				return default;
+				if (_stream is not null)
+				{
+					await _stream.DisposeAsync();
+				}
+			}
+
+			/// <summary>The next line the writer finished (its '\n' written), or null at the end of what is complete.</summary>
+			async ValueTask<string?> ReadTerminatedLineAsync()
+			{
+				string? line = null;
+				var ended = false;
+				while (line is null && !ended)
+				{
+					var newline = Array.IndexOf(_buffer, (byte)'\n', _start, _end - _start);
+					if (newline >= 0)
+					{
+						_pending.Write(_buffer, _start, newline - _start);
+						_start = newline + 1;
+						line = _utf8NoBom.GetString(_pending.GetBuffer(), 0, (int)_pending.Length).TrimEnd('\r');
+						_pending.SetLength(0);
+					}
+					else
+					{
+						_pending.Write(_buffer, _start, _end - _start);
+						_start = 0;
+						_end = await _stream!.ReadAsync(_buffer, _cancellationToken ?? default);
+						ended = _end == 0;
+					}
+				}
+				return line;
 			}
 
 			public async ValueTask<bool> MoveNextAsync()
@@ -354,15 +388,14 @@ public static class AppendStorageJsonLinesExtensions
 				{
 					if (File.Exists(_fileName))
 					{
-						var stream = new FileStream(
+						_stream = new FileStream(
 							  _fileName
 							, FileMode.Open
 							, FileAccess.Read
 							, FileShare.ReadWrite
-							, bufferSize: 1024 * 64
+							, bufferSize: 1
 							, FileOptions.SequentialScan | FileOptions.Asynchronous
 							);
-						_streamReader = new StreamReader(stream, encoding: _utf8NoBom, detectEncodingFromByteOrderMarks: false, bufferSize: 1024 * 64);
 						_state = 1;
 					}
 					else
@@ -376,7 +409,7 @@ public static class AppendStorageJsonLinesExtensions
 
 				if (_state == 1)
 				{
-					var lineHeader = await _streamReader.ReadLineAsync();
+					var lineHeader = await ReadTerminatedLineAsync();
 					if (lineHeader == null)
 					{
 						throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
@@ -397,7 +430,7 @@ public static class AppendStorageJsonLinesExtensions
 
 				while (true)
 				{
-					_currentLine = await _streamReader.ReadLineAsync();
+					_currentLine = await ReadTerminatedLineAsync();
 					if (_currentLine == null)
 					{
 						return false;

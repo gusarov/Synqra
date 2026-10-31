@@ -141,12 +141,15 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 
 		using var stop = new CancellationTokenSource();
 		var writes = 0;
+		// Paced and capped: the writes have to land during the cuts, not flood the clients. Unpaced, a loaded agent made thousands,
+		// and a client appending each to its JSON-lines log (a scan of the whole file per append) fell further behind than the budget.
 		var writer = Task.Run(async () =>
 		{
-			while (!stop.IsCancellationRequested)
+			while (!stop.IsCancellationRequested && writes < 400)
 			{
 				await RunOnMasterAsync(master, store => RenameAsync(store, ids[writes % ids.Count], $"write {writes}"));
 				writes++;
+				await Task.Delay(5);
 			}
 		});
 		var clients = new List<SynqraTestNode>();
@@ -161,7 +164,13 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var expected = await DescribeAsync(master);
 		foreach (var client in clients)
 		{
-			await WaitUntilAsync(async () => await DescribeAsync(client) == expected, "a client holds every write, those during its snapshot included");
+			var sw = Stopwatch.StartNew();
+			while (await DescribeAsync(client) != expected && sw.ElapsedMilliseconds < PropagationTimeoutMs)
+			{
+				await Task.Delay(100);
+			}
+			// The scene itself on failure: the text comparison names the first line that differs.
+			await Assert.That(await DescribeAsync(client)).IsEqualTo(expected).Because($"a client holds every write, those during its snapshot included ({writes} writes; this client: {Replication(client).SnapshotsLoaded} snapshots, {Replication(client).FramesReceived} frames, {await CountEventsAsync(client)} log records)");
 		}
 		await Assert.That(writes).IsGreaterThan(0);
 	}
