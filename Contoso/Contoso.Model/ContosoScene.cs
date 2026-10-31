@@ -96,7 +96,7 @@ public sealed class ContosoScene
 	/// <summary>Renames the node first in id order: an edit a test makes on one replica and expects on the others.</summary>
 	public async Task RenameFirstAsync(IObjectStore store, string name)
 	{
-		var first = store.GetCollection<ContosoSceneNode>().ToList().OrderBy(store.GetId).FirstOrDefault()
+		var first = ReadNodes(store).OrderBy(store.GetId).FirstOrDefault()
 			?? throw new InvalidOperationException("The scene has no node to rename.");
 		var id = store.GetId(first);
 		await store.SubmitCommandAsync(ComposeChange<ContosoSceneNode>(store, id, id, nameof(ContosoSceneNode.Name), name));
@@ -105,7 +105,7 @@ public sealed class ContosoScene
 	/// <summary>Adds an edge from the first node to the last, in id order, with this weight.</summary>
 	public async Task LinkFirstToLastAsync(IObjectStore store, double weight)
 	{
-		var ordered = store.GetCollection<ContosoSceneNode>().ToList().Select(store.GetId).Order().ToList();
+		var ordered = ReadNodes(store).Select(store.GetId).Order().ToList();
 		if (ordered.Count < 2)
 		{
 			throw new InvalidOperationException("The scene has fewer than two nodes to link.");
@@ -117,7 +117,7 @@ public sealed class ContosoScene
 	public string Describe(IObjectStore store)
 	{
 		var text = new StringBuilder();
-		foreach (var node in store.GetCollection<ContosoSceneNode>().ToList().OrderBy(store.GetId))
+		foreach (var node in ReadNodes(store).OrderBy(store.GetId))
 		{
 			var components = ((IComponentContainer)node).Components.ToList();
 			var position = components.OfType<ContosoScenePosition>().SingleOrDefault();
@@ -127,6 +127,10 @@ public sealed class ContosoScene
 		}
 		return text.ToString();
 	}
+
+	// Enumerated once: a Mongo collection's Count is a query of its own, so a copy sized by it misses or overruns a root a peer
+	// adds or deletes in between.
+	List<ContosoSceneNode> ReadNodes(IObjectStore store) => store.GetCollection<ContosoSceneNode>().Where(node => node is not null).ToList();
 
 	AddComponentCommand ComposeAdd(IObjectStore store, Guid owner, Guid componentId, object data)
 	{

@@ -70,6 +70,28 @@ public sealed class MongoProjectionStreamIsolationTests : BaseTest
 		await Assert.That(seenByB).IsEquivalentTo(["from-b"]);
 	}
 
+	/// <summary>
+	/// List&lt;T&gt; and ToList size their array by Count (one query) and fill it by CopyTo (another): a root a peer added in between
+	/// overran the array (IndexOutOfRangeException on the Contoso master while a browser synced its scene). What fits is copied.
+	/// </summary>
+	[Test]
+	public async Task Should_copy_what_fits_when_a_root_was_added_after_the_count()
+	{
+		var store = Store;
+		using (SynqraStreamContext.Enter(Guid.NewGuid()))
+		{
+			var nodes = store.GetCollection<TestGeneratedContainerNode>();
+			nodes.Add(new TestGeneratedContainerNode { Name = "counted" });
+			var array = new TestGeneratedContainerNode[nodes.Count];
+			nodes.Add(new TestGeneratedContainerNode { Name = "added after the count" });
+
+			((ICollection<TestGeneratedContainerNode>)nodes).CopyTo(array, 0);
+
+			await Assert.That(array).HasCount(1);
+			await Assert.That(array[0]).IsNotNull();
+		}
+	}
+
 	[Test]
 	public async Task Should_not_see_another_streams_components_in_the_same_database()
 	{

@@ -127,11 +127,14 @@ internal sealed class MongoStoreCollection<T> : MongoStoreCollection, ISynqraCol
 
 	void ICollection<T>.Clear() => throw new NotSupportedException();
 	bool ICollection<T>.Contains(T item) => throw new NotSupportedException();
+	// A caller sizes the array by Count, one query; the enumeration is another, and a root added in between would overrun it
+	// (List<T>/ToList over a collection a peer writes to). What fits is copied: the read is as of the count.
 	void ICollection<T>.CopyTo(T[] array, int arrayIndex)
 	{
-		foreach (var item in (IEnumerable<T>)this)
+		using var items = ((IEnumerable<T>)this).GetEnumerator();
+		while (arrayIndex < array.Length && items.MoveNext())
 		{
-			array[arrayIndex++] = item;
+			array[arrayIndex++] = items.Current;
 		}
 	}
 	bool ICollection<T>.Remove(T item) => throw new NotSupportedException();
