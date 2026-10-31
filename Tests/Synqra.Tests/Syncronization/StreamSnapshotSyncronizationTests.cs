@@ -360,22 +360,50 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		var text = new StringBuilder();
 		await RunOnMasterAsync(node, store =>
 		{
-			foreach (var scene in ReadNodes(store).OrderBy(store.GetId))
+			foreach (var (id, scene) in ReadNodes(store))
 			{
 				var components = ((IComponentContainer)scene).Components.ToList();
 				var position = components.OfType<SnapshotScenePosition>().SingleOrDefault();
 				var tags = components.OfType<SnapshotSceneTag>().Select(x => x.Label).Order();
 				var edges = scene.Edges.Select(x => $"{x.TargetId}:{x.Weight}").Order();
-				text.AppendLine($"{store.GetId(scene)} {scene.Name} {scene.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]");
+				text.AppendLine($"{id} {scene.Name} {scene.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]");
 			}
 			return Task.CompletedTask;
 		});
 		return text.ToString();
 	}
 
-	// Enumerated once: a Mongo collection's Count is a query of its own, so a copy sized by it misses or overruns a root a peer
-	// adds or deletes in between.
-	List<SnapshotSceneNode> ReadNodes(IObjectStore store) => store.GetCollection<SnapshotSceneNode>().Where(node => node is not null).ToList();
+	/// <summary>
+	/// The nodes with their ids, in id order, read in one pass: a Mongo collection's Count is a query of its own, so a copy sized by
+	/// it misses or overruns a root added in between. A node deleted while it is read leaves the store's tracking, and asking its id
+	/// then throws: it is gone, and left out.
+	/// </summary>
+	List<(Guid Id, SnapshotSceneNode Node)> ReadNodes(IObjectStore store)
+	{
+		var nodes = new List<(Guid Id, SnapshotSceneNode Node)>();
+		foreach (var node in store.GetCollection<SnapshotSceneNode>())
+		{
+			if (FindId(store, node) is Guid id)
+			{
+				nodes.Add((id, node));
+			}
+		}
+		return nodes.OrderBy(x => x.Id).ToList();
+	}
+
+	Guid? FindId(IObjectStore store, object node)
+	{
+		Guid? id = null;
+		try
+		{
+			id = store.GetId(node);
+		}
+		catch (InvalidOperationException)
+		{
+			// deleted while the scene was read
+		}
+		return id;
+	}
 
 	// ---------------------------------------------------------------- logs and runs
 
