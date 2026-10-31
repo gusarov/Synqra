@@ -66,6 +66,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	readonly List<SnapshotChunk> _snapshotChunks = new List<SnapshotChunk>();
 	// Set when a snapshot's header names a schema this build cannot read: the rest of this run replays instead.
 	bool _snapshotRefused;
+	// The watermark of the snapshot this run stored: an event the master stamped at or before it is in that state already.
+	Guid _snapshotWatermark;
 
 	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
 	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
@@ -348,14 +350,18 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				var ev = envelope.Event;
 				var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
 				var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
+				// Covered by the snapshot this run stored: a live push of an event committed before the cut can arrive after the
+				// newer backlog, and applying it then would put an older value back over a newer one.
+				var covered = _snapshotWatermark != default && sequence != default && sequence.CompareBigEndian(_snapshotWatermark) <= 0;
 				bool known;
 				lock (_skipSet)
 				{
-					known = !_skipSet.Add(ev.EventId);
-					if (!known)
+					var added = _skipSet.Add(ev.EventId);
+					if (added)
 					{
 						_skipList.AddLast(ev.EventId);
 					}
+					known = !added || covered;
 					_heldByMaster.Add(ev.EventId);
 				}
 				if (!known && !_ended)
@@ -661,6 +667,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_eventReplicationState.ServerWatermark = end.Watermark;
 			await SaveStateAsync();
 		}
+		_snapshotWatermark = end.Watermark;
 		SnapshotsLoaded++;
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper

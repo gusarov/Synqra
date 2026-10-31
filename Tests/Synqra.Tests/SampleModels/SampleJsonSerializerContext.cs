@@ -50,6 +50,11 @@ namespace Synqra.Tests.SampleModels;
 [JsonSerializable(typeof(Synqra.CommandCreatedEvent))]
 [JsonSerializable(typeof(Synqra.ObjectPropertyChangedEvent))]
 [JsonSerializable(typeof(Synqra.ComponentAddedEvent))]
+[JsonSerializable(typeof(Synqra.StreamSnapshotEvent))] // a client keeps a stream snapshot in its log
+[JsonSerializable(typeof(Synqra.Tests.SampleModels.Syncronization.SnapshotSceneNode))]
+[JsonSerializable(typeof(Synqra.Tests.SampleModels.Syncronization.SnapshotScenePosition))]
+[JsonSerializable(typeof(Synqra.Tests.SampleModels.Syncronization.SnapshotSceneTag))]
+[JsonSerializable(typeof(Synqra.Tests.SampleModels.Syncronization.SnapshotSceneEdge))]
 
 [JsonSerializable(typeof(Synqra.Command))]
 [JsonSerializable(typeof(Synqra.ChangeObjectPropertyCommand))]
