@@ -96,16 +96,18 @@ public sealed class ContosoScene
 	/// <summary>Renames the node first in id order: an edit a test makes on one replica and expects on the others.</summary>
 	public async Task RenameFirstAsync(IObjectStore store, string name)
 	{
-		var first = ReadNodes(store).OrderBy(store.GetId).FirstOrDefault()
-			?? throw new InvalidOperationException("The scene has no node to rename.");
-		var id = store.GetId(first);
+		var id = ReadNodes(store).Select(x => x.Id).FirstOrDefault();
+		if (id == default)
+		{
+			throw new InvalidOperationException("The scene has no node to rename.");
+		}
 		await store.SubmitCommandAsync(ComposeChange<ContosoSceneNode>(store, id, id, nameof(ContosoSceneNode.Name), name));
 	}
 
 	/// <summary>Adds an edge from the first node to the last, in id order, with this weight.</summary>
 	public async Task LinkFirstToLastAsync(IObjectStore store, double weight)
 	{
-		var ordered = ReadNodes(store).Select(store.GetId).Order().ToList();
+		var ordered = ReadNodes(store).Select(x => x.Id).ToList();
 		if (ordered.Count < 2)
 		{
 			throw new InvalidOperationException("The scene has fewer than two nodes to link.");
@@ -117,20 +119,48 @@ public sealed class ContosoScene
 	public string Describe(IObjectStore store)
 	{
 		var text = new StringBuilder();
-		foreach (var node in ReadNodes(store).OrderBy(store.GetId))
+		foreach (var (id, node) in ReadNodes(store))
 		{
 			var components = ((IComponentContainer)node).Components.ToList();
 			var position = components.OfType<ContosoScenePosition>().SingleOrDefault();
 			var tags = components.OfType<ContosoSceneTag>().Select(x => x.Label).Order();
 			var edges = node.Edges.Select(x => $"{x.TargetId}:{x.Weight}").Order();
-			text.Append($"{store.GetId(node)} {node.Name} {node.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]\n");
+			text.Append($"{id} {node.Name} {node.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]\n");
 		}
 		return text.ToString();
 	}
 
-	// Enumerated once: a Mongo collection's Count is a query of its own, so a copy sized by it misses or overruns a root a peer
-	// adds or deletes in between.
-	List<ContosoSceneNode> ReadNodes(IObjectStore store) => store.GetCollection<ContosoSceneNode>().Where(node => node is not null).ToList();
+	/// <summary>
+	/// The nodes with their ids, in id order, read in one pass: a Mongo collection's Count is a query of its own, so a copy sized by
+	/// it misses or overruns a root a peer adds in between. A node a peer deletes while it is read leaves the store's tracking, and
+	/// asking its id then throws: it is gone, and left out.
+	/// </summary>
+	List<(Guid Id, ContosoSceneNode Node)> ReadNodes(IObjectStore store)
+	{
+		var nodes = new List<(Guid Id, ContosoSceneNode Node)>();
+		foreach (var node in store.GetCollection<ContosoSceneNode>())
+		{
+			if (FindId(store, node) is Guid id)
+			{
+				nodes.Add((id, node));
+			}
+		}
+		return nodes.OrderBy(x => x.Id).ToList();
+	}
+
+	Guid? FindId(IObjectStore store, object node)
+	{
+		Guid? id = null;
+		try
+		{
+			id = store.GetId(node);
+		}
+		catch (InvalidOperationException)
+		{
+			// deleted by a peer while the scene was read
+		}
+		return id;
+	}
 
 	AddComponentCommand ComposeAdd(IObjectStore store, Guid owner, Guid componentId, object data)
 	{

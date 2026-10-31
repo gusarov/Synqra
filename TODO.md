@@ -31,3 +31,7 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
 - [ ] **Header names every mapping.** `SnapshotSchema.DescribeSnapshot` lists the writer's full map, so a client lacking
   any one mapped type (even one the stream never uses) refuses the whole snapshot and replays. Collect the ids the chunks
   actually wrote instead, if that becomes a deployment problem.
+- [ ] **Mongo reads racing a delete.** `MongoProjection` drops a deleted entity from its tracking after the commit, so a reader
+  that enumerated the entity a moment earlier gets "The object is not attached to this MongoProjection" from `GetId`. Found by
+  the Contoso master listing a scene while a browser's delete landed (CI build 14977); the scene readers skip such a node. A
+  store-level answer (`TryGetId`, or ids handed out with the enumeration) would spare every caller that.
