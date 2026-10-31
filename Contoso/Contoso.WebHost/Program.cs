@@ -44,7 +44,7 @@ builder.Services
 	.AddRazorComponents()
 	.AddInteractiveWebAssemblyComponents()
 	;
-builder.Services.AddContosoMaster();
+builder.Services.AddContosoMaster(builder.Configuration);
 
 var app = builder.Build();
 

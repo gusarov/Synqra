@@ -30,7 +30,7 @@ public sealed class SeedingStream
 
 	public string ComposeCreationRecordKey(Guid stream) => $"synqra-contoso-created-{stream:N}";
 
-	/// <summary>The replication client's config: the page's own origin, scoped by the server to this stream.</summary>
+	/// <summary>The replication client's config: the page's own origin, scoped by the server to this stream. A cold load asks for the stream's state (a snapshot).</summary>
 	public EventReplicationConfig CreateReplicationConfig()
 	{
 		var scheme = _page.Scheme == "https" ? "wss" : "ws";
@@ -39,6 +39,7 @@ public sealed class SeedingStream
 		{
 			Endpoint = $"{scheme}://{_page.Host}{port}/api/synqra/ws?stream={StreamId:D}",
 			HelloKind = ReplicationHelloKind.UserDefaultMainStream,
+			InitialSubscribeStreamId = StreamId, // the stream it serves: a cold load asks for its state rather than its history
 		};
 	}
 }

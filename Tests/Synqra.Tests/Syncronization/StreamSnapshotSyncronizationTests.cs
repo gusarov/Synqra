@@ -102,6 +102,34 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		await Assert.That(Replication(next).FramesReceived).IsEqualTo(delta);
 	}
 
+	/// <summary>
+	/// A host that keeps no replication state (Contoso's browser) asks every load for the whole stream: its log, which starts with the
+	/// snapshot, names the floor it resumes after, and nothing the snapshot holds is folded in twice.
+	/// </summary>
+	[Test]
+	[Arguments(false)]
+	[Arguments(true)]
+	public async Task A_warm_reload_without_a_state_store_resumes_after_the_stored_snapshot(bool mongo)
+	{
+		var streamId = Guid.NewGuid();
+		var master = await StartMasterAsync(streamId, mongo);
+		var ids = await BuildSceneAsync(master, SceneNodes);
+		var client = await StartClientAsync(master, streamId);
+		await WaitUntilAsync(async () => await DescribeAsync(client) == await DescribeAsync(master), "the client holds the master's scene");
+		var cutAt = await CountEventsAsync(master);
+		var log = await EndRunAsync(client);
+
+		await RunOnMasterAsync(master, store => RenameAsync(store, ids[5], "renamed while the client was away"));
+		var delta = await CountEventsAsync(master) - cutAt;
+
+		var next = await StartClientAsync(master, streamId, configure: builder => builder.Configuration[LogFileKey] = log);
+		await WaitUntilAsync(async () => await DescribeAsync(next) == await DescribeAsync(master), "the reloaded client holds the scene once, and the write it missed");
+		await Task.Delay(500); // nothing more may follow
+
+		await Assert.That(await DescribeAsync(next)).IsEqualTo(await DescribeAsync(master));
+		await Assert.That(Replication(next).FramesReceived).IsEqualTo(delta).Because("the stored snapshot's watermark is where the client resumes");
+	}
+
 	[Test]
 	[Arguments(false)]
 	[Arguments(true)]

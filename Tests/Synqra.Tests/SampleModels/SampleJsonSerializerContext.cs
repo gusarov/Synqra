@@ -146,6 +146,10 @@ public partial class SampleJsonSerializerContext : JsonSerializerContext
 		typeof(TestTaggingComponent),
 		typeof(TestActivatableComponent),
 		typeof(TestFlagComponent),
+		typeof(SnapshotSceneNode),
+		typeof(SnapshotScenePosition),
+		typeof(SnapshotSceneTag),
+		typeof(SnapshotSceneEdge),
 	];
 
 	static readonly object __sync = new object();
