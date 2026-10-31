@@ -29,12 +29,14 @@ public static class MongoSynqraStoreExtensions
 			services.TryAddSingleton<MongoProjection>();
 			services.AddSingleton<IObjectStore>(sp => sp.GetRequiredService<MongoProjection>());
 			services.AddSingleton<IProjection>(sp => sp.GetRequiredService<MongoProjection>());
+			services.TryAddSingleton<IStreamSnapshotSource>(sp => sp.GetRequiredService<MongoProjection>()); // a cold client loads state, not history
 		}
 		else
 		{
 			services.TryAddKeyedSingleton<MongoProjection>(serviceKey);
 			services.AddKeyedSingleton<IObjectStore>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 			services.AddKeyedSingleton<IProjection>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
+			services.TryAddKeyedSingleton<IStreamSnapshotSource>(serviceKey, (sp, key) => sp.GetRequiredKeyedService<MongoProjection>(key));
 		}
 		// The projection is a derivation source for the event-log upgrades, and gets its own upgrades when its event log is not Mongo (one runner per host either way).
 		services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SynqraMongoUpgradeService>());

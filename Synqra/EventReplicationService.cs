@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Synqra.AppendStorage;
+using Synqra.BinarySerializer;
 using System;
 using System.Buffers;
 using System.Diagnostics;
@@ -27,6 +28,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	private readonly INetworkSerializationService _networkSerializationService;
 	private readonly IEventReplicationStateStore? _stateStore;
+	private readonly ISbxSerializerFactory? _serializerFactory;
 
 	private SemaphoreSlim _autoResetEvent = new SemaphoreSlim(0, 1);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
@@ -56,6 +58,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <summary>Event frames this run wrote to the server: a client never echoes what the master sent it.</summary>
 	public long FramesSent { get; private set; }
 
+	/// <summary>Stream snapshots this run received and stored in the local log (plans/snapshot.md).</summary>
+	public long SnapshotsLoaded { get; private set; }
+
+	// The snapshot being received on this connection: its header, then its chunks, until its end.
+	SnapshotBegin? _snapshotHeader;
+	readonly List<SnapshotChunk> _snapshotChunks = new List<SnapshotChunk>();
+	// Set when a snapshot's header names a schema this build cannot read: the rest of this run replays instead.
+	bool _snapshotRefused;
+
 	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
 	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
 
@@ -82,6 +93,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		, JsonSerializerContext? jsonSerializerContext = null
 		, EventReplicationConfig? config = null
 		, IEventReplicationStateStore? stateStore = null
+		, ISbxSerializerFactory? serializerFactory = null
 		)
 	{
 		_storage = storage;
@@ -90,6 +102,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		_jsonSerializerContext = jsonSerializerContext;
 		_config = config ?? options.Value;
 		_stateStore = stateStore;
+		_serializerFactory = serializerFactory;
 	}
 
 	/// <summary>The stream this connection serves; the persisted state is keyed by it.</summary>
@@ -240,6 +253,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			var connectedAt = Stopwatch.StartNew();
 			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
 			_lastSentSequence = default;
+			_snapshotHeader = null; // a snapshot cut short with its connection is asked for again by the next one
+			_snapshotChunks.Clear();
 
 			async Task Reader()
 			{
@@ -289,7 +304,19 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
 							break;
+						case SnapshotBegin begin:
+							ReceiveSnapshotBegin(begin);
+							break;
+						case SnapshotChunk chunk:
+							ReceiveSnapshotChunk(chunk);
+							break;
+						case SnapshotEnd end:
+							await StoreSnapshotAsync(end);
+							break;
 						case SnapshotDeclined declined:
+							// Whatever part of a snapshot came is dropped: the backlog that follows is the whole stream.
+							_snapshotHeader = null;
+							_snapshotChunks.Clear();
 							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
 							break;
 						case EventRejected rejected:
@@ -359,17 +386,18 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// 8 bytes magic + 16 bytes ServerWatermark (Guid.Empty = "send me everything") + the
 				// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
 				// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
-				var isSubscribeTo = _config.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot;
+				var helloKind = ChooseHelloKind();
+				var isSubscribeTo = helloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot;
 				var helloSize = isSubscribeTo ? 41 : 25;
 				var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
 				try
 				{
 					BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
 					_eventReplicationState.ServerWatermark.TryWriteBytes(buffer.AsSpan(8, 16));
-					buffer[24] = (byte)_config.HelloKind;
+					buffer[24] = (byte)helloKind;
 					if (isSubscribeTo)
 					{
-						(_config.InitialSubscribeStreamId ?? throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId.")).TryWriteBytes(buffer.AsSpan(25, 16));
+						(_config.InitialSubscribeStreamId ?? (StreamKey != default ? StreamKey : throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId."))).TryWriteBytes(buffer.AsSpan(25, 16));
 					}
 					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 				}
@@ -384,7 +412,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 			}
 			#endregion
-			EmergencyLog.Default.Stage("replication: HELLO sent");
+			EmergencyLog.Default.Stage($"replication: HELLO sent ({ChooseHelloKind()})");
 			Wake(); // whatever the last run left unacknowledged goes now, not at the next local write
 
 			try
@@ -427,7 +455,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						bool held;
 						lock (_skipSet)
 						{
-							held = _heldByMaster.Contains(ev.EventId);
+							held = _heldByMaster.Contains(ev.EventId) || ev is StreamSnapshotEvent; // a snapshot is this client's own record of what the master sent
 						}
 						if (held)
 						{
@@ -540,6 +568,104 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	*/
 
 	public void Trigger(Command command, IReadOnlyList<Event> events) => Wake();
+
+	/// <summary>
+	/// The HELLO kind this connection announces: the configured one, or a snapshot request when this client is fully cold (no
+	/// watermark, nothing in its log), knows its stream, and has not refused a snapshot this run.
+	/// </summary>
+	ReplicationHelloKind ChooseHelloKind()
+	{
+		bool logEmpty;
+		lock (_skipSet)
+		{
+			logEmpty = _skipSet.Count == 0;
+		}
+		var cold = logEmpty && _eventReplicationState.ServerWatermark == default;
+		return cold
+			&& _config.RequestSnapshot
+			&& !_snapshotRefused
+			&& StreamKey != default
+			&& _config.HelloKind is ReplicationHelloKind.UserDefaultMainStream or ReplicationHelloKind.SubscribeTo
+			? ReplicationHelloKind.SubscribeToSnapshot
+			: _config.HelloKind;
+	}
+
+	/// <summary>
+	/// A snapshot starts. Its header is checked at once: a schema this build cannot read would be stored and then refused on every
+	/// load, so the connection ends instead and the next one replays the stream.
+	/// </summary>
+	void ReceiveSnapshotBegin(SnapshotBegin begin)
+	{
+		if (_serializerFactory is not null)
+		{
+			try
+			{
+				new SnapshotSchema(_serializerFactory).CreateReader(begin);
+			}
+			catch (SnapshotSchemaRefusedException refused)
+			{
+				_snapshotRefused = true;
+				throw new InvalidOperationException($"EventReplicationService: snapshot {begin.SnapshotId} of stream {begin.StreamId} cannot be read by this build ({refused.Message}); reconnecting to replay the stream.", refused);
+			}
+		}
+		_snapshotHeader = begin;
+		_snapshotChunks.Clear();
+		EmergencyLog.Default.Stage($"replication: snapshot {begin.SnapshotId} of {begin.StreamId} at {begin.Watermark} begins");
+	}
+
+	void ReceiveSnapshotChunk(SnapshotChunk chunk)
+	{
+		if (_snapshotHeader?.SnapshotId != chunk.SnapshotId || chunk.Index != _snapshotChunks.Count)
+		{
+			throw new InvalidOperationException($"EventReplicationService: snapshot chunk {chunk.SnapshotId} #{chunk.Index} arrived out of place (expected #{_snapshotChunks.Count} of {_snapshotHeader?.SnapshotId}); reconnecting.");
+		}
+		_snapshotChunks.Add(chunk);
+	}
+
+	/// <summary>
+	/// The snapshot is complete: kept as the first record of the local log, then its watermark becomes the resume point, so a
+	/// load never resumes past a state it does not hold. One that came incomplete ends the connection; the next asks again.
+	/// </summary>
+	async Task StoreSnapshotAsync(SnapshotEnd end)
+	{
+		var header = _snapshotHeader;
+		var records = _snapshotChunks.Sum(x => x.Count);
+		if (header is null || header.SnapshotId != end.SnapshotId || _snapshotChunks.Count != end.ChunkCount || records != end.RecordCount)
+		{
+			throw new InvalidOperationException($"EventReplicationService: snapshot {end.SnapshotId} ended with {_snapshotChunks.Count} of {end.ChunkCount} chunks and {records} of {end.RecordCount} records; reconnecting.");
+		}
+		var snapshot = new StreamSnapshotEvent
+		{
+			EventId = end.SnapshotId,
+			CommandId = end.SnapshotId,
+			StreamId = header.StreamId,
+			Header = header,
+			Chunks = _snapshotChunks.ToList(),
+		};
+		_snapshotHeader = null;
+		_snapshotChunks.Clear();
+		lock (_skipSet)
+		{
+			if (_skipSet.Add(snapshot.EventId))
+			{
+				_skipList.AddLast(snapshot.EventId);
+			}
+			_heldByMaster.Add(snapshot.EventId);
+		}
+		if (!_ended)
+		{
+			await _storage.AppendAsync(snapshot);
+		}
+		if (end.Watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+		{
+			_eventReplicationState.ServerWatermark = end.Watermark;
+			await SaveStateAsync();
+		}
+		SnapshotsLoaded++;
+		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
+		EventsReceived?.Invoke(); // the owner folds it in through the keeper
+		Wake();
+	}
 
 	/// <summary>Remembers where the send loop is in the local log, so its next read starts there.</summary>
 	void Passed(Event ev)

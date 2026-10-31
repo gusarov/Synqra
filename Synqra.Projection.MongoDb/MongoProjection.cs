@@ -43,7 +43,7 @@ using IAppendStorage = IEventLog;
 /// sync when there is one, but neither ever requires the entity to be materialized in RAM.
 /// </para>
 /// </summary>
-public sealed class MongoProjection : IObjectStore, IProjection, ILinkIndex, IComponentIndex, ICommittedEventSource
+public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIndex, IComponentIndex, ICommittedEventSource
 {
 	static MongoProjection()
 	{

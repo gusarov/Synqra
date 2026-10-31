@@ -55,6 +55,14 @@ public class EventReplicationConfig
 	public virtual Guid? InitialSubscribeStreamId { get; set; }
 
 	/// <summary>
+	/// Whether a fully cold client (no server watermark, an empty local log) asks for its stream's state instead of its history
+	/// (<see cref="ReplicationHelloKind.SubscribeToSnapshot"/>, plans/snapshot.md). It takes the stream this connection serves
+	/// (<see cref="StreamId"/>, else <see cref="InitialSubscribeStreamId"/>) and applies to the <see cref="ReplicationHelloKind.UserDefaultMainStream"/>
+	/// and <see cref="ReplicationHelloKind.SubscribeTo"/> kinds. A master that serves none declines and the client replays as before.
+	/// </summary>
+	public virtual bool RequestSnapshot { get; set; } = true;
+
+	/// <summary>
 	/// Full WebSocket endpoint URI for the replication master. When set, overrides the default
 	/// <c>ws://localhost:{Port}/api/synqra/ws</c> construction so the WASM client can connect to
 	/// the correct remote host in deployed environments.
