@@ -1,0 +1,131 @@
+@page "/scene"
+@implements IDisposable
+@using Contoso.Model
+@using Contoso.Projection.InMemory
+@using Synqra
+
+<PageTitle>Synqra scene replication</PageTitle>
+
+<h1>Scene</h1>
+
+@* A scene made in one browser reaches the master and every other browser; a browser that opens a stream it holds nothing of loads
+   the stream's state from the master (a snapshot) and keeps it in its own log, so its next load starts from there. *@
+@if (!SeedingStream.IsSelected)
+{
+    <p data-testid="no-stream">No stream: open <code>scene?stream=&lt;id&gt;</code>, or create one here.</p>
+}
+else if (_projection is null)
+{
+    <p>Loading stream…</p>
+}
+else
+{
+    <dl>
+        <dt>Stream</dt>
+        <dd><code data-testid="stream">@SeedingStream.StreamId</code></dd>
+        <dt>Connection</dt>
+        <dd data-testid="online">@(Replication.IsOnline ? "online" : "offline")</dd>
+        <dt>Snapshots loaded this load</dt>
+        <dd data-testid="snapshots">@Replication.SnapshotsLoaded</dd>
+        <dt>Event frames received this load</dt>
+        <dd data-testid="frames">@Replication.FramesReceived</dd>
+        <dt>Nodes</dt>
+        <dd data-testid="node-count">@NodeCount</dd>
+    </dl>
+    <div data-testid="ready">ready</div>
+
+    <p>
+        <InputText @bind-Value="_prefix" data-testid="prefix" />
+        <InputNumber @bind-Value="_nodes" data-testid="nodes" />
+        <button @onclick="BuildAsync" data-testid="btnBuild">Build a scene</button>
+    </p>
+    <p>
+        <InputText @bind-Value="_rename" data-testid="renameTo" />
+        <button @onclick="RenameAsync" data-testid="btnRename">Rename the first node</button>
+        <button @onclick="LinkAsync" data-testid="btnLink">Link the first node to the last</button>
+    </p>
+    <p data-testid="error">@_error</p>
+
+    <pre data-testid="scene">@Scene.Describe(_projection)</pre>
+}
+
+<button @onclick="CreateStream" data-testid="btnCreateStream">Create a new stream in this browser</button>
+
+@code {
+    [Inject]
+    private SeedingStream SeedingStream { get; set; } = default!;
+
+    [Inject]
+    private IProjectionProvider ProjectionProvider { get; set; } = default!;
+
+    [Inject]
+    private EventReplicationService Replication { get; set; } = default!;
+
+    [Inject]
+    private ContosoScene Scene { get; set; } = default!;
+
+    [Inject]
+    private NavigationManager Navigation { get; set; } = default!;
+
+    private ContosoInMemoryProjection? _projection;
+    private Timer? _statusRefresh;
+    private string _prefix = "browser";
+    private int _nodes = 12;
+    private string _rename = "renamed";
+    private string? _error;
+
+    private int NodeCount => _projection?.GetCollection<ContosoSceneNode>().Count() ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (SeedingStream.IsSelected)
+        {
+            _projection = (ContosoInMemoryProjection)await ProjectionProvider.GetAsync(SeedingStream.StreamId);
+            _projection.CommandProcessed += OnCommandProcessed;
+            Replication.EventsReceived += OnEventsReceived;
+            _statusRefresh = new Timer(_ => _ = InvokeAsync(StateHasChanged), null, 250, 250); // the connection state is polled
+        }
+    }
+
+    private void OnCommandProcessed(object? sender, EventArgs args) => _ = InvokeAsync(StateHasChanged);
+
+    // What the server sent is in the log (a snapshot first, on a cold load): the provider folds it into the projection.
+    private void OnEventsReceived() => _ = InvokeAsync(async () =>
+    {
+        await ProjectionProvider.GetAsync(SeedingStream.StreamId);
+        StateHasChanged();
+    });
+
+    private Task BuildAsync() => RunAsync(() => Scene.BuildAsync(_projection!, _prefix, _nodes));
+
+    private Task RenameAsync() => RunAsync(() => Scene.RenameFirstAsync(_projection!, _rename));
+
+    private Task LinkAsync() => RunAsync(() => Scene.LinkFirstToLastAsync(_projection!, 9.5));
+
+    // A refused write shows on the page: a test waiting for a scene reads why it never came.
+    private async Task RunAsync(Func<Task> write)
+    {
+        try
+        {
+            _error = null;
+            await write();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    // A new stream: this browser holds nothing of it and neither does the master, so it starts empty here.
+    private void CreateStream() => Navigation.NavigateTo($"scene?stream={SynqraIdProvider.Default.CreateStreamId():D}", forceLoad: true);
+
+    public void Dispose()
+    {
+        _statusRefresh?.Dispose();
+        Replication.EventsReceived -= OnEventsReceived;
+        if (_projection is not null)
+        {
+            _projection.CommandProcessed -= OnCommandProcessed;
+        }
+    }
+}

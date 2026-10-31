@@ -244,6 +244,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			logHoldsEvents = _skipSet.Count > 0;
 		}
 		await LoadStateAsync(logHoldsEvents); // the cursor of the last run: HELLO asks for the delta, not the stream
+		if (logHoldsEvents)
+		{
+			await ResumeAfterStoredSnapshotAsync();
+		}
 		_lastSentEventId = _eventReplicationState.LastEventIdFromMe; // this run offers everything the master has not acknowledged
 
 		// One pass per connection. A reader that fails or a socket that closes ends the pass; the next one resumes from the
@@ -594,6 +598,30 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			&& _config.HelloKind is ReplicationHelloKind.UserDefaultMainStream or ReplicationHelloKind.SubscribeTo
 			? ReplicationHelloKind.SubscribeToSnapshot
 			: _config.HelloKind;
+	}
+
+	/// <summary>
+	/// A log that starts with a snapshot holds the stream's state up to its watermark and none of the events before it, so the
+	/// watermark is the floor of this client's resume point, and an event stamped at or before it is never applied again. A host
+	/// that keeps no replication state (or lost it) would otherwise be sent the whole history and fold it over the snapshot.
+	/// </summary>
+	async Task ResumeAfterStoredSnapshotAsync()
+	{
+		var first = StreamKey != default
+			? _storage.ReadStreamAsync(StreamKey, default, _cts.Token)
+			: _storage.GetAllAsync(from: default, _cts.Token);
+		await foreach (var ev in first)
+		{
+			if (ev is StreamSnapshotEvent snapshot)
+			{
+				_snapshotWatermark = snapshot.Header.Watermark;
+				if (_snapshotWatermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				{
+					_eventReplicationState.ServerWatermark = _snapshotWatermark;
+				}
+			}
+			break; // a snapshot is only ever the first record
+		}
 	}
 
 	/// <summary>

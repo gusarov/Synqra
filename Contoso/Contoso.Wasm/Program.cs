@@ -32,13 +32,21 @@ builder.Services.AddSbxSerializer(ser =>
 	ser.Map(100, typeof(ContosoItem));
 	ser.Map(101, typeof(FooContosoCommand));
 	ser.Map(102, typeof(FooContosoEvent));
+	ser.Map(103, typeof(ContosoSceneNode));
+	ser.Map(104, typeof(ContosoScenePosition));
+	ser.Map(105, typeof(ContosoSceneTag));
+	ser.Map(106, typeof(ContosoSceneEdge));
 });
 
 // Projection
-builder.Services.AddTypeMetadataProvider(
+var scene = new ContosoScene();
+builder.Services.AddSingleton(scene);
+builder.Services.AddTypeMetadataProvider([
 	typeof(ContosoItem),
 	typeof(FooContosoCommand),
-	typeof(FooContosoEvent));
+	typeof(FooContosoEvent),
+	.. scene.Types,
+]);
 builder.Services.AddSingleton<JsonSerializerContext>(ContosoJsonSerializerContext.Default);
 builder.Services.AddSingleton(ContosoJsonSerializerContext.DefaultOptions);
 // Projection is non-multitenant in-memory: no DI-resolvable singleton — the factory/provider produce

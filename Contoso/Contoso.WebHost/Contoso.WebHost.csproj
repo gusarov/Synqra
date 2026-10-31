@@ -14,6 +14,8 @@
     <ProjectReference Include="..\Contoso.Wasm\Contoso.Wasm.csproj" />
     <ProjectReference Include="..\Contoso.Projection.InMemory\Contoso.Projection.InMemory.csproj" />
     <ProjectReference Include="..\..\Synqra.AppendStorage.InMemory\Synqra.AppendStorage.InMemory.csproj" />
+    <ProjectReference Include="..\..\Synqra.AppendStorage.MongoDb\Synqra.AppendStorage.MongoDb.csproj" />
+    <ProjectReference Include="..\..\Synqra.Projection.MongoDb\Synqra.Projection.MongoDb.csproj" />
     <ProjectReference Include="..\..\Synqra.BinarySerializer\Synqra.BinarySerializer.csproj" />
     <ProjectReference Include="..\..\Synqra.Replication.AspNetCore\Synqra.Replication.AspNetCore.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
