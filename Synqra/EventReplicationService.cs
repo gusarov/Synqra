@@ -29,6 +29,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	private readonly INetworkSerializationService _networkSerializationService;
 	private readonly IEventReplicationStateStore? _stateStore;
 	private readonly ISbxSerializerFactory? _serializerFactory;
+	private readonly bool _foldsSnapshots;
 
 	private SemaphoreSlim _autoResetEvent = new SemaphoreSlim(0, 1);
 	private CancellationTokenSource _cts = new CancellationTokenSource();
@@ -104,6 +105,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		, EventReplicationConfig? config = null
 		, IEventReplicationStateStore? stateStore = null
 		, ISbxSerializerFactory? serializerFactory = null
+		, StreamSnapshotFolding? snapshotFolding = null
 		)
 	{
 		_storage = storage;
@@ -113,6 +115,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		_config = config ?? options.Value;
 		_stateStore = stateStore;
 		_serializerFactory = serializerFactory;
+		_foldsSnapshots = snapshotFolding is not null;
 	}
 
 	/// <summary>The stream this connection serves; the persisted state is keyed by it.</summary>
@@ -603,7 +606,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>
 	/// The HELLO kind this connection announces: the configured one, or a snapshot request when this client is fully cold (no
-	/// watermark, nothing in its log), knows its stream, and has not given up on snapshots this run.
+	/// watermark, nothing in its log), knows its stream, has a projection that folds one (<see cref="StreamSnapshotFolding"/>), and
+	/// has not given up on snapshots this run.
 	/// </summary>
 	ReplicationHelloKind ChooseHelloKind()
 	{
@@ -615,6 +619,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		var cold = logEmpty && _eventReplicationState.ServerWatermark == default;
 		return cold
 			&& _config.RequestSnapshot
+			&& _foldsSnapshots
 			&& !_snapshotRefused
 			&& StreamKey != default
 			&& _config.HelloKind is ReplicationHelloKind.UserDefaultMainStream or ReplicationHelloKind.SubscribeTo

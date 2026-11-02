@@ -3,6 +3,7 @@ using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Synqra.BinarySerializer;
 using System;
@@ -173,6 +174,21 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 			await Assert.That(await DescribeAsync(client)).IsEqualTo(expected).Because($"a client holds every write, those during its snapshot included ({writes} writes; this client: {Replication(client).SnapshotsLoaded} snapshots, {Replication(client).FramesReceived} frames, {await CountEventsAsync(client)} log records)");
 		}
 		await Assert.That(writes).IsGreaterThan(0);
+	}
+
+	/// <summary>A client whose projection does not fold a snapshot never asks for one: it would move past the history and show nothing.</summary>
+	[Test]
+	public async Task A_client_whose_projection_cannot_fold_a_snapshot_replays()
+	{
+		var streamId = Guid.NewGuid();
+		var master = await StartMasterAsync(streamId, mongo: false);
+		await BuildSceneAsync(master, SceneNodes);
+
+		var client = await StartClientAsync(master, streamId, configure: builder => builder.Services.RemoveAll<StreamSnapshotFolding>());
+
+		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
+		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(0);
+		await Assert.That(Replication(client).FramesReceived).IsEqualTo(await CountEventsAsync(master));
 	}
 
 	[Test]

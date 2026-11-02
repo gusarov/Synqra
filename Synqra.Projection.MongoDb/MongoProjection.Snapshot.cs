@@ -30,7 +30,7 @@ public sealed partial class MongoProjection : IStreamSnapshotSource
 				var roots = await Components.FindAsync(
 					  session
 					, Builders<BsonDocument>.Filter.And(stream, RootsOnlyFilter)
-					, new FindOptions<BsonDocument> { Sort = Builders<BsonDocument>.Sort.Ascending("_id"), }
+					, new FindOptions<BsonDocument> { Sort = Builders<BsonDocument>.Sort.Ascending(EntityIdField), } // a root's _eid is its _id: the (_sid, _eid) index serves the order
 					, cancellationToken
 					);
 				// The first read, inside the gate: it fixes the session's point in time.
@@ -60,7 +60,7 @@ public sealed partial class MongoProjection : IStreamSnapshotSource
 			return cut;
 		});
 
-	/// <summary>Roots in id order, then facets and links by owner: a record never arrives before the entity it hangs on.</summary>
+	/// <summary>Roots in id order, then facets and links grouped by owner: a record never arrives before the entity it hangs on.</summary>
 	async IAsyncEnumerable<SnapshotRecord> ReadRecordsAsync(IClientSessionHandle session, List<BsonDocument> first, IAsyncCursor<BsonDocument> roots, FilterDefinition<BsonDocument> hanging, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		foreach (var doc in first)
@@ -77,7 +77,7 @@ public sealed partial class MongoProjection : IStreamSnapshotSource
 		using var rest = await Components.FindAsync(
 			  session
 			, hanging
-			, new FindOptions<BsonDocument> { Sort = Builders<BsonDocument>.Sort.Ascending(EntityIdField).Ascending("_id"), }
+			, new FindOptions<BsonDocument> { Sort = Builders<BsonDocument>.Sort.Ascending(EntityIdField), } // by owner, from the (_sid, _eid) index: no in-memory sort
 			, cancellationToken
 			);
 		while (await rest.MoveNextAsync(cancellationToken))

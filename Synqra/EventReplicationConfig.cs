@@ -58,7 +58,8 @@ public class EventReplicationConfig
 	/// Whether a fully cold client (no server watermark, an empty local log) asks for its stream's state instead of its history
 	/// (<see cref="ReplicationHelloKind.SubscribeToSnapshot"/>, plans/snapshot.md). It takes the stream this connection serves
 	/// (<see cref="StreamId"/>, else <see cref="InitialSubscribeStreamId"/>) and applies to the <see cref="ReplicationHelloKind.UserDefaultMainStream"/>
-	/// and <see cref="ReplicationHelloKind.SubscribeTo"/> kinds. A master that serves none declines and the client replays as before.
+	/// and <see cref="ReplicationHelloKind.SubscribeTo"/> kinds, and only on a client whose projection folds a snapshot (it registers
+	/// <see cref="StreamSnapshotFolding"/>, as the in-memory store does). A master that serves none declines and the client replays.
 	/// </summary>
 	public virtual bool RequestSnapshot { get; set; } = true;
 
