@@ -268,6 +268,42 @@ public class ModelBindingGenerator : IIncrementalGenerator
 			bool isSealed = classData.Data.IsSealed;
 			var virtualKeyword = isSealed ? "" : " virtual";
 
+			// One SetCore case. A value read back from JSON has lost its CLR type: a number is a long, a Guid is its string, so those
+			// are converted back; anything else is cast.
+			string ComposeSetCase(IPropertySymbol pro)
+			{
+				var type = pro.Type.ToString();
+				var fromJson = type switch
+				{
+					"int" => ("long l", "l"),
+					"System.Guid" or "System.Guid?" => ("string g", "global::System.Guid.Parse(g)"),
+					_ => default,
+				};
+				var setCase = $$"""
+			case "{{pro.Name}}":
+				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				break;
+""";
+				if (fromJson.Item1 is not null)
+				{
+					setCase = $$"""
+			case "{{pro.Name}}":
+			{
+				if (value is {{fromJson.Item1}})
+				{
+					this.{{pro.Name}} = ({{FQN(pro.Type)}}){{fromJson.Item2}};
+				}
+				else
+				{
+					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
+				}
+				break;
+			}
+""";
+				}
+				return setCase;
+			}
+
 			// SBX can read a property's value back by type name only; root those types for trimming/AOT (see Synqra.BinarySerializer/readme.md).
 			string RootPropertyTypes(IEnumerable<IPropertySymbol> properties)
 			{
@@ -491,31 +527,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 """);
 				foreach (var pro in GetAllInstancePropertiesWithAncestors(classData.Data, exclude).Where(p => p.SetMethod is not null && TryGetLinkNav(p, classData.LinkSymbols) is null))
 				{
-					if (pro.Type.ToString() == "int")
-					{
-						body.AppendLine($$"""
-			case "{{pro.Name}}":
-			{
-				if (value is long l)
-				{
-					this.{{pro.Name}} = ({{FQN(pro.Type)}})l;
-				}
-				else
-				{
-					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
-				}
-				break;
-			}
-""");
-					}
-					else
-					{
-						body.AppendLine($$"""
-			case "{{pro.Name}}":
-				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
-				break;
-""");
-					}
+					body.AppendLine(ComposeSetCase(pro));
 				}
 				body.AppendLine(
 	$$"""
@@ -540,31 +552,7 @@ public class ModelBindingGenerator : IIncrementalGenerator
 					{
 						continue;
 					}
-					if (pro.Type.ToString() == "int")
-					{
-						body.AppendLine($$"""
-			case "{{pro.Name}}":
-			{
-				if (value is long l)
-				{
-					this.{{pro.Name}} = ({{FQN(pro.Type)}})l;
-				}
-				else
-				{
-					this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
-				}
-				break;
-			}
-""");
-					}
-					else
-					{
-						body.AppendLine($$"""
-			case "{{pro.Name}}":
-				this.{{pro.Name}} = ({{FQN(pro.Type)}})value!;
-				break;
-""");
-					}
+					body.AppendLine(ComposeSetCase(pro));
 				}
 				body.AppendLine(
 """

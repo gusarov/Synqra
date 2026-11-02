@@ -180,4 +180,18 @@ public class BindingTests : BaseTest
 		}
 	}
 
+	/// <summary>
+	/// A Guid in an event's untyped value (a link retargeted: <c>NewValue</c> is the new target) comes back from a JSON log as its
+	/// string. The generated setter takes it back as the Guid; a cast threw, and a client replaying its log lost the change.
+	/// </summary>
+	[Test]
+	public async Task Should_set_a_guid_property_from_its_json_string()
+	{
+		var edge = new Synqra.Tests.SampleModels.Syncronization.SnapshotSceneEdge();
+		var target = Guid.CreateVersion7();
+
+		((IBindableModel)edge).Set(nameof(Link.TargetId), target.ToString());
+
+		await Assert.That(edge.TargetId).IsEqualTo(target);
+	}
 }
