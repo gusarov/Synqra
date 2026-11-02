@@ -36,8 +36,10 @@ still serves — server-first is the only order that must work, and it does.
 | `SnapshotDeclined` | `StreamId Guid`, `Reason string` | the client falls back to replay, which is already flowing |
 
 After `SnapshotEnd` the master continues exactly like a warm resume: backlog strictly after `Watermark`, then live
-broadcasts. `SnapshotBegin` → chunks → `SnapshotEnd` → backlog are sent under the same `broadcastGate` the backlog replay
-holds today, so no broadcast interleaves (see §7 for why that gate is a follow-up).
+broadcasts. `SnapshotBegin` → chunks → `SnapshotEnd` → backlog go through the socket's own outbox (`ReplicationOutbox`) with
+its pushes held, so no broadcast interleaves; the pushes queued meanwhile follow in commit order. The global `broadcastGate` is
+held only to register the socket, seed, cut and read the watermarks, never while anything is sent: a slow client holds up only
+its own pushes.
 
 ### 2. Schema header — every type the payload uses, pinned
 
@@ -149,8 +151,7 @@ later build refuses must be dropped and fetched again (today the fold steps over
 
 ### 7. Follow-ups and open points
 
-- `broadcastGate` is global: the backlog — and now the snapshot — is sent while every other connection's broadcasts wait.
-  Per-socket send queues remove that; a 300 KB snapshot over a slow link makes it worth doing soon.
+- Done: per-socket send queues. The snapshot and the backlog are sent outside the global `broadcastGate` (§1).
 - Uplink: a cold client has no local writes to offer, so snapshot and uplink never meet in v1.
 - Reuse the snapshot for a *far behind* warm client (watermark older than N events) — needs the client to discard its
   projection first; later.

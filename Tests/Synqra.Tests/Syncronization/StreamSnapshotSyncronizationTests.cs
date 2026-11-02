@@ -191,6 +191,42 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		await Assert.That(Replication(client).FramesReceived).IsEqualTo(await CountEventsAsync(master));
 	}
 
+	/// <summary>
+	/// A client whose snapshot the master is still sending holds up no other client: the master's writes reach the others, and theirs
+	/// reach the master, meanwhile. The endpoint sent a snapshot under its global gate, so every push and every inbound event on the
+	/// master waited for one client's snapshot to reach it. The writes made meanwhile reach that client after its snapshot.
+	/// </summary>
+	[Test]
+	public async Task A_snapshot_still_being_sent_holds_up_no_other_client()
+	{
+		var streamId = Guid.NewGuid();
+		var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var master = await StartMasterAsync(streamId, mongo: false, configure: builder => builder.Services.AddSingleton<IStreamSnapshotSource>(sp => new StallingSnapshotSource(new InMemoryStreamSnapshotSource(sp.GetRequiredService<IProjectionProvider>()), stalled, resume.Task)));
+		var ids = await BuildSceneAsync(master, SceneNodes);
+		var follower = await StartClientAsync(master, streamId, requestSnapshot: false);
+		await ExpectSameSceneAsync(follower, master, "the follower holds the master's scene");
+
+		var cold = StartClientAsync(master, streamId); // its snapshot stalls after the first record
+		await stalled.Task.WaitAsync(TimeSpan.FromMilliseconds(PropagationTimeoutMs));
+		try
+		{
+			await RunOnMasterAsync(master, store => RenameAsync(store, ids[0], "renamed on the master"));
+			await RenameAsync(follower.StoreContext, ids[1], "renamed by the follower");
+			await ExpectSameSceneAsync(follower, master, "the follower and the master trade writes while the snapshot is stalled");
+			await Assert.That(await DescribeAsync(master)).Contains("renamed by the follower");
+			await Assert.That(await DescribeAsync(follower)).Contains("renamed on the master");
+		}
+		finally
+		{
+			resume.TrySetResult();
+		}
+
+		var client = await cold;
+		await ExpectSameSceneAsync(client, master, "the cold client holds both writes after its snapshot");
+		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(1);
+	}
+
 	[Test]
 	public async Task A_snapshot_the_master_cannot_finish_is_declined_and_the_client_replays()
 	{
@@ -515,6 +551,27 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		}
 
 		EventReplicationState Copy(EventReplicationState state) => new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
+	}
+
+	/// <summary>A source whose cut stops after its first record until the test lets it go on: a snapshot the master is still sending.</summary>
+	sealed class StallingSnapshotSource(IStreamSnapshotSource inner, TaskCompletionSource stalled, Task resume) : IStreamSnapshotSource
+	{
+		public async Task<SnapshotCut?> CutAsync(Guid streamId, CancellationToken cancellationToken = default)
+			=> await inner.CutAsync(streamId, cancellationToken) is { } cut ? new SnapshotCut(cut.Watermark, Stall(cut.Records), cut.DisposeAsync) : null;
+
+		async IAsyncEnumerable<SnapshotRecord> Stall(IAsyncEnumerable<SnapshotRecord> records)
+		{
+			var sent = 0;
+			await foreach (var record in records)
+			{
+				if (++sent == 2)
+				{
+					stalled.TrySetResult();
+					await resume;
+				}
+				yield return record;
+			}
+		}
 	}
 
 	/// <summary>A source whose cut breaks off after some records: the master has sent part of a snapshot when it fails.</summary>

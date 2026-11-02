@@ -415,7 +415,8 @@ public static class AppendStorageJsonLinesExtensions
 					var lineHeader = await ReadTerminatedLineAsync();
 					if (lineHeader == null)
 					{
-						throw new Exception("Header line of Syncra.Storage.Jsonl is not found");
+						// The writer has created the file and not yet finished its header line: nothing is in it yet.
+						return false;
 					}
 					var header = JsonSerializer.Deserialize(lineHeader, JsonLinesStorageInternalSerializerContext.Default.JsonLinesStorageHeader);
 					if (header == null || header.Version == null)
