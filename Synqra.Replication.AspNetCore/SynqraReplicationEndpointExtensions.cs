@@ -113,8 +113,6 @@ public static class SynqraReplicationEndpointExtensions
 			var pushed = new RecentEventIds(capacity: 100_000); // the log and the projection both report a REST write: one push
 			_ = Task.Run(async () =>
 			{
-				var networkSerializationService = app.Services.GetRequiredService<INetworkSerializationService>();
-				var buffer = new byte[EventReplicationService.DefaultFrameSize];
 				try
 				{
 					await foreach (var (ev, watermark) in queue.Reader.ReadAllAsync(lifetime))
@@ -141,6 +139,8 @@ public static class SynqraReplicationEndpointExtensions
 					// host shutting down
 				}
 
+				// Queued to each peer that reads the event's stream, never sent from here: a peer's network holds up only its own pushes.
+				// Under the gate only to read the peers' subscriptions while no Subscribe frame changes them.
 				async Task BroadcastAsync(Event ev, Guid watermark)
 				{
 					await broadcastGate.WaitAsync(lifetime);
@@ -148,17 +148,9 @@ public static class SynqraReplicationEndpointExtensions
 					{
 						foreach (var (peer, peerScope) in sockets)
 						{
-							if (peer.State != WebSocketState.Open || !ReplicationStreamScope.Admits(ev.StreamId, peerScope.WritableStream, peerScope.Active))
+							if (peer.State == WebSocketState.Open && ReplicationStreamScope.Admits(ev.StreamId, peerScope.WritableStream, peerScope.Active))
 							{
-								continue;
-							}
-							try
-							{
-								await peer.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev, Watermark = watermark }, buffer, lifetime);
-							}
-							catch (Exception sendEx) when (sendEx is not OperationCanceledException)
-							{
-								pushLogger?.LogDebug(sendEx, "Synqra replication: pushing committed event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
+								peerScope.Outbox.Push(ev, watermark);
 							}
 						}
 					}
@@ -209,19 +201,12 @@ public static class SynqraReplicationEndpointExtensions
 				}
 			}
 
-			// Serializes one event as an SBX TransportOperation — no tag byte, the polymorphic model
-			// layer discriminates it from the subscription-control messages.
-			async Task SendEventFrameAsync(WebSocket target, byte[] frameBuffer, Event ev, Guid watermark)
-			{
-				await target.SendOperationAsync(networkSerializationService, new EventEnvelope { Event = ev, Watermark = watermark }, frameBuffer, ctx.RequestAborted);
-			}
-
 			// A replay frame that cannot be written ends this connection: the failure names the event, so the log says which one.
-			async Task ReplayFrameAsync(byte[] frameBuffer, Event ev, Guid watermark)
+			async Task ReplayFrameAsync(ReplicationOutbox outbox, Event ev, Guid watermark)
 			{
 				try
 				{
-					await SendEventFrameAsync(socket, frameBuffer, ev, watermark);
+					await outbox.SendAsync(new EventEnvelope { Event = ev, Watermark = watermark }, ctx.RequestAborted);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
@@ -264,12 +249,12 @@ public static class SynqraReplicationEndpointExtensions
 				return reason;
 			}
 
-			// The stream's state cut at a watermark (plans/snapshot.md): SnapshotBegin (the schema header), its chunks, SnapshotEnd. Declined,
-			// with the reason, when the host serves none, the connection is unscoped, the stream holds nothing or the cut fails: the client
-			// then takes the ordinary backlog. Returns the watermark the backlog resumes after.
-			async Task<Guid?> SendSnapshotAsync(Guid stream)
+			// The stream's state cut at a watermark (plans/snapshot.md), or why it is declined: the host serves none, the connection is
+			// unscoped, the stream holds nothing or the cut fails. The caller holds the global gate, so no peer's event is between being
+			// applied and being logged: the state and the log agree at the watermark. Sending it is SendSnapshotAsync's, outside the gate.
+			async Task<SnapshotTaken> CutSnapshotAsync(Guid stream)
 			{
-				Guid? sent = null;
+				SnapshotCut? cut = null;
 				var declined = snapshots is null ? "this master serves no snapshots"
 					: connectionStream is null ? "an unscoped connection replays its streams"
 					: null;
@@ -277,60 +262,71 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					try
 					{
-						var cut = await snapshots!.CutAsync(stream, ctx.RequestAborted);
+						cut = await snapshots!.CutAsync(stream, ctx.RequestAborted);
 						if (cut is null)
 						{
 							declined = "the stream holds nothing to snapshot";
 						}
-						else
+						else if (cut.Watermark == default)
 						{
-							await using (cut)
-							{
-								if (cut.Watermark == default)
-								{
-									declined = "the stream's log reports no watermark to resume after";
-								}
-								else
-								{
-									await SendCutAsync(stream, cut);
-									sent = cut.Watermark;
-								}
-							}
+							declined = "the stream's log reports no watermark to resume after";
 						}
 					}
 					catch (Exception ex) when (ex is not OperationCanceledException)
 					{
+						logger?.LogError(ex, "Synqra replication: the snapshot of stream {Stream} could not be cut; the client replays the stream instead.", stream);
+						declined = $"the snapshot failed: {ex.Message}";
+					}
+				}
+				return new SnapshotTaken(stream, declined is null ? cut : null, declined, cut);
+			}
+
+			// SnapshotBegin (the schema header), its chunks, SnapshotEnd; or SnapshotDeclined with the reason, and the client takes the ordinary
+			// backlog. Returns the watermark the backlog resumes after.
+			async Task<Guid?> SendSnapshotAsync(ReplicationOutbox outbox, SnapshotTaken taken)
+			{
+				Guid? sent = null;
+				var declined = taken.Declined;
+				if (taken.Cut is { } cut)
+				{
+					try
+					{
+						await SendCutAsync(outbox, taken.Stream, cut);
+						sent = cut.Watermark;
+					}
+					catch (Exception ex) when (ex is not OperationCanceledException)
+					{
 						// The client drops whatever part it got on the decline and replays: slower, never wrong.
-						logger?.LogError(ex, "Synqra replication: the snapshot of stream {Stream} failed; the client replays the stream instead.", stream);
+						logger?.LogError(ex, "Synqra replication: the snapshot of stream {Stream} failed; the client replays the stream instead.", taken.Stream);
 						declined = $"the snapshot failed: {ex.Message}";
 					}
 				}
 				if (declined is not null)
 				{
-					await socket.SendOperationAsync(networkSerializationService, new SnapshotDeclined { StreamId = stream, Reason = declined }, ctx.RequestAborted);
+					await outbox.SendAsync(new SnapshotDeclined { StreamId = taken.Stream, Reason = declined }, ctx.RequestAborted);
 				}
 				return sent;
 			}
 
-			async Task SendCutAsync(Guid stream, SnapshotCut cut)
+			async Task SendCutAsync(ReplicationOutbox outbox, Guid stream, SnapshotCut cut)
 			{
 				var schema = new SnapshotSchema(ctx.RequestServices.GetRequiredService<ISbxSerializerFactory>());
 				var writer = schema.CreateWriter();
 				var snapshotId = Guid.CreateVersion7();
 				var chunks = new SnapshotChunkWriter(writer, snapshotId);
-				await socket.SendOperationAsync(networkSerializationService, schema.DescribeSnapshot(writer, stream, snapshotId, cut.Watermark, entityCount: 0), ctx.RequestAborted);
+				await outbox.SendAsync(schema.DescribeSnapshot(writer, stream, snapshotId, cut.Watermark, entityCount: 0), ctx.RequestAborted);
 				await foreach (var record in cut.Records.WithCancellation(ctx.RequestAborted))
 				{
 					if (chunks.Write(record) is { } chunk)
 					{
-						await socket.SendOperationAsync(networkSerializationService, chunk, ctx.RequestAborted);
+						await outbox.SendAsync(chunk, ctx.RequestAborted);
 					}
 				}
 				if (chunks.Complete() is { } last)
 				{
-					await socket.SendOperationAsync(networkSerializationService, last, ctx.RequestAborted);
+					await outbox.SendAsync(last, ctx.RequestAborted);
 				}
-				await socket.SendOperationAsync(networkSerializationService, new SnapshotEnd
+				await outbox.SendAsync(new SnapshotEnd
 				{
 					SnapshotId = snapshotId,
 					Watermark = cut.Watermark,
@@ -412,79 +408,89 @@ public static class SynqraReplicationEndpointExtensions
 				default:
 					throw new InvalidOperationException($"Protocol negotiation failed: unknown HELLO kind {helloBytes[24]}.");
 			}
-			var socketScope = new SocketScope(connectionStream, grantable, active);
 			#endregion
 
-			#region HELLO — to client, then replay this stream's backlog since clientCursor
-			// Register for broadcasts BEFORE answering HELLO, and do both — plus the backlog
-			// replay below — under the same gate as every broadcast SendAsync on this socket:
-			// the moment the client observes the HELLO reply, every later broadcast is
-			// guaranteed to reach it, and none of this can interleave with a concurrent
-			// broadcast write. Holding the gate for the whole backlog replay blocks other
-			// clients' broadcasts briefly — acceptable, this runs once per connection, and
-			// the file already accepts a single global semaphore over throughput elsewhere.
+			#region HELLO — to client, then the catch-up: the snapshots, and the backlog since clientCursor
+			// The socket is registered for pushes BEFORE anything is read for it, with its pushes held: an event committed after a read is
+			// either in that read or in this socket's outbox, and the outbox writes it only after the catch-up, so a push never overtakes
+			// the backlog before it. Only the bookkeeping runs under the global gate (registering, seeding, cutting the snapshots, reading
+			// the watermarks), which orders it with the inbound path that applies and logs a peer's event under the same gate. The sends
+			// (the HELLO reply, the snapshots, the backlog) run outside it: a slow client holds up only its own pushes.
+			var outbox = new ReplicationOutbox(socket, networkSerializationService, logger);
+			var socketScope = new SocketScope(connectionStream, grantable, active, outbox);
+			var storage = serviceKey is null
+				? ctx.RequestServices.GetRequiredService<IEventLog>()
+				: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 			var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
-			await broadcastGate.WaitAsync(ctx.RequestAborted);
+			var pump = outbox.PumpAsync(ctx.RequestAborted);
 			try
 			{
-				sockets[socket] = socketScope;
-				await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
-
-				// Auto-ack the HELLO with the authoritative active set, so the client can immediately
-				// tell whether the server's default matched what it expected (see SubscriptionState).
-				await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
-
-				var storage = serviceKey is null
-					? ctx.RequestServices.GetRequiredService<IEventLog>()
-					: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
-				foreach (var stream in socketScope.Active)
-				{
-					await SeedOrUpgradeAsync(storage, stream);
-				}
-
-				// A cold client gets each stream's state as of a watermark, and the backlog after it below. Cut under this gate: no
-				// peer's event is applied meanwhile, so the state and the log agree at the watermark.
-				var snapshotted = new Dictionary<Guid, Guid>();
-				if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
-				{
-					foreach (var stream in socketScope.Active)
-					{
-						if (await SendSnapshotAsync(stream) is Guid cutAt)
-						{
-							snapshotted[stream] = cutAt;
-						}
-					}
-				}
-
-				var backlogBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-				var backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
+			using (await outbox.HoldPushesAsync(ctx.RequestAborted))
+			{
+				var taken = new List<SnapshotTaken>();
+				IReadOnlyDictionary<Guid, Guid> backlogWatermarks;
+				await broadcastGate.WaitAsync(ctx.RequestAborted);
 				try
 				{
-					// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark (or the
-					// snapshot's): a stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own
-					// streams. An unscoped host (connectionStream null) sends every stream's events after the watermark.
-					var backlog = connectionStream is null
-						? AfterCursor(storage.GetAllAsync(default, ctx.RequestAborted), clientCursor)
-						: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, ctx.RequestAborted);
-					await foreach (var ev in backlog)
+					sockets[socket] = socketScope;
+					foreach (var stream in socketScope.Active)
 					{
-						knownEvents.TryAdd(ev.EventId);
-						await ReplayFrameAsync(backlogBuffer, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
+						await SeedOrUpgradeAsync(storage, stream);
+					}
+					// A cold client gets each stream's state as of a watermark, and the backlog after it below.
+					if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
+					{
+						foreach (var stream in socketScope.Active)
+						{
+							taken.Add(await CutSnapshotAsync(stream));
+						}
+					}
+					backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
+				}
+				finally
+				{
+					broadcastGate.Release();
+				}
+
+				var snapshotted = new Dictionary<Guid, Guid>();
+				try
+				{
+					await outbox.SendBytesAsync(magicBytes, ctx.RequestAborted);
+					// Auto-ack the HELLO with the authoritative active set, so the client can immediately
+					// tell whether the server's default matched what it expected (see SubscriptionState).
+					await outbox.SendAsync(new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
+					foreach (var snapshot in taken)
+					{
+						if (await SendSnapshotAsync(outbox, snapshot) is Guid cutAt)
+						{
+							snapshotted[snapshot.Stream] = cutAt;
+						}
 					}
 				}
 				finally
 				{
-					ArrayPool<byte>.Shared.Return(backlogBuffer);
+					foreach (var snapshot in taken)
+					{
+						if (snapshot.Owned is { } owned)
+						{
+							await owned.DisposeAsync();
+						}
+					}
 				}
-			}
-			finally
-			{
-				broadcastGate.Release();
-			}
-			#endregion
 
-			try
-			{
+				// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark (or the
+				// snapshot's): a stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own
+				// streams. An unscoped host (connectionStream null) sends every stream's events after the watermark.
+				var backlog = connectionStream is null
+					? AfterCursor(storage.GetAllAsync(default, ctx.RequestAborted), clientCursor)
+					: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, ctx.RequestAborted);
+				await foreach (var ev in backlog)
+				{
+					knownEvents.TryAdd(ev.EventId);
+					await ReplayFrameAsync(outbox, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
+				}
+			} // the pushes held meanwhile follow
+			#endregion
 
 			while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
 			{
@@ -501,49 +507,47 @@ public static class SynqraReplicationEndpointExtensions
 
 				// Subscribe / Unsubscribe control messages. Mutate this connection's active set (under
 				// the broadcast gate so the fan-out loop never races it), replay the newly-subscribed
-				// stream's backlog, then ack the resulting active set.
+				// stream's backlog with this socket's pushes held, as at HELLO, then ack the resulting active set.
 				if (operation is SubscribeRequest or UnsubscribeRequest)
 				{
 					var target = operation is SubscribeRequest sub ? sub.StreamId : ((UnsubscribeRequest)operation).StreamId;
-					await broadcastGate.WaitAsync(ctx.RequestAborted);
-					try
+					using (await outbox.HoldPushesAsync(ctx.RequestAborted))
 					{
-						if (operation is SubscribeRequest)
+						Guid? subWatermark = null;
+						List<Guid> subscribed;
+						await broadcastGate.WaitAsync(ctx.RequestAborted);
+						try
 						{
-							// Authorize against the ceiling: unscoped host admits any stream, scoped host
-							// only its grantable set. A rejected target leaves the active set unchanged —
-							// the ack tells the client it did not take.
-							if ((connectionStream is null || grantable.Contains(target)) && socketScope.Active.Add(target))
+							if (operation is SubscribeRequest)
 							{
-								var storage = serviceKey is null
-									? ctx.RequestServices.GetRequiredService<IEventLog>()
-									: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
-								await SeedOrUpgradeAsync(storage, target);
-								var subBuffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-								var subWatermark = watermarks is null ? default : await watermarks.ReadWatermarkAsync(target, ctx.RequestAborted);
-								try
+								// Authorize against the ceiling: unscoped host admits any stream, scoped host
+								// only its grantable set. A rejected target leaves the active set unchanged —
+								// the ack tells the client it did not take.
+								if ((connectionStream is null || grantable.Contains(target)) && socketScope.Active.Add(target))
 								{
-									await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
-									{
-										knownEvents.TryAdd(ev.EventId);
-										await ReplayFrameAsync(subBuffer, ev, ev.SequenceId.CapAt(subWatermark));
-									}
-								}
-								finally
-								{
-									ArrayPool<byte>.Shared.Return(subBuffer);
+									await SeedOrUpgradeAsync(storage, target);
+									subWatermark = watermarks is null ? default : await watermarks.ReadWatermarkAsync(target, ctx.RequestAborted);
 								}
 							}
+							else
+							{
+								socketScope.Active.Remove(target);
+							}
+							subscribed = socketScope.Active.ToList();
 						}
-						else
+						finally
 						{
-							socketScope.Active.Remove(target);
+							broadcastGate.Release();
 						}
-						await socket.SendOperationAsync(networkSerializationService, new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
-					}
-					finally
-					{
-						broadcastGate.Release();
+						if (subWatermark is Guid replayCap)
+						{
+							await foreach (var ev in storage.ReadStreamAsync(target, default, ctx.RequestAborted))
+							{
+								knownEvents.TryAdd(ev.EventId);
+								await ReplayFrameAsync(outbox, ev, ev.SequenceId.CapAt(replayCap));
+							}
+						}
+						await outbox.SendAsync(new SubscriptionState { Streams = subscribed }, ctx.RequestAborted);
 					}
 					continue;
 				}
@@ -552,13 +556,12 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
 				}
+				// Applied and logged under the global gate; the reply is sent after it, through this socket's outbox.
+				TransportOperation? reply = null;
 				await broadcastGate.WaitAsync(ctx.RequestAborted);
 				try
 				{
 					var ev = eventEnvelope.Event;
-					var storage = serviceKey is null
-						? ctx.RequestServices.GetRequiredService<IEventLog>()
-						: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 					// Already applied/broadcast: an echo from this same client, or a resend after a lost ack. The in-memory set is
 					// empty after a restart, so the log is asked too: an event it holds was applied by the process that stored it,
 					// and applying it again is refused by the projection (prod 2026-10-22: a facet re-added to a filled slot, on
@@ -574,7 +577,7 @@ public static class SynqraReplicationEndpointExtensions
 					}
 					if (known)
 					{
-						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
+						reply = new EventAccepted { EventId = ev.EventId };
 					}
 					else
 					{
@@ -592,55 +595,40 @@ public static class SynqraReplicationEndpointExtensions
 						{
 							// The host forbids this change from a peer (a system object, say): refused for good, never applied or stored.
 							logger?.LogInformation("Synqra replication: event {EventId} on stream {Stream} refused by a guard: {Reason}", ev.EventId, connectionStream, refused);
-							await socket.SendOperationAsync(networkSerializationService, new EventRejected { EventId = ev.EventId, Reason = refused }, ctx.RequestAborted);
-							continue;
-						}
-						var projection = serviceKey is null
-							? ctx.RequestServices.GetRequiredService<IProjection>()
-							: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
-						if (projection is IReplayProjection replay)
-						{
-							await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
+							reply = new EventRejected { EventId = ev.EventId, Reason = refused };
 						}
 						else
 						{
-							await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
-						}
-						await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
-						// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
-						await socket.SendOperationAsync(networkSerializationService, new EventAccepted { EventId = ev.EventId }, ctx.RequestAborted);
-					}
-					if (!known && !logBroadcasts)
-					{
-						var buffer = ArrayPool<byte>.Shared.Rent(EventReplicationService.DefaultFrameSize);
-						try
-						{
-							foreach (var (other, otherScope) in sockets)
+							var projection = serviceKey is null
+								? ctx.RequestServices.GetRequiredService<IProjection>()
+								: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
+							if (projection is IReplayProjection replay)
 							{
-								if (other == socket || other.State != WebSocketState.Open) { continue; }
+								await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
+							}
+							else
+							{
+								await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
+							}
+							await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
+							// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
+							reply = new EventAccepted { EventId = ev.EventId };
+							if (!logBroadcasts)
+							{
 								// Only fan out to peers subscribed to the event's stream. Without this a
 								// client's event was broadcast to every connected socket regardless of stream
 								// — a live cross-tenant leak. The check is oriented per peer: is THIS peer
 								// currently subscribed to the event's stream (ev.StreamId, stamped above from
 								// the sender's stream)? Unscoped peer (null own stream) → admits all, as before.
-								if (!ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.Active))
+								// Queued to each peer's outbox, never sent from here.
+								foreach (var (other, otherScope) in sockets)
 								{
-									continue;
-								}
-								try
-								{
-									await SendEventFrameAsync(other, buffer, ev, default);
-								}
-								catch (Exception broadcastEx)
-								{
-									// best-effort broadcast — a dead peer socket shouldn't fail this client's request
-									logger?.LogDebug(broadcastEx, "Synqra replication: dropping event {EventId} to a peer socket failed (peer likely gone).", ev.EventId);
+									if (other != socket && other.State == WebSocketState.Open && ReplicationStreamScope.Admits(ev.StreamId, otherScope.WritableStream, otherScope.Active))
+									{
+										otherScope.Outbox.Push(ev, default);
+									}
 								}
 							}
-						}
-						finally
-						{
-							ArrayPool<byte>.Shared.Return(buffer);
 						}
 					}
 				}
@@ -649,7 +637,7 @@ public static class SynqraReplicationEndpointExtensions
 					// The projection refused the event (a facet for a slot already filled, a link that exists): it will never be
 					// in this log, so the sender is told and moves its cursor past it instead of offering it on every connect.
 					logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", eventEnvelope.Event.EventId, connectionStream);
-					await socket.SendOperationAsync(networkSerializationService, new EventRejected { EventId = eventEnvelope.Event.EventId, Reason = refusal.Message }, ctx.RequestAborted);
+					reply = new EventRejected { EventId = eventEnvelope.Event.EventId, Reason = refusal.Message };
 				}
 				catch (Exception eventEx)
 				{
@@ -661,6 +649,10 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					broadcastGate.Release();
 				}
+				if (reply is not null)
+				{
+					await outbox.SendAsync(reply, ctx.RequestAborted);
+				}
 			}
 			}
 			finally
@@ -668,6 +660,8 @@ public static class SynqraReplicationEndpointExtensions
 				// Stop tracking a closed socket — otherwise the registry (and the broadcast loop
 				// that walks it) grew without bound across the server's lifetime.
 				sockets.TryRemove(socket, out _);
+				outbox.Complete();
+				await pump;
 			}
 		});
 
@@ -711,17 +705,27 @@ public static class SynqraReplicationEndpointExtensions
 	/// the endpoint's broadcast gate). <see cref="Active"/> feeds <see cref="ReplicationStreamScope.Admits"/>.</summary>
 	sealed class SocketScope
 	{
-		public SocketScope(Guid? writableStream, IReadOnlySet<Guid> grantable, HashSet<Guid> active)
+		public SocketScope(Guid? writableStream, IReadOnlySet<Guid> grantable, HashSet<Guid> active, ReplicationOutbox outbox)
 		{
 			WritableStream = writableStream;
 			Grantable = grantable;
 			Active = active;
+			Outbox = outbox;
 		}
 
 		public Guid? WritableStream { get; }
 		public IReadOnlySet<Guid> Grantable { get; }
 		public HashSet<Guid> Active { get; }
+
+		/// <summary>Every send to this socket goes through here: pushes are queued, never sent by the broadcaster.</summary>
+		public ReplicationOutbox Outbox { get; }
 	}
+
+	/// <summary>
+	/// A stream's snapshot as cut under the gate, sent after it: the <see cref="Cut"/> to send, or why it is <see cref="Declined"/>. The
+	/// <see cref="Owned"/> cut, whether sent or not, holds a read (a Mongo snapshot session) until it is disposed.
+	/// </summary>
+	sealed record SnapshotTaken(Guid Stream, SnapshotCut? Cut, string? Declined, SnapshotCut? Owned);
 
 	/// <summary>
 	/// A backlog frame's resume point: the frame's own sequence, capped by the watermark taken at connect. A client persists
