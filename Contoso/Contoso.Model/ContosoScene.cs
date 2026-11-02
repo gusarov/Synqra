@@ -121,13 +121,31 @@ public sealed class ContosoScene
 		var text = new StringBuilder();
 		foreach (var (id, node) in ReadNodes(store))
 		{
+			text.Append(DescribeNode(id, node));
+		}
+		return text.ToString();
+	}
+
+	/// <summary>
+	/// One node's line, or nothing when a peer deletes the node while it is read: its edges ask the store for its id, which throws
+	/// once it has left the store's tracking. It is gone, and left out, as <see cref="ReadNodes"/> leaves it out.
+	/// </summary>
+	string DescribeNode(Guid id, ContosoSceneNode node)
+	{
+		var line = "";
+		try
+		{
 			var components = ((IComponentContainer)node).Components.ToList();
 			var position = components.OfType<ContosoScenePosition>().SingleOrDefault();
 			var tags = components.OfType<ContosoSceneTag>().Select(x => x.Label).Order();
 			var edges = node.Edges.Select(x => $"{x.TargetId}:{x.Weight}").Order();
-			text.Append($"{id} {node.Name} {node.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]\n");
+			line = $"{id} {node.Name} {node.Size} @{position?.X},{position?.Y} [{string.Join(", ", tags)}] -> [{string.Join(", ", edges)}]\n";
 		}
-		return text.ToString();
+		catch (InvalidOperationException)
+		{
+			// deleted while it was read
+		}
+		return line;
 	}
 
 	/// <summary>

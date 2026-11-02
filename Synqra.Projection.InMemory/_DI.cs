@@ -35,6 +35,7 @@ public static class InMemorySynqraExtensions
 		services.TryAddSingleton<IProjectionFactory, InMemoryProjectionFactory>();
 		services.TryAddSingleton<IProjectionProvider, InMemoryProjectionProvider>();
 		services.TryAddSingleton<IProjectionKeeper, ProjectionKeeper>();
+		services.TryAddSingleton<StreamSnapshotFolding>(); // its projection folds a stream snapshot: a cold client may ask for one
 	}
 
 	/// <summary>
@@ -48,6 +49,7 @@ public static class InMemorySynqraExtensions
 		services.TryAddSingleton<IProjectionFactory, InMemoryProjectionFactory<TProjection>>();
 		services.TryAddSingleton<IProjectionProvider, InMemoryProjectionProvider>();
 		services.TryAddSingleton<IProjectionKeeper, ProjectionKeeper>();
+		services.TryAddSingleton<StreamSnapshotFolding>(); // its projection folds a stream snapshot: a cold client may ask for one
 	}
 
 	/// <summary>
