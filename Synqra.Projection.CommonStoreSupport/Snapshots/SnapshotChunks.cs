@@ -30,10 +30,13 @@ public sealed class SnapshotChunkWriter
 	/// <summary>Records written so far, in completed chunks and the open one.</summary>
 	public long RecordCount { get; private set; }
 
-	/// <summary>Writes a record; returns the chunk it completed, if it completed one.</summary>
+	/// <summary>
+	/// Writes a record; returns the chunk it completed, if it completed one. At most one per call: a chunk the budget filled is closed
+	/// by the next call (or <see cref="Complete"/>), so a record that also overflows into a chunk of its own never closes a second.
+	/// </summary>
 	public SnapshotChunk? Write(SnapshotRecord record)
 	{
-		SnapshotChunk? completed = null;
+		SnapshotChunk? completed = _pos >= _budget ? CloseChunk() : null;
 		var written = false;
 		while (!written)
 		{
@@ -57,10 +60,6 @@ public sealed class SnapshotChunkWriter
 			{
 				_buffer = new byte[_buffer.Length * 2]; // a record larger than the chunk budget, alone
 			}
-		}
-		if (_pos >= _budget)
-		{
-			completed = CloseChunk();
 		}
 		return completed;
 	}

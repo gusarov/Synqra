@@ -35,3 +35,8 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
   that enumerated the entity a moment earlier gets "The object is not attached to this MongoProjection" from `GetId`. Found by
   the Contoso master listing a scene while a browser's delete landed (CI build 14977); the scene readers skip such a node. A
   store-level answer (`TryGetId`, or ids handed out with the enumeration) would spare every caller that.
+- [ ] **A Mongo collection's `ToList` is two queries.** `List<T>`/`ToList` over a `MongoStoreCollection` size their array by
+  `Count` (one query) and fill it by `CopyTo` (another). `CopyTo` now stops at the array's end when a root was added in between,
+  but a root deleted in between leaves the list's last slot null, and `ICollection<T>`'s two calls give `CopyTo` no way to
+  shrink it. Callers that must not see a torn read enumerate once (`ContosoScene`). A store-level answer: collections that
+  do not expose `Count` and `CopyTo` as separate reads, or a `Count` served from the same read.

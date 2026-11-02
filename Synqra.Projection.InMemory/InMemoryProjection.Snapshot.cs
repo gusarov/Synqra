@@ -10,47 +10,77 @@ public partial class InMemoryProjection
 	/// <summary>
 	/// Folds a stream snapshot the client keeps in its log: every record is added as its entity, facet or link, as a replay
 	/// (no activator runs), roots first, so a facet or a link always finds its owner. An entity's version is the one it had on
-	/// the master.
+	/// the master. A record this projection cannot take (a type it does not know, a vetoed facet, a chunk that does not decode) is
+	/// logged and stepped over by itself: the client is never sent the snapshot's state again, so one bad record must not cost it
+	/// the records after it.
 	/// </summary>
 	public async Task VisitAsync(StreamSnapshotEvent ev, EventVisitorContext ctx)
 	{
 		var reader = new SnapshotChunkReader(new SnapshotSchema(_serializerFactory).CreateReader(ev.Header));
 		var owners = new Dictionary<Guid, (TypeMetadata Type, Guid Version)>();
-		var replay = new EventVisitorContext { IsReplay = true };
 		var applied = 0L;
+		var skipped = 0L;
 		foreach (var chunk in ev.Chunks.OrderBy(x => x.Index))
 		{
-			foreach (var record in reader.Read(chunk))
+			List<SnapshotRecord> records;
+			try
 			{
-				var type = TypeMetadataProvider.GetTypeMetadata(record.Data.GetType());
-				if (record.IsRoot)
+				records = reader.Read(chunk);
+			}
+			catch (Exception ex)
+			{
+				EmergencyLog.Default.LogError(ex, $"InMemoryProjection: chunk {chunk.Index} of snapshot {ev.Header.SnapshotId} of stream {StreamId} does not decode; its {chunk.Count} records are stepped over.");
+				records = [];
+				skipped += chunk.Count;
+			}
+			foreach (var record in records)
+			{
+				if (await TryApplyRecordAsync(ev, record, owners))
 				{
-					owners[record.ComponentId] = (type, record.Version ?? ev.EventId);
-				}
-				if (owners.TryGetValue(record.Owner ?? record.ComponentId, out var owner))
-				{
-					// Applied in place, not through AcceptAsync: the records are not events of the log, and only the snapshot moves the cursor.
-					await VisitAsync(new ComponentAddedEvent
-					{
-						EventId = owner.Version,
-						CommandId = ev.CommandId,
-						StreamId = StreamId,
-						TargetId = record.Owner ?? record.ComponentId,
-						TargetTypeId = owner.Type.TypeId,
-						CollectionId = owner.Type.CollectionId,
-						ComponentTypeId = type.TypeId,
-						ComponentId = record.ComponentId,
-						Data = record.Data,
-					}, replay);
 					applied++;
 				}
 				else
 				{
-					EmergencyLog.Default.LogError($"InMemoryProjection: snapshot {ev.Header.SnapshotId} of stream {StreamId} holds {record}, whose owner it does not hold; stepped over.");
+					skipped++;
 				}
 			}
 		}
-		EmergencyLog.Default.Stage($"projection {StreamId}: snapshot at {ev.Header.Watermark} applied, {applied} records, {owners.Count} entities");
+		EmergencyLog.Default.Stage($"projection {StreamId}: snapshot at {ev.Header.Watermark} applied, {applied} records, {owners.Count} entities, {skipped} stepped over");
+	}
+
+	/// <summary>One record of a snapshot, applied in place: not through AcceptAsync, since the records are not events of the log and only the snapshot moves the cursor.</summary>
+	async Task<bool> TryApplyRecordAsync(StreamSnapshotEvent ev, SnapshotRecord record, Dictionary<Guid, (TypeMetadata Type, Guid Version)> owners)
+	{
+		var applied = false;
+		try
+		{
+			var type = TypeMetadataProvider.GetTypeMetadata(record.Data.GetType());
+			(TypeMetadata Type, Guid Version) owner = record.IsRoot
+				? (type, record.Version ?? ev.EventId)
+				: owners.TryGetValue(record.Owner!.Value, out var known) ? known : throw new InvalidOperationException("its owner is not in the snapshot");
+			await VisitAsync(new ComponentAddedEvent
+			{
+				EventId = owner.Version,
+				CommandId = ev.CommandId,
+				StreamId = StreamId,
+				TargetId = record.Owner ?? record.ComponentId,
+				TargetTypeId = owner.Type.TypeId,
+				CollectionId = owner.Type.CollectionId,
+				ComponentTypeId = type.TypeId,
+				ComponentId = record.ComponentId,
+				Data = record.Data,
+			}, new EventVisitorContext { IsReplay = true, });
+			if (record.IsRoot)
+			{
+				owners[record.ComponentId] = owner; // only an entity that landed owns facets and links
+			}
+			applied = true;
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.LogError(ex, $"InMemoryProjection: snapshot {ev.Header.SnapshotId} of stream {StreamId} holds {record}, which this projection cannot take; stepped over.");
+		}
+		return applied;
 	}
 
 	/// <summary>
