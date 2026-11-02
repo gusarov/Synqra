@@ -60,6 +60,11 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 	private ISbxSerializer _sbxSerializerSender;
 	private ISbxSerializer _sbxSerializerReceiver;
 	private int _frameSize = EventReplicationService.DefaultFrameSize; // the largest frame array so far: a frame starts there, not in a buffer it already outgrew
+	// One frame at a time, either way: the serializers are shared and replaced per frame (Reinitialize), and a master's sockets send
+	// and receive on their own threads, as a client's send loop and reader do. Two frames at once wrote one frame's type ids into
+	// the other, and the peer could not read it (KeyNotFoundException on a type id). A frame comes back in the caller's buffer or an
+	// array of its own, so it is used outside the lock.
+	private readonly object _framing = new();
 
 	public bool IsTextOrBinary => false;
 
@@ -73,12 +78,23 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 
 	public void Reinitialize()
 	{
-		_sbxSerializerSender = _sbxSerializerFactory.CreateSerializer();
-		_sbxSerializerSenderVerify = _sbxSerializerFactory.CreateSerializer();
-		_sbxSerializerReceiver = _sbxSerializerFactory.CreateSerializer();
+		lock (_framing)
+		{
+			_sbxSerializerSender = _sbxSerializerFactory.CreateSerializer();
+			_sbxSerializerSenderVerify = _sbxSerializerFactory.CreateSerializer();
+			_sbxSerializerReceiver = _sbxSerializerFactory.CreateSerializer();
+		}
 	}
 
 	public ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj, ArraySegment<byte> buffer)
+	{
+		lock (_framing)
+		{
+			return SerializeFrame(obj, buffer);
+		}
+	}
+
+	ArraySegment<byte> SerializeFrame<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj, ArraySegment<byte> buffer)
 	{
 		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
 
@@ -113,6 +129,14 @@ public class SbxNetworkSerializationService : INetworkSerializationService
 	}
 
 	public T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ReadOnlySpan<byte> bytes)
+	{
+		lock (_framing)
+		{
+			return DeserializeFrame<T>(bytes);
+		}
+	}
+
+	T DeserializeFrame<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ReadOnlySpan<byte> bytes)
 	{
 		Reinitialize(); // This is temporary to improve stability during initial development. Actual idea is to allow stateful serializers
 

@@ -360,6 +360,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 			}
 			var reader = ObserveAsync(Reader());
+			// The send loop ends this connection once it sees the reader complete, so it is woken only after: a wake from inside the
+			// reader came before the task completed, and the loop could find it still running, take another pass and wait for a wake
+			// that never came (a cold client writes nothing), never reconnecting.
+			_ = reader.ContinueWith(_ => Wake(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 			_readerTask = reader;
 
 			// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
@@ -824,7 +828,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			IsOnline = false;
 			EmergencyLog.Default.Stage($"replication: reader ended after {FramesReceived} frames");
-			Wake(); // the send loop ends this connection
 		}
 	}
 
