@@ -64,10 +64,18 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	// The snapshot being received on this connection: its header, then its chunks, until its end.
 	SnapshotBegin? _snapshotHeader;
 	readonly List<SnapshotChunk> _snapshotChunks = new List<SnapshotChunk>();
-	// Set when a snapshot's header names a schema this build cannot read: the rest of this run replays instead.
+	// Set when this run gives up on snapshots and replays instead: a header this build cannot read, a snapshot that broke the
+	// protocol (a chunk out of place, counts that do not add up), a second connection lost in the middle of one, or a master that
+	// did not take the stream a snapshot request named. Without it a deterministic failure would be asked for again forever.
 	bool _snapshotRefused;
-	// The watermark of the snapshot this run stored: an event the master stamped at or before it is in that state already.
-	Guid _snapshotWatermark;
+	// Connections that ended while a snapshot was arriving: one is a dropped connection, the second is a pattern.
+	int _snapshotsCutShort;
+	// Whether this connection's HELLO asked for a snapshot in place of the configured UserDefaultMainStream: it names the stream
+	// where the configured kind lets the master choose it, so the master must confirm it took that stream.
+	bool _helloNamedStream;
+	// Per stream, the watermark of the snapshot the log holds: an event of that stream the master stamped at or before it is in
+	// that state already. Another stream's sequences say nothing about it.
+	readonly Dictionary<Guid, Guid> _snapshotWatermarks = new Dictionary<Guid, Guid>();
 
 	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
 	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
@@ -116,15 +124,21 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// </summary>
 	Guid StreamOf(Event ev)
 	{
-		var active = _activeStreams;
-		var stream = ev.StreamId != default ? ev.StreamId
-			: active.Count == 1 ? active.First()
-			: StreamKey;
+		var stream = FindStreamOf(ev);
 		if (stream == default)
 		{
-			throw new InvalidOperationException($"EventReplicationService: event {ev.EventId} arrived on a connection subscribed to {active.Count} streams and no configured stream; its stream cannot be told.");
+			throw new InvalidOperationException($"EventReplicationService: event {ev.EventId} arrived on a connection subscribed to {_activeStreams.Count} streams and no configured stream; its stream cannot be told.");
 		}
 		return stream;
+	}
+
+	/// <summary>The event's stream as <see cref="StreamOf"/> tells it, or default when it cannot be told.</summary>
+	Guid FindStreamOf(Event ev)
+	{
+		var active = _activeStreams;
+		return ev.StreamId != default ? ev.StreamId
+			: active.Count == 1 ? active.First()
+			: StreamKey;
 	}
 
 	/// <summary>
@@ -259,6 +273,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			var connectedAt = Stopwatch.StartNew();
 			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
 			_lastSentSequence = default;
+			if (_snapshotHeader is not null && ++_snapshotsCutShort >= 2)
+			{
+				_snapshotRefused = true; // the second connection lost mid-snapshot: this run replays
+			}
 			_snapshotHeader = null; // a snapshot cut short with its connection is asked for again by the next one
 			_snapshotChunks.Clear();
 
@@ -301,6 +319,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							// subscribed to. Lets the client detect an unexpected default and drive its
 							// own UI off the confirmed set. Sent after HELLO and every sub/unsub.
 							_activeStreams = state.Streams as IReadOnlyCollection<Guid> ?? state.Streams.ToArray();
+							ConfirmNamedStream(state);
 							break;
 						case EventEnvelope envelope:
 							await ReceiveAsync(envelope);
@@ -354,9 +373,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				var ev = envelope.Event;
 				var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
 				var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
-				// Covered by the snapshot this run stored: a live push of an event committed before the cut can arrive after the
-				// newer backlog, and applying it then would put an older value back over a newer one.
-				var covered = _snapshotWatermark != default && sequence != default && sequence.CompareBigEndian(_snapshotWatermark) <= 0;
+				// Covered by the snapshot the log holds for its stream: a live push of an event committed before the cut can arrive after
+				// the newer backlog, and applying it then would put an older value back over a newer one.
+				var covered = sequence != default
+					&& _snapshotWatermarks.TryGetValue(FindStreamOf(ev), out var cutAt)
+					&& sequence.CompareBigEndian(cutAt) <= 0;
 				bool known;
 				lock (_skipSet)
 				{
@@ -397,6 +418,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// HELLO "ws-method": byte[24] kind, and for Hello_SubscribeTo the next 16 bytes are the
 				// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
 				var helloKind = ChooseHelloKind();
+				_helloNamedStream = helloKind == ReplicationHelloKind.SubscribeToSnapshot && _config.HelloKind == ReplicationHelloKind.UserDefaultMainStream;
 				var isSubscribeTo = helloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot;
 				var helloSize = isSubscribeTo ? 41 : 25;
 				var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
@@ -581,7 +603,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>
 	/// The HELLO kind this connection announces: the configured one, or a snapshot request when this client is fully cold (no
-	/// watermark, nothing in its log), knows its stream, and has not refused a snapshot this run.
+	/// watermark, nothing in its log), knows its stream, and has not given up on snapshots this run.
 	/// </summary>
 	ReplicationHelloKind ChooseHelloKind()
 	{
@@ -614,13 +636,31 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			if (ev is StreamSnapshotEvent snapshot)
 			{
-				_snapshotWatermark = snapshot.Header.Watermark;
-				if (_snapshotWatermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				_snapshotWatermarks[snapshot.Header.StreamId] = snapshot.Header.Watermark;
+				if (snapshot.Header.Watermark.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 				{
-					_eventReplicationState.ServerWatermark = _snapshotWatermark;
+					_eventReplicationState.ServerWatermark = snapshot.Header.Watermark;
 				}
 			}
 			break; // a snapshot is only ever the first record
+		}
+	}
+
+	/// <summary>
+	/// A HELLO that asked for a snapshot in place of UserDefaultMainStream named the stream itself; the master subscribes it only
+	/// when that stream is one the connection may read. When it took another (or none), the snapshot request changed what this
+	/// client gets: it reconnects with the configured kind and replays, as it did before snapshots.
+	/// </summary>
+	void ConfirmNamedStream(SubscriptionState state)
+	{
+		if (_helloNamedStream)
+		{
+			_helloNamedStream = false;
+			if (!state.Streams.Contains(StreamKey))
+			{
+				_snapshotRefused = true;
+				throw new InvalidOperationException($"EventReplicationService: the master did not subscribe this connection to stream {StreamKey}, which its snapshot request named; reconnecting with {_config.HelloKind}.");
+			}
 		}
 	}
 
@@ -651,6 +691,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	{
 		if (_snapshotHeader?.SnapshotId != chunk.SnapshotId || chunk.Index != _snapshotChunks.Count)
 		{
+			_snapshotRefused = true; // a broken snapshot is broken again on the next connection: this run replays
 			throw new InvalidOperationException($"EventReplicationService: snapshot chunk {chunk.SnapshotId} #{chunk.Index} arrived out of place (expected #{_snapshotChunks.Count} of {_snapshotHeader?.SnapshotId}); reconnecting.");
 		}
 		_snapshotChunks.Add(chunk);
@@ -658,7 +699,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>
 	/// The snapshot is complete: kept as the first record of the local log, then its watermark becomes the resume point, so a
-	/// load never resumes past a state it does not hold. One that came incomplete ends the connection; the next asks again.
+	/// load never resumes past a state it does not hold. One that came incomplete ends the connection; the next replays.
 	/// </summary>
 	async Task StoreSnapshotAsync(SnapshotEnd end)
 	{
@@ -666,6 +707,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		var records = _snapshotChunks.Sum(x => x.Count);
 		if (header is null || header.SnapshotId != end.SnapshotId || _snapshotChunks.Count != end.ChunkCount || records != end.RecordCount)
 		{
+			_snapshotRefused = true; // a broken snapshot is broken again on the next connection: this run replays
 			throw new InvalidOperationException($"EventReplicationService: snapshot {end.SnapshotId} ended with {_snapshotChunks.Count} of {end.ChunkCount} chunks and {records} of {end.RecordCount} records; reconnecting.");
 		}
 		var snapshot = new StreamSnapshotEvent
@@ -695,7 +737,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_eventReplicationState.ServerWatermark = end.Watermark;
 			await SaveStateAsync();
 		}
-		_snapshotWatermark = end.Watermark;
+		_snapshotWatermarks[header.StreamId] = end.Watermark;
 		SnapshotsLoaded++;
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper
