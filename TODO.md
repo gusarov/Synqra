@@ -24,6 +24,10 @@ Deferred / known-improvement items. Prefer referencing an entry here over leavin
 - [ ] **A stored snapshot a later build refuses.** `InMemoryProjection` steps over a `StreamSnapshotEvent` whose header it
   cannot read (logged as an error), and the projection then lacks that state. Drop the local log and its replication state
   instead, and fetch a fresh snapshot.
+- [ ] **Outbox cap during a cold catch-up.** `ReplicationOutbox` cuts off a client 10,000 pushes behind, and that is most likely
+  while its pushes are held for a snapshot: a busy stream and a slow link can fill the queue before the snapshot ends. The client
+  reconnects still cold and asks again; after two cut-short snapshots it falls back to replay, so it ends, at the cost of two full
+  transfers. Count only the pushes queued after the hold, or give the hold a cap of its own.
 - [ ] **Missing events in a browser log.** A prod browser log held 12,928 of the master's 14,594 events after a full
   catch-up (plans/snapshot.md §7). A snapshot load bypasses the cause; it is still unknown.
 - [ ] **Header names every mapping.** `SnapshotSchema.DescribeSnapshot` lists the writer's full map, so a client lacking
