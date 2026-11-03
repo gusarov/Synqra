@@ -429,32 +429,32 @@ public static class SynqraReplicationEndpointExtensions
 			{
 				var taken = new List<SnapshotTaken>();
 				IReadOnlyDictionary<Guid, Guid> backlogWatermarks;
-				await broadcastGate.WaitAsync(ctx.RequestAborted);
-				try
+				var snapshotted = new Dictionary<Guid, Guid>();
+				try // every cut taken is disposed, whatever throws after it: a Mongo cut holds a snapshot session open
 				{
-					sockets[socket] = socketScope;
-					foreach (var stream in socketScope.Active)
+					await broadcastGate.WaitAsync(ctx.RequestAborted);
+					try
 					{
-						await SeedOrUpgradeAsync(storage, stream);
-					}
-					// A cold client gets each stream's state as of a watermark, and the backlog after it below.
-					if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
-					{
+						sockets[socket] = socketScope;
 						foreach (var stream in socketScope.Active)
 						{
-							taken.Add(await CutSnapshotAsync(stream));
+							await SeedOrUpgradeAsync(storage, stream);
 						}
+						// A cold client gets each stream's state as of a watermark, and the backlog after it below.
+						if (helloKind == ReplicationHelloKind.SubscribeToSnapshot)
+						{
+							foreach (var stream in socketScope.Active)
+							{
+								taken.Add(await CutSnapshotAsync(stream));
+							}
+						}
+						backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
 					}
-					backlogWatermarks = await ReadWatermarksAsync(socketScope.Active);
-				}
-				finally
-				{
-					broadcastGate.Release();
-				}
+					finally
+					{
+						broadcastGate.Release();
+					}
 
-				var snapshotted = new Dictionary<Guid, Guid>();
-				try
-				{
 					await outbox.SendBytesAsync(magicBytes, ctx.RequestAborted);
 					// Auto-ack the HELLO with the authoritative active set, so the client can immediately
 					// tell whether the server's default matched what it expected (see SubscriptionState).
