@@ -104,7 +104,7 @@ WORKDIR /src/Contoso/Contoso.WebHost
 RUN withmongo sh -c '(dotnet bin/$BUILD_CONFIGURATION/net10.0/Contoso.WebHost.dll > /tmp/contoso.log 2>&1 &) \
  && for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:5063/seeding && break; sleep 1; done \
  && curl -sf -o /dev/null http://127.0.0.1:5063/_framework/blazor.web.js \
- && dotnet test /src/Contoso/Contoso.Playwright -c $BUILD_CONFIGURATION --no-restore --no-build --filter "Category=Seeding|Category=Replication" \
+ && dotnet test /src/Contoso/Contoso.Playwright -c $BUILD_CONFIGURATION --no-restore --no-build --filter "Category=Seeding|Category=Replication|Category=GuidV7" \
  || (tail -n 200 /tmp/contoso.log; exit 1)'
 
 FROM scratch AS art
