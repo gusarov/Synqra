@@ -157,28 +157,27 @@ public sealed class SynqraIdProvider : ISynqraIdProvider
 }
 
 /// <summary>
-/// Test <see cref="ISynqraIdProvider"/> — predictable, per-class monotonic <b>generated</b> ids
-/// (<c>C0DE0000-0000-8000-{mode}{class}-{counter}</c>, see docs/model.md §8) so ids minted by production
-/// code under test read cleanly in logs and assertions. The mode keeps the semantic registry of the type
+/// Test <see cref="ISynqraIdProvider"/> — predictable <b>generated</b> ids
+/// (<c>C0DE{n}-0000-8000-{mode}{class}-{node}</c>, see docs/model.md §8.9 "Test ids") so ids minted by
+/// production code under test read cleanly in logs and assertions. <c>n</c> is one creation counter across
+/// every class, so ids sort by creation first and class second, like v7 ids sort by time. The mode keeps the semantic registry of the type
 /// being instantiated and only sets <see cref="AllocationMode.Generated"/>: a committed type yields an
 /// <c>A</c> instance, a staging type a <c>B</c> one. Registered by the test host in place of
 /// <see cref="SynqraIdProvider"/>; being a DI singleton it is shared across background-service threads
-/// and WAF hosts.
+/// and WAF hosts. Two providers (two hosts in one test) count independently: their ids may coincide and
+/// have no order between them.
 /// </summary>
 public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 {
-	// One counter per class. Only the command counter strides by 0x100, to reserve the low byte for a
-	// command's derived events (CreateEventId = command node + ordinal); every other class steps by 1.
-	// The command counter is shared across command types on purpose: two command types get different
-	// classes, but a single striding counter also keeps their nodes distinct and chronologically readable.
-	long _command, _stream, _component, _collection, _link;
+	// The creation counter, shared by every class; the old per-class counters had no reader left.
+	int _created;
 
-	public Guid CreateCommandId(Guid commandTypeId) => New(ModeOf(commandTypeId), ClassOf(commandTypeId, family: 0xC), ref _command, 0x100);
-	public Guid CreateStreamId() => New(AllocationMode.CommittedGenerated, 0x005, ref _stream, 1);
-	public Guid CreateComponentId() => New(AllocationMode.CommittedGenerated, 0x001, ref _component, 1);
+	public Guid CreateCommandId(Guid commandTypeId) => Mint(ModeOf(commandTypeId), ClassOf(commandTypeId, family: 0xC), 0x100);
+	public Guid CreateStreamId() => Mint(AllocationMode.CommittedGenerated, 0x005, 1);
+	public Guid CreateComponentId() => Mint(AllocationMode.CommittedGenerated, 0x001, 1);
 	[Obsolete("Collections are retired — see ISynqraIdProvider.CreateCollectionId.")]
-	public Guid CreateCollectionId() => New(AllocationMode.CommittedGenerated, 0x002, ref _collection, 1);
-	public Guid CreateLinkId() => New(AllocationMode.CommittedGenerated, 0x003, ref _link, 1);
+	public Guid CreateCollectionId() => Mint(AllocationMode.CommittedGenerated, 0x002, 1);
+	public Guid CreateLinkId() => Mint(AllocationMode.CommittedGenerated, 0x003, 1);
 	[Obsolete("Call the static SynqraIdDerivation.DeriveEventId instead — see ISynqraIdProvider.CreateEventId.")]
 	public Guid CreateEventId(Guid commandId, Guid eventTypeId, int ordinal) => SynqraIdDerivation.DeriveEventId(commandId, eventTypeId, ordinal);
 
@@ -210,6 +209,18 @@ public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 		return (ushort)((family << 8) | (b[15] | 0x80));
 	}
 
-	static Guid New(AllocationMode mode, ushort @class, ref long counter, long step) =>
-		new Guid($"C0DE0000-0000-8000-{(byte)mode:X1}{@class:X3}-{Interlocked.Add(ref counter, step):X12}");
+	/// <summary>
+	/// Mints the next id: the creation number <c>n</c> leads (company-hash high half, low half <c>0000</c>),
+	/// and the node repeats it times <paramref name="nodeStride"/> — <c>0x100</c> for a command, keeping the
+	/// low byte for the events <see cref="SynqraIdDerivation.DeriveEventId"/> advances into.
+	/// </summary>
+	Guid Mint(AllocationMode mode, ushort @class, long nodeStride)
+	{
+		var n = Interlocked.Increment(ref _created);
+		if (n > 0xFFFF)
+		{
+			throw new InvalidOperationException($"{nameof(DeterministicSynqraIdProvider)} ran out of its 16-bit creation counter (model.md §8.9 \"Test ids\").");
+		}
+		return new Guid($"C0DE{n:X4}-0000-8000-{(byte)mode:X1}{@class:X3}-{n * nodeStride:X12}");
+	}
 }

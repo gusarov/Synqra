@@ -155,8 +155,8 @@ public class BaseTest : TestUtils
 				_origServiceCount = _hostBuilder.Services.Count;
 				Register(_hostBuilder);
 				// Tests mint predictable ids: production code under test resolves this same singleton, so
-				// store-minted ids come out as readable per-class A-variant C0DE values. Registered last so
-				// it wins over the store's TryAdd production default. Counters reset per host (per test).
+				// store-minted ids come out as readable C0DE{n} values in creation order. Registered last so
+				// it wins over the store's TryAdd production default. The counter resets per host (per test).
 				_hostBuilder.Services.AddSingleton<ISynqraIdProvider, DeterministicSynqraIdProvider>();
 				foreach (var service in _hostBuilder.Services)
 				{
