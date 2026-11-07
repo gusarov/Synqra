@@ -26,6 +26,10 @@ public static class GuidExtensions
 	/// </summary>
 	public static Generator Default { get; } = new Generator();
 
+	// A clock property, so one per process: latched by the first sub-ms tick any generator sees; until then the clock is
+	// taken as whole-ms (browsers clamp it) and the sub-ms field is entropy. Ids from elsewhere (Approve) never latch it.
+	internal static bool _subMsClock;
+
 	public class Generator
 	{
 		// For v1 & v6: Same as Mongo ObjectID, it is reset on client start, not saved
@@ -35,6 +39,9 @@ public static class GuidExtensions
 
 		// For v7 monotonicy
 		private long _prevOmniStamp; // custom layout of ms<<12 | sub_ms>>2 (see details in implementation)
+
+		/// <summary>Overrides the process-wide clock resolution for this generator: true packs the real sub-ms fraction, false seeds entropy. Null follows the process.</summary>
+		public bool? SubMsClock { get; init; }
 
 		/// <summary>
 		/// 
@@ -233,18 +240,22 @@ public static class GuidExtensions
 			var g = Guid.NewGuid(); // extremely optimized — supplies rand_b and the sub-ms seed below
 			byte* bytes = (byte*)&g;
 
-			// Sub-ms field seed. DateTime.UtcNow is millisecond-granular on some hosts (Linux/containers),
-			// so `ticks % 10000` was 0 there and every id read "…-7000-…". Seed the 12-bit sub-ms field from
-			// entropy instead (top bit cleared so the monotonic bump below keeps headroom to increment within
-			// a ms). GetTimestamp is unaffected — v7 reads only the millisecond bits from groups 1-2, never
-			// this field — and ordering stays monotonic via the counter loop, now by generation order rather
-			// than the (frequently-unavailable) sub-ms clock. Source bytes 0-1 are overwritten below.
+			// Whole-ms clock seed; 0x7FF leaves >=2048 bumps before the ms overflows. Bytes 0-1 are overwritten below.
 			ushort subMsSeed = (ushort)(*(ushort*)bytes & 0x07FF);
 
 			ticks -= UnixEpochTicks;
 
-			// Omni Stamp is a combo of ms<<12 & the sub-ms seed
-			long omniStamp = ((ticks / 10000) << 12) | subMsSeed;
+			long rem = ticks % 10000;
+			if (rem != 0 && SubMsClock is null)
+			{
+				_subMsClock = true;
+			}
+
+			// The real 100ns fraction, or entropy on a whole-ms clock (else every id reads "…-7000-…"); never both.
+			long subMs = (SubMsClock ?? _subMsClock) ? (rem >> 2) : subMsSeed;
+
+			// Omni Stamp is a combo of ms<<12 & the sub-ms part
+			long omniStamp = ((ticks / 10000) << 12) | subMs;
 
 			while (true)
 			{

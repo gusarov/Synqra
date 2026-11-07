@@ -1,6 +1,7 @@
 ﻿using Synqra.Tests.TestHelpers;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using TUnit.Assertions.Extensions;
@@ -299,6 +300,116 @@ public class GuidExtensionsTests3 : BaseTest
 		Console.WriteLine(timestamp);
 		await Assert.That((DateTime.UtcNow - timestamp).TotalSeconds).IsLessThan(1);
 	}
+
+	[Test]
+	public async Task Should_seed_the_sub_ms_field_from_entropy_on_a_whole_ms_clock()
+	{
+		var wholeMs = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+		// A fresh generator per id: each is the first of its ms, so only the seed fills the field.
+		var groups = Enumerable.Range(0, 32).Select(_ => ReadGroup3(new GuidExtensions.Generator { SubMsClock = false }.CreateVersion7(wholeMs))).ToList();
+
+		await Assert.That(groups.Distinct().Count()).IsGreaterThan(1);
+		await Assert.That(groups.Contains("7000")).IsFalse();
+	}
+
+	[Test]
+	public async Task Should_pack_zero_for_a_whole_ms_instant_on_a_precise_clock()
+	{
+		var wholeMs = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+		var id = new GuidExtensions.Generator { SubMsClock = true }.CreateVersion7(wholeMs);
+
+		await Assert.That(ReadGroup3(id)).IsEqualTo("7000");
+		await Assert.That(id.GetVersion()).IsEqualTo(7);
+		await Assert.That(id.GetVariant()).IsEqualTo(1);
+		await Assert.That(id.GetTimestamp()).IsEqualTo(wholeMs);
+	}
+
+	[Test]
+	public async Task Should_pack_the_real_sub_ms_fraction_on_a_precise_clock()
+	{
+		var wholeMs = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+		// 5000 ticks = 0.5 ms; the field holds ticks >> 2 = 1250 = 0x4e2
+		var id = new GuidExtensions.Generator().CreateVersion7(wholeMs.AddTicks(5000));
+
+		await Assert.That(ReadGroup3(id)).IsEqualTo("74e2");
+		await Assert.That(id.GetTimestamp()).IsEqualTo(wholeMs);
+	}
+
+	[Test]
+	public async Task Should_order_precise_clock_ids_by_time_across_generators()
+	{
+		var wholeMs = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+		// Each id from its own generator, all inside one ms: only the sub-ms field can order them.
+		var ids = Enumerable.Range(1, 64).Select(i => new GuidExtensions.Generator().CreateVersion7(wholeMs.AddTicks(i * 100))).ToList();
+
+		for (var i = 1; i < ids.Count; i++)
+		{
+			await Assert.That(ids[i].CompareBigEndian(ids[i - 1])).IsGreaterThan(0);
+		}
+	}
+
+	[Test]
+	[Arguments(false, 0L)]
+	[Arguments(true, 5000L)]
+	public async Task Should_keep_one_generator_strictly_ascending_at_a_frozen_instant(bool subMsClock, long subMsTicks)
+	{
+		// Every id after the first is a bump, on the entropy seed and on the real fraction alike.
+		var instant = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddTicks(subMsTicks);
+		var generator = new GuidExtensions.Generator { SubMsClock = subMsClock };
+		var prev = generator.CreateVersion7(instant);
+		var unordered = 0;
+		for (var i = 0; i < 10_000; i++)
+		{
+			var next = generator.CreateVersion7(instant);
+			if (next.CompareBigEndian(prev) <= 0)
+			{
+				unordered++;
+			}
+			prev = next;
+		}
+
+		await Assert.That(unordered).IsEqualTo(0);
+	}
+
+	[Test]
+	[NotInParallel] // owns the process-wide latch
+	public async Task Should_latch_the_process_clock_only_from_its_own_sub_ms_ticks()
+	{
+		var wholeMs = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+		var latched = GuidExtensions._subMsClock;
+		GuidExtensions._subMsClock = false;
+		try
+		{
+			new GuidExtensions.Generator().CreateVersion7(wholeMs);
+			await Assert.That(GuidExtensions._subMsClock).IsFalse();
+
+			// an overriding generator decides for itself only
+			var foreign = new GuidExtensions.Generator { SubMsClock = true }.CreateVersion7(wholeMs.AddTicks(5000));
+			await Assert.That(GuidExtensions._subMsClock).IsFalse();
+
+			// Approve takes an id minted on another clock: its sub-ms bits say nothing about this one
+			await Assert.That(ReadGroup3(foreign)).IsEqualTo("74e2");
+			await Assert.That(new GuidExtensions.Generator().CreateVersion7OrApprove(foreign)).IsEqualTo(foreign);
+			await Assert.That(GuidExtensions._subMsClock).IsFalse();
+
+			new GuidExtensions.Generator().CreateVersion7(wholeMs.AddTicks(5000));
+			await Assert.That(GuidExtensions._subMsClock).IsTrue();
+
+			// latched for every generator, and a whole-ms instant never unlatches it
+			await Assert.That(ReadGroup3(new GuidExtensions.Generator().CreateVersion7(wholeMs))).IsEqualTo("7000");
+			await Assert.That(GuidExtensions._subMsClock).IsTrue();
+		}
+		finally
+		{
+			GuidExtensions._subMsClock = latched;
+		}
+	}
+
+	string ReadGroup3(Guid id) => id.ToString().Split('-')[2];
 
 	[Test]
 	public async Task Should_create_v6()
