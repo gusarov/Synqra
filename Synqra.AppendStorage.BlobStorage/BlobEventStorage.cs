@@ -15,7 +15,7 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 {
 	readonly ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>? _tailAppend;
 	readonly IUniqueTagIndex? _tags;
-	readonly GuidExtensions.Generator _stamps = new();
+	readonly GuidExtensions.Generator _stamps = GuidExtensions.CreateGenerator();
 
 	public BlobEventStorage(IBlobStorage<(Guid Stream, Guid Sequence)> blobStorage, ISbxSerializerFactory serializerFactory, JsonSerializerOptions? jsonMirrorOptions = null)
 		: base(blobStorage, serializerFactory, ev => (ev.StreamId, ev.SequenceId), jsonMirrorOptions)

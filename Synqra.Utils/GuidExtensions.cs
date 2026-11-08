@@ -24,7 +24,12 @@ public static class GuidExtensions
 	/// <summary>
 	/// This is default state of counters. If you want to have a dedicated one - create your own instance of State class.
 	/// </summary>
-	public static Generator Default { get; } = new Generator();
+	public static Generator Default { get; } = GuidExtensions.CreateGenerator();
+
+	public static Generator CreateGenerator()
+	{
+		return new Generator();
+	}
 
 	// A clock property, so one per process: latched by the first sub-ms tick any generator sees; until then the clock is
 	// taken as whole-ms (browsers clamp it) and the sub-ms field is entropy. Ids from elsewhere (Approve) never latch it.
@@ -48,7 +53,7 @@ public static class GuidExtensions
 		/// </summary>
 		/// <param name="nodeId">V1 and V6 has Node Id field. When zero - it Random for every generator. Default generator will have random on every application start.</param>
 		/// <param name="guidLen">Guids are 16 byte by default. This setting allows you to make shorter v7 guids, zero ending, e.g. 12 is mongo guids length (but not same semantic!)</param>
-		public unsafe Generator(ulong nodeId = 0, byte guidLen = 16)
+		internal unsafe Generator(ulong nodeId = 0, byte guidLen = 16)
 		{
 			if (nodeId == 0)
 			{
@@ -85,7 +90,7 @@ public static class GuidExtensions
 			}
 		}
 
-		public unsafe Generator()
+		internal unsafe Generator()
 			: this(0)
 		{
 		}
