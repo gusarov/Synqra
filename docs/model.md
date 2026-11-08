@@ -203,9 +203,9 @@ C0DE yyyy-yyyy 8prs  m F nn  iiiiiiiiiiii
   *without* this prefix is an unrelated hash and MUST NOT be parsed as structured.
 - **`yyyy-yyyy`** — company hash: first 4 bytes of SHA-256 of the lowercase company name
   (`synqra` → `ADD0 1032`, `quotaly` → `7F1D 6199`). All-zero = **internal** (framework
-  infrastructure and Synqra's own test fixtures, no external company). Every hash whose low half
-  (group 2) is `0000` is reserved for internal use: `xxxx 0000` with `xxxx ≠ 0` is the creation
-  counter of test ids (§8.9). A company whose hash lands there salts its name.
+  infrastructure and Synqra's own test fixtures, no external company). Every hash whose high half
+  is `0000` is reserved for internal use: `0000 xxxx` with `xxxx ≠ 0` carries the creation counter
+  of test ids (§8.9). A company whose hash lands there salts its name.
 - **`8`** — RFC 9562 **version**, fixed at `8`. This nibble is the version field and MUST stay `8`.
 - **`prs`** — **project** + **space**. Both `0` for the default project and space, so group-3 reads
   `8000`. The project/space boundary is deliberately unspecified: within its own company hash each
@@ -386,19 +386,29 @@ Because the node advances and the class is replaced, fixtures MUST space command
 (`…-AC01-…000100`, `…-AC01-…000200`) so a command's events fill its low byte without colliding with
 the next command: `…-AE0E-…000100` (wrapper, ordinal 0), `…-AE01-…000101`, `…-AE01-…000102`, …
 
-**Test ids.** Under test, `DeterministicSynqraIdProvider` mints `C0DE{n:X4}-0000-8000-{m}{Fnn}-{node}`
-where `n` is **one creation counter shared by every class** (1, 2, 3, …), so a test id sorts by
-creation first and by class second, as a v7 sorts by time. `n` sits in the company hash's high half
-with the low half `0000` (the reserved internal block, §8.4): it can never equal a real company hash
-nor the all-zero prefix of hand-written fixtures, which therefore sort before every minted id and never
-collide with one. It is 16 bits — 65 535 ids per provider (per test host); exhaustion throws. The
-node repeats `n` (a command's node is `n × 0x100`, keeping the low byte for its events), so it is
-non-zero (an instance, §8.7) and the creation number reads at either end. The mode keeps the registry of
-the type being instantiated: a committed type yields `A…`, a staging type `B…`; a family-less generic id
-is never minted. `DeriveEventId` needs no special case: it keeps the command's whole prefix, so every
-event of command `n` sorts after that command and before id `n + 1`. Within one command its events
-sort by class, then ordinal; their order is the log's `SequenceId`, never their ids. Two providers
-(two hosts in one test) count independently — their ids may coincide and have no mutual order.
+**Test ids.** Under test, `DeterministicSynqraIdProvider` mints `C0DE0000-0000-8{n}-{m}{Fnn}-{node}`
+where `n` is **one creation counter shared by every class**, added to the leading 60 bits (groups 1–3
+except the version nibble) as one big-endian number: `…-8001`, `…-8002`, …, `C0DE0000-0001-8000`, …,
+`C0DEFFFF-FFFF-8FFF`. A test id therefore sorts by creation first and by class second, as a v7 sorts by
+time.
+- **Capacity.** The first 2⁴⁴ (~1.8 × 10¹³) ids keep the `C0DE` magic. Past that `n` carries into the
+  magic (`C0DF…`, `C0E0…`): the id stops being structured (`IsStructuredId` is false), which deep in a
+  test is fine, and still sorts in creation order. The last id is `FFFFFFFF-FFFF-8FFF`
+  (~2.8 × 10¹⁷); exhaustion throws.
+- **No collision.** `n` starts at 1, so the all-zero prefix of hand-written fixtures (`C0DE0000-0000-8000`)
+  is never minted and sorts first. Below 2²⁸ (~2.7 × 10⁸) groups 1–2 read `0000 xxxx`, the reserved
+  internal block (§8.4). Above it they read as an arbitrary company hash, but still never equal a real
+  company's id: production never mints a structured id (§8.4), so every real one is a hand-pinned
+  constant (mode `8`/`9`), while every test id is generated (`A`/`B`).
+- **Node.** A fixed non-zero node (an instance, §8.7): `1`, or `0x100` for a command so its events
+  fill the low byte. The prefix alone carries `n`; a node repeating it would cap commands at 2⁴⁰.
+- **Mode.** It keeps the registry of the type being instantiated: a committed type yields `A…`, a staging
+  type `B…`; a family-less generic id is never minted.
+- **Events.** `DeriveEventId` needs no special case: it keeps the command's leading groups, so every
+  event of command `n` sorts after it and before id `n + 1`. Within one command its events sort by class,
+  then ordinal; their order is the log's `SequenceId`, never their ids.
+- Two providers (two hosts in one test) count independently: their ids may coincide and have no
+  mutual order.
 
 ### 8.10 Promotion between registries
 

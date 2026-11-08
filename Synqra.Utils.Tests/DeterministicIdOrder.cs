@@ -34,13 +34,13 @@ internal class DeterministicIdOrder
 	}
 
 	[Test]
-	public async Task Should_read_as_a_test_id_with_the_creation_number_at_both_ends()
+	public async Task Should_read_as_a_test_id_numbered_in_its_leading_groups()
 	{
 		var ids = new DeterministicSynqraIdProvider();
 		var stream = ids.CreateStreamId();
 		var command = ids.CreateCommandId(AddComponentCommandType);
-		await Assert.That(stream).IsEqualTo(new Guid("C0DE0001-0000-8000-A005-000000000001"));
-		await Assert.That(command).IsEqualTo(new Guid("C0DE0002-0000-8000-AC01-000000000200"));
+		await Assert.That(stream).IsEqualTo(new Guid("C0DE0000-0000-8001-A005-000000000001"));
+		await Assert.That(command).IsEqualTo(new Guid("C0DE0000-0000-8002-AC01-000000000100"));
 	}
 
 	[Test]
@@ -58,8 +58,8 @@ internal class DeterministicIdOrder
 			await Assert.That(ev.CompareBigEndian(next)).IsLessThan(0);
 			await Assert.That(ev.CompareBigEndian(nextCommand)).IsLessThan(0);
 		}
-		await Assert.That(wrapper).IsEqualTo(new Guid("C0DE0001-0000-8000-AE0E-000000000100"));
-		await Assert.That(added).IsEqualTo(new Guid("C0DE0001-0000-8000-AE01-000000000101"));
+		await Assert.That(wrapper).IsEqualTo(new Guid("C0DE0000-0000-8001-AE0E-000000000100"));
+		await Assert.That(added).IsEqualTo(new Guid("C0DE0000-0000-8001-AE01-000000000101"));
 	}
 
 	[Test]
@@ -109,13 +109,40 @@ internal class DeterministicIdOrder
 	}
 
 	[Test]
-	public async Task Should_refuse_to_wrap_the_creation_counter()
+	public async Task Should_carry_each_group_in_byte_order()
 	{
-		var ids = new DeterministicSynqraIdProvider();
-		for (var i = 0; i < 0xFFFF; i++)
+		// 0xFFF -> 0x1000 crosses group 3 into group 2, 0xFFFFFFF -> 0x10000000 crosses group 2 into group 1
+		foreach (var (before, after) in new[] { (0xFFFL, "C0DE0000-0001-8000"), (0xFFFFFFFL, "C0DE0001-0000-8000") })
 		{
-			ids.CreateComponentId();
+			var ids = new DeterministicSynqraIdProvider(before - 1);
+			var first = ids.CreateComponentId();
+			var second = ids.CreateComponentId();
+			await Assert.That(second.ToString("D").ToUpperInvariant()).StartsWith(after);
+			await Assert.That(first.CompareBigEndian(second)).IsLessThan(0);
 		}
+	}
+
+	[Test]
+	public async Task Should_carry_past_the_magic_once_the_test_runs_deep()
+	{
+		// 2^44 - 1 ids still read C0DE; the next carries into the magic: no longer a structured id, still in creation order
+		var ids = new DeterministicSynqraIdProvider((1L << 44) - 2);
+		var lastStructured = ids.CreateComponentId();
+		var firstBeyond = ids.CreateComponentId();
+		await Assert.That(lastStructured).IsEqualTo(new Guid("C0DEFFFF-FFFF-8FFF-A001-000000000001"));
+		await Assert.That(firstBeyond).IsEqualTo(new Guid("C0DF0000-0000-8000-A001-000000000001"));
+		await Assert.That(lastStructured.IsStructuredId()).IsTrue();
+		await Assert.That(firstBeyond.IsStructuredId()).IsFalse();
+		await Assert.That(lastStructured.CompareBigEndian(firstBeyond)).IsLessThan(0);
+		await Assert.That(firstBeyond.GetVersion()).IsEqualTo(8);
+	}
+
+	[Test]
+	public async Task Should_refuse_to_wrap_past_the_last_creation_number()
+	{
+		// FFFFFFFF-FFFF-8FFF is the last of (2^60 - 1) - (0xC0DE << 44) ~ 2.8e17 creation numbers
+		var ids = new DeterministicSynqraIdProvider((1L << 60) - 1 - (0xC0DEL << 44) - 1);
+		await Assert.That(ids.CreateComponentId()).IsEqualTo(new Guid("FFFFFFFF-FFFF-8FFF-A001-000000000001"));
 		await Assert.That(() => { _ = ids.CreateComponentId(); }).Throws<InvalidOperationException>();
 	}
 }
