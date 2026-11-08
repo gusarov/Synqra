@@ -130,7 +130,7 @@ public sealed class EventSequencer
 
 	sealed class StreamSequence(IComparer<Guid> order)
 	{
-		public GuidExtensions.Generator Generator { get; } = new();
+		public GuidExtensions.Generator Generator { get; } = GuidExtensions.CreateGenerator();
 		public SortedSet<Guid> InFlight { get; } = new(order);
 		public SortedSet<Guid> Committed { get; } = new(order);
 		public Guid Watermark { get; set; }
