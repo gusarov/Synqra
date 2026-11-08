@@ -4,7 +4,9 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Internal;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
@@ -48,6 +50,12 @@ using IAppendStorage = IEventLog;
 /// of the instances it finds tracked up front (<see cref="HoldTracked"/>), serves those from what it holds,
 /// and serves every other id from Mongo with its facets; it never asks <see cref="TryGetTracked"/> again for
 /// a decision already made.
+/// </para>
+/// <para>
+/// <b>A touched instance stays for a minute.</b> Besides the weak tracking, every instance a read finds or an
+/// attach publishes is pinned strongly for <see cref="RecentlyTouchedLifetime"/> after its last touch, so an
+/// instance in use is not collected and loaded again between two calls. The pin is a cache, never the identity:
+/// tracking decides what an id resolves to, the pin only keeps it alive.
 /// </para>
 /// </summary>
 public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIndex, IComponentIndex, ICommittedEventSource
@@ -112,6 +120,9 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 	// Weak on purpose: holding the TrackedObject here would keep it reachable, so its finalizer would never drop this slot.
 	// Keyed by stream as well: one multitenant instance serves every stream, and an id seen in one must never answer in another.
 	readonly ConcurrentDictionary<(Guid Stream, Guid Id), WeakReference<object>> _byId = new();
+	// A strong pin on every instance a read found or an attach published, sliding for RecentlyTouchedLifetime after the last
+	// touch. Keyed like _byId; an expired pin is dropped on the cache's next scan, so a pin lives one to two lifetimes.
+	readonly MemoryCache _recent;
 	readonly Dictionary<Guid, MongoStoreCollection> _collections = new();
 	readonly object _collectionsGate = new();
 
@@ -145,9 +156,11 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		, IServiceProvider? serviceProvider = null
 		, StreamPin? pin = null
 		, ISynqraIdProvider? idProvider = null
+		, TimeProvider? timeProvider = null
 		)
 	{
 		_ids = idProvider ?? SynqraIdProvider.Default;
+		_recent = new MemoryCache(new MemoryCacheOptions { Clock = new ProviderClock(timeProvider ?? TimeProvider.System) });
 		_database = database ?? throw new ArgumentNullException(nameof(database));
 		_serializerFactory = serializerFactory;
 		TypeMetadataProvider = typeMetadataProvider;
@@ -166,6 +179,15 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 				TypeMetadataProvider.RegisterType((Type)data.ConstructorArguments[0].Value!);
 			}
 		}
+	}
+
+	/// <summary>How long an instance stays pinned after its last touch; a touch restarts the clock. Zero pins nothing.</summary>
+	public TimeSpan RecentlyTouchedLifetime { get; set; } = TimeSpan.FromMinutes(1);
+
+	/// <summary>The pin cache's clock, from the host's <see cref="TimeProvider"/>: a test moves it by hand.</summary>
+	sealed class ProviderClock(TimeProvider time) : ISystemClock
+	{
+		public DateTimeOffset UtcNow => time.GetUtcNow();
 	}
 
 	/// <summary>
@@ -602,7 +624,9 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 
 	void Evict(Guid id)
 	{
-		if (_byId.TryRemove((StreamId, id), out var entry) && entry.TryGetTarget(out var model))
+		var key = (Stream: StreamId, Id: id);
+		_recent.Remove(key);
+		if (_byId.TryRemove(key, out var entry) && entry.TryGetTarget(out var model))
 		{
 			_byModel.Remove(model);
 		}
@@ -726,6 +750,7 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		{
 			_byModel.Remove(model);
 		}
+		Touch(key, winner);
 		return winner;
 	}
 
@@ -733,8 +758,35 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 	internal bool TryGetTracked(Guid id, out object model)
 	{
 		model = null!;
-		return _byId.TryGetValue((StreamId, id), out var entry) && entry.TryGetTarget(out model!);
+		var key = (Stream: StreamId, Id: id);
+		var live = _byId.TryGetValue(key, out var entry) && entry.TryGetTarget(out model!);
+		if (live)
+		{
+			Touch(key, model);
+		}
+		return live;
 	}
+
+	/// <summary>Pins <paramref name="model"/> for <see cref="RecentlyTouchedLifetime"/> from now; a pin already there slides instead of being rebuilt.</summary>
+	void Touch((Guid Stream, Guid Id) key, object model)
+	{
+		if (RecentlyTouchedLifetime > TimeSpan.Zero)
+		{
+			if (!(_recent.TryGetValue(key, out var pinned) && ReferenceEquals(pinned, model)))
+			{
+				_recent.Set(key, model, new MemoryCacheEntryOptions { SlidingExpiration = RecentlyTouchedLifetime });
+			}
+		}
+	}
+
+	/// <summary>Drops every pin at once, so a collection finds only what somebody holds; for tests.</summary>
+	internal void ReleaseRecentlyTouched() => _recent.Clear();
+
+	/// <summary>Drops the pins whose lifetime passed now, instead of on the cache's own thread-pool scan; for tests.</summary>
+	internal void SweepRecentlyTouched() => _recent.Compact(0);
+
+	/// <summary>How many instances are pinned right now; for tests.</summary>
+	internal int RecentlyTouchedCount => _recent.Count;
 
 	/// <summary>Whether an id slot exists at all in the current stream, live or awaiting its finalizer; for tests.</summary>
 	internal bool IsSlotHeld(Guid id) => _byId.ContainsKey((StreamId, id));

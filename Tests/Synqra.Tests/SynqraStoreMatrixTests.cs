@@ -1319,7 +1319,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	{
 		var projection = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase(), (IEventLog)new UnavailableLog());
 		var id = Guid.NewGuid();
-		using var _ = SynqraStreamContext.Enter(_streamId);
+		using var scope = SynqraStreamContext.Enter(_streamId);
 
 		var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => projection.SubmitCommandAsync(BuildCreateCommand(projection, id, "never stored")));
 
@@ -1385,13 +1385,74 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	bool IsAlive(WeakReference<object> instance) => instance.TryGetTarget(out _);
 
+	/// <summary>Drops the recent-touch pins and collects: what survives is held by somebody.</summary>
 	void CollectGarbage()
+	{
+		((MongoProjection)Store).ReleaseRecentlyTouched();
+		RunGarbageCollector();
+	}
+
+	void RunGarbageCollector()
 	{
 		for (var i = 0; i < 3; i++)
 		{
 			GC.Collect();
 			GC.WaitForPendingFinalizers();
 		}
+	}
+
+	/// <summary>Never inlined: an <c>out</c> discard in the test's own frame is address-exposed and would keep the instance alive.</summary>
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	bool IsTracked(MongoProjection store, Guid id) => store.TryGetTracked(id, out _);
+
+	/// <summary>A clock the test moves by hand.</summary>
+	sealed class HandClock : TimeProvider
+	{
+		DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+		public override DateTimeOffset GetUtcNow() => _now;
+		public void Advance(TimeSpan by) => _now += by;
+	}
+
+	[Test]
+	public async Task Should_keep_a_touched_entity_alive_for_a_minute_after_nobody_holds_it()
+	{
+		using var scope = SynqraStreamContext.Enter(_streamId);
+		var time = new HandClock();
+		var store = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase(), (TimeProvider)time);
+		var (id, instance) = CreateUnreferenced(store, "touched");
+
+		RunGarbageCollector();
+		await Assert.That(IsAlive(instance)).IsTrue(); // pinned by the submit that created it
+		await Assert.That(IsTracked(store, id)).IsTrue(); // and this touch restarts its minute
+
+		time.Advance(TimeSpan.FromSeconds(59));
+		await Assert.That(IsTracked(store, id)).IsTrue(); // slides the pin again
+		time.Advance(TimeSpan.FromSeconds(59)); // 118 s after creation: the pin would be gone without that second touch
+		store.SweepRecentlyTouched();
+		RunGarbageCollector();
+		await Assert.That(store.RecentlyTouchedCount).IsEqualTo(1);
+		await Assert.That(IsAlive(instance)).IsTrue();
+
+		time.Advance(TimeSpan.FromSeconds(2)); // 61 s since the last touch
+		store.SweepRecentlyTouched();
+		RunGarbageCollector();
+		await Assert.That(store.RecentlyTouchedCount).IsEqualTo(0);
+		await Assert.That(IsAlive(instance)).IsFalse();
+		await Assert.That(store.IsSlotHeld(id)).IsFalse();
+	}
+
+	[Test]
+	public async Task Should_pin_nothing_when_the_lifetime_is_zero()
+	{
+		using var scope = SynqraStreamContext.Enter(_streamId);
+		var store = ActivatorUtilities.CreateInstance<MongoProjection>(ServiceProvider, OpenDatabase());
+		store.RecentlyTouchedLifetime = TimeSpan.Zero;
+		var (id, instance) = CreateUnreferenced(store, "unpinned");
+
+		RunGarbageCollector();
+
+		await Assert.That(IsAlive(instance)).IsFalse();
+		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
 	}
 
 	/// <summary>
