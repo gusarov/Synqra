@@ -42,6 +42,13 @@ using IAppendStorage = IEventLog;
 /// <c>$set</c> writes addressed by id + stream (see <see cref="SetField"/>) — a tracked instance is kept in
 /// sync when there is one, but neither ever requires the entity to be materialized in RAM.
 /// </para>
+/// <para>
+/// <b>A read decides tracked-or-not once and holds what it decided.</b> Tracking is weak, so the GC may
+/// collect an instance between any two Mongo calls of one read. A read therefore takes the strong references
+/// of the instances it finds tracked up front (<see cref="HoldTracked"/>), serves those from what it holds,
+/// and serves every other id from Mongo with its facets; it never asks <see cref="TryGetTracked"/> again for
+/// a decision already made.
+/// </para>
 /// </summary>
 public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIndex, IComponentIndex, ICommittedEventSource
 {
@@ -1589,15 +1596,48 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		while (cursor.MoveNext())
 		{
 			var page = cursor.Current.ToList();
-			// One facet query per cursor batch, for the objects this process does not hold yet.
-			var facets = ReadFacetsOf(page.Select(doc => doc["_id"].AsGuid).Where(id => !TryGetTracked(id, out _)).ToList());
+			var held = new Dictionary<Guid, object>();
+			var unknown = new List<Guid>();
+			HoldTracked(page.Select(doc => doc["_id"].AsGuid), held, unknown);
+			// One facet query per cursor batch, for the objects this process did not hold when the page was decided.
+			var facets = ReadFacetsOf(unknown);
 			foreach (var doc in page)
 			{
 				var id = doc["_id"].AsGuid;
-				yield return TryGetTracked(id, out var tracked) ? tracked : AttachLoaded(doc, id, collection: null, facets[id]);
+				// An instance attached meanwhile wins inside AttachWithId; a held one was decided above and cannot be collected.
+				yield return held.TryGetValue(id, out var tracked) ? tracked : AttachLoaded(doc, id, collection: null, facets[id]);
 			}
 		}
 	}
+
+	/// <summary>
+	/// The one tracked-or-not decision of a read: each live instance goes into <paramref name="held"/> (a strong
+	/// reference for the rest of the read), every other id into <paramref name="unknown"/>, to be served from Mongo.
+	/// A read never asks <see cref="TryGetTracked"/> again across I/O: the GC may collect a weakly tracked instance
+	/// between two Mongo calls, and the second answer would contradict the first. <paramref name="ids"/> are distinct;
+	/// one already in <paramref name="held"/> stays as decided.
+	/// </summary>
+	void HoldTracked(IEnumerable<Guid> ids, Dictionary<Guid, object> held, List<Guid> unknown)
+	{
+		foreach (var id in ids)
+		{
+			if (!held.ContainsKey(id))
+			{
+				if (TryGetTracked(id, out var model))
+				{
+					held[id] = model;
+				}
+				else
+				{
+					unknown.Add(id);
+				}
+			}
+		}
+		TrackedPassCompleted?.Invoke();
+	}
+
+	/// <summary>Runs after each tracked-or-not pass of a read, before its next Mongo call; for tests, to collect garbage in that window.</summary>
+	internal Action? TrackedPassCompleted { get; set; }
 
 	/// <summary>The facet documents of these containers, by container: one query by <c>(_sid, _eid)</c>, none for no containers.</summary>
 	ILookup<Guid, BsonDocument> ReadFacetsOf(IReadOnlyCollection<Guid> containerIds)
@@ -1620,8 +1660,10 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 	{
 		var asked = ids.Where(id => id != default).Distinct().ToList();
 		var ownerIds = new Dictionary<Guid, Guid>();
+		// Every owner this read serves, held strongly from the moment it is decided: tracked ones up front, loaded ones as they load.
 		var owners = new Dictionary<Guid, object>();
-		var unknown = asked.Where(id => !TryGetTracked(id, out _)).ToList();
+		var unknown = new List<Guid>();
+		HoldTracked(asked, owners, unknown);
 		if (unknown.Count > 0)
 		{
 			foreach (var doc in FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.In("_id", unknown)), Builders<BsonDocument>.Projection.Include(EntityIdField)))
@@ -1629,14 +1671,16 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 				ownerIds[doc["_id"].AsGuid] = doc[EntityIdField].AsGuid;
 			}
 		}
-		var untracked = ownerIds.Values.Distinct().Where(id => !TryGetTracked(id, out _)).ToList();
+		var untracked = new List<Guid>();
+		HoldTracked(ownerIds.Values.Distinct(), owners, untracked);
 		if (untracked.Count > 0)
 		{
 			foreach (var entity in FindDocuments(Components, Builders<BsonDocument>.Filter.And(StreamFilter, Builders<BsonDocument>.Filter.In(EntityIdField, untracked))).GroupBy(doc => doc[EntityIdField].AsGuid))
 			{
 				if (entity.FirstOrDefault(doc => doc["_id"].AsGuid == entity.Key) is { } root)
 				{
-					owners[entity.Key] = TryGetTracked(entity.Key, out var raced) ? raced : AttachLoaded(root, entity.Key, collection: null, entity.Where(doc => doc != root));
+					// Untracked when decided: loaded with the facets just read; an instance attached meanwhile wins inside AttachWithId.
+					owners[entity.Key] = AttachLoaded(root, entity.Key, collection: null, entity.Where(doc => doc != root));
 				}
 			}
 		}
@@ -1644,7 +1688,7 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		foreach (var id in asked)
 		{
 			var ownerId = ownerIds.TryGetValue(id, out var stored) ? stored : id;
-			if (owners.TryGetValue(ownerId, out var owner) || TryGetTracked(ownerId, out owner))
+			if (owners.TryGetValue(ownerId, out var owner))
 			{
 				found[id] = owner;
 			}
