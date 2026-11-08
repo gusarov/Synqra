@@ -158,9 +158,10 @@ public sealed class SynqraIdProvider : ISynqraIdProvider
 
 /// <summary>
 /// Test <see cref="ISynqraIdProvider"/> — predictable <b>generated</b> ids
-/// (<c>C0DE{n}-0000-8000-{mode}{class}-{node}</c>, see docs/model.md §8.9 "Test ids") so ids minted by
+/// (<c>C0DE0000-0000-8{n}-{mode}{class}-{node}</c>, see docs/model.md §8.9 "Test ids") so ids minted by
 /// production code under test read cleanly in logs and assertions. <c>n</c> is one creation counter across
-/// every class, so ids sort by creation first and class second, like v7 ids sort by time. The mode keeps the semantic registry of the type
+/// every class, added to the leading 60 bits, so ids sort by creation first and class second, like v7 ids
+/// sort by time. The mode keeps the semantic registry of the type
 /// being instantiated and only sets <see cref="AllocationMode.Generated"/>: a committed type yields an
 /// <c>A</c> instance, a staging type a <c>B</c> one. Registered by the test host in place of
 /// <see cref="SynqraIdProvider"/>; being a DI singleton it is shared across background-service threads
@@ -169,8 +170,22 @@ public sealed class SynqraIdProvider : ISynqraIdProvider
 /// </summary>
 public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 {
+	// The leading 60 bits (groups 1-3 but the version nibble) run from C0DE0000-0000-8000 to FFFFFFFF-FFFF-8FFF.
+	const long Origin = 0xC0DEL << 44;
+	const long Last = (1L << 60) - 1;
+
 	// The creation counter, shared by every class; the old per-class counters had no reader left.
-	int _created;
+	long _created;
+
+	public DeterministicSynqraIdProvider()
+	{
+	}
+
+	// Test seam: start after creation number `created`, to reach the counter's boundaries without minting up to them.
+	internal DeterministicSynqraIdProvider(long created)
+	{
+		_created = created;
+	}
 
 	public Guid CreateCommandId(Guid commandTypeId) => Mint(ModeOf(commandTypeId), ClassOf(commandTypeId, family: 0xC), 0x100);
 	public Guid CreateStreamId() => Mint(AllocationMode.CommittedGenerated, 0x005, 1);
@@ -210,17 +225,20 @@ public sealed class DeterministicSynqraIdProvider : ISynqraIdProvider
 	}
 
 	/// <summary>
-	/// Mints the next id: the creation number <c>n</c> leads (company-hash high half, low half <c>0000</c>),
-	/// and the node repeats it times <paramref name="nodeStride"/> — <c>0x100</c> for a command, keeping the
-	/// low byte for the events <see cref="SynqraIdDerivation.DeriveEventId"/> advances into.
+	/// Mints the next id: creation number <c>n</c> is added to the leading 60 bits, starting from
+	/// <c>C0DE0000-0000-8000</c> and carrying past <c>C0DE</c> into <c>C0DF</c>, <c>C0E0</c>, … (no longer a
+	/// structured id there, which deep in a test is fine). The node is a fixed <paramref name="node"/> —
+	/// <c>0x100</c> for a command, keeping the low byte for the events
+	/// <see cref="SynqraIdDerivation.DeriveEventId"/> advances into.
 	/// </summary>
-	Guid Mint(AllocationMode mode, ushort @class, long nodeStride)
+	Guid Mint(AllocationMode mode, ushort @class, long node)
 	{
 		var n = Interlocked.Increment(ref _created);
-		if (n > 0xFFFF)
+		if (n > Last - Origin)
 		{
-			throw new InvalidOperationException($"{nameof(DeterministicSynqraIdProvider)} ran out of its 16-bit creation counter (model.md §8.9 \"Test ids\").");
+			throw new InvalidOperationException($"{nameof(DeterministicSynqraIdProvider)} ran out of creation numbers past FFFFFFFF-FFFF-8FFF (model.md §8.9 \"Test ids\").");
 		}
-		return new Guid($"C0DE{n:X4}-0000-8000-{(byte)mode:X1}{@class:X3}-{n * nodeStride:X12}");
+		var lead = Origin + n;
+		return new Guid($"{lead >> 28:X8}-{(lead >> 12) & 0xFFFF:X4}-8{lead & 0xFFF:X3}-{(byte)mode:X1}{@class:X3}-{node:X12}");
 	}
 }
