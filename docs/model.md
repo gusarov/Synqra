@@ -559,7 +559,12 @@ gap is expected.
   deletes and link writes go to the documents by id; a tracked instance is updated after commit. A
   facet add on an entity nobody holds checks existence and uniqueness on the stored state and loads
   nothing; component vetoes and activation belong to a live container, so they run only when it is
-  tracked. The attach race is explained inline at `MongoProjection.AttachWithId`.
+  tracked. The attach race is explained inline at `MongoProjection.AttachWithId`. **A read decides
+  tracked-or-not once and holds what it decided**: `FindObjects`/`FindOwners` take the strong references of
+  the instances they find tracked before their first Mongo call and serve those from what they hold; every
+  other id is served from Mongo with its facets. Asking again after I/O would let the GC turn "tracked" into
+  "missing" (an owner reported not found) or into "load it" with the facets skipped (an object without its
+  components and links).
 - **Events from a peer are a write of their own.** The replication endpoint applies a client's event
   straight through the projection's visitor; outside a submit that event takes the gate and runs in its
   own session and transaction (the endpoint appends the log and broadcasts itself).

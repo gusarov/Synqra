@@ -1394,6 +1394,136 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 		}
 	}
 
+	/// <summary>
+	/// Creates an entity with one facet; its instance is held only by <paramref name="holder"/>. Never inlined, so no
+	/// frame of the caller holds it either.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	(Guid Id, Guid FacetId, WeakReference<object> Instance) CreateHeld(IObjectStore store, string name, string subject, object?[] holder)
+	{
+		var id = Guid.NewGuid();
+		var command = BuildCreateCommand(store, id, name);
+		holder[0] = command.Data;
+		store.SubmitCommandAsync(command).GetAwaiter().GetResult();
+		store.SubmitCommandAsync(BuildAddFacetCommand(store, id, subject)).GetAwaiter().GetResult();
+		var facetId = ((IIdentifiable<Guid>)((TestGeneratedContainerNode)holder[0]!).Components.Single()).Id;
+		return (id, facetId, new WeakReference<object>(holder[0]!));
+	}
+
+	/// <summary>Runs <paramref name="action"/> in the window after the <paramref name="pass"/>-th tracked-or-not pass of a read, before its next Mongo call.</summary>
+	void RunAtPass(MongoProjection store, int pass, Action action)
+	{
+		var passes = 0;
+		store.TrackedPassCompleted = () =>
+		{
+			passes++;
+			if (passes == pass)
+			{
+				action();
+			}
+		};
+	}
+
+	/// <summary>Drops the only strong reference the test has and collects, so the instance survives only if the read holds it.</summary>
+	Action Release(object?[] holder, bool[] ran) => () =>
+	{
+		holder[0] = null;
+		CollectGarbage();
+		ran[0] = true;
+	};
+
+	/// <summary>Never inlined, so the target it compares is not held by the caller's frame.</summary>
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	bool IsSame(WeakReference<object> instance, object other) => instance.TryGetTarget(out var target) && ReferenceEquals(target, other);
+
+	[Test]
+	public async Task Should_find_a_tracked_owner_the_gc_collects_between_the_tracked_pass_and_the_lookup()
+	{
+		var store = (MongoProjection)Store;
+		var holder = new object?[1];
+		var ran = new bool[1];
+		var (id, _, original) = CreateHeld(store, "owner", "facet", holder);
+		RunAtPass(store, 1, Release(holder, ran));
+
+		var found = store.FindOwners([id]);
+
+		store.TrackedPassCompleted = null;
+		await Assert.That(ran[0]).IsTrue();
+		await Assert.That(found.ContainsKey(id)).IsTrue();
+		await Assert.That(IsSame(original, found[id])).IsTrue(); // served from what the read held, not reloaded
+		await Assert.That(((TestGeneratedContainerNode)found[id]).Components.Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Should_find_the_tracked_owner_of_a_facet_the_gc_collects_between_the_owner_pass_and_the_lookup()
+	{
+		var store = (MongoProjection)Store;
+		var holder = new object?[1];
+		var ran = new bool[1];
+		var (id, facetId, _) = CreateHeld(store, "owner", "facet", holder);
+		RunAtPass(store, 2, Release(holder, ran)); // pass 1 decides the facet id, pass 2 its owner
+
+		var found = store.FindOwners([facetId]);
+
+		store.TrackedPassCompleted = null;
+		await Assert.That(ran[0]).IsTrue();
+		await Assert.That(found.ContainsKey(facetId)).IsTrue();
+		await Assert.That(store.GetId(found[facetId])).IsEqualTo(id);
+	}
+
+	[Test]
+	public async Task Should_page_a_tracked_object_with_its_facets_when_the_gc_collects_it_before_the_facet_query()
+	{
+		var store = (MongoProjection)Store;
+		var holder = new object?[1];
+		var ran = new bool[1];
+		var (id, _, original) = CreateHeld(store, "paged", "facet", holder);
+		RunAtPass(store, 1, Release(holder, ran));
+
+		var paged = (TestGeneratedContainerNode)((IComponentIndex)store).FindObjects(new ObjectQuery([typeof(TestGeneratedContainerNode)]) { Ids = [id] }).Single();
+
+		store.TrackedPassCompleted = null;
+		await Assert.That(ran[0]).IsTrue();
+		await Assert.That(IsSame(original, paged)).IsTrue();
+		await Assert.That(((TestUniqueComponent)paged.Components.Single()).Subject).IsEqualTo("facet");
+	}
+
+	[Test]
+	public async Task Should_serve_the_instance_attached_while_a_page_loads_an_untracked_object()
+	{
+		var store = (MongoProjection)Store;
+		var holder = new object?[1];
+		var (id, _, _) = CreateHeld(store, "raced", "facet", holder);
+		holder[0] = null;
+		CollectGarbage();
+		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
+		RunAtPass(store, 1, () => holder[0] = store.ResolveObject(id)); // another caller attaches it in the window
+
+		var paged = ((IComponentIndex)store).FindObjects(new ObjectQuery([typeof(TestGeneratedContainerNode)]) { Ids = [id] }).Single();
+
+		store.TrackedPassCompleted = null;
+		await Assert.That(paged).IsSameReferenceAs(holder[0]);
+		await Assert.That(((TestUniqueComponent)((TestGeneratedContainerNode)paged).Components.Single()).Subject).IsEqualTo("facet");
+	}
+
+	[Test]
+	public async Task Should_serve_the_instance_attached_while_find_owners_loads_an_untracked_owner()
+	{
+		var store = (MongoProjection)Store;
+		var holder = new object?[1];
+		var (id, facetId, _) = CreateHeld(store, "raced", "facet", holder);
+		holder[0] = null;
+		CollectGarbage();
+		await Assert.That(store.TryGetTracked(id, out _)).IsFalse();
+		RunAtPass(store, 2, () => holder[0] = store.ResolveObject(id)); // after the owner pass decided "untracked"
+
+		var found = store.FindOwners([facetId]);
+
+		store.TrackedPassCompleted = null;
+		await Assert.That(found[facetId]).IsSameReferenceAs(holder[0]);
+		await Assert.That(((TestUniqueComponent)((TestGeneratedContainerNode)found[facetId]).Components.Single()).Subject).IsEqualTo("facet");
+	}
+
 	[Test]
 	public async Task Should_not_keep_an_entity_alive_that_nobody_holds()
 	{
