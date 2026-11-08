@@ -564,7 +564,11 @@ gap is expected.
   the instances they find tracked before their first Mongo call and serve those from what they hold; every
   other id is served from Mongo with its facets. Asking again after I/O would let the GC turn "tracked" into
   "missing" (an owner reported not found) or into "load it" with the facets skipped (an object without its
-  components and links).
+  components and links). **A touched instance also stays for a minute**: every instance a read finds or an
+  attach publishes is pinned strongly in a sliding `MemoryCache` for `RecentlyTouchedLifetime` after its last
+  touch (dropped on the cache's next expiry scan, so one to two lifetimes), so an instance in use is not
+  collected and loaded again between two calls. The pin is a cache, never the identity: tracking decides what
+  an id resolves to.
 - **Events from a peer are a write of their own.** The replication endpoint applies a client's event
   straight through the projection's visitor; outside a submit that event takes the gate and runs in its
   own session and transaction (the endpoint appends the log and broadcasts itself).
