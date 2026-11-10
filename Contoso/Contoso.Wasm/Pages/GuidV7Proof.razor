@@ -5,10 +5,11 @@
 <PageTitle>v7 GUID sub-ms proof</PageTitle>
 
 @* Browser-level guard for the v7 sub-ms fix. In a browser DateTime.UtcNow is clamped to whole
-   milliseconds (Spectre), so `ticks % 10000 == 0`. Each id below is minted from a *fresh* generator,
-   so every one is the "first of its millisecond" (monotonic counter at 0). Without the entropy
-   fallback in GuidExtensions the sub-ms field is 0 for all of them and every id collapses to
-   group3 "7000" — which is exactly what the Playwright test asserts must NOT happen. *@
+   milliseconds (Spectre), so `ticks % 10000 == 0`. The ids below come from the shared generator, as
+   in the app, each minted in a fresh millisecond, so every one is the "first of its millisecond"
+   (monotonic counter at 0). Without the entropy fallback in GuidExtensions the sub-ms field is 0
+   for all of them and every id collapses to group3 "7000" — which is exactly what the Playwright
+   test asserts must NOT happen. *@
 
 <h1 data-testid="guid-v7-page">v7 GUID sub-ms proof</h1>
 <div data-testid="guid-v7-env">@(OperatingSystem.IsBrowser() ? "Browser/WASM" : "native")</div>
@@ -36,17 +37,29 @@
 
 	private static string Group3(Guid g) => g.ToString().Split('-')[2];
 
-	private void Generate()
+	private async Task Generate()
 	{
 		_guids.Clear();
+		var generator = GuidExtensions.Default;
 		for (int i = 0; i < 16; i++)
 		{
-			// fresh generator => each id is the first of its millisecond (counter at 0)
-			_guids.Add(GuidExtensions.CreateGenerator().CreateVersion7());
+			await WaitForNextMillisecond();
+			// first id of its millisecond => the counter is at 0 and the sub-ms field is the fallback's alone
+			_guids.Add(generator.CreateVersion7());
 		}
 
 		_distinctGroup3 = _guids.Select(Group3).Distinct().Count();
 		_allSeven = _guids.All(g => Group3(g) == "7000");
 		_generated = true;
+	}
+
+	// a new millisecond on the clock the generator reads, so the counter cannot hide a zero sub-ms field
+	private async Task WaitForNextMillisecond()
+	{
+		var started = DateTime.UtcNow.Ticks / 10000;
+		while (DateTime.UtcNow.Ticks / 10000 == started)
+		{
+			await Task.Delay(1);
+		}
 	}
 }
