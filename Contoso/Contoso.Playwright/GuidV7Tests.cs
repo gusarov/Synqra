@@ -3,7 +3,7 @@ namespace Contoso.Playwright;
 // Browser-level regression guard for the v7 sub-ms fix (GuidExtensions). Unlike the other Playwright
 // tests here this one is intentionally NOT [Explicit] and NOT CI=false: it must run in the PR gate so
 // that removing the entropy fallback fails CI. In a real browser DateTime.UtcNow is clamped to whole
-// milliseconds, so without that fallback every fresh-generator id reads group3 "7000".
+// milliseconds, so without that fallback every first-of-its-millisecond id reads group3 "7000".
 [Category("GuidV7")]
 [Parallelizable(ParallelScope.Self)]
 public class GuidV7Tests : SynqraPageTest
@@ -22,7 +22,7 @@ public class GuidV7Tests : SynqraPageTest
 			await Page.GetByTestId("guid-v7-generate").ClickAsync();
 			await Expect(Page.GetByTestId("guid-v7-count")).ToHaveTextAsync("16", new() { Timeout = 30000 });
 
-			// the bug: sub-ms field 0 with no entropy fallback => every fresh-generator id is group3 "7000"
+			// the bug: sub-ms field 0 with no entropy fallback => every first-of-its-millisecond id is group3 "7000"
 			await Expect(Page.GetByTestId("guid-v7-all-7000")).ToHaveTextAsync("false", new() { Timeout = 30000 });
 			// and they must actually vary (entropy fills the field)
 			await Expect(Page.GetByTestId("guid-v7-distinct-group3")).Not.ToHaveTextAsync("1", new() { Timeout = 30000 });
