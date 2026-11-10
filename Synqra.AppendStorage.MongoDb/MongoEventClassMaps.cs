@@ -163,6 +163,8 @@ public static class MongoEventClassMaps
 			new JsonIgnoreConvention(),
 			new IgnoreIfNullConvention(true),
 			new GuidAndObjectSerializerConvention(),
+			// A property a model dropped stays in the documents already written; a replay reads past it instead of failing on it.
+			new IgnoreExtraElementsConvention(true),
 		};
 		// Scoped to Synqra's own model ecosystem — NOT a blanket `_ => true`. That filter
 		// previously applied this pack to every class map in the process, including
