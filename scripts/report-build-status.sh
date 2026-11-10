@@ -76,11 +76,11 @@ esac
 body="{\"key\":\"$(json_escape "$pr_key")\",\"title\":\"$(json_escape "$title")\",\"subtitle\":\"$(json_escape "$subtitle")\",\"kind\":\"${kind}\",\"status\":\"${status}\",\"severity\":\"${severity}\",\"urls\":[${urls}]}"
 
 out=$(mktemp)
-code=$(curl -sS -m 30 -o "$out" -w '%{http_code}' -X POST -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" --data "$body" "${server%/}/api/hooks/push" 2>&1)
-echo "report-build-status: ${phase} '${pr_key}' = ${status} -> ${server%/}/api/hooks/push : HTTP ${code} $(head -c 300 "$out")"
+code=$(curl -sS -m 30 -o "$out" -w '%{http_code}' -X POST -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" --data "$body" "${server%/}/api/hooks/push" 2>"$out.err")
+echo "report-build-status: ${phase} '${pr_key}' = ${status} -> ${server%/}/api/hooks/push : HTTP ${code} $(head -c 300 "$out") $(head -c 300 "$out.err")"
 case "$code" in
 	2*) ;;
 	*) echo "##vso[task.logissue type=warning]report-build-status: the hook answered HTTP ${code}" ;;
 esac
-rm -f "$out"
+rm -f "$out" "$out.err"
 exit 0
