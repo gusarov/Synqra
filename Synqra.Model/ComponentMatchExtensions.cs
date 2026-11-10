@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 
@@ -7,7 +6,6 @@ namespace Synqra;
 public static class ComponentMatchExtensions
 {
 	/// <summary>The property a match names, on a registered type; an unknown type or property throws, naming both, so a typo never matches nothing.</summary>
-	[UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "A property trimmed away is not matchable; the registered model types keep their public properties.")]
 	public static PropertyInfo ResolveProperty(this ComponentMatch match, ITypeMetadataProvider types)
 	{
 		PropertyInfo property;
