@@ -51,7 +51,7 @@ else
 	title="Synqra ${branch}"
 fi
 
-subtitle="build ${BUILD_BUILDNUMBER:-?} · ${short_sha}"
+subtitle="build ${BUILD_BUILDNUMBER:-?} at ${short_sha}"
 urls="{\"kind\":\"pull-request\",\"url\":\"$(json_escape "$pr_url")\",\"label\":\"$(json_escape "$title")\"},{\"kind\":\"build\",\"url\":\"$(json_escape "$build_url")\",\"label\":\"build ${BUILD_BUILDNUMBER:-?}\"}"
 
 case "$phase" in
