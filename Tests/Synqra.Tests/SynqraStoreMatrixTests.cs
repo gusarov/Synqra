@@ -94,6 +94,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			typeof(TestComponentNode),
 			typeof(TestUniqueComponent),
 			typeof(TestFlagComponent),
+			typeof(TestKeyedComponent),
 		]);
 		hostBuilder.Services.AddSbxSerializer(ser =>
 		{
@@ -101,6 +102,7 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 			ser.Map(224, typeof(TestComponentNode));
 			ser.Map(221, typeof(TestUniqueComponent));
 			ser.Map(225, typeof(TestFlagComponent));
+			ser.Map(226, typeof(TestKeyedComponent));
 			ser.Map(210, typeof(TestGraphNode));
 			ser.Map(211, typeof(HierarchyLink));
 			ser.Map(212, typeof(DependsOn));
@@ -631,6 +633,78 @@ public abstract class Cobra_SynqraStoreContractTests : BaseTest
 		await Assert.That(demos.SequenceEqual(ids)).IsTrue();
 		await Assert.That(afterFirst).IsEquivalentTo(new[] { ids[1] });
 		await Assert.That(nothing).IsEmpty();
+	}
+
+	[Test]
+	public async Task Should_86_find_the_object_by_an_indexed_component_property()
+	{
+		var store = ResolveStore();
+		var owner = Guid.NewGuid();
+		var wanted = await CreateWithKeysAsync(store, ("1270", owner));
+		await CreateWithKeysAsync(store, ("1271", owner));
+		var index = (IComponentIndex)store;
+
+		var found = index.FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Where = [new ComponentMatch(typeof(TestKeyedComponent), nameof(TestKeyedComponent.Key), "1270")] }).Select(store.GetId).ToList();
+
+		await Assert.That(found).IsEquivalentTo(new[] { wanted });
+	}
+
+	[Test]
+	public async Task Should_87_require_every_match_on_one_facet()
+	{
+		var store = ResolveStore();
+		var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+		await CreateWithKeysAsync(store, ("1270", first), ("1271", second)); // both values, on two different facets
+		var wanted = await CreateWithKeysAsync(store, ("1270", second));
+		var index = (IComponentIndex)store;
+
+		var found = index.FindObjects(new ObjectQuery([typeof(TestComponentNode)])
+		{
+			Where =
+			[
+				new ComponentMatch(typeof(TestKeyedComponent), nameof(TestKeyedComponent.Key), "1270"),
+				new ComponentMatch(typeof(TestKeyedComponent), nameof(TestKeyedComponent.Owner), second),
+			],
+		}).Select(store.GetId).ToList();
+
+		await Assert.That(found).IsEquivalentTo(new[] { wanted });
+	}
+
+	[Test]
+	public async Task Should_88_refuse_an_unknown_property()
+	{
+		var store = ResolveStore();
+		var index = (IComponentIndex)store;
+
+		var unknownProperty = Assert.Throws<ArgumentException>(() => index.FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Where = [new ComponentMatch(typeof(TestKeyedComponent), "Nope", "1270")] }).ToList());
+		var unknownType = Assert.Throws<ArgumentException>(() => index.FindObjects(new ObjectQuery([typeof(TestComponentNode)]) { Where = [new ComponentMatch(typeof(ObjectQuery), nameof(ObjectQuery.Text), "1270")] }).ToList());
+
+		await Assert.That(unknownProperty.Message).Contains(nameof(TestKeyedComponent)).And.Contains("Nope");
+		await Assert.That(unknownType.Message).Contains(nameof(ObjectQuery));
+	}
+
+	/// <summary>A <see cref="TestComponentNode"/> with one <see cref="TestKeyedComponent"/> per key and owner, created in one batch.</summary>
+	async Task<Guid> CreateWithKeysAsync(IObjectStore store, params (string Key, Guid Owner)[] facets)
+	{
+		var id = Guid.NewGuid();
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestComponentNode));
+		var keyed = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestKeyedComponent));
+		var batch = new BatchCommand();
+		batch.Commands.Add(BuildCreateRootCommand(store, id, new TestComponentNode { Name = "keyed" }));
+		foreach (var (key, owner) in facets)
+		{
+			batch.Commands.Add(new AddComponentCommand
+			{
+				TargetTypeId = container.TypeId,
+				CollectionId = container.GetCollectionId(""),
+				TargetId = id,
+				ComponentId = Guid.NewGuid(),
+				ComponentTypeId = keyed.TypeId,
+				Data = new TestKeyedComponent { Key = key, Owner = owner },
+			});
+		}
+		await store.SubmitCommandAsync(batch);
+		return id;
 	}
 
 	Guid AddDemo(IObjectStore store, string name)
@@ -1265,6 +1339,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			typeof(TestUniqueComponent),
 			typeof(TestTaggingComponent),
 			typeof(TestActivatableComponent),
+			typeof(TestKeyedComponent),
 		]);
 		hostBuilder.Services.AddSbxSerializer(ser =>
 		{
@@ -1272,6 +1347,7 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 			ser.Map(221, typeof(TestUniqueComponent));
 			ser.Map(222, typeof(TestTaggingComponent));
 			ser.Map(223, typeof(TestActivatableComponent));
+			ser.Map(226, typeof(TestKeyedComponent));
 		});
 		hostBuilder.Services.AddTestMongoDatabase(_connectionString).AddMongoEventStorage().AddServerEventLog();
 		UseMongoProjectionStore(hostBuilder.Services);
@@ -1354,10 +1430,35 @@ public sealed class Cobra_Mongo_Store_Components_Tests : BaseTest
 	}
 
 	/// <summary>An id-only command, the way a REST call or a job sends it: no live instance handed over.</summary>
+	[Test]
+	public async Task Should_ensure_the_index_for_the_indexed_property()
+	{
+		var store = Store;
+		var id = Guid.NewGuid();
+		var batch = new BatchCommand();
+		batch.Commands.Add(BuildCreateCommand(store, id, "keyed"));
+		batch.Commands.Add(BuildAddKeyCommand(store, id, "1270"));
+		await store.SubmitCommandAsync(batch);
+
+		var found = ((IComponentIndex)store).FindObjects(new ObjectQuery([typeof(TestGeneratedContainerNode)]) { Where = [new ComponentMatch(typeof(TestKeyedComponent), nameof(TestKeyedComponent.Key), "1270")] }).Select(store.GetId).ToList();
+		var index = ((MongoProjection)store).Components.Indexes.List().ToList().Single(i => i["name"] == "idx_TestKeyedComponent_Key");
+
+		await Assert.That(found).IsEquivalentTo(new[] { id });
+		await Assert.That(index["key"].AsBsonDocument.Names.SequenceEqual(["_sid", "_t", nameof(TestKeyedComponent.Key)])).IsTrue();
+		await Assert.That(index["partialFilterExpression"][nameof(TestKeyedComponent.Key)]["$exists"].AsBoolean).IsTrue();
+	}
+
 	AddComponentCommand BuildCreateCommand(IObjectStore store, Guid id, string name)
 	{
 		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
 		return new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = container.TypeId, ComponentId = id, Data = new TestGeneratedContainerNode { Name = name }, };
+	}
+
+	AddComponentCommand BuildAddKeyCommand(IObjectStore store, Guid id, string key)
+	{
+		var container = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestGeneratedContainerNode));
+		var keyed = store.TypeMetadataProvider.GetTypeMetadata(typeof(TestKeyedComponent));
+		return new AddComponentCommand { TargetTypeId = container.TypeId, CollectionId = container.CollectionId, TargetId = id, ComponentTypeId = keyed.TypeId, ComponentId = Guid.NewGuid(), Data = new TestKeyedComponent { Key = key, Owner = id }, };
 	}
 
 	AddComponentCommand BuildAddFacetCommand(IObjectStore store, Guid id, string subject)

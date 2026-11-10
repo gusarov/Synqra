@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -913,14 +914,7 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 	/// </summary>
 	void SetField(BsonDocument? doc, Type type, string propertyName, object? value, string what, Guid stampVersion = default)
 	{
-		// GetMemberMap sees declared members only; an inherited one (a link's TargetId) lives on a base map.
-		var classMap = BsonClassMap.LookupClassMap(type);
-		var memberMap = classMap.GetMemberMap(propertyName);
-		while (memberMap is null && classMap.BaseClassMap is { } baseMap)
-		{
-			classMap = baseMap;
-			memberMap = classMap.GetMemberMap(propertyName);
-		}
+		var memberMap = FindMemberMap(type, propertyName);
 		if (memberMap is null)
 		{
 			// A [JsonIgnore] member is unmapped by convention and never persisted — nothing to write.
@@ -951,6 +945,19 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 			doc[LastEventIdField] = new BsonBinaryData(stampVersion, GuidRepresentation.Standard);
 		}
 		Touch(doc);
+	}
+
+	/// <summary>The class-map member of a property, or null for one the map does not persist (a [JsonIgnore] member). GetMemberMap sees declared members only; an inherited one (a link's TargetId) lives on a base map.</summary>
+	BsonMemberMap? FindMemberMap(Type type, string propertyName)
+	{
+		var classMap = BsonClassMap.LookupClassMap(type);
+		var memberMap = classMap.GetMemberMap(propertyName);
+		while (memberMap is null && classMap.BaseClassMap is { } baseMap)
+		{
+			classMap = baseMap;
+			memberMap = classMap.GetMemberMap(propertyName);
+		}
+		return memberMap;
 	}
 
 	// Same conversion ComponentApplyHelpers.ApplyPropertyChange does on the live instance (an event
@@ -1621,7 +1628,8 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 
 	/// <summary>
 	/// Roots by <c>(_sid, _t, _id)</c>, in id order through a cursor: a page reads one batch, never the stream. A facet
-	/// filter first collects the owners carrying that facet type, by <c>(_sid, _t, _eid)</c>; a text filter the owners holding its words, by <c>(_sid, $** text)</c>.
+	/// filter first collects the owners carrying that facet type, by <c>(_sid, _t, _eid)</c>; a text filter the owners holding its words, by <c>(_sid, $** text)</c>;
+	/// a property filter the owners of the facets carrying its values, by <c>(_sid, _t, property)</c> where the property is indexed.
 	/// </summary>
 	public IEnumerable<object> FindObjects(ObjectQuery query)
 	{
@@ -1642,6 +1650,11 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		if (query.Words is { Count: > 0 } words)
 		{
 			parts.Add(filters.In("_id", FindOwnersMentioning(words)));
+		}
+		if (query.Where is { Count: > 0 } matches)
+		{
+			EnsurePropertyIndexes();
+			parts.Add(filters.In("_id", FindOwnersMatching(matches)));
 		}
 		var find = FlushSession() is { } session ? Components.Find(session, filters.And(parts)) : Components.Find(filters.And(parts));
 		using var cursor = find.Sort(Builders<BsonDocument>.Sort.Ascending("_id")).ToCursor();
@@ -1755,6 +1768,88 @@ public sealed partial class MongoProjection : IObjectStore, IProjection, ILinkIn
 		var distinct = FlushSession() is { } session ? Components.Distinct<BsonValue>(session, EntityIdField, filter) : Components.Distinct<BsonValue>(EntityIdField, filter);
 		return distinct.ToEnumerable().Select(v => v.AsGuid);
 	}
+
+	/// <summary>
+	/// The ids of the entities carrying every match: one distinct over <c>_eid</c> per component type, that type's matches on one
+	/// document (the same facet) by <c>(_sid, _t, property)</c>, owners intersected across types; stops at the first type nothing carries.
+	/// </summary>
+	HashSet<Guid> FindOwnersMatching(IReadOnlyCollection<ComponentMatch> matches)
+	{
+		var groups = matches.GroupBy(m => m.Component).ToList();
+		var owners = FindOwnersCarrying(groups[0]);
+		for (var i = 1; i < groups.Count && owners.Count > 0; i++)
+		{
+			owners.IntersectWith(FindOwnersCarrying(groups[i]));
+		}
+		return owners;
+	}
+
+	// The owners (_eid) of the stream's facets of this type (or a subtype) holding every value.
+	HashSet<Guid> FindOwnersCarrying(IGrouping<Type, ComponentMatch> matches)
+	{
+		var filters = Builders<BsonDocument>.Filter;
+		var parts = new List<FilterDefinition<BsonDocument>> { StreamFilter, filters.In(DiscriminatorField, ConcreteTypeNamesOf(matches.Key)) };
+		foreach (var match in matches)
+		{
+			parts.Add(BuildMatchFilter(match));
+		}
+		var filter = filters.And(parts);
+		var distinct = FlushSession() is { } session ? Components.Distinct<BsonValue>(session, EntityIdField, filter) : Components.Distinct<BsonValue>(EntityIdField, filter);
+		return distinct.ToEnumerable().Select(v => v.AsGuid).ToHashSet();
+	}
+
+	/// <summary>An equality on the stored field: the value goes through the member's own serializer (a Guid as Standard binary, an enum as stored); null matches a dropped field too.</summary>
+	FilterDefinition<BsonDocument> BuildMatchFilter(ComponentMatch match)
+	{
+		var property = match.ResolveProperty(TypeMetadataProvider);
+		var memberMap = FindMemberMap(match.Component, match.Property)
+			?? throw new ArgumentException($"'{match.Component.Name}.{match.Property}' is not persisted, so it cannot be matched.", nameof(match));
+		var value = match.CoerceValue(property);
+		BsonValue stored = value is null ? BsonNull.Value : SerializeMember(memberMap, value);
+		return Builders<BsonDocument>.Filter.Eq(memberMap.ElementName, stored);
+	}
+
+	// Once per instance: CreateMany on identical existing indexes is a no-op, so another instance or process ensuring them again is harmless.
+	bool _propertyIndexesEnsured;
+	readonly object _propertyIndexesGate = new();
+
+	/// <summary>
+	/// Ensures the <c>(_sid, _t, property)</c> index of every <see cref="IndexedAttribute"/> property a registered type declares, named
+	/// <c>idx_&lt;Type&gt;_&lt;Property&gt;</c> and partial on the property existing: before this instance's first property query, and
+	/// outside a write (an index build cannot join a transaction). Internal for tests.
+	/// </summary>
+	internal void EnsurePropertyIndexes()
+	{
+		lock (_propertyIndexesGate)
+		{
+			if (!_propertyIndexesEnsured && _scope.Value is null)
+			{
+				var models = BuildPropertyIndexModels().ToList();
+				if (models.Count > 0)
+				{
+					Components.Indexes.CreateMany(models);
+				}
+				_propertyIndexesEnsured = true;
+			}
+		}
+	}
+
+	// One index per declaring type and property: a subtype inheriting the property shares it, since the index keys the field, not the type.
+	[UnconditionalSuppressMessage("Trimming", "IL2070", Justification = "A property trimmed away is not indexed; the registered model types keep their public properties.")]
+	IEnumerable<CreateIndexModel<BsonDocument>> BuildPropertyIndexModels()
+		=> TypeMetadataProvider.RegisteredTypes
+			.Select(m => m.Type)
+			.SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+			.Where(p => p.IsDefined(typeof(IndexedAttribute), inherit: false))
+			.Select(p => (
+				Name: $"idx_{p.DeclaringType!.Name}_{p.Name}"
+				, Field: FindMemberMap(p.DeclaringType!, p.Name)?.ElementName ?? throw new InvalidOperationException($"'{p.DeclaringType!.Name}.{p.Name}' is [Indexed] but not persisted.")
+				))
+			.DistinctBy(x => x.Name)
+			.Select(x => new CreateIndexModel<BsonDocument>(
+				Builders<BsonDocument>.IndexKeys.Ascending(StreamIdField).Ascending(DiscriminatorField).Ascending(x.Field)
+				, new CreateIndexOptions<BsonDocument> { Name = x.Name, PartialFilterExpression = Builders<BsonDocument>.Filter.Exists(x.Field) }
+				));
 
 	/// <summary>
 	/// The ids of the entities whose root or facets hold every word: one <c>(_sid, $** text)</c> query per word, each word a

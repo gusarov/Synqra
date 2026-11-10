@@ -571,6 +571,15 @@ gap is expected.
   intersected, so words may sit on different documents of one entity; the roots then page by id like any other filter.
   Results are in id order, not by relevance, so the `After` cursor stays stable. In memory the same rule scans public string
   properties (nested documents are not reached there).
+- **Lookup by value (`ObjectQuery.Where`).** A `ComponentMatch(type, property, value)` selects the objects carrying a facet of
+  that type (or a registered subtype) whose property equals the value; the matches naming one type hold on the same facet,
+  types combine with AND, and the owners join the other query parts as any filter. A property marked `[Indexed]` is served by
+  the index `(_sid, _t, <Property>)` on `Components`, named `idx_<Type>_<Property>` and partial on the property existing. The
+  Mongo projection ensures those indexes itself, once per instance before its first `Where` query and idempotently: the
+  registered types are only known at runtime, so a storage upgrade with a static id cannot enumerate them. A value goes
+  through the member's own serializer (a `Guid` as Standard binary, an enum as stored), `null` matches a dropped field too, and
+  an unregistered type or unknown property throws `ArgumentException` rather than matching nothing. In memory the same rule
+  reads the facets' public properties.
 - **Tracking is per-process, lazy and weak.** The Mongo projection keeps id <-> instance in a
   `ConditionalWeakTable` and a map of `WeakReference`s, so it never keeps an entity alive: an entity is
   in memory only while some caller holds it, and is loaded again from Mongo (`ResolveObject`, enumeration)

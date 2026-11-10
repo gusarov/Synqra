@@ -4,11 +4,15 @@ namespace Synqra;
 /// What <see cref="IComponentIndex.FindObjects"/> narrows by, combined with AND. A type stands for itself and every
 /// registered subtype. <see cref="Has"/>: the object carries a facet of that type. <see cref="Ids"/>: one of these ids.
 /// <see cref="After"/>: ids strictly after this cursor. <see cref="Text"/>: every one of its <see cref="Words"/> appears in
-/// the object's text or one of its facets' (string values and type names), whole and case-insensitive.
+/// the object's text or one of its facets' (string values and type names), whole and case-insensitive. <see cref="Where"/>:
+/// every match holds; the matches naming one component type hold on the same facet of it, those naming different types on
+/// facets of their own. On an <see cref="IndexedAttribute"/> property a match is an index lookup.
 /// </summary>
 public sealed record ObjectQuery(IReadOnlyCollection<Type> Types)
 {
 	public Type? Has { get; init; }
+
+	public IReadOnlyCollection<ComponentMatch>? Where { get; init; }
 
 	public IReadOnlyCollection<Guid>? Ids { get; init; }
 

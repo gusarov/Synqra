@@ -909,6 +909,8 @@ public partial class InMemoryProjection : IObjectStore, IProjection, ICommandVis
 			.Where(t => !t.IsAbstract && query.Types.Any(q => q.IsAssignableFrom(t)))
 			.Distinct();
 		var words = query.Words;
+		// Resolved up front, so an unknown type or property is refused when the query is made, not when it renders.
+		var matches = (query.Where ?? []).Select(m => (Match: m, Property: m.ResolveProperty(TypeMetadataProvider))).Select(x => (x.Match, x.Property, Value: x.Match.CoerceValue(x.Property))).GroupBy(x => x.Match.Component).ToList();
 		return types
 			.SelectMany(t => GetCollection(t, "").Cast<object>().Where(t.IsInstanceOfType))
 			.Select(o => (Id: GetId(o), Model: o))
@@ -916,9 +918,15 @@ public partial class InMemoryProjection : IObjectStore, IProjection, ICommandVis
 			.Where(x => query.Ids is null || query.Ids.Contains(x.Id))
 			.Where(x => query.Has is null || (x.Model is IComponentContainer c && c.Components.Any(query.Has.IsInstanceOfType)))
 			.Where(x => words.All(w => Mentions(x.Model, w)))
+			.Where(x => matches.All(group => Carries(x.Model, group)))
 			.OrderBy(x => x.Id)
 			.Select(x => x.Model);
 	}
+
+	// The Mongo property index's contract without one: one facet of the type (the object itself counts) holds every value of the group.
+	bool Carries(object model, IGrouping<Type, (ComponentMatch Match, PropertyInfo Property, object? Value)> group)
+		=> (model is IComponentContainer container ? container.Components.Cast<object>().Prepend(model) : [model])
+			.Any(facet => group.Key.IsInstanceOfType(facet) && group.All(m => Equals(m.Property.GetValue(facet), m.Value)));
 
 	// The Mongo text index's contract without one: the word whole, case-insensitive, in a string or type name of the object or a facet.
 	bool Mentions(object model, string word)
