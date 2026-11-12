@@ -456,6 +456,81 @@ public partial class SampleComponent : IComponent
 	}
 
 	[Test]
+	public void Should_skip_a_dropped_schema_field_by_its_stamped_type()
+	{
+		// Regression: a schema field with no property left was only commented, so the reader took the next field from its bytes.
+		var source = @"
+using System;
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 A Guid B string?"")]
+[Schema(2.0, ""1 B string?"")]
+public sealed partial class DroppedFieldModel
+{
+	public partial string? B { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
+
+		Assert.That(generated, Does.Contain("_ = serializer.Deserialize/*None*/<Guid>(in buffer, ref pos); // schema 1 field 'A' has no property any more, skipped"));
+		Assert.That(generated, Does.Contain("serializer.Serialize(in buffer, ref pos, default(global::System.Guid)!); // schema 1 field 'A' has no property any more, written as default"));
+		Assert.That(generated, Does.Not.Contain("could not be mapped to a current property"));
+		Assert.That(result.GeneratorDiagnostics, Is.Empty, string.Join(Environment.NewLine, result.GeneratorDiagnostics));
+	}
+
+	[Test]
+	public void Should_report_a_dropped_schema_field_whose_type_does_not_resolve()
+	{
+		var source = @"
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 A GoneType B string?"")]
+[Schema(2.0, ""1 B string?"")]
+public sealed partial class DroppedFieldModel
+{
+	public partial string? B { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+		var sbx003 = result.GeneratorDiagnostics.Where(x => x.Id == "SBX003").ToArray();
+
+		Assert.That(sbx003, Has.Length.EqualTo(1), string.Join(Environment.NewLine, result.GeneratorDiagnostics));
+		Assert.That(sbx003[0].Severity, Is.EqualTo(DiagnosticSeverity.Error));
+		Assert.That(sbx003[0].GetMessage(), Does.Contain("'A'").And.Contain("'GoneType'"));
+	}
+
+	[Test]
+	public void Should_keep_a_spaced_generic_type_as_one_schema_token()
+	{
+		var source = @"
+using System.Collections.Generic;
+using Synqra;
+namespace Test;
+
+[SynqraModel]
+[Schema(1.0, ""1 Data IDictionary<string, object> B string?"")]
+[Schema(2.0, ""1 B string?"")]
+public sealed partial class DroppedFieldModel
+{
+	public partial string? B { get; set; }
+}
+";
+
+		var result = RunSbxGenerator(source);
+		var generated = string.Join(Environment.NewLine, result.GeneratedSources);
+
+		Assert.That(generated, Does.Contain("_ = serializer.DeserializeDict<string, object>(in buffer, ref pos); // schema 1 field 'Data' has no property any more, skipped"));
+		Assert.That(result.GeneratorDiagnostics, Is.Empty, string.Join(Environment.NewLine, result.GeneratorDiagnostics));
+	}
+
+	[Test]
 	public void Domain_generator_should_NOT_emit_ISbxSerializer_methods()
 	{
 		var source = @"
@@ -477,7 +552,7 @@ public sealed partial class SomeModel
 			"Domain generator output must not contain any ISbxSerializer references");
 	}
 
-	private static (string[] GeneratedSources, Diagnostic[] Errors) RunSbxGenerator(string source)
+	private static (string[] GeneratedSources, Diagnostic[] Errors, Diagnostic[] GeneratorDiagnostics) RunSbxGenerator(string source)
 	{
 		var generator = new Synqra.BinarySerializer.SourceGenerator.SbxBindingGenerator();
 
@@ -487,7 +562,7 @@ public sealed partial class SomeModel
 			.WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
 		var driver = CSharpGeneratorDriver.Create(generator)
-			.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out _);
+			.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics);
 
 		var runResult = driver.GetRunResult();
 		var generatedSources = runResult.Results
@@ -498,7 +573,7 @@ public sealed partial class SomeModel
 			.Where(x => x.Severity == DiagnosticSeverity.Error)
 			.ToArray();
 
-		return (generatedSources, errors);
+		return (generatedSources, errors, generatorDiagnostics.ToArray());
 	}
 
 	private static (string[] GeneratedSources, Diagnostic[] Errors) RunDomainOnlyGenerator(string source)

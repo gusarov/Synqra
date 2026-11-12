@@ -30,6 +30,7 @@ using SbxClassesProviderT = (
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ibm
 	, Microsoft.CodeAnalysis.INamedTypeSymbol Ssa
 	, Synqra.CodeGeneration.LinkFrameworkSymbols LinkSymbols
+	, Microsoft.CodeAnalysis.SemanticModel SemanticModel
 	);
 
 namespace Synqra.BinarySerializer.SourceGenerator;
@@ -54,6 +55,14 @@ public class SbxBindingGenerator : IIncrementalGenerator
 		id: "SBX002",
 		title: "SBX serializer generator failed",
 		messageFormat: "{0}",
+		category: "Synqra.SbxBindingGenerator",
+		defaultSeverity: DiagnosticSeverity.Error,
+		isEnabledByDefault: true);
+
+	private static readonly DiagnosticDescriptor UnresolvedDroppedFieldTypeDiagnostic = new(
+		id: "SBX003",
+		title: "SBX dropped schema field has an unresolvable type",
+		messageFormat: "{0}: schema {1} field '{2}' has no property any more and its type '{3}' does not resolve, so its bytes cannot be skipped; records written under that schema would be misread",
 		category: "Synqra.SbxBindingGenerator",
 		defaultSeverity: DiagnosticSeverity.Error,
 		isEnabledByDefault: true);
@@ -136,16 +145,16 @@ public class SbxBindingGenerator : IIncrementalGenerator
 						var ssa = comp.GetTypeByMetadataName("Synqra.SchemaAttribute");
 						if (ibm is null || ssa is null)
 						{
-							return (null, null, default!, default!, default!, default!, default!);
+							return (null, null, default!, default!, default!, default!, default!, default!);
 						}
 						var linkSymbols = new LinkFrameworkSymbols(comp);
 						cancelToken.ThrowIfCancellationRequested();
-						return (null, null, classDeclaration, symbol, ibm, ssa, linkSymbols);
+						return (null, null, classDeclaration, symbol, ibm, ssa, linkSymbols, ctx.SemanticModel);
 					}
 					catch (Exception ex)
 					{
 						EmergencyLog.Default.Error($"transform", ex);
-						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!);
+						return ($"Error processing class: {ex.Message}", ex, default!, default!, default!, default!, default!, default!);
 					}
 				});
 
@@ -439,13 +448,52 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			return result;
 		}
 
-		var tokens = schemaString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+		var tokens = SplitSchemaTokens(schemaString);
 		// First token is the schema format prefix (e.g. "1"), skip it.
-		for (int i = 1; i + 1 < tokens.Length; i += 2)
+		for (int i = 1; i + 1 < tokens.Count; i += 2)
 		{
 			result.Add((tokens[i], tokens[i + 1]));
 		}
 		return result;
+	}
+
+	/// <summary>
+	/// Splits a schema string on spaces, except inside &lt;&gt; or () — the stamped type of a member is its display
+	/// string, so "IDictionary&lt;string, object&gt;" is one token.
+	/// </summary>
+	static List<string> SplitSchemaTokens(string schemaString)
+	{
+		var tokens = new List<string>();
+		var current = new StringBuilder();
+		int depth = 0;
+		foreach (var c in schemaString)
+		{
+			if (c == ' ' && depth == 0)
+			{
+				if (current.Length > 0)
+				{
+					tokens.Add(current.ToString());
+					current.Clear();
+				}
+			}
+			else
+			{
+				if (c == '<' || c == '(')
+				{
+					depth++;
+				}
+				else if ((c == '>' || c == ')') && depth > 0)
+				{
+					depth--;
+				}
+				current.Append(c);
+			}
+		}
+		if (current.Length > 0)
+		{
+			tokens.Add(current.ToString());
+		}
+		return tokens;
 	}
 
 	/// <summary>
@@ -518,22 +566,55 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	/// each resolved to the current property symbol. Returns null entries for fields that
 	/// cannot be mapped (removed fields).
 	/// </summary>
-	static List<(string SchemaFieldName, IPropertySymbol? Property)> ResolveSchemaFieldsForVersion(
+	static List<(string SchemaFieldName, string SchemaFieldType, IPropertySymbol? Property)> ResolveSchemaFieldsForVersion(
 		string schemaString
 		, Dictionary<string, string> fieldMapping
 		, Dictionary<string, IPropertySymbol> propertyLookup)
 	{
 		var schemaFields = ParseSchemaFields(schemaString);
-		var result = new List<(string, IPropertySymbol?)>(schemaFields.Count);
+		var result = new List<(string, string, IPropertySymbol?)>(schemaFields.Count);
 
 		foreach (var (name, type) in schemaFields)
 		{
 			string currentName = fieldMapping.TryGetValue(name, out var mapped) ? mapped : name;
 			propertyLookup.TryGetValue(currentName, out var prop);
-			result.Add((name, prop));
+			result.Add((name, type, prop));
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	/// Binds a stamped schema type token (the member type's minimally qualified display string) back to a type, in the
+	/// scope of the model's own declaration — the inverse of the stamping. Null when it does not resolve.
+	/// </summary>
+	static ITypeSymbol? ResolveSchemaFieldType(SemanticModel semanticModel, ClassDeclarationSyntax clazz, string schemaFieldType)
+	{
+		var type = semanticModel.GetSpeculativeTypeInfo(
+			  clazz.SpanStart
+			, SyntaxFactory.ParseTypeName(schemaFieldType)
+			, SpeculativeBindingOption.BindAsTypeOrNamespace
+			).Type;
+		return type is null || type.TypeKind == TypeKind.Error
+			? null
+			: type;
+	}
+
+	static void ReportUnresolvedDroppedField(
+		SourceProductionContext context
+		, ClassDeclarationSyntax clazz
+		, double version
+		, string schemaFieldName
+		, string schemaFieldType)
+	{
+		context.ReportDiagnostic(Diagnostic.Create(
+			UnresolvedDroppedFieldTypeDiagnostic
+			, clazz.Identifier.GetLocation()
+			, clazz.Identifier.Text
+			, FormattableString.Invariant($"{version}")
+			, schemaFieldName
+			, schemaFieldType
+			));
 	}
 
 	static void Execute(SourceProductionContext context, SbxCombinedSource combinedData)
@@ -713,7 +794,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	protected{{virtualKeyword}} void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 """);
-				EmitGetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, virtualKeyword, classData.Data);
+				EmitGetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, virtualKeyword, classData.Data, classData.SemanticModel);
 				body.AppendLine("""
 	}
 
@@ -722,7 +803,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	protected{{virtualKeyword}} void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 """);
-				EmitSetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, classData.Data);
+				EmitSetCore(context, body, clazz, schemas, schemaFieldMapping, propertyLookup, classData.Data, classData.SemanticModel);
 				body.AppendLine("""
 	}
 """);
@@ -733,7 +814,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	protected override void GetCore(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 	{
 """);
-				EmitGetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, virtualKeyword, classData.Data);
+				EmitGetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, virtualKeyword, classData.Data, classData.SemanticModel);
 				body.AppendLine("""
 	}
 
@@ -742,7 +823,7 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	protected override void SetCore(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	{
 """);
-				EmitSetCore(body, clazz, schemas, schemaFieldMapping, propertyLookup, classData.Data);
+				EmitSetCore(context, body, clazz, schemas, schemaFieldMapping, propertyLookup, classData.Data, classData.SemanticModel);
 				body.AppendLine("""
 	}
 """);
@@ -776,7 +857,8 @@ public class SbxBindingGenerator : IIncrementalGenerator
 		, Dictionary<string, string> schemaFieldMapping
 		, Dictionary<string, IPropertySymbol> propertyLookup
 		, string virtualKeyword
-		, INamedTypeSymbol containingType)
+		, INamedTypeSymbol containingType
+		, SemanticModel semanticModel)
 	{
 		bool doesSupportField = false;
 		body.AppendLine($"\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get\");");
@@ -792,18 +874,29 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - if schema {item.Item1}\");");
 			body.AppendLine($"\t\t\t// Positional Fields:");
 			var getCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-			foreach (var (schemaName, pro) in getCoreFields)
+			foreach (var (schemaName, schemaType, pro) in getCoreFields)
 			{
 				if (pro is null)
 				{
-					body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-					continue;
+					// Only a binder mapped at an old version writes one; the slot keeps the layout an old reader expects.
+					var droppedType = ResolveSchemaFieldType(semanticModel, clazz, schemaType);
+					if (droppedType is null)
+					{
+						body.AppendLine($"\t\t\t// schema {item.Item1} field '{schemaName}' has no property any more and type '{schemaType}' does not resolve (SBX003)");
+					}
+					else
+					{
+						body.AppendLine($"\t\t\tserializer.Serialize(in buffer, ref pos, default({FQN(droppedType)})!); // schema {item.Item1} field '{schemaName}' has no property any more, written as default");
+					}
 				}
-				body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
-				var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
-					? GetFieldName(pro, doesSupportField: false)
-					: "this." + pro.Name;
-				body.AppendLine($"\t\t\tserializer.Serialize(in buffer, ref pos, {access});");
+				else
+				{
+					body.AppendLine($"\t\t\tEmergencyLog.Default.Debug($\"SBX {clazz.Identifier} IBindableModel.Get - {item.Item1} {pro.Name}\");");
+					var access = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
+						? GetFieldName(pro, doesSupportField: false)
+						: "this." + pro.Name;
+					body.AppendLine($"\t\t\tserializer.Serialize(in buffer, ref pos, {access});");
+				}
 			}
 			body.AppendLine($"\t\t}}");
 			els = "else ";
@@ -819,12 +912,14 @@ public class SbxBindingGenerator : IIncrementalGenerator
 	}
 
 	static void EmitSetCore(
-		StringBuilder body
+		SourceProductionContext context
+		, StringBuilder body
 		, ClassDeclarationSyntax clazz
 		, (double, string)[] schemas
 		, Dictionary<string, string> schemaFieldMapping
 		, Dictionary<string, IPropertySymbol> propertyLookup
-		, INamedTypeSymbol containingType)
+		, INamedTypeSymbol containingType
+		, SemanticModel semanticModel)
 	{
 		bool doesSupportField = false;
 		string? els = null;
@@ -837,17 +932,29 @@ public class SbxBindingGenerator : IIncrementalGenerator
 			body.AppendLine($"\t\t{{");
 			body.AppendLine($"\t\t\t// Positional Fields:");
 			var setCoreFields = ResolveSchemaFieldsForVersion(item.Item2, schemaFieldMapping, propertyLookup);
-			foreach (var (schemaName, pro) in setCoreFields)
+			foreach (var (schemaName, schemaType, pro) in setCoreFields)
 			{
 				if (pro is null)
 				{
-					body.AppendLine($"\t\t\t// WARNING: field '{schemaName}' from schema {item.Item1} could not be mapped to a current property");
-					continue;
+					// The bytes are still there: read them as the stamped type did, or every later field is misread.
+					var droppedType = ResolveSchemaFieldType(semanticModel, clazz, schemaType);
+					if (droppedType is null)
+					{
+						ReportUnresolvedDroppedField(context, clazz, item.Item1, schemaName, schemaType);
+						body.AppendLine($"\t\t\t// schema {item.Item1} field '{schemaName}' has no property any more and type '{schemaType}' does not resolve (SBX003)");
+					}
+					else
+					{
+						body.AppendLine($"\t\t\t_ = serializer.Deserialize{DeserializeMethod(droppedType, debug: containingType.Name)}(in buffer, ref pos); // schema {item.Item1} field '{schemaName}' has no property any more, skipped");
+					}
 				}
-				var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
-					? GetFieldName(pro)
-					: "this." + pro.Name;
-				body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: containingType.Name)}(in buffer, ref pos);");
+				else
+				{
+					var target = (!doesSupportField && SymbolEqualityComparer.Default.Equals(pro.ContainingType, containingType))
+						? GetFieldName(pro)
+						: "this." + pro.Name;
+					body.AppendLine($"\t\t\t{target} = ({FQN(pro.Type)})serializer.Deserialize{DeserializeMethod(pro.Type, debug: containingType.Name)}(in buffer, ref pos);");
+				}
 			}
 			body.AppendLine($"\t\t}}");
 			els = "else ";
