@@ -73,6 +73,46 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 #if NET10_0_OR_GREATER
 	/// <summary>
+	/// A client is caught up once the master answers its probe, which it reads only after the backlog: by then the log holds the
+	/// whole stream. The HELLO's SubscriptionState, which comes before the backlog, never was such a mark.
+	/// </summary>
+	[Test]
+	public async Task Should_report_caught_up_only_after_the_backlog_is_in()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		var collectionA = nodeA.StoreContext.GetCollection<SampleTaskModel>();
+		for (var i = 0; i < 20; i++)
+		{
+			collectionA.Add(new SampleTaskModel { Subject = $"task {i}" });
+		}
+		await WaitUntilAsync(async () => await CountWhenSettledAsync(nodeMaster) >= 20, "A's writes reach the master");
+		var total = await CountWhenSettledAsync(nodeMaster);
+
+		var nodeC = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeC.Started;
+		IEventReplicationService replicationC = nodeC.Host.Services.GetRequiredService<EventReplicationService>();
+		var framesWhenCaughtUp = -1L;
+		replicationC.StatusChanged += () =>
+		{
+			if (replicationC.IsCaughtUp)
+			{
+				framesWhenCaughtUp = replicationC.ConnectionFrames;
+			}
+		};
+		await WaitUntilAsync(() => Task.FromResult(replicationC.IsCaughtUp), "C is caught up");
+		var heldWhenCaughtUp = await CountEventsAsync(nodeC); // the reader appends each frame before it takes the next
+
+		await Assert.That(framesWhenCaughtUp).IsEqualTo(total);
+		await Assert.That(heldWhenCaughtUp).IsEqualTo(total);
+		await Assert.That(replicationC.ServerWatermark).IsNotEqualTo(Guid.Empty);
+	}
+
+	/// <summary>
 	/// A cold client that asks for a snapshot (HELLO kind 4) from a master that serves none is declined and gets the ordinary
 	/// backlog, the same history a kind 3 client gets (plans/snapshot.md §1).
 	/// </summary>

@@ -499,6 +499,20 @@ internal class SynqraTestNode
 						{
 							continue;
 						}
+						if (operation is CatchUpRequest catchUp)
+						{
+							// read after the backlog above, as the real endpoint does; under the gate, which every broadcast to this socket takes
+							await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
+							try
+							{
+								await socket.SendOperationAsync(networkSerializationService, new CaughtUp { RequestId = catchUp.RequestId }, ctx.RequestAborted);
+							}
+							finally
+							{
+								_semaphoreSlim.Release();
+							}
+							continue;
+						}
 
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is EventEnvelope eventEnvelope)
