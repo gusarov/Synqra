@@ -6,6 +6,33 @@ public interface IEventReplicationService
 	bool IsOnline { get; }
 
 	/// <summary>
+	/// Whether the master has sent this connection everything it held when the connection opened (its snapshot and backlog):
+	/// false while offline and while a catch-up arrives, which every reconnect starts again. A host with no master has nothing to
+	/// wait for. Its changes raise <see cref="StatusChanged"/>.
+	/// </summary>
+	bool IsCaughtUp => true;
+
+	/// <summary>Event frames the current connection received, known ones included: during a catch-up, how far it has come.</summary>
+	long ConnectionFrames => 0;
+
+	/// <summary>
+	/// The master's position this client has reached: the resume point of the last frame it took (a v7 sequence, so it also tells
+	/// how far into the stream's history a replay is). Default before the first.
+	/// </summary>
+	Guid ServerWatermark => default;
+
+	/// <summary>Raised when <see cref="IsOnline"/> or <see cref="IsCaughtUp"/> changes, on the replication's own thread.</summary>
+	event Action? StatusChanged
+	{
+		add
+		{
+		}
+		remove
+		{
+		}
+	}
+
+	/// <summary>
 	/// The streams this connection is currently subscribed to, as last confirmed by the master's
 	/// subscription-state ack (sent after HELLO and every Subscribe/Unsubscribe). A client can compare
 	/// this against what it asked for to detect an unexpected server default. Empty until the first ack.

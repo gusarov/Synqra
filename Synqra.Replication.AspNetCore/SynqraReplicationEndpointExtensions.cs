@@ -558,6 +558,13 @@ public static class SynqraReplicationEndpointExtensions
 					continue;
 				}
 
+				// Read only now, after the catch-up above: the answer tells the client its snapshot and backlog are all in.
+				if (operation is CatchUpRequest catchUp)
+				{
+					await outbox.SendAsync(new CaughtUp { RequestId = catchUp.RequestId }, ctx.RequestAborted);
+					continue;
+				}
+
 				if (operation is not EventEnvelope eventEnvelope)
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");

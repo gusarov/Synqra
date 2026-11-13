@@ -35,7 +35,36 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	private CancellationTokenSource _cts = new CancellationTokenSource();
 
 	volatile bool _isOnline;
-	public bool IsOnline { get => _isOnline; private set => _isOnline = value; }
+	public bool IsOnline
+	{
+		get => _isOnline;
+		private set
+		{
+			if (_isOnline != value)
+			{
+				_isOnline = value;
+				_isCaughtUp &= value; // an ended connection is caught up no more: the next one catches up again
+				StatusChanged?.Invoke();
+			}
+		}
+	}
+
+	volatile bool _isCaughtUp;
+
+	/// <inheritdoc />
+	public bool IsCaughtUp => _isCaughtUp;
+
+	/// <inheritdoc />
+	public event Action? StatusChanged;
+
+	// The probe this connection sent after its HELLO: only the CaughtUp that answers it ends the catch-up.
+	Guid _catchUpRequest;
+
+	/// <inheritdoc />
+	public long ConnectionFrames { get; private set; }
+
+	/// <inheritdoc />
+	public Guid ServerWatermark => _eventReplicationState.ServerWatermark;
 
 	private Task? _readerTask;
 	private ClientWebSocket? _wsConnection;
@@ -276,6 +305,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			var connectedAt = Stopwatch.StartNew();
 			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
 			_lastSentSequence = default;
+			ConnectionFrames = 0;
+			_catchUpRequest = Guid.CreateVersion7();
 			if (_snapshotHeader is not null && ++_snapshotsCutShort >= 2)
 			{
 				_snapshotRefused = true; // the second connection lost mid-snapshot: this run replays
@@ -341,6 +372,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						case SnapshotEnd end:
 							await StoreSnapshotAsync(end);
 							break;
+						case CaughtUp caughtUp:
+							ReceiveCaughtUp(caughtUp);
+							break;
 						case SnapshotDeclined declined:
 							// Whatever part of a snapshot came is dropped: the backlog that follows is the whole stream.
 							_snapshotHeader = null;
@@ -373,6 +407,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			async Task ReceiveAsync(EventEnvelope envelope)
 			{
 				FramesReceived++;
+				ConnectionFrames++;
 				if (FramesReceived <= 3 || FramesReceived % 100 == 0)
 				{
 					EmergencyLog.Default.Stage($"replication: frame {FramesReceived} ({envelope.Event.GetType().Name} {envelope.Event.EventId})");
@@ -439,6 +474,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						(_config.InitialSubscribeStreamId ?? (StreamKey != default ? StreamKey : throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId."))).TryWriteBytes(buffer.AsSpan(25, 16));
 					}
 					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
+					// Read by the master after the catch-up, so its answer marks the end of it. Sent before the send loop starts: a socket takes one send at a time.
+					await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = _catchUpRequest }, _cts.Token);
 				}
 				catch (WebSocketException ex)
 				{
@@ -751,6 +788,17 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper
 		Wake();
+	}
+
+	/// <summary>The master has sent what it held for this connection: what follows is live. An answer to an earlier connection's probe is not.</summary>
+	void ReceiveCaughtUp(CaughtUp caughtUp)
+	{
+		if (caughtUp.RequestId == _catchUpRequest && !_isCaughtUp)
+		{
+			_isCaughtUp = true;
+			EmergencyLog.Default.Stage($"replication: caught up after {ConnectionFrames} frames");
+			StatusChanged?.Invoke();
+		}
 	}
 
 	/// <summary>Remembers where the send loop is in the local log, so its next read starts there.</summary>

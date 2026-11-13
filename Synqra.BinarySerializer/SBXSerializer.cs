@@ -262,6 +262,8 @@ public class SbxSerializer : ISbxSerializer
 		Map(-86, typeof(SnapshotDeclined));
 		Map(-87, typeof(SnapshotType));
 		Map(-88, typeof(StreamSnapshotEvent));
+		Map(-89, typeof(CatchUpRequest));
+		Map(-90, typeof(CaughtUp));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
