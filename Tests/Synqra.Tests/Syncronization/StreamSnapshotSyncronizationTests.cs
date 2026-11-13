@@ -241,19 +241,25 @@ internal class StreamSnapshotSyncronizationTests : BaseTest
 		await Assert.That(Replication(client).FramesReceived).IsEqualTo(await CountEventsAsync(master));
 	}
 
+	/// <summary>
+	/// The master maps a type the client's build does not, and the stream holds none of it (Quotaly's web host maps its server-only
+	/// graph): the header names only the types the snapshot uses, so the client loads it. Naming the master's whole map refused every
+	/// snapshot, and every cold client replayed its stream. A payload type the client cannot read is still refused (SnapshotSchemaTests).
+	/// </summary>
 	[Test]
-	public async Task A_snapshot_whose_schema_this_build_cannot_read_is_refused_and_the_client_replays()
+	[Arguments(false)]
+	[Arguments(true)]
+	public async Task A_type_the_master_maps_but_the_stream_does_not_hold_refuses_no_snapshot(bool mongo)
 	{
 		var streamId = Guid.NewGuid();
-		// The master maps a type the client's build does not: its header names it, and the client cannot read it exactly.
-		var master = await StartMasterAsync(streamId, mongo: false, configure: builder => builder.Services.AddSbxSerializer(ser => ser.Map(150, typeof(TestTaggingComponent))));
+		var master = await StartMasterAsync(streamId, mongo, configure: builder => builder.Services.AddSbxSerializer(ser => ser.Map(150, typeof(TestTaggingComponent))));
 		await BuildSceneAsync(master, SceneNodes);
 
 		var client = await StartClientAsync(master, streamId);
 
 		await ExpectSameSceneAsync(client, master, "the client holds the master's scene");
-		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(0);
-		await Assert.That(await CountEventsAsync(client)).IsEqualTo(await CountEventsAsync(master)).Because("the client replayed the stream, with no snapshot record in its log");
+		await Assert.That(Replication(client).SnapshotsLoaded).IsEqualTo(1);
+		await Assert.That(await CountEventsAsync(client)).IsEqualTo(1).Because("the client's log holds the snapshot record alone");
 	}
 
 	// ---------------------------------------------------------------- nodes

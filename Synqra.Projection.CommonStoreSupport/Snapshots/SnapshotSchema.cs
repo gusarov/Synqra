@@ -13,12 +13,20 @@ public sealed class SnapshotSchema(ISbxSerializerFactory serializerFactory)
 	/// <summary>The record layout and the snapshot frames this build writes and reads.</summary>
 	public long FormatVersion => 1;
 
-	/// <summary>A payload writer: this host's own serializer, mapped as the factory maps it.</summary>
+	/// <summary>A payload writer: this host's own serializer, mapped as the factory maps it, recording the mappings it writes with.</summary>
 	public SbxSerializer CreateWriter()
-		=> serializerFactory.CreateSerializer() as SbxSerializer
+	{
+		var writer = serializerFactory.CreateSerializer() as SbxSerializer
 			?? throw new InvalidOperationException("A snapshot header describes SbxSerializer mappings; the registered serializer factory makes another kind.");
+		writer.TrackUsage();
+		return writer;
+	}
 
-	/// <summary>The header for a snapshot written with <paramref name="writer"/>: every type it maps, at the version it writes.</summary>
+	/// <summary>
+	/// The header for a snapshot written with <paramref name="writer"/>: every type the payload uses, at the version it is written.
+	/// Never the host's whole map: a host maps types of its own (another feature's, server-only) that a client build may not, and
+	/// one entry it cannot read refuses the snapshot whole. Described once the payload is written.
+	/// </summary>
 	public SnapshotBegin DescribeSnapshot(SbxSerializer writer, Guid streamId, Guid snapshotId, Guid watermark, long entityCount)
 		=> new SnapshotBegin
 		{
@@ -27,7 +35,7 @@ public sealed class SnapshotSchema(ISbxSerializerFactory serializerFactory)
 			SnapshotId = snapshotId,
 			Watermark = watermark,
 			TimeBase = new DateTimeOffset(writer.TimeBase).ToUnixTimeSeconds(),
-			Types = writer.Mappings
+			Types = writer.UsedMappings
 				.OrderBy(x => x.MapId)
 				.Select(x => new SnapshotType
 				{

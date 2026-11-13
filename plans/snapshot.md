@@ -52,9 +52,10 @@ SnapshotType { MapId long, TypeId Guid, Version double, Schema string }
 ```
 
 - One entry per SBX map id that occurs in the payload — every root, component and link type, and any mapped type nested in
-  their data. The writer collects them while it writes the chunks (it knows each id it emitted); `SnapshotBegin` is sent
-  before the chunks, so the writer either uses the host's full map (simple, ~30 entries, ~2 KB) or buffers the first
-  chunk. v1: the full map of the stream's registered types.
+  their data. The writer records each mapping it writes with (`SbxSerializer.TrackUsage`/`UsedMappings`); `SnapshotBegin`
+  goes before the chunks, so the endpoint writes all the chunks first, then sends the header, the chunks and the end. Never
+  the host's full map (v1 sent it): a host maps types a client build does not (Quotaly's web host maps its server-only graph),
+  and one such entry refused every snapshot of every stream, so each cold client replayed its whole stream.
 - `MapId ↔ TypeId` binds the payload's numbering to Synqra type ids, so a payload never depends on the reader's own
   numbering (Scene's 300-block is host-private).
 - `Version` + `Schema` (the `[Schema]` signature string, e.g. `"1 SourceId Guid TargetId Guid"`): the version alone is not
@@ -164,7 +165,7 @@ later build refuses must be dropped and fetched again (today the fold steps over
    `Guid?` one byte off (no model used `Guid?` until the record layout).
 2. DONE — Frames + `SnapshotType` models (SBX ids -83..-87), HELLO kind 4, `SnapshotDeclined`; the endpoint accepts kind 4
    and declines it until a snapshot source exists (Synqra.Model, Synqra, Synqra.Replication.AspNetCore).
-3. DONE — `SnapshotSchema`: the header lists every mapping of the writer (system and consumer), the reader is built from it,
+3. DONE — `SnapshotSchema`: the header lists every mapping the payload uses (system and consumer), the reader is built from it,
    refusal rules + tests for amended schemas, unknown versions and types, and reading an older schema.
 4. DONE — `IStreamSnapshotSource`, `SnapshotRecord`/`SnapshotCut`, `SnapshotChunkWriter`/`Reader` (CommonStoreSupport, where
    `SnapshotSchema` moved); the `MongoProjection` cut (§4, registered by `AddMongoProjection`) and the `InMemoryProjection` one

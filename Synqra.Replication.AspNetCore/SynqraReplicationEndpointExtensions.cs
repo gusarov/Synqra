@@ -308,23 +308,29 @@ public static class SynqraReplicationEndpointExtensions
 				return sent;
 			}
 
+			// The chunks are written before the header is sent: the header names exactly the types they use, never the host's whole map.
 			async Task SendCutAsync(ReplicationOutbox outbox, Guid stream, SnapshotCut cut)
 			{
 				var schema = new SnapshotSchema(ctx.RequestServices.GetRequiredService<ISbxSerializerFactory>());
 				var writer = schema.CreateWriter();
 				var snapshotId = Guid.CreateVersion7();
 				var chunks = new SnapshotChunkWriter(writer, snapshotId);
-				await outbox.SendAsync(schema.DescribeSnapshot(writer, stream, snapshotId, cut.Watermark, entityCount: 0), ctx.RequestAborted);
+				var written = new List<SnapshotChunk>();
 				await foreach (var record in cut.Records.WithCancellation(ctx.RequestAborted))
 				{
 					if (chunks.Write(record) is { } chunk)
 					{
-						await outbox.SendAsync(chunk, ctx.RequestAborted);
+						written.Add(chunk);
 					}
 				}
 				if (chunks.Complete() is { } last)
 				{
-					await outbox.SendAsync(last, ctx.RequestAborted);
+					written.Add(last);
+				}
+				await outbox.SendAsync(schema.DescribeSnapshot(writer, stream, snapshotId, cut.Watermark, entityCount: chunks.RecordCount), ctx.RequestAborted);
+				foreach (var chunk in written)
+				{
+					await outbox.SendAsync(chunk, ctx.RequestAborted);
 				}
 				await outbox.SendAsync(new SnapshotEnd
 				{
