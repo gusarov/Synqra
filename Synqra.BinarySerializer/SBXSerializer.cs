@@ -217,6 +217,7 @@ public class SbxSerializer : ISbxSerializer
 	// TypeIds are not needed to be snapshotted
 	Dictionary<int, (float schemaVersion, Type type, IModelBinder? Binder)> _typeById = new();
 	Dictionary<Type, (int typeId, float schemaVersion, IModelBinder? Binder)> _idByType = new();
+	HashSet<int>? _usedTypeIds; // the map ids written with, once TrackUsage() is called
 
 	public SbxSerializer(ILogger<SbxSerializer>? logger = null)
 	{
@@ -321,6 +322,14 @@ public class SbxSerializer : ISbxSerializer
 
 	/// <summary>Every type this serializer maps, with the schema version it writes and reads that type at.</summary>
 	public IReadOnlyCollection<SbxMapping> Mappings => _typeById.Select(x => new SbxMapping(x.Key, x.Value.type, x.Value.schemaVersion, x.Value.Binder)).ToArray();
+
+	/// <summary>Records from now on every mapping this serializer writes with, for <see cref="UsedMappings"/>.</summary>
+	public void TrackUsage() => _usedTypeIds ??= new HashSet<int>();
+
+	/// <summary>The mappings written with since <see cref="TrackUsage"/>: exactly the mapped types a payload holds.</summary>
+	public IReadOnlyCollection<SbxMapping> UsedMappings => _usedTypeIds is null
+		? throw new InvalidOperationException("This serializer does not track the mappings it writes with; call TrackUsage first.")
+		: _typeById.Where(x => _usedTypeIds.Contains(x.Key)).Select(x => new SbxMapping(x.Key, x.Value.type, x.Value.schemaVersion, x.Value.Binder)).ToArray();
 
 	/// <summary>The epoch v7 guids and times are compressed against.</summary>
 	public DateTime TimeBase => _streamBaseTime;
@@ -555,6 +564,7 @@ public class SbxSerializer : ISbxSerializer
 
 		if (obj is IBindableModel bm && _idByType.TryGetValue(actualType!, out var typeInfo1))
 		{
+			_usedTypeIds?.Add(typeInfo1.typeId);
 			EmergencyLog.Default.Debug($"SBX Serializing {actualType!.FullName} with schema version {typeInfo1.schemaVersion}");
 			bm.Get(this, typeInfo1.schemaVersion, buffer, ref pos);
 		}
@@ -637,6 +647,7 @@ public class SbxSerializer : ISbxSerializer
 		}
 		else if (_idByType.TryGetValue(actualType, out var typeInfo2) && typeInfo2.Binder != null)
 		{
+			_usedTypeIds?.Add(typeInfo2.typeId);
 			typeInfo2.Binder.Get(obj, this, 0, buffer, ref pos);
 		}
 		else
@@ -1390,7 +1401,10 @@ public class SbxSerializer : ISbxSerializer
 			case Type t when t.IsAssignableTo(typeof(IEnumerable)):
 				return TypeId.ListTypeFrom; // artificial mark, requre a call to GetTypeIdForList
 			default:
-				_idByType.TryGetValue(type, out var metaData); // it will stay Unknown if there is no such type, as designed.
+				if (_idByType.TryGetValue(type, out var metaData)) // it will stay Unknown if there is no such type, as designed.
+				{
+					_usedTypeIds?.Add(metaData.typeId);
+				}
 				return (TypeId)metaData.typeId;
 				// throw new Exception($"Type {type.FullName} is not supported for serialization.");
 		}
