@@ -8,6 +8,8 @@
 #        scripts/report-build-status.sh finish <Agent.JobStatus>
 # Env:   QUOTALY_HOOK_SERVER (https://dev.quotaly.com), QUOTALY_HOOK_KEY (the hook's bearer token: "{WebHookId}:{secret}"),
 #        plus the Azure Pipelines variables of a GitHub-sourced build (SYSTEM_PULLREQUEST_PULLREQUESTNUMBER, BUILD_BUILDID, ...).
+# Tags follow the build: start = InProgress, success = Ready, failure = Broken (each push takes the other two off; a
+# cancel only takes InProgress off).
 # Never fails the pipeline: a missing key or an unreachable server is logged as a warning and the step exits 0.
 set -u
 
@@ -73,7 +75,16 @@ case "$phase" in
 		;;
 esac
 
-body="{\"key\":\"$(json_escape "$pr_key")\",\"title\":\"$(json_escape "$title")\",\"subtitle\":\"$(json_escape "$subtitle")\",\"kind\":\"${kind}\",\"status\":\"${status}\",\"severity\":\"${severity}\",\"urls\":[${urls}]}"
+# The tag delta of this report, read from the outcome above.
+case "$status" in
+	building) tags="\"addTags\":[{\"tag\":\"InProgress\",\"tone\":\"busy\"}],\"removeTags\":[\"Ready\",\"Broken\"]" ;;
+	build\ succeeded*) tags="\"addTags\":[{\"tag\":\"Ready\",\"tone\":\"good\"}],\"removeTags\":[\"InProgress\",\"Broken\"]" ;;
+	build\ failed) tags="\"addTags\":[{\"tag\":\"Broken\",\"tone\":\"bad\"}],\"removeTags\":[\"InProgress\",\"Ready\"]" ;;
+	build\ canceled) tags="\"removeTags\":[\"InProgress\"]" ;;
+	*) tags="" ;;
+esac
+
+body="{\"key\":\"$(json_escape "$pr_key")\",\"title\":\"$(json_escape "$title")\",\"subtitle\":\"$(json_escape "$subtitle")\",\"kind\":\"${kind}\",\"status\":\"${status}\",\"severity\":\"${severity}\",\"urls\":[${urls}]${tags:+,${tags}}}"
 
 out=$(mktemp)
 code=$(curl -sS -m 30 -o "$out" -w '%{http_code}' -X POST -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" --data "$body" "${server%/}/api/hooks/push" 2>"$out.err")
