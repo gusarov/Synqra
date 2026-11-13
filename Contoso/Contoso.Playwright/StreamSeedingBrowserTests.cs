@@ -150,7 +150,7 @@ public class StreamSeedingBrowserTests : BrowserTest
 	}
 
 	[Test]
-	public async Task Should_send_nothing_but_its_hello_for_a_stream_nobody_created()
+	public async Task Should_send_nothing_but_its_hello_and_probe_for_a_stream_nobody_created()
 	{
 		var stream = Guid.NewGuid();
 		var page = await (await NewContext()).NewPageAsync();
@@ -160,12 +160,12 @@ public class StreamSeedingBrowserTests : BrowserTest
 		await ExpectOnlineAsync(page);
 		await Task.Delay(_quietPeriod);
 
-		Assert.That(sent, Has.Count.EqualTo(1), "a browser that opens a stream it did not create sends its HELLO and nothing else");
+		Assert.That(sent, Has.Count.EqualTo(2), "a browser that opens a stream it did not create sends its HELLO and its catch-up probe, nothing else");
 		await ExpectServerAsync(stream, events: 0);
 	}
 
 	[Test]
-	public async Task Should_send_nothing_but_its_hello_for_a_server_stream_it_was_given()
+	public async Task Should_send_nothing_but_its_hello_and_probe_for_a_server_stream_it_was_given()
 	{
 		var stream = await CreateServerStreamAsync();
 		var page = await (await NewContext()).NewPageAsync();
@@ -175,7 +175,7 @@ public class StreamSeedingBrowserTests : BrowserTest
 		await ExpectWelcomesAsync(page, 1);
 		await Task.Delay(_quietPeriod);
 
-		Assert.That(sent, Has.Count.EqualTo(1), "the seed came from the master: the browser sends no event of its own");
+		Assert.That(sent, Has.Count.EqualTo(2), "the seed came from the master: the browser sends its HELLO and its catch-up probe, no event of its own");
 		await ExpectServerAsync(stream, welcomes: 1);
 	}
 
