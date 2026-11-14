@@ -60,6 +60,8 @@ public static class SynqraReplicationEndpointExtensions
 		var broadcastGate = new SemaphoreSlim(1, 1);
 		// Bounded: a long-running host sees every committed event through here, so an unbounded set would grow forever.
 		var knownEvents = new RecentEventIds(capacity: 100_000);
+		// Peers' events the projection applied but the log failed to store: their resend is stored, not applied twice. Under broadcastGate only.
+		var appliedUnstored = new HashSet<Guid>();
 
 		// Writes that never crossed a socket (a REST call, a background job) are pushed too: the
 		// projection reports what each locally submitted command committed, and one ordered queue fans
@@ -259,6 +261,60 @@ public static class SynqraReplicationEndpointExtensions
 					reason = await guards[i].RefuseAsync(ev, ctx.RequestAborted);
 				}
 				return reason;
+			}
+
+			// Applies a peer's event once: a resend whose store failed is only stored. The projection's refusal (a facet for a slot already
+			// filled, a link that exists) is final and returned: the event will never be in this log, so the sender moves its cursor past it.
+			async Task<EventRejected?> ApplyAsync(Event ev)
+			{
+				EventRejected? rejected = null;
+				if (!appliedUnstored.Contains(ev.EventId))
+				{
+					var projection = serviceKey is null
+						? ctx.RequestServices.GetRequiredService<IProjection>()
+						: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
+					try
+					{
+						if (projection is IReplayProjection replay)
+						{
+							await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
+						}
+						else
+						{
+							await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
+						}
+						appliedUnstored.Add(ev.EventId);
+					}
+					catch (InvalidOperationException refusal)
+					{
+						logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", ev.EventId, connectionStream);
+						rejected = new EventRejected { EventId = ev.EventId, Reason = refusal.Message };
+					}
+					catch (Exception failure) when (failure is not OperationCanceledException)
+					{
+						// The projection could not take it at all: refused like a projection's refusal, or the sender hears nothing, a later
+						// ack moves its cursor past it and the write is lost. The reason names the failure's type only, never its message.
+						// A failure to store is not this: StoreAsync ends the connection and the resend is stored.
+						logger?.LogWarning(failure, "Synqra replication: event {EventId} on stream {Stream} failed to apply; refused, and the connection continues.", ev.EventId, connectionStream);
+						rejected = new EventRejected { EventId = ev.EventId, Reason = $"The server could not apply it ({failure.GetType().Name})." };
+					}
+				}
+				return rejected;
+			}
+
+			// Known only once the log holds it. A sequenced log reports the commit to the push loop, which echoes it to the sender too.
+			async Task StoreAsync(IEventLog eventLog, Event ev)
+			{
+				try
+				{
+					await eventLog.AppendAsync(ev);
+				}
+				catch (Exception ex)
+				{
+					throw new UnstoredEventException(ev, ex);
+				}
+				appliedUnstored.Remove(ev.EventId);
+				knownEvents.TryAdd(ev.EventId);
 			}
 
 			// The stream's state cut at a watermark (plans/snapshot.md), or why it is declined: the host serves none, the connection is
@@ -642,16 +698,18 @@ public static class SynqraReplicationEndpointExtensions
 				try
 				{
 					var ev = eventEnvelope.Event;
-					// Already applied/broadcast: an echo from this same client, or a resend after a lost ack. The in-memory set is
+					// Already stored: an echo from this same client, or a resend after a lost ack. An event is known only once the
+					// log holds it, so a resend after a failed store is stored, never acknowledged unsaved. The in-memory set is
 					// empty after a restart, so the log is asked too: an event it holds was applied by the process that stored it,
 					// and applying it again is refused by the projection (prod 2026-10-22: a facet re-added to a filled slot, on
 					// every connect, since a refusal gets no ack). Either way it is acknowledged again, never re-applied.
-					var known = !knownEvents.TryAdd(ev.EventId);
+					var known = knownEvents.Contains(ev.EventId);
 					if (!known && connectionStream is Guid heldStream && storage is IEventLookup lookup)
 					{
 						known = await lookup.ContainsAsync(heldStream, ev.EventId, ctx.RequestAborted);
 						if (known)
 						{
+							knownEvents.TryAdd(ev.EventId);
 							logger?.LogInformation("Synqra replication: event {EventId} of stream {Stream} is in the log already; acknowledged, not applied again.", ev.EventId, heldStream);
 						}
 					}
@@ -671,27 +729,21 @@ public static class SynqraReplicationEndpointExtensions
 							ev.StreamId = stream;
 						}
 						ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
-						if ((ev is StreamSnapshotEvent ? "a stream snapshot is a client's own record, never an event of the stream" : await AskGuardsAsync(ev)) is { } refused)
+						// A resend of an event applied before its store failed is stored as it is: the guards already admitted it, and
+						// asked again they would see the state it applied itself (an answer already given) and refuse it.
+						if ((appliedUnstored.Contains(ev.EventId) ? null
+							: ev is StreamSnapshotEvent ? "a stream snapshot is a client's own record, never an event of the stream"
+							: ev.StreamId == default ? "an unscoped connection's event names no stream for the log to file it under"
+							: await AskGuardsAsync(ev)) is { } refused)
 						{
 							// The host forbids this change from a peer (a system object, say): refused for good, never applied or stored.
 							logger?.LogInformation("Synqra replication: event {EventId} on stream {Stream} refused by a guard: {Reason}", ev.EventId, connectionStream, refused);
 							reply = new EventRejected { EventId = ev.EventId, Reason = refused };
 						}
-						else
+						else if ((reply = await ApplyAsync(ev)) is null)
 						{
-							var projection = serviceKey is null
-								? ctx.RequestServices.GetRequiredService<IProjection>()
-								: ctx.RequestServices.GetRequiredKeyedService<IProjection>(serviceKey);
-							if (projection is IReplayProjection replay)
-							{
-								await replay.ApplyAsync(ev); // under the projection's write gate, like a submit
-							}
-							else
-							{
-								await ev.AcceptAsync<EventVisitorContext?>((IEventVisitor<EventVisitorContext?>)projection, null!); // Mongo gates each visitor per stream
-							}
-							await storage.AppendAsync(ev); // a sequenced log reports this commit to the push loop, which echoes it to the sender too
-							// The sender moves its outbound cursor on this, not on having written the frame: a refused event gets no ack and is offered again.
+							await StoreAsync(storage, ev);
+							// The sender moves its outbound cursor on this, not on having written the frame: an unstored event gets no ack and is offered again.
 							reply = new EventAccepted { EventId = ev.EventId };
 							if (!logBroadcasts)
 							{
@@ -712,14 +764,7 @@ public static class SynqraReplicationEndpointExtensions
 						}
 					}
 				}
-				catch (InvalidOperationException refusal)
-				{
-					// The projection refused the event (a facet for a slot already filled, a link that exists): it will never be
-					// in this log, so the sender is told and moves its cursor past it instead of offering it on every connect.
-					logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", eventEnvelope.Event.EventId, connectionStream);
-					reply = new EventRejected { EventId = eventEnvelope.Event.EventId, Reason = refusal.Message };
-				}
-				catch (Exception eventEx)
+				catch (Exception eventEx) when (eventEx is not UnstoredEventException) // an unstored event ends the connection, unacknowledged
 				{
 					// One bad event must not kill this whole connection (every other
 					// message on it, and the connection itself) — log and keep going.
