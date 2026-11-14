@@ -13,6 +13,9 @@ internal sealed class RecentEventIds(int capacity)
 	readonly ConcurrentDictionary<Guid, byte> _seen = new();
 	readonly ConcurrentQueue<Guid> _order = new();
 
+	/// <summary>True when the id was seen within the window; marks nothing.</summary>
+	public bool Contains(Guid eventId) => _seen.ContainsKey(eventId);
+
 	/// <summary>True when the id was not seen within the window.</summary>
 	public bool TryAdd(Guid eventId)
 	{
