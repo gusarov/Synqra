@@ -124,6 +124,35 @@ internal sealed class ReplicationOutbox
 		}
 	}
 
+	/// <summary>
+	/// Closes the socket with a close frame, in turn with the sends, so the client reconnects at once; a socket that cannot take the
+	/// frame within five seconds is aborted instead.
+	/// </summary>
+	public async Task CloseAsync(WebSocketCloseStatus status, string description)
+	{
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+		try
+		{
+			await _sending.WaitAsync(timeout.Token);
+			try
+			{
+				if (_socket.State == WebSocketState.Open)
+				{
+					await _socket.CloseOutputAsync(status, description, timeout.Token);
+				}
+			}
+			finally
+			{
+				_sending.Release();
+			}
+		}
+		catch (Exception ex)
+		{
+			_logger?.LogWarning(ex, "Synqra replication: closing a client's socket ({Status}) failed; it is aborted instead.", status);
+			_socket.Abort();
+		}
+	}
+
 	/// <summary>No more pushes: the pump ends once it has written what is queued.</summary>
 	public void Complete() => _pushes.Writer.TryComplete();
 
