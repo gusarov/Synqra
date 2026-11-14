@@ -27,6 +27,7 @@ internal sealed class ReplicationOutbox
 	readonly SemaphoreSlim _pushesFlow = new(1, 1);
 	readonly Channel<EventEnvelope> _pushes;
 	readonly byte[] _buffer = new byte[EventReplicationService.DefaultFrameSize];
+	volatile bool _closed;
 
 	public ReplicationOutbox(WebSocket socket, INetworkSerializationService serializer, ILogger? logger, int capacity = 10_000)
 	{
@@ -54,13 +55,20 @@ internal sealed class ReplicationOutbox
 		}
 	}
 
-	/// <summary>Sends one of the connection's own frames, in turn with the pump.</summary>
+	/// <summary>Sends one of the connection's own frames, in turn with the pump; none once <see cref="CloseAsync"/> closed the socket.</summary>
 	public async Task SendAsync(TransportOperation operation, CancellationToken cancellationToken)
 	{
 		await _sending.WaitAsync(cancellationToken);
 		try
 		{
-			await _socket.SendOperationAsync(_serializer, operation, _buffer, cancellationToken);
+			if (_closed)
+			{
+				_logger?.LogDebug("Synqra replication: {Operation} not sent, the socket is closed for the server's stop.", operation.GetType().Name);
+			}
+			else
+			{
+				await _socket.SendOperationAsync(_serializer, operation, _buffer, cancellationToken);
+			}
 		}
 		finally
 		{
@@ -136,6 +144,8 @@ internal sealed class ReplicationOutbox
 			await _sending.WaitAsync(timeout.Token);
 			try
 			{
+				_closed = true; // under the send turn: nothing is written after the close frame
+				_pushes.Writer.TryComplete();
 				if (_socket.State == WebSocketState.Open)
 				{
 					await _socket.CloseOutputAsync(status, description, timeout.Token);

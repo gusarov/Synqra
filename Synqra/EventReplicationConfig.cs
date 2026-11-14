@@ -80,6 +80,18 @@ public class EventReplicationConfig
 	public virtual TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
 	/// <summary>
+	/// The probe's timeout while writes await their ack: the master answers frames in order, and a write it holds behind its global
+	/// gate (a peer's snapshot or seeding) holds the answer too, so the shorter timeout reconnected a live connection.
+	/// </summary>
+	public virtual TimeSpan HeartbeatTimeoutWhileWriting { get; set; } = TimeSpan.FromSeconds(45);
+
+	/// <summary>
+	/// This client's build when its host knows it, compared with the master's (<see cref="ServerVersion"/>); null takes the build of
+	/// the first master this run talks to as its own.
+	/// </summary>
+	public virtual string? ClientBuild { get; set; }
+
+	/// <summary>
 	/// How long a connect attempt may take before it is given up and tried again: a proxy holds the upgrade of a master still
 	/// starting for up to minutes. Zero or less waits as long as the transport does.
 	/// </summary>

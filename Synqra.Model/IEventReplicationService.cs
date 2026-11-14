@@ -22,6 +22,21 @@ public interface IEventReplicationService
 	/// </summary>
 	long UnreadableFrames => 0;
 
+	/// <summary>The build the master last told this client (<see cref="ServerVersion"/>); null before it did, or when it names none.</summary>
+	string? ServerBuild => null;
+
+	/// <summary>
+	/// Whether the master asked this page to reload: it runs another build than the one this run started with, or it raised a reload
+	/// demand. A host reloads once <see cref="HasUnconfirmedWrites"/> is false. Its change raises <see cref="StatusChanged"/>.
+	/// </summary>
+	bool ReloadRequired => false;
+
+	/// <summary>
+	/// Whether a local write may not have reached the master yet (unsent, or sent and not acknowledged): a reload now could lose it.
+	/// Its changes raise <see cref="StatusChanged"/>.
+	/// </summary>
+	bool HasUnconfirmedWrites => false;
+
 	/// <summary>
 	/// The master's position this client has reached: the resume point of the last frame it took (a v7 sequence, so it also tells
 	/// how far into the stream's history a replay is). Default before the first.

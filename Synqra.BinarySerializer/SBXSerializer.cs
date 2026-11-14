@@ -264,6 +264,8 @@ public class SbxSerializer : ISbxSerializer
 		Map(-88, typeof(StreamSnapshotEvent));
 		Map(-89, typeof(CatchUpRequest));
 		Map(-90, typeof(CaughtUp));
+		Map(-91, typeof(VersionRequest));
+		Map(-92, typeof(ServerVersion));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
@@ -906,7 +908,7 @@ public class SbxSerializer : ISbxSerializer
 			type = typeInfo.type;  // duplicate?
 			schemaVersion = typeInfo.schemaVersion;
 		}
-		else if ((int)typeId > 0)
+		else if ((int)typeId > 0 || typeId < TypeId.ListTypeTo) // below the primitives are the built-in models: a newer peer's
 		{
 			throw new SbxUnknownTypeException((int)typeId); // read as the requested type, the rest of the frame came out as garbage
 		}
@@ -1432,7 +1434,7 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.DoubleFloating => typeof(double),
 			TypeId.Boolean => typeof(bool),
 			TypeId.Bytes => typeof(byte[]),
-			> 0 => throw new SbxUnknownTypeException((int)typeId),
+			> 0 or < TypeId.ListTypeTo => throw new SbxUnknownTypeException((int)typeId),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}

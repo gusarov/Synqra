@@ -590,6 +590,11 @@ internal class SynqraTestNode
 							continue;
 						}
 
+						if (operation is VersionRequest)
+						{
+							continue; // this simulator names no build: its clients are never asked to reload
+						}
+
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
 						if (operation is EventEnvelope eventEnvelope)
 						{
