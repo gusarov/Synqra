@@ -239,6 +239,17 @@ public static class SynqraReplicationEndpointExtensions
 				}
 			}
 
+			// Waits out an orphaned backlog read, whatever its outcome, then disposes its enumerator: a deaf read still releases its cursor.
+			async Task DisposeOrphanAsync(Task<bool> pending, IAsyncEnumerator<Event> orphan)
+			{
+				await Task.WhenAny(pending);
+				if (pending.IsFaulted)
+				{
+					logger?.LogWarning(pending.Exception, "Synqra replication: an orphaned backlog read for stream {Stream} failed.", connectionStream);
+				}
+				await orphan.DisposeAsync();
+			}
+
 			// The first guard that refuses a peer's event names why; none refusing lets it through.
 			async Task<string?> AskGuardsAsync(Event ev)
 			{
@@ -533,10 +544,14 @@ public static class SynqraReplicationEndpointExtensions
 				{
 					if (step is { IsCompleted: false })
 					{
-						// Disposing an enumerator while its read is pending is not allowed: it is left to the store, its failure logged when it ends.
-						logger?.LogWarning("Synqra replication: the backlog read for stream {Stream} did not end on its cancellation; its enumerator is orphaned, not disposed.", connectionStream);
-						_ = step.ContinueWith(
-							  t => logger?.LogWarning(t.Exception, "Synqra replication: an orphaned backlog read for stream {Stream} failed.", connectionStream)
+						await Task.WhenAny(step, Task.Delay(TimeSpan.FromSeconds(1))); // a read that honours its cancellation ends within it
+					}
+					if (step is { IsCompleted: false })
+					{
+						// Disposing an enumerator while its read is pending is not allowed: it is disposed once the read ends, however it ends.
+						logger?.LogWarning("Synqra replication: the backlog read for stream {Stream} did not end on its cancellation; its enumerator is orphaned and disposed when the read returns.", connectionStream);
+						_ = DisposeOrphanAsync(step, reading).ContinueWith(
+							  t => logger?.LogWarning(t.Exception, "Synqra replication: disposing an orphaned backlog read for stream {Stream} failed.", connectionStream)
 							, CancellationToken.None
 							, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
 							, TaskScheduler.Default

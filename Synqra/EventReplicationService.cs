@@ -71,6 +71,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	DateTimeOffset? _nextAttemptAt;
 	// Who cut the current connection short, if anyone: its reader's end is then expected, not a failure.
 	volatile string? _cutBy;
+	// Whether the watchdog already counted this connection's cut toward refusing snapshots.
+	volatile bool _cutCounted;
 	// Since when the reader waits for a frame (a Stopwatch timestamp), or 0 while it handles one: the catch-up watchdog's clock.
 	long _waitingSince;
 	// Whether this connection's HELLO asked for a snapshot whose end or decline has not arrived yet.
@@ -644,7 +646,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			wsConnection.Dispose();
 			await reader; // it logged its own failure
 			await watchdog;
-			if (_snapshotHeader is not null && _cutBy != nameof(ReconnectNow) && ++_snapshotsCutShort >= 2)
+			if (_snapshotHeader is not null && _cutBy != nameof(ReconnectNow) && !_cutCounted && ++_snapshotsCutShort >= 2)
 			{
 				_snapshotRefused = true; // the second connection lost mid-snapshot: this run replays; a user's reconnect is no such pattern
 			}
@@ -906,6 +908,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	{
 		var attempt = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
 		_cutBy = null;
+		_cutCounted = false;
 		Volatile.Write(ref _waitingSince, Stopwatch.GetTimestamp());
 		lock (_reconnectGate)
 		{
@@ -960,18 +963,20 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <inheritdoc />
 	/// <remarks>
-	/// A connection is cut only while it looks dead: not online yet, or not caught up with no frame for two seconds. A catch-up that
-	/// is still receiving is left alone, as a caught-up connection is: a host calls this on every tab return and network change.
+	/// Acts only while the connection looks dead: during a pause, or not caught up with nothing heard for two seconds, counted from
+	/// the attempt's start until the HELLO reply and from the last frame after it. A master still seeding or cutting a snapshot
+	/// before its HELLO, and a catch-up still receiving, are left alone, as a caught-up connection is: a host calls this on every
+	/// tab return and network change.
 	/// </remarks>
 	public void ReconnectNow()
 	{
-		var silent = !IsOnline || !IsCaughtUp && Silence >= TimeSpan.FromSeconds(2);
-		if (silent)
+		// Cancelled under the gate: CloseAttempt takes the gate before it disposes, so nothing cancelled here is disposed yet.
+		lock (_reconnectGate)
 		{
-			EmergencyLog.Default.Stage($"replication: reconnect requested (online: {IsOnline}, frames {ConnectionFrames})");
-			// Cancelled under the gate: CloseAttempt takes the gate before it disposes, so nothing cancelled here is disposed yet.
-			lock (_reconnectGate)
+			var dead = _pause is not null || !IsCaughtUp && Silence >= TimeSpan.FromSeconds(2);
+			if (dead)
 			{
+				EmergencyLog.Default.Stage($"replication: reconnect requested (online: {IsOnline}, frames {ConnectionFrames}, silent {Silence.TotalSeconds:F1} s)");
 				_reconnectAtOnce = true;
 				if (_pause is { } pause)
 				{
@@ -1049,7 +1054,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			if (silence >= timeout)
 			{
 				EmergencyLog.Default.LogError($"EventReplicationService: no frame for {silence.TotalSeconds:F0} s and no CaughtUp after {ConnectionFrames} frames (online: {IsOnline}); the connection is taken for dead and opened again from watermark {ServerWatermark}.");
-				if (_awaitingSnapshot && _snapshotHeader is null && ++_snapshotsCutShort >= 2)
+				_cutCounted = _awaitingSnapshot && _snapshotHeader is null; // counted here: the end of the pass does not count it again
+				if (_cutCounted && ++_snapshotsCutShort >= 2)
 				{
 					_snapshotRefused = true; // a snapshot the master cannot cut in time would cut every connection: this run replays
 				}
@@ -1096,12 +1102,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>
 	/// The pause before connecting again: half a second, doubling with each failure in a row, at most eight seconds, each within 20 %
-	/// below or above (never past the cap), so the clients a server restart dropped together do not retry in lockstep.
+	/// below or above (at the cap only below it), so the clients a server restart dropped together do not retry in lockstep.
 	/// </summary>
 	internal TimeSpan CalculateBackoff(int failures)
 	{
-		var pause = 500 * (1 << Math.Min(failures, 6)) * (0.8 + 0.4 * Random.Shared.NextDouble());
-		return TimeSpan.FromMilliseconds(Math.Min(8_000, pause));
+		var middle = Math.Min(8_000, 500 * (1 << Math.Min(failures, 6)));
+		var spread = middle < 8_000 ? 0.4 : 0.2; // at the cap the spread stays, below it
+		return TimeSpan.FromMilliseconds(Math.Min(8_000, middle * (0.8 + spread * Random.Shared.NextDouble())));
 	}
 
 	/// <inheritdoc />

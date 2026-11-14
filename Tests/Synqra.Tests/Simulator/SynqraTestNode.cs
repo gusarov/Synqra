@@ -157,6 +157,9 @@ internal class SynqraTestNode
 	/// <summary>Simulator master only: a pause before each backlog frame, as a catch-up that takes a while but keeps coming.</summary>
 	public TimeSpan BacklogPause { get; set; }
 
+	/// <summary>Simulator master only: a pause before its HELLO reply, as a master seeding or cutting a snapshot first.</summary>
+	public TimeSpan HelloDelay { get; set; }
+
 	/// <summary>A Mongo-backed master's store: one instance serves every stream, so a caller enters this node's stream around its use.</summary>
 	IObjectStore? _masterStore;
 
@@ -479,6 +482,10 @@ internal class SynqraTestNode
 				if (helloBytes.Length >= 25)
 				{
 					HelloKinds.Enqueue((ReplicationHelloKind)helloBytes[24]);
+				}
+				if (HelloDelay > TimeSpan.Zero)
+				{
+					await Task.Delay(HelloDelay, ctx.RequestAborted);
 				}
 				#endregion
 				#region HELLO - to client, then replay this stream's backlog since clientCursor
