@@ -721,7 +721,10 @@ public static class SynqraReplicationEndpointExtensions
 							ev.StreamId = stream;
 						}
 						ev.SequenceId = default; // a sequence is a position in the log that stamped it: the client's local one means nothing here
-						if ((ev is StreamSnapshotEvent ? "a stream snapshot is a client's own record, never an event of the stream"
+						// A resend of an event applied before its store failed is stored as it is: the guards already admitted it, and
+						// asked again they would see the state it applied itself (an answer already given) and refuse it.
+						if ((appliedUnstored.Contains(ev.EventId) ? null
+							: ev is StreamSnapshotEvent ? "a stream snapshot is a client's own record, never an event of the stream"
 							: ev.StreamId == default ? "an unscoped connection's event names no stream for the log to file it under"
 							: await AskGuardsAsync(ev)) is { } refused)
 						{
