@@ -488,7 +488,7 @@ public static class SynqraReplicationEndpointExtensions
 				// A backlog read that yields nothing for BacklogReadTimeout aborts the connection: a hung read (a Mongo getMore) held the
 				// socket open in silence, the client never got its CaughtUp and showed "syncing" forever. Sends to a slow client do not count.
 				var readTimeout = (ctx.RequestServices.GetService<IOptions<SynqraReplicationEndpointOptions>>()?.Value ?? new SynqraReplicationEndpointOptions()).BacklogReadTimeout;
-				var idleLimit = readTimeout > TimeSpan.Zero && readTimeout < TimeSpan.FromDays(40) ? readTimeout : Timeout.InfiniteTimeSpan;
+				var idleLimit = readTimeout > TimeSpan.Zero && readTimeout < TimeSpan.FromDays(40) ? readTimeout : Timeout.InfiniteTimeSpan; // CancelAfter takes at most ~49.7 days
 				using var backlogIdle = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
 				var replayed = 0L;
 				using var onStall = backlogIdle.Token.Register(() =>
@@ -501,20 +501,52 @@ public static class SynqraReplicationEndpointExtensions
 				});
 				// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark (or the
 				// snapshot's): a stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own
-				// streams. An unscoped host (connectionStream null) sends every stream's events after the watermark.
+				// streams. An unscoped host (connectionStream null) reads the whole log and sends every stream's events after the watermark.
 				var backlog = connectionStream is null
-					? AfterCursor(storage.GetAllAsync(default, backlogIdle.Token), clientCursor)
+					? storage.GetAllAsync(default, backlogIdle.Token)
 					: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, backlogIdle.Token);
-				backlogIdle.CancelAfter(idleLimit);
-				await foreach (var ev in backlog)
+				// Driven by hand: each read races the timeout, so a read that ignores its cancellation is left behind and this handler still ends.
+				var reading = backlog.GetAsyncEnumerator(backlogIdle.Token);
+				Task<bool>? step = null;
+				try
 				{
-					backlogIdle.CancelAfter(Timeout.InfiniteTimeSpan); // the read yielded; the send that follows is the client's pace, not the read's
-					knownEvents.TryAdd(ev.EventId);
-					await ReplayFrameAsync(outbox, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
-					replayed++;
-					backlogIdle.CancelAfter(idleLimit);
+					var more = true;
+					while (more)
+					{
+						backlogIdle.CancelAfter(idleLimit);
+						step = reading.MoveNextAsync().AsTask();
+						more = await step.WaitAsync(backlogIdle.Token);
+						backlogIdle.CancelAfter(Timeout.InfiniteTimeSpan); // every item read resets the clock, one the cursor skips too; a send is the client's pace, not the read's
+						if (more)
+						{
+							var ev = reading.Current;
+							if (connectionStream is not null || clientCursor == default || ev.SequenceId.CompareBigEndian(clientCursor) > 0)
+							{
+								knownEvents.TryAdd(ev.EventId);
+								await ReplayFrameAsync(outbox, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
+								replayed++;
+							}
+						}
+					}
 				}
-				backlogIdle.CancelAfter(Timeout.InfiniteTimeSpan); // the backlog is in
+				finally
+				{
+					if (step is { IsCompleted: false })
+					{
+						// Disposing an enumerator while its read is pending is not allowed: it is left to the store, its failure logged when it ends.
+						logger?.LogWarning("Synqra replication: the backlog read for stream {Stream} did not end on its cancellation; its enumerator is orphaned, not disposed.", connectionStream);
+						_ = step.ContinueWith(
+							  t => logger?.LogWarning(t.Exception, "Synqra replication: an orphaned backlog read for stream {Stream} failed.", connectionStream)
+							, CancellationToken.None
+							, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
+							, TaskScheduler.Default
+							);
+					}
+					else
+					{
+						await reading.DisposeAsync();
+					}
+				}
 			} // the pushes held meanwhile follow
 			#endregion
 
@@ -773,18 +805,6 @@ public static class SynqraReplicationEndpointExtensions
 		foreach (var stream in streams)
 		{
 			await foreach (var ev in log.ReadStreamAsync(stream, cursorOf(stream), cancellationToken))
-			{
-				yield return ev;
-			}
-		}
-	}
-
-	/// <summary>The events whose sequence is past the cursor (all of them for a cold cursor).</summary>
-	static async IAsyncEnumerable<Event> AfterCursor(this IAsyncEnumerable<Event> events, Guid cursor)
-	{
-		await foreach (var ev in events)
-		{
-			if (cursor == default || ev.SequenceId.CompareBigEndian(cursor) > 0)
 			{
 				yield return ev;
 			}

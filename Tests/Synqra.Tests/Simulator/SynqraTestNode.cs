@@ -151,6 +151,12 @@ internal class SynqraTestNode
 	/// <summary>Simulator master only: the replication sockets it accepted.</summary>
 	public int Connections => Volatile.Read(ref _connections);
 
+	/// <summary>Simulator master only: the HELLO kind of each connection, in order (a 24-byte HELLO has none and is left out).</summary>
+	public ConcurrentQueue<ReplicationHelloKind> HelloKinds { get; } = new ConcurrentQueue<ReplicationHelloKind>();
+
+	/// <summary>Simulator master only: a pause before each backlog frame, as a catch-up that takes a while but keeps coming.</summary>
+	public TimeSpan BacklogPause { get; set; }
+
 	/// <summary>A Mongo-backed master's store: one instance serves every stream, so a caller enters this node's stream around its use.</summary>
 	IObjectStore? _masterStore;
 
@@ -470,6 +476,10 @@ internal class SynqraTestNode
 					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 				}
 				var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
+				if (helloBytes.Length >= 25)
+				{
+					HelloKinds.Enqueue((ReplicationHelloKind)helloBytes[24]);
+				}
 				#endregion
 				#region HELLO - to client, then replay this stream's backlog since clientCursor
 				// Register for broadcasts BEFORE answering HELLO, and do both — plus the
@@ -494,6 +504,10 @@ internal class SynqraTestNode
 						await foreach (var ev in backlogStorage.ReadStreamAsync(StreamId, clientCursor, ctx.RequestAborted))
 						{
 							knownEvents.TryAdd(ev.EventId, null);
+							if (BacklogPause > TimeSpan.Zero)
+							{
+								await Task.Delay(BacklogPause, ctx.RequestAborted);
+							}
 							var payload = networkSerializationService.Serialize<TransportOperation>(new EventEnvelope { Event = ev }, new ArraySegment<byte>(backlogBuffer));
 							await socket.SendAsync(payload, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
 						}

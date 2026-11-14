@@ -28,9 +28,10 @@ public interface IEventReplicationService
 	DateTimeOffset? NextAttemptAt => null;
 
 	/// <summary>
-	/// Connects again at once: cuts short the pause before the next attempt, or ends a connect attempt or a connection whose
-	/// catch-up is not in yet and opens a new one, which resumes from the watermark. Safe to call at any time; a no-op while
-	/// online and caught up.
+	/// Connects again at once when the connection looks dead: cuts short the pause before the next attempt, or ends a connect
+	/// attempt, a connection not online yet, or one whose catch-up has received nothing for two seconds, and opens a new one, which
+	/// resumes from the watermark. A no-op while online and caught up, and while a catch-up is still receiving frames: safe to call
+	/// at any time, e.g. on every tab return or network change.
 	/// </summary>
 	void ReconnectNow()
 	{
