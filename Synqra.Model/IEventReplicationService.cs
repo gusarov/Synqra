@@ -30,9 +30,11 @@ public interface IEventReplicationService
 	/// <summary>
 	/// Connects again at once when the connection looks dead: cuts short the pause before the next attempt, or ends a connect
 	/// attempt or a connection that is not caught up and has heard nothing for two seconds (counted from the attempt's start until
-	/// the master's HELLO reply, from the last frame after it), and opens a new one, which resumes from the watermark. A no-op while
-	/// online and caught up, while the master prepares its HELLO reply (seeding, cutting a snapshot) for under two seconds, and while
-	/// a catch-up is still receiving frames: safe to call at any time, e.g. on every tab return or network change.
+	/// the master's HELLO reply, from the last frame after it), and opens a new one, which resumes from the watermark. Online and
+	/// caught up, it asks the master whether it is still there and cuts the connection when nothing answers (after a sleep or a
+	/// network change a connection can be dead without a close). A no-op while the master prepares its HELLO reply (seeding, cutting
+	/// a snapshot) for under two seconds, and while a catch-up is still receiving frames: safe to call at any time, e.g. on every tab
+	/// return or network change.
 	/// </summary>
 	void ReconnectNow()
 	{

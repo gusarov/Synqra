@@ -140,6 +140,18 @@ internal class SynqraTestNode
 	/// <summary>A client's catch-up watchdog; null keeps the configured default.</summary>
 	public TimeSpan? CatchUpTimeout { get; init; }
 
+	/// <summary>A client's liveness probe once caught up: the silence before it asks, and how long it waits for an answer; null keeps the configured default.</summary>
+	public TimeSpan? HeartbeatInterval { get; init; }
+
+	/// <inheritdoc cref="HeartbeatInterval"/>
+	public TimeSpan? HeartbeatTimeout { get; init; }
+
+	/// <summary>How long a client's connect attempt may take; null keeps the configured default.</summary>
+	public TimeSpan? ConnectTimeout { get; init; }
+
+	/// <summary>Simulator master only: while true it holds every connect unanswered, as a proxy holding the upgrade of a master still starting.</summary>
+	public bool HangsConnects { get; set; }
+
 	/// <summary>Simulator master only: false makes it a master stuck in its catch-up, which reads a client's probe and never answers it.</summary>
 	public bool AnswersCatchUp { get; set; } = true;
 
@@ -434,6 +446,10 @@ internal class SynqraTestNode
 				{
 					ctx.Response.StatusCode = 503;
 				}
+				else if (HangsConnects)
+				{
+					await Task.WhenAny(Task.Delay(Timeout.Infinite, ctx.RequestAborted)); // until the client gives up
+				}
 				else
 				{
 					await next(ctx);
@@ -719,6 +735,9 @@ internal class SynqraTestNode
 		public override Guid? InitialSubscribeStreamId => _node.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot ? _node.StreamId : null;
 		public override bool RequestSnapshot => _node.RequestSnapshot;
 		public override TimeSpan CatchUpTimeout => _node.CatchUpTimeout ?? base.CatchUpTimeout;
+		public override TimeSpan HeartbeatInterval => _node.HeartbeatInterval ?? base.HeartbeatInterval;
+		public override TimeSpan HeartbeatTimeout => _node.HeartbeatTimeout ?? base.HeartbeatTimeout;
+		public override TimeSpan ConnectTimeout => _node.ConnectTimeout ?? base.ConnectTimeout;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}

@@ -441,6 +441,9 @@ public static class SynqraReplicationEndpointExtensions
 				: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 			var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
 			var pump = outbox.PumpAsync(ctx.RequestAborted);
+			// The pushes end as the host starts stopping, but the socket lived on until the process died under it, through a proxy
+			// possibly never closed: a close frame now, which proxies pass on, sends the client to the host that follows at once.
+			using var closeOnStop = app.Lifetime.ApplicationStopping.Register(() => _ = outbox.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "the server is stopping"));
 			try
 			{
 			using (await outbox.HoldPushesAsync(ctx.RequestAborted))
