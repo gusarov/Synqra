@@ -70,6 +70,22 @@ public class EventReplicationConfig
 	public virtual TimeSpan CatchUpTimeout { get; set; } = TimeSpan.FromSeconds(20);
 
 	/// <summary>
+	/// How long a caught-up connection may hear nothing before the client asks the master whether it is still there (a
+	/// <see cref="CatchUpRequest"/>, which any frame answers). A master gone without a close (a restart behind a proxy, a sleep, a
+	/// network change) otherwise left the connection online and caught up, and the page stale until a reload. Zero or less turns it off.
+	/// </summary>
+	public virtual TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+	/// <summary>How long that question may go unanswered before the connection is taken for dead and opened again from the watermark.</summary>
+	public virtual TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+	/// <summary>
+	/// How long a connect attempt may take before it is given up and tried again: a proxy holds the upgrade of a master still
+	/// starting for up to minutes. Zero or less waits as long as the transport does.
+	/// </summary>
+	public virtual TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+	/// <summary>
 	/// Full WebSocket endpoint URI for the replication master. When set, overrides the default
 	/// <c>ws://localhost:{Port}/api/synqra/ws</c> construction so the WASM client can connect to
 	/// the correct remote host in deployed environments.
