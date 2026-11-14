@@ -421,11 +421,13 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
 							break;
 						case EventRejected rejected:
-							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect, and its local effect is undone.
+							// Refused for good: its local effect is undone, then the cursor moves past it like on an ack, so it is not offered on every
+							// connect. An undo that fails ends this connection before the cursor moves: the next one offers the event again, the
+							// master refuses it again, and the undo is tried again (one already in the log decides the state, so none is doubled).
 							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
+							await UndoAsync(rejected.EventId);
 							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
 							await SaveStateAsync();
-							await UndoAsync(rejected.EventId);
 							Settle(rejected.EventId, rejected.Reason);
 							break;
 						default:

@@ -94,6 +94,19 @@ internal class RefusedEventsTests : BaseTest
 	}
 
 	[Test]
+	public async Task A_refusal_heard_again_after_its_undo_is_in_the_log_undoes_nothing_more()
+	{
+		var refused = Change("Title", "before", "refused");
+		var log = new List<Event> { Add(_facet), refused };
+		var refusals = new RefusedEvents();
+		log.AddRange(refusals.Undo(log, refused.EventId)); // the undo was written, the connection then ended before the cursor moved
+
+		var again = refusals.Undo(log, refused.EventId);
+
+		await Assert.That(again.Count).IsEqualTo(0).Because("the undo already in the log decides the value");
+	}
+
+	[Test]
 	public async Task A_refused_add_deleted_since_is_not_deleted_again()
 	{
 		var refused = Add(_facet);
