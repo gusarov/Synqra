@@ -169,7 +169,8 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 			lastWritten = ev.EventId;
 		}
 
-		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.LastEventIdFromMe == lastWritten), "the cursor moves past what the master refused");
+		// At the refused event, or past it: the client's local undo follows it in the log, and the send loop steps over that too.
+		await WaitUntilAsync(async () => await IsAtOrPastAsync(nodeA.Events, remembered.Saved?.LastEventIdFromMe ?? default, lastWritten), "the cursor moves past what the master refused");
 		await Assert.That(refusing.Applied).IsGreaterThan(0).Because("the master tried and refused");
 		await Assert.That(await CountEventsAsync(nodeMaster)).IsEqualTo(0).Because("a refused event is not in the master's log");
 	}
@@ -398,6 +399,20 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		var own = (await EventIdsAsync(nodeB.Events)).Except(before).ToHashSet();
 		await Assert.That(own.Count).IsGreaterThan(0);
 		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(own), "the write reaches the master despite the lost cursor");
+	}
+
+
+	/// <summary>Whether the cursor names <paramref name="target"/> or an event after it in the log.</summary>
+	async Task<bool> IsAtOrPastAsync(IEventLog log, Guid cursor, Guid target)
+	{
+		var seenTarget = false;
+		var at = false;
+		await foreach (var ev in log.GetAllAsync())
+		{
+			seenTarget |= ev.EventId == target;
+			at |= seenTarget && ev.EventId == cursor;
+		}
+		return at;
 	}
 
 	EventReplicationService Replication(SynqraTestNode node) => node.Host.Services.GetRequiredService<EventReplicationService>();
