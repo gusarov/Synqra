@@ -126,7 +126,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	// protocol (a chunk out of place, counts that do not add up), a second connection lost in the middle of one, or a master that
 	// did not take the stream a snapshot request named. Without it a deterministic failure would be asked for again forever.
 	bool _snapshotRefused;
-	// Connections that ended while a snapshot was arriving: one is a dropped connection, the second is a pattern.
+	// Connections that ended before a snapshot was in, since the last one stored (a ReconnectNow's cut aside): one is a dropped
+	// connection, the second is a pattern.
 	int _snapshotsCutShort;
 	// Whether this connection's HELLO asked for a snapshot in place of the configured UserDefaultMainStream: it names the stream
 	// where the configured kind lets the master choose it, so the master must confirm it took that stream.
@@ -336,10 +337,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_lastSentSequence = default;
 			ConnectionFrames = 0;
 			_catchUpRequest = Guid.CreateVersion7();
-			if (_snapshotHeader is not null && ++_snapshotsCutShort >= 2)
-			{
-				_snapshotRefused = true; // the second connection lost mid-snapshot: this run replays
-			}
 			_snapshotHeader = null; // a snapshot cut short with its connection is asked for again by the next one
 			_snapshotChunks.Clear();
 
@@ -512,7 +509,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 				{
 					// The socket broke (or was cut) before the master heard us: the reader sees it too and ends this connection.
-					EmergencyLog.Default.LogError(ex, "EventReplicationService: the HELLO could not be sent; reconnecting.");
+					EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Error : LogLevel.Information, ex, $"EventReplicationService: the HELLO could not be sent{CutNote}; reconnecting.");
 				}
 				finally
 				{
@@ -639,7 +636,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 			{
 				// The socket broke (or was cut) under a send: this pass is over, the next connection sends it again.
-				EmergencyLog.Default.LogError(ex, "EventReplicationService: a send failed; reconnecting.");
+				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Error : LogLevel.Information, ex, $"EventReplicationService: a send failed{CutNote}; reconnecting.");
 			}
 			IsOnline = false;
 			cut.Cancel(); // ends the watchdog
@@ -647,6 +644,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			wsConnection.Dispose();
 			await reader; // it logged its own failure
 			await watchdog;
+			if (_snapshotHeader is not null && _cutBy != nameof(ReconnectNow) && ++_snapshotsCutShort >= 2)
+			{
+				_snapshotRefused = true; // the second connection lost mid-snapshot: this run replays; a user's reconnect is no such pattern
+			}
 			CloseAttempt(cut);
 			failures = connectedAt.Elapsed > TimeSpan.FromSeconds(30) ? 0 : failures + 1; // a connection that held a while was not the problem
 			if (!_cts.IsCancellationRequested)
@@ -820,6 +821,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 		_snapshotWatermarks[header.StreamId] = end.Watermark;
 		_awaitingSnapshot = false;
+		_snapshotsCutShort = 0; // a snapshot came in: the cuts before it were no pattern
 		SnapshotsLoaded++;
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper
@@ -891,7 +893,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			{
 				socket.Dispose();
 				CloseAttempt(cut);
-				EmergencyLog.Default.LogWarning(ex, $"EventReplicationService: connect attempt {attempt} failed: {ex.Message}");
+				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Warning : LogLevel.Information, ex, $"EventReplicationService: connect attempt {attempt} failed{CutNote}: {ex.Message}");
 				await PauseAsync(CalculateBackoff(attempt));
 				_cts.Token.ThrowIfCancellationRequested(); // the host's stop ends the service here, as it always did
 			}
@@ -925,24 +927,56 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		attempt.Dispose();
 	}
 
+	/// <summary>" (cut by the …)" when a ReconnectNow or the watchdog cut this connection: its failures are then expected.</summary>
+	string CutNote => _cutBy is { } by ? $" (cut by the {by})" : "";
+
+	/// <summary>How long the reader has waited for the frame it waits for; zero while it handles one.</summary>
+	TimeSpan Silence
+	{
+		get
+		{
+			var since = Volatile.Read(ref _waitingSince);
+			return since == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(since);
+		}
+	}
+
 	/// <summary>Cuts a connect attempt or a connection short, naming who did, so its end reads as expected.</summary>
 	void CutConnection(CancellationTokenSource attempt, string by)
 	{
 		_cutBy ??= by;
-		attempt.Cancel();
+		CancelInBackground(attempt);
+	}
+
+	/// <summary>Cancels without running the callbacks (a socket's abort, a pause's end) on this thread, which may hold the gate; a callback's failure is logged.</summary>
+	void CancelInBackground(CancellationTokenSource source)
+	{
+		source.CancelAsync().ContinueWith(
+			  t => EmergencyLog.Default.LogError(t.Exception, "EventReplicationService: a cancellation callback failed.")
+			, CancellationToken.None
+			, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
+			, TaskScheduler.Default
+			);
 	}
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// A connection is cut only while it looks dead: not online yet, or not caught up with no frame for two seconds. A catch-up that
+	/// is still receiving is left alone, as a caught-up connection is: a host calls this on every tab return and network change.
+	/// </remarks>
 	public void ReconnectNow()
 	{
-		if (!(IsOnline && IsCaughtUp))
+		var silent = !IsOnline || !IsCaughtUp && Silence >= TimeSpan.FromSeconds(2);
+		if (silent)
 		{
 			EmergencyLog.Default.Stage($"replication: reconnect requested (online: {IsOnline}, frames {ConnectionFrames})");
 			// Cancelled under the gate: CloseAttempt takes the gate before it disposes, so nothing cancelled here is disposed yet.
 			lock (_reconnectGate)
 			{
 				_reconnectAtOnce = true;
-				_pause?.Cancel();
+				if (_pause is { } pause)
+				{
+					CancelInBackground(pause);
+				}
 				if (_attempt is { } attempt)
 				{
 					CutConnection(attempt, nameof(ReconnectNow));
@@ -1011,8 +1045,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		var watching = timeout > TimeSpan.Zero;
 		while (watching && !cut.IsCancellationRequested && !_isCaughtUp)
 		{
-			var since = Volatile.Read(ref _waitingSince);
-			var silence = since == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(since);
+			var silence = Silence;
 			if (silence >= timeout)
 			{
 				EmergencyLog.Default.LogError($"EventReplicationService: no frame for {silence.TotalSeconds:F0} s and no CaughtUp after {ConnectionFrames} frames (online: {IsOnline}); the connection is taken for dead and opened again from watermark {ServerWatermark}.");
@@ -1061,8 +1094,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 	}
 
-	/// <summary>The pause before connecting again: half a second, doubling with each failure in a row, at most eight seconds.</summary>
-	internal TimeSpan CalculateBackoff(int failures) => TimeSpan.FromMilliseconds(Math.Min(8_000, 500 * (1 << Math.Min(failures, 6))));
+	/// <summary>
+	/// The pause before connecting again: half a second, doubling with each failure in a row, at most eight seconds, each within 20 %
+	/// below or above (never past the cap), so the clients a server restart dropped together do not retry in lockstep.
+	/// </summary>
+	internal TimeSpan CalculateBackoff(int failures)
+	{
+		var pause = 500 * (1 << Math.Min(failures, 6)) * (0.8 + 0.4 * Random.Shared.NextDouble());
+		return TimeSpan.FromMilliseconds(Math.Min(8_000, pause));
+	}
 
 	/// <inheritdoc />
 	/// <remarks>
