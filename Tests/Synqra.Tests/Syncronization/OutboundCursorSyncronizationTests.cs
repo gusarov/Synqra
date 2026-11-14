@@ -213,6 +213,47 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		await Assert.That(onceOnly.Repeats).IsEqualTo(0).Because("an event applied before its store failed is not applied again");
 	}
 
+	/// <summary>
+	/// A guard that judges an event by the state it would change (Quotaly's DecisionAnswerGuard refuses an answer to a decision already
+	/// answered) sees, on a resend after a failed store, the state that event itself applied. Asked again it refuses, the client undoes a
+	/// change the master keeps, and the log never holds it. The resend is stored as it is, without the guards.
+	/// </summary>
+	[Test]
+	public async Task A_resend_after_a_failed_store_is_not_asked_of_the_guards_again()
+	{
+		var streamId = Guid.NewGuid();
+		var failingOnce = new FailingOnceLog();
+		var onceOnly = new OnceOnlyProjection();
+		var guard = new AppliedStateGuard(onceOnly);
+		var nodeMaster = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(failingOnce);
+			builder.Services.AddSingleton<IProjection>(onceOnly);
+			builder.Services.AddSingleton<IInboundEventGuard>(guard);
+		}, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "guarded, the first store fails" });
+		var written = new List<Guid>();
+		await foreach (var ev in nodeA.Events.GetAllAsync())
+		{
+			written.Add(ev.EventId);
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.LastEventIdFromMe == written[^1]), "the master answers every event A wrote");
+		await Assert.That(failingOnce.Failures).IsEqualTo(1).Because("the master's first store failed");
+		var stored = await EventIdCountsAsync(nodeMaster.Events);
+		foreach (var id in written)
+		{
+			await Assert.That(stored.GetValueOrDefault(id)).IsEqualTo(1).Because($"event {id} is stored exactly once, never refused on its resend");
+		}
+		await Assert.That(guard.Refusals).IsEqualTo(0).Because("the resend of an applied event is not asked of the guards again");
+	}
+
 	/// <summary>An event the master holds is acknowledged when it comes again, never stored or applied twice.</summary>
 	[Test]
 	public async Task A_resend_of_a_stored_event_is_acknowledged_not_stored_again()
@@ -495,6 +536,14 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 
 		public int Repeats { get; private set; }
 
+		public bool HasApplied(Guid eventId)
+		{
+			lock (_applied)
+			{
+				return _applied.Contains(eventId);
+			}
+		}
+
 		Task Apply(Event ev)
 		{
 			lock (_applied)
@@ -527,6 +576,23 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
 		public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+	}
+
+	/// <summary>Refuses an event whose change the projection already holds, as DecisionAnswerGuard refuses a second answer.</summary>
+	sealed class AppliedStateGuard(OnceOnlyProjection projection) : IInboundEventGuard
+	{
+		public int Refusals { get; private set; }
+
+		public ValueTask<string?> RefuseAsync(Event ev, CancellationToken cancellationToken = default)
+		{
+			string? reason = null;
+			if (projection.HasApplied(ev.EventId))
+			{
+				Refusals++;
+				reason = $"the change of event {ev.EventId} is in the state already";
+			}
+			return ValueTask.FromResult(reason);
+		}
 	}
 
 	async Task<Dictionary<Guid, int>> EventIdCountsAsync(IEventLog log)
