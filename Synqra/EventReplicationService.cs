@@ -60,6 +60,34 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	// The probe this connection sent after its HELLO: only the CaughtUp that answers it ends the catch-up.
 	Guid _catchUpRequest;
 
+	// Guards the pause and the attempt that ReconnectNow cuts short, and the next attempt's due time.
+	readonly object _reconnectGate = new object();
+	// The pause before the next connect attempt, while one runs.
+	CancellationTokenSource? _pause;
+	// The connect attempt under way, then the connection it opened, until that connection ends; cancelling it aborts the socket.
+	CancellationTokenSource? _attempt;
+	// Set by ReconnectNow: the next pause is skipped.
+	bool _reconnectAtOnce;
+	DateTimeOffset? _nextAttemptAt;
+	// Who cut the current connection short, if anyone: its reader's end is then expected, not a failure.
+	volatile string? _cutBy;
+	// Since when the reader waits for a frame (a Stopwatch timestamp), or 0 while it handles one: the catch-up watchdog's clock.
+	long _waitingSince;
+	// Whether this connection's HELLO asked for a snapshot whose end or decline has not arrived yet.
+	volatile bool _awaitingSnapshot;
+
+	/// <inheritdoc />
+	public DateTimeOffset? NextAttemptAt
+	{
+		get
+		{
+			lock (_reconnectGate)
+			{
+				return _nextAttemptAt;
+			}
+		}
+	}
+
 	/// <inheritdoc />
 	public long ConnectionFrames { get; private set; }
 
@@ -300,7 +328,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		// persisted cursor and offers again what the master has not acknowledged. The service stops only with the host.
 		for (var failures = 0; !_cts.IsCancellationRequested; )
 		{
-			var wsConnection = await ConnectAsync();
+			var (wsConnection, cut) = await ConnectAsync();
+			using var abortOnCut = cut.Token.Register(wsConnection.Abort); // a cut connection ends at once: its reader and sends fail, the pass ends
 			EmergencyLog.Default.Stage($"replication: connected (cursor {_eventReplicationState.ServerWatermark}, log ids {_skipList.Count})");
 			var connectedAt = Stopwatch.StartNew();
 			_lastSentEventId = _eventReplicationState.LastEventIdFromMe;
@@ -317,7 +346,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			async Task Reader()
 			{
 				#region HELLO
-				var magicBytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+				var magicBytes = await ReceiveWatchedAsync(wsConnection);
 				if (magicBytes == null || magicBytes.Length == 0)
 				{
 					IsOnline = false;
@@ -339,7 +368,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				#endregion
 				while (!_cts.IsCancellationRequested)
 				{
-					var bytes = await ReceiveFullMessageAsync(wsConnection, _cts.Token);
+					var bytes = await ReceiveWatchedAsync(wsConnection);
 					if (bytes == null || bytes.Length == 0)
 					{
 						IsOnline = false;
@@ -379,6 +408,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							// Whatever part of a snapshot came is dropped: the backlog that follows is the whole stream.
 							_snapshotHeader = null;
 							_snapshotChunks.Clear();
+							_awaitingSnapshot = false;
 							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
 							break;
 						case EventRejected rejected:
@@ -399,6 +429,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			// that never came (a cold client writes nothing), never reconnecting.
 			_ = reader.ContinueWith(_ => Wake(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 			_readerTask = reader;
+			var watchdog = WatchCatchUpAsync(cut);
 
 			// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
 			// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
@@ -461,6 +492,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				// stream id (total 41 bytes). See SynqraReplicationEndpointExtensions.cs for the server side.
 				var helloKind = ChooseHelloKind();
 				_helloNamedStream = helloKind == ReplicationHelloKind.SubscribeToSnapshot && _config.HelloKind == ReplicationHelloKind.UserDefaultMainStream;
+				_awaitingSnapshot = helloKind == ReplicationHelloKind.SubscribeToSnapshot;
 				var isSubscribeTo = helloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot;
 				var helloSize = isSubscribeTo ? 41 : 25;
 				var buffer = ArrayPool<byte>.Shared.Rent(helloSize);
@@ -477,9 +509,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					// Read by the master after the catch-up, so its answer marks the end of it. Sent before the send loop starts: a socket takes one send at a time.
 					await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = _catchUpRequest }, _cts.Token);
 				}
-				catch (WebSocketException ex)
+				catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 				{
-					// The socket broke before the master heard us: the reader sees it too and ends this connection.
+					// The socket broke (or was cut) before the master heard us: the reader sees it too and ends this connection.
 					EmergencyLog.Default.LogError(ex, "EventReplicationService: the HELLO could not be sent; reconnecting.");
 				}
 				finally
@@ -604,19 +636,22 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					// get events from server and apply them locally
 				}
 			}
-			catch (WebSocketException ex)
+			catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 			{
-				// The socket broke under a send: this pass is over, the next connection sends it again.
+				// The socket broke (or was cut) under a send: this pass is over, the next connection sends it again.
 				EmergencyLog.Default.LogError(ex, "EventReplicationService: a send failed; reconnecting.");
 			}
 			IsOnline = false;
+			cut.Cancel(); // ends the watchdog
 			wsConnection.Abort();
 			wsConnection.Dispose();
 			await reader; // it logged its own failure
+			await watchdog;
+			CloseAttempt(cut);
 			failures = connectedAt.Elapsed > TimeSpan.FromSeconds(30) ? 0 : failures + 1; // a connection that held a while was not the problem
 			if (!_cts.IsCancellationRequested)
 			{
-				await Task.WhenAny(Task.Delay(CalculateBackoff(failures), _cts.Token)); // a stop ends the pause, not the service with an exception
+				await PauseAsync(CalculateBackoff(failures));
 			}
 		}
 	}
@@ -784,6 +819,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			await SaveStateAsync();
 		}
 		_snapshotWatermarks[header.StreamId] = end.Watermark;
+		_awaitingSnapshot = false;
 		SnapshotsLoaded++;
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper
@@ -795,6 +831,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	{
 		if (caughtUp.RequestId == _catchUpRequest && !_isCaughtUp)
 		{
+			lock (_reconnectGate)
+			{
+				_reconnectAtOnce = false; // a ReconnectNow is answered: a later disconnect waits its pause as usual
+			}
 			_isCaughtUp = true;
 			EmergencyLog.Default.Stage($"replication: caught up after {ConnectionFrames} frames");
 			StatusChanged?.Invoke();
@@ -826,31 +866,169 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 	}
 
-	/// <summary>Opens the socket, retrying with a growing pause while the master cannot be reached; only the host's stop ends the wait.</summary>
-	async Task<ClientWebSocket> ConnectAsync()
+	/// <summary>
+	/// Opens the socket, retrying with a growing pause while the master cannot be reached; only the host's stop ends the wait.
+	/// Returns it with the attempt that opened it: cancelling that cuts the connection.
+	/// </summary>
+	async Task<(ClientWebSocket Socket, CancellationTokenSource Cut)> ConnectAsync()
 	{
-		ClientWebSocket? connected = null;
+		(ClientWebSocket Socket, CancellationTokenSource Cut)? connected = null;
 		for (var attempt = 0; connected is null; attempt++)
 		{
 			var socket = new ClientWebSocket();
 			_config.ConfigureSocket?.Invoke(socket.Options);
+			var cut = OpenAttempt();
 			try
 			{
-				await socket.ConnectAsync(_config.ResolveEndpointUri(), _cts.Token);
+				await socket.ConnectAsync(_config.ResolveEndpointUri(), cut.Token);
 				_wsConnection = socket;
 				_networkSerializationService.Reinitialize();
 				// Not online yet: that is declared only after the HELLO handshake completes,
 				// when the master is guaranteed to have registered this node for broadcasts.
-				connected = socket;
+				connected = (socket, cut);
 			}
-			catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException)
+			catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException || ex is OperationCanceledException && !_cts.IsCancellationRequested)
 			{
 				socket.Dispose();
+				CloseAttempt(cut);
 				EmergencyLog.Default.LogWarning(ex, $"EventReplicationService: connect attempt {attempt} failed: {ex.Message}");
-				await Task.Delay(CalculateBackoff(attempt), _cts.Token);
+				await PauseAsync(CalculateBackoff(attempt));
+				_cts.Token.ThrowIfCancellationRequested(); // the host's stop ends the service here, as it always did
 			}
 		}
-		return connected;
+		return connected.Value;
+	}
+
+	/// <summary>Starts a connect attempt that <see cref="ReconnectNow"/> can cut short, and its connection's watchdog clock.</summary>
+	CancellationTokenSource OpenAttempt()
+	{
+		var attempt = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+		_cutBy = null;
+		Volatile.Write(ref _waitingSince, Stopwatch.GetTimestamp());
+		lock (_reconnectGate)
+		{
+			_attempt = attempt;
+		}
+		return attempt;
+	}
+
+	/// <summary>Ends an attempt or its connection: out of ReconnectNow's reach first, then disposed.</summary>
+	void CloseAttempt(CancellationTokenSource attempt)
+	{
+		lock (_reconnectGate)
+		{
+			if (_attempt == attempt)
+			{
+				_attempt = null;
+			}
+		}
+		attempt.Dispose();
+	}
+
+	/// <summary>Cuts a connect attempt or a connection short, naming who did, so its end reads as expected.</summary>
+	void CutConnection(CancellationTokenSource attempt, string by)
+	{
+		_cutBy ??= by;
+		attempt.Cancel();
+	}
+
+	/// <inheritdoc />
+	public void ReconnectNow()
+	{
+		if (!(IsOnline && IsCaughtUp))
+		{
+			EmergencyLog.Default.Stage($"replication: reconnect requested (online: {IsOnline}, frames {ConnectionFrames})");
+			// Cancelled under the gate: CloseAttempt takes the gate before it disposes, so nothing cancelled here is disposed yet.
+			lock (_reconnectGate)
+			{
+				_reconnectAtOnce = true;
+				_pause?.Cancel();
+				if (_attempt is { } attempt)
+				{
+					CutConnection(attempt, nameof(ReconnectNow));
+				}
+			}
+		}
+	}
+
+	/// <summary>Waits before the next connect attempt, announcing when it is due; a <see cref="ReconnectNow"/> or the host's stop ends the wait.</summary>
+	async Task PauseAsync(TimeSpan delay)
+	{
+		using var pause = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+		bool atOnce;
+		lock (_reconnectGate)
+		{
+			atOnce = _reconnectAtOnce;
+			_reconnectAtOnce = false;
+			if (!atOnce)
+			{
+				_pause = pause;
+			}
+		}
+		if (atOnce)
+		{
+			EmergencyLog.Default.Stage("replication: reconnecting at once");
+		}
+		else
+		{
+			AnnounceNextAttempt(DateTimeOffset.UtcNow + delay);
+			await Task.WhenAny(Task.Delay(delay, pause.Token)); // a cut-short pause ends without an exception
+			lock (_reconnectGate)
+			{
+				_pause = null;
+				_reconnectAtOnce = false; // the request that cut this pause short is answered by the attempt that follows
+			}
+			AnnounceNextAttempt(null);
+		}
+	}
+
+	void AnnounceNextAttempt(DateTimeOffset? at)
+	{
+		lock (_reconnectGate)
+		{
+			_nextAttemptAt = at;
+		}
+		StatusChanged?.Invoke();
+	}
+
+	/// <summary>Receives the next frame, telling the catch-up watchdog how long this connection has been waiting for it.</summary>
+	async Task<byte[]?> ReceiveWatchedAsync(WebSocket ws)
+	{
+		Volatile.Write(ref _waitingSince, Stopwatch.GetTimestamp());
+		var bytes = await ReceiveFullMessageAsync(ws, _cts.Token);
+		Volatile.Write(ref _waitingSince, 0); // handling a frame is not silence: a slow local store never cuts the connection
+		return bytes;
+	}
+
+	/// <summary>
+	/// Until the master answers this connection's catch-up probe, a silence of <see cref="EventReplicationConfig.CatchUpTimeout"/>
+	/// cuts the connection, and the next one resumes from the watermark: a master stuck in its backlog read kept a client
+	/// "syncing" forever (prod: 606 frames, then nothing, and no CaughtUp).
+	/// </summary>
+	async Task WatchCatchUpAsync(CancellationTokenSource cut)
+	{
+		var timeout = _config.CatchUpTimeout;
+		var watching = timeout > TimeSpan.Zero;
+		while (watching && !cut.IsCancellationRequested && !_isCaughtUp)
+		{
+			var since = Volatile.Read(ref _waitingSince);
+			var silence = since == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(since);
+			if (silence >= timeout)
+			{
+				EmergencyLog.Default.LogError($"EventReplicationService: no frame for {silence.TotalSeconds:F0} s and no CaughtUp after {ConnectionFrames} frames (online: {IsOnline}); the connection is taken for dead and opened again from watermark {ServerWatermark}.");
+				if (_awaitingSnapshot && _snapshotHeader is null && ++_snapshotsCutShort >= 2)
+				{
+					_snapshotRefused = true; // a snapshot the master cannot cut in time would cut every connection: this run replays
+				}
+				CutConnection(cut, "catch-up watchdog");
+				watching = false;
+			}
+			else
+			{
+				var wait = timeout - silence;
+				await Task.WhenAny(Task.Delay(wait < TimeSpan.FromHours(1) ? wait : TimeSpan.FromHours(1), cut.Token)); // the connection's end ends the wait
+			}
+		}
 	}
 
 	/// <summary>
@@ -867,6 +1045,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			EmergencyLog.Default.LogDebug(ex, "EventReplicationService: the reader stopped with the service.");
 		}
+		catch (Exception ex) when (_cutBy is { } by && ex is WebSocketException or OperationCanceledException)
+		{
+			EmergencyLog.Default.LogInformation(ex, $"EventReplicationService: the reader stopped as the connection was cut by the {by}; reconnecting.");
+		}
 		catch (Exception ex)
 		{
 			// Tolerable: the next connection resumes from the persisted cursor. A frame that fails every time shows as repeated errors.
@@ -879,8 +1061,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		}
 	}
 
-	/// <summary>The pause before connecting again: half a second, doubling with each failure in a row, at most half a minute.</summary>
-	TimeSpan CalculateBackoff(int failures) => TimeSpan.FromMilliseconds(Math.Min(30_000, 500 * (1 << Math.Min(failures, 6))));
+	/// <summary>The pause before connecting again: half a second, doubling with each failure in a row, at most eight seconds.</summary>
+	internal TimeSpan CalculateBackoff(int failures) => TimeSpan.FromMilliseconds(Math.Min(8_000, 500 * (1 << Math.Min(failures, 6))));
 
 	/// <inheritdoc />
 	/// <remarks>

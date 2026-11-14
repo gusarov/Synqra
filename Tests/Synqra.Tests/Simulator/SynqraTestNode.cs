@@ -137,6 +137,20 @@ internal class SynqraTestNode
 	/// <summary>Whether a cold client asks for its stream's state (it does with a <see cref="ReplicationHelloKind.SubscribeTo"/> kind, which names the stream).</summary>
 	public bool RequestSnapshot { get; init; } = true;
 
+	/// <summary>A client's catch-up watchdog; null keeps the configured default.</summary>
+	public TimeSpan? CatchUpTimeout { get; init; }
+
+	/// <summary>Simulator master only: false makes it a master stuck in its catch-up, which reads a client's probe and never answers it.</summary>
+	public bool AnswersCatchUp { get; set; } = true;
+
+	/// <summary>Simulator master only: while true it answers every connect with 503, as a host that is down behind its proxy.</summary>
+	public bool RefusesConnections { get; set; }
+
+	int _connections;
+
+	/// <summary>Simulator master only: the replication sockets it accepted.</summary>
+	public int Connections => Volatile.Read(ref _connections);
+
 	/// <summary>A Mongo-backed master's store: one instance serves every stream, so a caller enters this node's stream around its use.</summary>
 	IObjectStore? _masterStore;
 
@@ -405,12 +419,24 @@ internal class SynqraTestNode
 
 			app.MapControllers();
 			app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+			app.Use(next => async ctx =>
+			{
+				if (RefusesConnections)
+				{
+					ctx.Response.StatusCode = 503;
+				}
+				else
+				{
+					await next(ctx);
+				}
+			});
 			ConcurrentBag<WebSocket> _sockets = new ConcurrentBag<WebSocket>();
 			app.Map("/api/synqra/ws", async ctx =>
 			{
 				var networkSerializationService = app.Services.GetRequiredService<INetworkSerializationService>();
 				if (!ctx.WebSockets.IsWebSocketRequest) { ctx.Response.StatusCode = 400; return; }
 				using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
+				Interlocked.Increment(ref _connections);
 
 				// Hand-rolled duplicate of SynqraReplicationEndpointExtensions.cs's HELLO/
 				// broadcast protocol, kept in sync by hand — Synqra.Replication.AspNetCore
@@ -501,15 +527,18 @@ internal class SynqraTestNode
 						}
 						if (operation is CatchUpRequest catchUp)
 						{
-							// read after the backlog above, as the real endpoint does; under the gate, which every broadcast to this socket takes
-							await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
-							try
+							if (AnswersCatchUp)
 							{
-								await socket.SendOperationAsync(networkSerializationService, new CaughtUp { RequestId = catchUp.RequestId }, ctx.RequestAborted);
-							}
-							finally
-							{
-								_semaphoreSlim.Release();
+								// read after the backlog above, as the real endpoint does; under the gate, which every broadcast to this socket takes
+								await _semaphoreSlim.WaitAsync(ctx.RequestAborted);
+								try
+								{
+									await socket.SendOperationAsync(networkSerializationService, new CaughtUp { RequestId = catchUp.RequestId }, ctx.RequestAborted);
+								}
+								finally
+								{
+									_semaphoreSlim.Release();
+								}
 							}
 							continue;
 						}
@@ -668,6 +697,7 @@ internal class SynqraTestNode
 		public override ReplicationHelloKind HelloKind => _node.HelloKind;
 		public override Guid? InitialSubscribeStreamId => _node.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot ? _node.StreamId : null;
 		public override bool RequestSnapshot => _node.RequestSnapshot;
+		public override TimeSpan CatchUpTimeout => _node.CatchUpTimeout ?? base.CatchUpTimeout;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}
