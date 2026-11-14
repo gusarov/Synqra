@@ -865,8 +865,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>
 	/// Takes back, in the local log, an own event the master refused: the undo is written after it as a local undo (never sent)
-	/// and folded in by the keeper like a received event. The whole log is read: a refusal is rare, and the undo must see every
-	/// event of the master's that already came for the same state.
+	/// and folded in by the keeper like a received event. The whole log is read (a refusal is rare, and the undo must see every
+	/// event of the master's that already came for the same state), then read again from where that read ended until a read finds
+	/// nothing new: a local write made meanwhile decides its state, and the undo leaves that state alone. The undo is computed and
+	/// appended as one batch in the turn that last read: the log stamps its place before it yields, so in the browser nothing is
+	/// written between them. A host with threads keeps a window of that one call.
 	/// </summary>
 	async Task UndoAsync(Guid refusedId)
 	{
@@ -874,6 +877,17 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
 		{
 			log.Add(ev);
+		}
+		var stream = StreamKey != default ? StreamKey : _lastSentStream;
+		var grew = stream != default && log.Count > 0;
+		while (grew)
+		{
+			var read = log.Count;
+			await foreach (var ev in _storage.ReadStreamAsync(stream, log[^1].SequenceId, _cts.Token))
+			{
+				log.Add(ev);
+			}
+			grew = log.Count > read;
 		}
 		var undo = _refused.Undo(log, refusedId);
 		if (undo.Count > 0 && !_ended)
@@ -888,8 +902,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						_skipList.AddLast(ev.EventId);
 					}
 				}
-				await _storage.AppendAsync(ev);
 			}
+			await _storage.AppendBatchAsync(undo);
 			EmergencyLog.Default.LogWarning($"EventReplicationService: {undo.Count} local undo event(s) take back refused event {refusedId}.");
 			EventsReceived?.Invoke(); // the owner folds the undo in through the keeper
 		}

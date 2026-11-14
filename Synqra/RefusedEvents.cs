@@ -52,7 +52,7 @@ public sealed class RefusedEvents
 				value = found ? earlier.NewValue : earlier.OldValue;
 			}
 		}
-		var decidedLater = DecidedAfter(log, at, ev => ev is ComponentPropertyChangedEvent later && Changes(later, change.ComponentId, change.PropertyName) || Removes(ev, change.ComponentId, change.TargetId));
+		var decidedLater = IsDecidedAfter(log, at, ev => ev is ComponentPropertyChangedEvent later && Changes(later, change.ComponentId, change.PropertyName) || Removes(ev, change.ComponentId, change.TargetId));
 		return decidedLater || Equals(value, change.NewValue)
 			? []
 			: [new ComponentPropertyChangedEvent
@@ -71,7 +71,7 @@ public sealed class RefusedEvents
 	}
 
 	IReadOnlyList<Event> UndoAdd(IReadOnlyList<Event> log, int at, ComponentAddedEvent added)
-		=> DecidedAfter(log, at, ev => Removes(ev, added.ComponentId, added.TargetId))
+		=> IsDecidedAfter(log, at, ev => Removes(ev, added.ComponentId, added.TargetId))
 			? []
 			: [new ComponentDeletedEvent
 			{
@@ -88,7 +88,7 @@ public sealed class RefusedEvents
 	IReadOnlyList<Event> UndoDelete(IReadOnlyList<Event> log, int at, ComponentDeletedEvent deleted)
 	{
 		var undo = new List<Event>();
-		var decidedLater = DecidedAfter(log, at, ev => ev is ComponentAddedEvent again && again.ComponentId == deleted.ComponentId || Removes(ev, deleted.TargetId, deleted.TargetId));
+		var decidedLater = IsDecidedAfter(log, at, ev => ev is ComponentAddedEvent again && again.ComponentId == deleted.ComponentId || Removes(ev, deleted.TargetId, deleted.TargetId));
 		var added = -1;
 		for (var i = at - 1; i >= 0 && added < 0 && !decidedLater; i--)
 		{
@@ -136,7 +136,7 @@ public sealed class RefusedEvents
 	}
 
 	/// <summary>Whether an event after the refused one, which the master did not refuse, decides the same state.</summary>
-	bool DecidedAfter(IReadOnlyList<Event> log, int at, Func<Event, bool> decides)
+	bool IsDecidedAfter(IReadOnlyList<Event> log, int at, Func<Event, bool> decides)
 	{
 		var decided = false;
 		for (var i = at + 1; i < log.Count && !decided; i++)

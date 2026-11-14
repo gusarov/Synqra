@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Synqra.AppendStorage;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -11,7 +12,7 @@ namespace Synqra.Tests.Syncronization;
 
 /// <summary>
 /// A client hears the master's answer to each own event: stored, or refused with its reason. A refused event's local effect
-/// is undone in the client's own log and never sent; a failure to store is answered as a refusal, never left silent.
+/// is undone in the client's own log and never sent; a failure to apply is answered as a refusal, never left silent (a failure to store is resent, see Synqra#205).
 /// </summary>
 internal class WriteVerdictSyncronizationTests : BaseTest
 {
@@ -65,7 +66,7 @@ internal class WriteVerdictSyncronizationTests : BaseTest
 	}
 
 	[Test]
-	public async Task A_failure_to_store_is_answered_as_a_refusal()
+	public async Task A_failure_to_apply_is_answered_as_a_refusal()
 	{
 		var streamId = Guid.NewGuid();
 		var failing = new RefusingProjection(ev => new IOException("the store is down"));
@@ -79,11 +80,11 @@ internal class WriteVerdictSyncronizationTests : BaseTest
 		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "not stored" });
 		var own = await EventsAsync(nodeA.Events);
 
-		await WaitUntilAsync(() => own.All(ev => verdicts.ContainsKey(ev.EventId)), "the failure is answered, not left silent");
+		await WaitUntilAsync(() => own.All(ev => verdicts.ContainsKey(ev.EventId)), "the apply failure is answered, not left silent");
 		var refusal = verdicts[own.First(ev => ev is ComponentAddedEvent).EventId].Refusal;
-		await Assert.That(refusal).Contains("could not store");
+		await Assert.That(refusal).Contains("could not apply");
 		await Assert.That(refusal).DoesNotContain("the store is down").Because("the failure's own words stay on the server");
-		await WaitUntilAsync(() => !nodeA.StoreContext.GetCollection<SampleTaskModel>().Any(), "the write that was not stored is gone from the client");
+		await WaitUntilAsync(() => !nodeA.StoreContext.GetCollection<SampleTaskModel>().Any(), "the write the master could not apply is gone from the client");
 	}
 
 	/// <summary>
@@ -122,6 +123,99 @@ internal class WriteVerdictSyncronizationTests : BaseTest
 		await Assert.That(stranded.All(ev => verdicts[ev.EventId].Refusal is { Length: > 0 })).IsTrue();
 		await WaitUntilAsync(() => !nextRun.StoreContext.GetCollection<SampleTaskModel>().Any(), "the refused add is gone from the next run's store");
 		await Assert.That((await EventsAsync(nextRun.Events)).Any(ev => ev.IsLocalUndo)).IsTrue();
+	}
+
+	/// <summary>
+	/// The user changes the same field again while the undo of their refused change reads the log. That later write is stored by the
+	/// master, so the client must end on it: an undo computed from the read alone and appended after the write put the old value
+	/// back over it, and the client and the master stayed apart until a reload (review of Synqra#206).
+	/// </summary>
+	[Test]
+	public async Task A_write_made_while_the_undo_reads_the_log_is_not_undone()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IInboundEventGuard>(new ValueGuard("refused")), masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var log = new InterruptedLog();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(log)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		var verdicts = Listen(nodeA);
+		await WaitForOnlineAsync(nodeA);
+		var task = new SampleTaskModel { Subject = "first" };
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(task);
+		var added = await EventsAsync(nodeA.Events);
+		await WaitUntilAsync(() => added.All(ev => verdicts.ContainsKey(ev.EventId)), "the add is stored");
+
+		log.Interrupt(() => task.Subject = "later"); // the next whole-log read, the undo's, lets the user write in its middle
+		task.Subject = "refused";
+
+		await WaitUntilAsync(() => verdicts.Values.Any(verdict => verdict.Refusal is { Length: > 0 }), "the change is refused");
+		await WaitUntilAsync(() => log.Interrupted, "the user wrote while the undo read the log");
+		var all = await EventsAsync(nodeA.Events);
+		await WaitUntilAsync(() => all.Where(ev => !ev.IsLocalUndo).All(ev => verdicts.ContainsKey(ev.EventId)), "the later write is answered too");
+		await Task.Delay(500); // the keeper folds what the log holds
+		await Assert.That(nodeA.StoreContext.GetCollection<SampleTaskModel>().Single().Subject).IsEqualTo("later").Because("the master stored the later write; the undo must not take it back");
+	}
+
+	/// <summary>Refuses a change of any property to one value.</summary>
+	sealed class ValueGuard(string refused) : IInboundEventGuard
+	{
+		public ValueTask<string?> RefuseAsync(Event ev, CancellationToken cancellationToken = default)
+			=> ValueTask.FromResult(ev is ComponentPropertyChangedEvent { NewValue: var value } && Equals(value?.ToString(), refused) ? $"'{refused}' is refused" : null);
+	}
+
+	/// <summary>An in-memory local log whose next whole read runs an action after taking what it returns: a write made during that read.</summary>
+	sealed class InterruptedLog : IAppendStorage<Event, (Guid, Guid)>
+	{
+		readonly SortedDictionary<(Guid, Guid), Event> _events = new(Comparer<(Guid, Guid)>.Create((a, b) => a.Item1.CompareBigEndian(b.Item1) is var first && first != 0 ? first : a.Item2.CompareBigEndian(b.Item2)));
+		Action? _interruption;
+
+		public bool Interrupted { get; private set; }
+
+		public void Interrupt(Action interruption) => _interruption = interruption;
+
+		public Task AppendAsync(Event item, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				_events.Add((item.StreamId, item.SequenceId), item);
+			}
+			return Task.CompletedTask;
+		}
+
+		public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				return Task.FromResult(_events[key]);
+			}
+		}
+
+		public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			List<Event> after;
+			lock (_events)
+			{
+				after = [.. _events.Where(e => from == default || _events.Comparer.Compare(e.Key, from) > 0).Select(e => e.Value)];
+			}
+			var interruption = from == default ? Interlocked.Exchange(ref _interruption, null) : null;
+			if (interruption is not null)
+			{
+				interruption();
+				Interrupted = true;
+			}
+			foreach (var ev in after)
+			{
+				await Task.Yield();
+				yield return ev;
+			}
+		}
+
+		public void Dispose()
+		{
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 
 	const string LogFileKey = "Storage:JsonLinesStorage:FileName";

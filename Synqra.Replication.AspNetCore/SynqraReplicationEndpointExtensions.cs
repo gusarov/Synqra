@@ -290,6 +290,14 @@ public static class SynqraReplicationEndpointExtensions
 						logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", ev.EventId, connectionStream);
 						rejected = new EventRejected { EventId = ev.EventId, Reason = refusal.Message };
 					}
+					catch (Exception failure) when (failure is not OperationCanceledException)
+					{
+						// The projection could not take it at all: refused like a projection's refusal, or the sender hears nothing, a later
+						// ack moves its cursor past it and the write is lost. The reason names the failure's type only, never its message.
+						// A failure to store is not this: StoreAsync ends the connection and the resend is stored.
+						logger?.LogWarning(failure, "Synqra replication: event {EventId} on stream {Stream} failed to apply; refused, and the connection continues.", ev.EventId, connectionStream);
+						rejected = new EventRejected { EventId = ev.EventId, Reason = $"The server could not apply it ({failure.GetType().Name})." };
+					}
 				}
 				return rejected;
 			}

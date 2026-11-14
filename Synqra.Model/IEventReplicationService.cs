@@ -40,8 +40,8 @@ public interface IEventReplicationService
 
 	/// <summary>
 	/// Raised when the master answers one of this client's own events: stored, or refused for good with its reason. A refused
-	/// event's local effect is undone first (<see cref="RefusedEvents"/>), so a listener that reads the store sees the master's
-	/// state. On the replication's own thread. A host with no master never raises it: its writes are stored when submitted.
+	/// event's local undo is in the log first (<see cref="RefusedEvents"/>); the store folds it in through 
+	/// <see cref="EventsReceived"/>, so a listener sees the master's state soon after the verdict, not necessarily on it. On the replication's own thread. A host with no master never raises it: its writes are stored when submitted.
 	/// </summary>
 	event Action<EventVerdict>? EventSettled
 	{
