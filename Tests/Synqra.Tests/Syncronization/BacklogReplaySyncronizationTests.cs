@@ -1,3 +1,4 @@
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -266,6 +267,46 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await Task.Delay(500); // nothing more may follow
 
 		await Assert.That(FramesReceived(nodeD)).IsEqualTo(total - heldByC);
+	}
+
+	/// <summary>
+	/// A page left open across a deploy runs the old build; the new one writes a model the old one has no type id for. Its frame
+	/// killed the reader on every connect, and the page looped on "Connecting" (prod 2026-11-14: KeyNotFoundException 159, an
+	/// interned string read out of place after the unknown type). The frame is stepped over and the frames after it still land;
+	/// the cursor stays before it, so the next run, on a build that knows the type, is sent it.
+	/// </summary>
+	[Test]
+	public async Task Should_step_over_a_frame_of_an_unknown_type_and_send_it_to_the_next_run()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		var remembered = new RecordingStateStore();
+		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port, RequestSnapshot = false, UnmappedSbxTypeIds = new HashSet<int> { 100 } };
+		await nodeC.Started;
+		await WaitForOnlineAsync(nodeC);
+		var replicationC = nodeC.Host.Services.GetRequiredService<EventReplicationService>();
+		await WaitUntilAsync(() => Task.FromResult(replicationC.IsCaughtUp), "C is caught up");
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "before" });
+		nodeA.StoreContext.GetCollection<SamplePublicModel>().Add(new SamplePublicModel { Name = "of a type C does not know" });
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "after" });
+
+		var tasksC = nodeC.StoreContext.GetCollection<SampleTaskModel>();
+		await WaitUntilAsync(() => Task.FromResult(tasksC.Count == 2), "C holds the frames before and after the unknown one");
+		await Assert.That(replicationC.UnreadableFrames).IsGreaterThan(0);
+		await Assert.That(replicationC.IsOnline && replicationC.IsCaughtUp).IsTrue().Because("the unknown frame does not end the connection");
+		var logC = await EndRunAsync(nodeC);
+
+		var nodeD = NextRun(nodeMaster, streamId, logC, remembered.Saved); // C's next run, on a build that knows the type
+		await nodeD.Started;
+		await WaitForOnlineAsync(nodeD);
+		var publicD = nodeD.StoreContext.GetCollection<SamplePublicModel>();
+		await WaitUntilAsync(() => Task.FromResult(publicD.Count == 1), "D is sent the event C could not read");
+		await Assert.That(nodeD.StoreContext.GetCollection<SampleTaskModel>().Count).IsEqualTo(2);
 	}
 
 	/// <summary>The master's event count once two reads half a second apart agree: the writes in flight have landed.</summary>

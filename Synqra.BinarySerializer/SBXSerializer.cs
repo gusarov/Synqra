@@ -906,6 +906,10 @@ public class SbxSerializer : ISbxSerializer
 			type = typeInfo.type;  // duplicate?
 			schemaVersion = typeInfo.schemaVersion;
 		}
+		else if ((int)typeId > 0)
+		{
+			throw new SbxUnknownTypeException((int)typeId); // read as the requested type, the rest of the frame came out as garbage
+		}
 
 		if (type.IsPrimitive)
 		{
@@ -1428,6 +1432,7 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.DoubleFloating => typeof(double),
 			TypeId.Boolean => typeof(bool),
 			TypeId.Bytes => typeof(byte[]),
+			> 0 => throw new SbxUnknownTypeException((int)typeId),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}

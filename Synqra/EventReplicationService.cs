@@ -121,6 +121,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <summary>Event frames this run received from the server, known ones included: what a resumed client was sent again.</summary>
 	public long FramesReceived { get; private set; }
 
+	/// <inheritdoc />
+	public long UnreadableFrames { get; private set; }
+
+	// The unknown type ids this run has warned of: one warning each, however many frames carry them.
+	readonly HashSet<int> _unknownTypeIds = new HashSet<int>();
+
 	/// <summary>Event frames this run wrote to the server: a client never echoes what the master sent it.</summary>
 	public long FramesSent { get; private set; }
 
@@ -381,9 +387,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						IsOnline = false;
 						break;
 					}
-					var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+					var operation = ReadFrame(bytes);
 					switch (operation)
 					{
+						case null:
+							break; // unreadable here, stepped over: see ReadFrame
 						case SubscriptionState state:
 							// Master's authoritative snapshot of the streams this connection is now
 							// subscribed to. Lets the client detect an unexpected default and drive its
@@ -478,9 +486,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
 					}
 				}
-				if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				if (UnreadableFrames == 0 && resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 				{
-					_eventReplicationState.ServerWatermark = resumePoint;
+					_eventReplicationState.ServerWatermark = resumePoint; // held before a frame this build could not read: a newer build is sent it
 					await SaveStateAsync();
 				}
 				if (!known)
@@ -842,6 +850,35 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		EmergencyLog.Default.Stage($"replication: snapshot {end.SnapshotId} stored, {end.RecordCount} records in {end.ChunkCount} chunks; the backlog after {end.Watermark} follows");
 		EventsReceived?.Invoke(); // the owner folds it in through the keeper
 		Wake();
+	}
+
+	/// <summary>
+	/// A frame as its operation, or null when it names a type this build does not know (a newer server's, for a page left open
+	/// across a deploy). Such a frame cannot be read past, so it is stepped over whole, one warning per type: it killed the reader on
+	/// every connect, and the page reconnected forever (prod 2026-11-14). The watermark stops before the first one for the rest of
+	/// the run, so a reload on the newer build is sent it; the frames after it still land here.
+	/// </summary>
+	TransportOperation? ReadFrame(byte[] bytes)
+	{
+		TransportOperation? operation;
+		try
+		{
+			operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+		}
+		catch (SbxUnknownTypeException unknown)
+		{
+			operation = null;
+			UnreadableFrames++;
+			if (_unknownTypeIds.Add(unknown.TypeId))
+			{
+				EmergencyLog.Default.LogWarning(unknown, $"EventReplicationService: a frame of {bytes.Length} bytes names type id {unknown.TypeId}, which this build does not know (a newer server's); it is stepped over, the watermark stays at {ServerWatermark} and a reload on the newer build is sent it.");
+			}
+			if (UnreadableFrames == 1)
+			{
+				StatusChanged?.Invoke();
+			}
+		}
+		return operation;
 	}
 
 	/// <summary>The master has sent what it held for this connection: what follows is live. An answer to an earlier connection's probe is not.</summary>

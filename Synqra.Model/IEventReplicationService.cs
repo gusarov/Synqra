@@ -16,6 +16,13 @@ public interface IEventReplicationService
 	long ConnectionFrames => 0;
 
 	/// <summary>
+	/// Frames this run could not read: they carry a type this build does not know, as a newer server's do for a page left open
+	/// across a deploy. Each is stepped over, and the watermark stays before the first, so a reload on the newer build is sent
+	/// them. Above zero, a host should offer that reload. Its first change raises <see cref="StatusChanged"/>.
+	/// </summary>
+	long UnreadableFrames => 0;
+
+	/// <summary>
 	/// The master's position this client has reached: the resume point of the last frame it took (a v7 sequence, so it also tells
 	/// how far into the stream's history a replay is). Default before the first.
 	/// </summary>

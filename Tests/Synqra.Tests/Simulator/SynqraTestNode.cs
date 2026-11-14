@@ -149,6 +149,9 @@ internal class SynqraTestNode
 	/// <summary>How long a client's connect attempt may take; null keeps the configured default.</summary>
 	public TimeSpan? ConnectTimeout { get; init; }
 
+	/// <summary>SBX type ids this node's serializer does not map, as a build from before those models: a frame carrying one is unreadable to it.</summary>
+	public IReadOnlySet<int> UnmappedSbxTypeIds { get; init; } = new HashSet<int>();
+
 	/// <summary>Simulator master only: while true it holds every connect unanswered, as a proxy holding the upgrade of a master still starting.</summary>
 	public bool HangsConnects { get; set; }
 
@@ -345,13 +348,20 @@ internal class SynqraTestNode
 			typeof(DemoModel),
 			typeof(MyPocoTask),
 			typeof(SampleTaskModel),
+			typeof(SamplePublicModel),
 		]);
 		builder.Services.AddEmergencyLogger();
 
 		builder.Services.AddSbxSerializer(ser =>
 		{
-			ser.Map(100, typeof(SamplePublicModel));
-			ser.Map(101, typeof(SampleTaskModel));
+			if (!UnmappedSbxTypeIds.Contains(100))
+			{
+				ser.Map(100, typeof(SamplePublicModel));
+			}
+			if (!UnmappedSbxTypeIds.Contains(101))
+			{
+				ser.Map(101, typeof(SampleTaskModel));
+			}
 		});
 
 		builder.Services.ConfigureHttpJsonOptions(o =>
