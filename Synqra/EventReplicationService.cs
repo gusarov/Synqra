@@ -77,6 +77,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	long _waitingSince;
 	// Whether this connection's HELLO asked for a snapshot whose end or decline has not arrived yet.
 	volatile bool _awaitingSnapshot;
+	// Since when this connection's liveness probe waits for an answer (a Stopwatch timestamp), or 0 when none does: any frame answers it.
+	long _probeSince;
+	// Set when a probe is asked for: the send loop writes it before its next read of the log.
+	volatile bool _probeToSend;
+	// Completed to wake the watchdog early: a probe asked for outside it is timed from then, not from the watchdog's next look.
+	volatile TaskCompletionSource _watchdogNudge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
 	/// <inheritdoc />
 	public DateTimeOffset? NextAttemptAt
@@ -114,6 +120,34 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 	/// <summary>Event frames this run received from the server, known ones included: what a resumed client was sent again.</summary>
 	public long FramesReceived { get; private set; }
+
+	/// <inheritdoc />
+	public long UnreadableFrames { get; private set; }
+
+	// Whether a local write may not have reached the master yet: set by each local write and at each connection's end, cleared
+	// when a send pass that saw every write so far ends. With an unacknowledged send (_lastSentEventId ahead of the persisted cursor) it
+	// makes HasUnconfirmedWrites.
+	volatile bool _unsent = true;
+	// Local writes this run: a send pass clears _unsent only when none came while it read the log.
+	int _writes;
+	bool _reportedUnconfirmed = true;
+
+	// The build and reload demand of this run's first ServerVersion (or the configured ClientBuild): a later one that differs asks for a reload.
+	bool _versionKnown;
+	string? _loadedBuild;
+	Guid _loadedEpoch;
+
+	/// <inheritdoc />
+	public string? ServerBuild { get; private set; }
+
+	/// <inheritdoc />
+	public bool ReloadRequired { get; private set; }
+
+	/// <inheritdoc />
+	public bool HasUnconfirmedWrites => _unsent || _lastSentEventId != _eventReplicationState.LastEventIdFromMe;
+
+	// The unknown type ids this run has warned of: one warning each, however many frames carry them.
+	readonly HashSet<int> _unknownTypeIds = new HashSet<int>();
 
 	/// <summary>Event frames this run wrote to the server: a client never echoes what the master sent it.</summary>
 	public long FramesSent { get; private set; }
@@ -339,6 +373,8 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_lastSentSequence = default;
 			ConnectionFrames = 0;
 			_catchUpRequest = Guid.CreateVersion7();
+			Volatile.Write(ref _probeSince, 0);
+			_probeToSend = false;
 			_snapshotHeader = null; // a snapshot cut short with its connection is asked for again by the next one
 			_snapshotChunks.Clear();
 
@@ -373,9 +409,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						IsOnline = false;
 						break;
 					}
-					var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+					var operation = ReadFrame(bytes);
 					switch (operation)
 					{
+						case null:
+							break; // unreadable here, stepped over: see ReadFrame
 						case SubscriptionState state:
 							// Master's authoritative snapshot of the streams this connection is now
 							// subscribed to. Lets the client detect an unexpected default and drive its
@@ -390,6 +428,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							// Acks arrive in the order the events were sent, so the latest one is the cursor.
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
+							NoteWrites();
 							break;
 						case SnapshotBegin begin:
 							ReceiveSnapshotBegin(begin);
@@ -415,6 +454,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
 							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
 							await SaveStateAsync();
+							NoteWrites();
+							break;
+						case ServerVersion serverVersion:
+							ReceiveServerVersion(serverVersion);
 							break;
 						default:
 							EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
@@ -428,7 +471,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			// that never came (a cold client writes nothing), never reconnecting.
 			_ = reader.ContinueWith(_ => Wake(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 			_readerTask = reader;
-			var watchdog = WatchCatchUpAsync(cut);
+			var watchdog = WatchConnectionAsync(cut);
 
 			// A known id (own, or resent as backlog) is not appended again: the local log keeps one record per event. The
 			// resume point on the envelope is the cursor; it only ever moves forward, and it is persisted as it moves, after the
@@ -470,9 +513,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
 					}
 				}
-				if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				if (UnreadableFrames == 0 && resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 				{
-					_eventReplicationState.ServerWatermark = resumePoint;
+					_eventReplicationState.ServerWatermark = resumePoint; // held before a frame this build could not read: a newer build is sent it
 					await SaveStateAsync();
 				}
 				if (!known)
@@ -507,6 +550,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 					// Read by the master after the catch-up, so its answer marks the end of it. Sent before the send loop starts: a socket takes one send at a time.
 					await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = _catchUpRequest }, _cts.Token);
+					await wsConnection.SendOperationAsync(_networkSerializationService, new VersionRequest { NodeId = _eventReplicationState.MyNodeId, ClientBuild = _config.ClientBuild }, _cts.Token);
 				}
 				catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 				{
@@ -535,12 +579,19 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					{
 						break;
 					}
+					if (_probeToSend)
+					{
+						_probeToSend = false;
+						// Answered with a CaughtUp of another id, which the reader steps over: any frame tells the watchdog the master is there.
+						await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = Guid.CreateVersion7() }, _cts.Token);
+					}
 					// get new events from storage and send them to server
 					// A fresh read per trigger: a storage's enumeration ends once it runs dry (IndexedDb stops at an empty
 					// page), so one enumerator kept across triggers sent nothing after the first drain. A full read, skipping
 					// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
 					// The first read of a run is a full one, walking to the last acknowledged id; once this run knows where that is in
 					// the log, a trigger reads only what follows, as the keeper does (a full read per local write cost seconds, WI 487).
+					var writesAtStart = Volatile.Read(ref _writes); // a write during this pass may come after the read: it keeps _unsent
 					var sent = _lastSentEventId;
 					var sendingStream = StreamKey != default ? StreamKey : _lastSentStream; // a client's log holds the one stream it serves
 					var incremental = _lastSentSequence != default && sendingStream != default;
@@ -615,6 +666,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 						FramesSent++;
 						_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+						NoteWrites(); // told before its ack can come, so a host sees it unconfirmed
 						Passed(ev);
 					}
 					if (!reached)
@@ -627,6 +679,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						Wake();
 					}
 					await SaveStateAsync();
+					if (Volatile.Read(ref _writes) == writesAtStart)
+					{
+						_unsent = false; // this pass read the log to its end after every write made so far
+					}
+					NoteWrites();
 					if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
 					{
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
@@ -641,6 +698,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Error : LogLevel.Information, ex, $"EventReplicationService: a send failed{CutNote}; reconnecting.");
 			}
 			IsOnline = false;
+			_unsent = true; // a pass cut short may have left writes unsent: the next connection's first pass tells
 			cut.Cancel(); // ends the watchdog
 			wsConnection.Abort();
 			wsConnection.Dispose();
@@ -681,7 +739,47 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 	*/
 
-	public void Trigger(Command command, IReadOnlyList<Event> events) => Wake();
+	public void Trigger(Command command, IReadOnlyList<Event> events)
+	{
+		Interlocked.Increment(ref _writes);
+		_unsent = true;
+		NoteWrites();
+		Wake();
+	}
+
+	/// <summary>Raises <see cref="StatusChanged"/> when <see cref="HasUnconfirmedWrites"/> changes: a host waits on it before a reload.</summary>
+	void NoteWrites()
+	{
+		var unconfirmed = HasUnconfirmedWrites;
+		if (unconfirmed != _reportedUnconfirmed)
+		{
+			_reportedUnconfirmed = unconfirmed;
+			StatusChanged?.Invoke();
+		}
+	}
+
+	/// <summary>
+	/// The master's build and reload demand. The run's first one (or the configured <see cref="EventReplicationConfig.ClientBuild"/>)
+	/// is the page's own; a later build that differs, or a reload demand raised since, asks the host to reload.
+	/// </summary>
+	void ReceiveServerVersion(ServerVersion version)
+	{
+		ServerBuild = version.Build;
+		if (!_versionKnown)
+		{
+			_versionKnown = true;
+			_loadedBuild = _config.ClientBuild ?? version.Build;
+			_loadedEpoch = version.ReloadEpoch;
+		}
+		var newerBuild = version.Build is not null && _loadedBuild is not null && version.Build != _loadedBuild;
+		var demanded = version.ReloadEpoch != default && version.ReloadEpoch != _loadedEpoch;
+		if ((newerBuild || demanded) && !ReloadRequired)
+		{
+			ReloadRequired = true;
+			EmergencyLog.Default.LogWarning($"EventReplicationService: the server asks this page to reload (its build {version.Build}, this page's {_loadedBuild}, reload demanded: {demanded}).");
+		}
+		StatusChanged?.Invoke();
+	}
 
 	/// <summary>
 	/// The HELLO kind this connection announces: the configured one, or a snapshot request when this client is fully cold (no
@@ -830,6 +928,35 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		Wake();
 	}
 
+	/// <summary>
+	/// A frame as its operation, or null when it names a type this build does not know (a newer server's, for a page left open
+	/// across a deploy). Such a frame cannot be read past, so it is stepped over whole, one warning per type: it killed the reader on
+	/// every connect, and the page reconnected forever (prod 2026-11-14). The watermark stops before the first one for the rest of
+	/// the run, so a reload on the newer build is sent it; the frames after it still land here.
+	/// </summary>
+	TransportOperation? ReadFrame(byte[] bytes)
+	{
+		TransportOperation? operation;
+		try
+		{
+			operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+		}
+		catch (SbxUnknownTypeException unknown)
+		{
+			operation = null;
+			UnreadableFrames++;
+			if (_unknownTypeIds.Add(unknown.TypeId))
+			{
+				EmergencyLog.Default.LogWarning(unknown, $"EventReplicationService: a frame of {bytes.Length} bytes names type id {unknown.TypeId}, which this build does not know (a newer server's); it is stepped over, the watermark stays at {ServerWatermark} and a reload on the newer build is sent it.");
+			}
+			if (UnreadableFrames == 1)
+			{
+				StatusChanged?.Invoke();
+			}
+		}
+		return operation;
+	}
+
 	/// <summary>The master has sent what it held for this connection: what follows is live. An answer to an earlier connection's probe is not.</summary>
 	void ReceiveCaughtUp(CaughtUp caughtUp)
 	{
@@ -882,9 +1009,14 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			var socket = new ClientWebSocket();
 			_config.ConfigureSocket?.Invoke(socket.Options);
 			var cut = OpenAttempt();
+			if (_config.ConnectTimeout > TimeSpan.Zero)
+			{
+				cut.CancelAfter(_config.ConnectTimeout); // a proxy holding the upgrade of a master still starting
+			}
 			try
 			{
 				await socket.ConnectAsync(_config.ResolveEndpointUri(), cut.Token);
+				cut.CancelAfter(Timeout.InfiniteTimeSpan); // the connection lives until it is cut
 				_wsConnection = socket;
 				_networkSerializationService.Reinitialize();
 				// Not online yet: that is declared only after the HELLO handshake completes,
@@ -893,9 +1025,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException || ex is OperationCanceledException && !_cts.IsCancellationRequested)
 			{
+				var timedOut = ex is OperationCanceledException && _cutBy is null && cut.IsCancellationRequested;
 				socket.Dispose();
 				CloseAttempt(cut);
-				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Warning : LogLevel.Information, ex, $"EventReplicationService: connect attempt {attempt} failed{CutNote}: {ex.Message}");
+				var failure = timedOut ? $"no answer within {_config.ConnectTimeout.TotalSeconds:F0} s" : ex.Message;
+				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Warning : LogLevel.Information, ex, $"EventReplicationService: connect attempt {attempt} failed{CutNote}: {failure}");
 				await PauseAsync(CalculateBackoff(attempt));
 				_cts.Token.ThrowIfCancellationRequested(); // the host's stop ends the service here, as it always did
 			}
@@ -965,8 +1099,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <remarks>
 	/// Acts only while the connection looks dead: during a pause, or not caught up with nothing heard for two seconds, counted from
 	/// the attempt's start until the HELLO reply and from the last frame after it. A master still seeding or cutting a snapshot
-	/// before its HELLO, and a catch-up still receiving, are left alone, as a caught-up connection is: a host calls this on every
-	/// tab return and network change.
+	/// before its HELLO, and a catch-up still receiving, are left alone. A caught-up connection is asked whether its master is still
+	/// there, and cut when no frame answers within <see cref="EventReplicationConfig.HeartbeatTimeout"/>: after a sleep or a network
+	/// change it may be dead without a close. A host calls this on every tab return and network change.
 	/// </remarks>
 	public void ReconnectNow()
 	{
@@ -987,6 +1122,22 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					CutConnection(attempt, nameof(ReconnectNow));
 				}
 			}
+			else if (IsCaughtUp && _attempt is not null && _config.HeartbeatTimeout > TimeSpan.Zero)
+			{
+				EmergencyLog.Default.Stage($"replication: reconnect requested while caught up; probing the connection (silent {Silence.TotalSeconds:F1} s)");
+				RequestProbe();
+				_watchdogNudge.TrySetResult(); // the probe is timed from now
+			}
+		}
+	}
+
+	/// <summary>Asks the master whether it is still there: the send loop writes a <see cref="CatchUpRequest"/>, and any frame answers it.</summary>
+	void RequestProbe()
+	{
+		if (Interlocked.CompareExchange(ref _probeSince, Stopwatch.GetTimestamp(), 0) == 0)
+		{
+			_probeToSend = true;
+			Wake();
 		}
 	}
 
@@ -1036,38 +1187,107 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		Volatile.Write(ref _waitingSince, Stopwatch.GetTimestamp());
 		var bytes = await ReceiveFullMessageAsync(ws, _cts.Token);
 		Volatile.Write(ref _waitingSince, 0); // handling a frame is not silence: a slow local store never cuts the connection
+		Volatile.Write(ref _probeSince, 0); // the master is there: a probe waiting is answered
 		return bytes;
 	}
 
 	/// <summary>
-	/// Until the master answers this connection's catch-up probe, a silence of <see cref="EventReplicationConfig.CatchUpTimeout"/>
-	/// cuts the connection, and the next one resumes from the watermark: a master stuck in its backlog read kept a client
-	/// "syncing" forever (prod: 606 frames, then nothing, and no CaughtUp).
+	/// Takes a dead connection for dead; the next one resumes from the watermark. Until the master answers this connection's
+	/// catch-up probe, a silence of <see cref="EventReplicationConfig.CatchUpTimeout"/> cuts it: a master stuck in its backlog read
+	/// kept a client "syncing" forever (prod: 606 frames, then nothing, and no CaughtUp). Once caught up, a silence of
+	/// <see cref="EventReplicationConfig.HeartbeatInterval"/> asks the master whether it is there, and no answer within
+	/// <see cref="EventReplicationConfig.HeartbeatTimeout"/> cuts it: a master gone without a close left the page online, caught up
+	/// and stale until a reload (prod 2026-11-14, a deploy).
 	/// </summary>
-	async Task WatchCatchUpAsync(CancellationTokenSource cut)
+	async Task WatchConnectionAsync(CancellationTokenSource cut)
+	{
+		var watching = true;
+		while (watching && !cut.IsCancellationRequested)
+		{
+			var nudge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+			_watchdogNudge = nudge; // before the look below: a probe asked for after it wakes this wait
+			var wait = _isCaughtUp ? WatchLiveness(cut) : WatchCatchUp(cut);
+			watching = wait > TimeSpan.Zero;
+			if (watching)
+			{
+				using var nap = CancellationTokenSource.CreateLinkedTokenSource(cut.Token);
+				await Task.WhenAny(Task.Delay(wait < TimeSpan.FromHours(1) ? wait : TimeSpan.FromHours(1), nap.Token), nudge.Task); // the connection's end ends the wait
+				nap.Cancel(); // a nudge ended it early: its timer goes now, not when it would have fired
+			}
+		}
+	}
+
+	/// <summary>Cuts a catch-up silent for <see cref="EventReplicationConfig.CatchUpTimeout"/>; returns how long to wait before looking again, zero when done.</summary>
+	TimeSpan WatchCatchUp(CancellationTokenSource cut)
 	{
 		var timeout = _config.CatchUpTimeout;
-		var watching = timeout > TimeSpan.Zero;
-		while (watching && !cut.IsCancellationRequested && !_isCaughtUp)
+		var silence = Silence;
+		TimeSpan wait;
+		if (timeout <= TimeSpan.Zero)
 		{
-			var silence = Silence;
-			if (silence >= timeout)
+			wait = _config.HeartbeatInterval > TimeSpan.Zero ? _config.HeartbeatInterval : TimeSpan.Zero; // unwatched: look again for the caught-up state, if that is watched
+		}
+		else if (silence >= timeout)
+		{
+			EmergencyLog.Default.LogError($"EventReplicationService: no frame for {silence.TotalSeconds:F0} s and no CaughtUp after {ConnectionFrames} frames (online: {IsOnline}); the connection is taken for dead and opened again from watermark {ServerWatermark}.");
+			_cutCounted = _awaitingSnapshot && _snapshotHeader is null; // counted here: the end of the pass does not count it again
+			if (_cutCounted && ++_snapshotsCutShort >= 2)
 			{
-				EmergencyLog.Default.LogError($"EventReplicationService: no frame for {silence.TotalSeconds:F0} s and no CaughtUp after {ConnectionFrames} frames (online: {IsOnline}); the connection is taken for dead and opened again from watermark {ServerWatermark}.");
-				_cutCounted = _awaitingSnapshot && _snapshotHeader is null; // counted here: the end of the pass does not count it again
-				if (_cutCounted && ++_snapshotsCutShort >= 2)
-				{
-					_snapshotRefused = true; // a snapshot the master cannot cut in time would cut every connection: this run replays
-				}
-				CutConnection(cut, "catch-up watchdog");
-				watching = false;
+				_snapshotRefused = true; // a snapshot the master cannot cut in time would cut every connection: this run replays
+			}
+			CutConnection(cut, "catch-up watchdog");
+			wait = TimeSpan.Zero;
+		}
+		else
+		{
+			wait = timeout - silence;
+		}
+		return wait;
+	}
+
+	/// <summary>Probes a caught-up connection gone silent and cuts one whose probe goes unanswered; returns how long to wait before looking again, zero when done.</summary>
+	TimeSpan WatchLiveness(CancellationTokenSource cut)
+	{
+		var interval = _config.HeartbeatInterval;
+		// Writes awaiting their ack hold the master's answers behind them (a peer's snapshot or seeding holds its global gate): a probe waits longer then.
+		var timeout = _lastSentEventId != _eventReplicationState.LastEventIdFromMe && _config.HeartbeatTimeoutWhileWriting > _config.HeartbeatTimeout
+			? _config.HeartbeatTimeoutWhileWriting
+			: _config.HeartbeatTimeout;
+		var probeSince = Volatile.Read(ref _probeSince);
+		var silence = Silence;
+		TimeSpan wait;
+		if (timeout <= TimeSpan.Zero)
+		{
+			wait = TimeSpan.Zero; // no heartbeat: a caught-up connection is not watched
+		}
+		else if (probeSince != 0)
+		{
+			var unanswered = Stopwatch.GetElapsedTime(probeSince);
+			if (unanswered >= timeout)
+			{
+				EmergencyLog.Default.LogWarning($"EventReplicationService: no answer from the master for {unanswered.TotalSeconds:F0} s ({silence.TotalSeconds:F0} s silent) on a caught-up connection; it is taken for dead and opened again from watermark {ServerWatermark}.");
+				CutConnection(cut, "heartbeat");
+				wait = TimeSpan.Zero;
 			}
 			else
 			{
-				var wait = timeout - silence;
-				await Task.WhenAny(Task.Delay(wait < TimeSpan.FromHours(1) ? wait : TimeSpan.FromHours(1), cut.Token)); // the connection's end ends the wait
+				wait = timeout - unanswered;
 			}
 		}
+		else if (interval > TimeSpan.Zero && silence >= interval)
+		{
+			RequestProbe();
+			wait = timeout;
+		}
+		else if (interval > TimeSpan.Zero)
+		{
+			wait = interval - silence;
+		}
+		else
+		{
+			wait = TimeSpan.FromHours(1); // probes only on ReconnectNow, which wakes this wait
+		}
+		return wait;
 	}
 
 	/// <summary>

@@ -272,7 +272,140 @@ internal class ReconnectSyncronizationTests : BaseTest
 		}
 	}
 
+	/// <summary>
+	/// A master gone without a close (a restart behind a proxy) left a caught-up client online, with nothing to tell it otherwise:
+	/// the page stayed stale until a reload (prod 2026-11-14). Its silence is probed, and an unanswered probe cuts the connection.
+	/// </summary>
+	[Test]
+	public async Task Should_reconnect_when_a_caught_up_master_stops_answering()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, HeartbeatInterval = TimeSpan.FromSeconds(1), HeartbeatTimeout = TimeSpan.FromSeconds(1), CatchUpTimeout = TimeSpan.FromSeconds(2) };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => replication.IsCaughtUp, "A is caught up");
+
+			nodeMaster.AnswersCatchUp = false; // the master hears A and says nothing, as a socket whose far end is gone
+			await WaitUntilAsync(() => nodeMaster.Connections >= 2, "A takes the silent connection for dead and connects again");
+
+			nodeMaster.AnswersCatchUp = true;
+			await WaitUntilAsync(() => replication.IsCaughtUp, "the next connection catches up");
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
+	[Test]
+	public async Task Should_keep_a_caught_up_connection_whose_master_answers_its_probes()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, HeartbeatInterval = TimeSpan.FromMilliseconds(300), HeartbeatTimeout = TimeSpan.FromSeconds(1) };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => replication.IsCaughtUp, "A is caught up");
+
+			await Task.Delay(3_000); // ten probes, each answered
+
+			await Assert.That(nodeMaster.Connections).IsEqualTo(1);
+			await Assert.That(replication.IsCaughtUp).IsTrue();
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
+	/// <summary>A tab return or a network change asks at once: the probe's answer is waited for, not the next heartbeat.</summary>
+	[Test]
+	public async Task Should_probe_a_caught_up_connection_when_asked_to_reconnect()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, HeartbeatInterval = TimeSpan.FromMinutes(10), HeartbeatTimeout = TimeSpan.FromSeconds(1) };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => replication.IsCaughtUp, "A is caught up");
+			nodeMaster.AnswersCatchUp = false;
+			var asked = Stopwatch.StartNew();
+
+			replication.ReconnectNow();
+			await WaitUntilAsync(() => nodeMaster.Connections >= 2, "A takes the unanswered connection for dead and connects again");
+
+			await Assert.That(asked.Elapsed).IsLessThan(TimeSpan.FromSeconds(5)).Because("the probe's timeout runs from the request, not from the next heartbeat");
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
+	/// <summary>A proxy holding the upgrade of a master still starting held the attempt for as long as it liked; it is given up and tried again.</summary>
+	[Test]
+	public async Task Should_try_again_when_a_connect_attempt_is_never_answered()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true) { HangsConnects = true };
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, ConnectTimeout = TimeSpan.FromSeconds(1) };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await Task.Delay(1_500); // the first attempt hangs
+			await Assert.That(replication.IsOnline).IsFalse();
+
+			nodeMaster.HangsConnects = false; // the master is up
+			await WaitUntilAsync(() => replication.IsCaughtUp, "a later attempt connects and catches up");
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
 #if NET10_0_OR_GREATER
+	/// <summary>
+	/// A stopping master closes its sockets: its pushes stop at once, and the clients go to the host that follows instead of holding
+	/// the connection until the process dies under it.
+	/// </summary>
+	[Test]
+	public async Task Should_close_the_connection_when_the_master_stops()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, HeartbeatInterval = TimeSpan.Zero };
+		await nodeA.Started;
+		Task? stopping = null;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => replication.IsCaughtUp, "A is caught up");
+
+			stopping = nodeMaster.Host.StopAsync(); // drains requests for its shutdown timeout, an open socket among them
+			await WaitUntilAsync(() => !replication.IsOnline, "A is told the master is going", TimeSpan.FromSeconds(3));
+		}
+		finally
+		{
+			await StopAsync(nodeA);
+			await (stopping ?? nodeMaster.Host.StopAsync());
+			await nodeMaster.Host.DisposeAsync();
+		}
+	}
+
 	/// <summary>A master whose backlog read hangs (a Mongo getMore) aborts the connection instead of holding it open in silence.</summary>
 	[Test]
 	public async Task Should_abort_the_connection_when_the_backlog_read_hangs()
@@ -440,10 +573,11 @@ internal class ReconnectSyncronizationTests : BaseTest
 	}
 #endif
 
-	async Task WaitUntilAsync(Func<bool> condition, string what)
+	async Task WaitUntilAsync(Func<bool> condition, string what, TimeSpan? within = null)
 	{
+		var budget = within ?? TimeSpan.FromMilliseconds(PropagationTimeoutMs);
 		var sw = Stopwatch.StartNew();
-		while (!condition() && (sw.ElapsedMilliseconds < PropagationTimeoutMs || Debugger.IsAttached))
+		while (!condition() && (sw.Elapsed < budget || Debugger.IsAttached))
 		{
 			await Task.Delay(100);
 		}

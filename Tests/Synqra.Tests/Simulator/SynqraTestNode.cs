@@ -140,6 +140,21 @@ internal class SynqraTestNode
 	/// <summary>A client's catch-up watchdog; null keeps the configured default.</summary>
 	public TimeSpan? CatchUpTimeout { get; init; }
 
+	/// <summary>A client's liveness probe once caught up: the silence before it asks, and how long it waits for an answer; null keeps the configured default.</summary>
+	public TimeSpan? HeartbeatInterval { get; init; }
+
+	/// <inheritdoc cref="HeartbeatInterval"/>
+	public TimeSpan? HeartbeatTimeout { get; init; }
+
+	/// <summary>How long a client's connect attempt may take; null keeps the configured default.</summary>
+	public TimeSpan? ConnectTimeout { get; init; }
+
+	/// <summary>SBX type ids this node's serializer does not map, as a build from before those models: a frame carrying one is unreadable to it.</summary>
+	public IReadOnlySet<int> UnmappedSbxTypeIds { get; init; } = new HashSet<int>();
+
+	/// <summary>Simulator master only: while true it holds every connect unanswered, as a proxy holding the upgrade of a master still starting.</summary>
+	public bool HangsConnects { get; set; }
+
 	/// <summary>Simulator master only: false makes it a master stuck in its catch-up, which reads a client's probe and never answers it.</summary>
 	public bool AnswersCatchUp { get; set; } = true;
 
@@ -333,13 +348,20 @@ internal class SynqraTestNode
 			typeof(DemoModel),
 			typeof(MyPocoTask),
 			typeof(SampleTaskModel),
+			typeof(SamplePublicModel),
 		]);
 		builder.Services.AddEmergencyLogger();
 
 		builder.Services.AddSbxSerializer(ser =>
 		{
-			ser.Map(100, typeof(SamplePublicModel));
-			ser.Map(101, typeof(SampleTaskModel));
+			if (!UnmappedSbxTypeIds.Contains(100))
+			{
+				ser.Map(100, typeof(SamplePublicModel));
+			}
+			if (!UnmappedSbxTypeIds.Contains(101))
+			{
+				ser.Map(101, typeof(SampleTaskModel));
+			}
 		});
 
 		builder.Services.ConfigureHttpJsonOptions(o =>
@@ -433,6 +455,10 @@ internal class SynqraTestNode
 				if (RefusesConnections)
 				{
 					ctx.Response.StatusCode = 503;
+				}
+				else if (HangsConnects)
+				{
+					await Task.WhenAny(Task.Delay(Timeout.Infinite, ctx.RequestAborted)); // until the client gives up
 				}
 				else
 				{
@@ -562,6 +588,11 @@ internal class SynqraTestNode
 								}
 							}
 							continue;
+						}
+
+						if (operation is VersionRequest)
+						{
+							continue; // this simulator names no build: its clients are never asked to reload
 						}
 
 						var storeCtx = _projection ?? throw new InvalidOperationException("Master projection not initialized.");
@@ -719,6 +750,9 @@ internal class SynqraTestNode
 		public override Guid? InitialSubscribeStreamId => _node.HelloKind is ReplicationHelloKind.SubscribeTo or ReplicationHelloKind.SubscribeToSnapshot ? _node.StreamId : null;
 		public override bool RequestSnapshot => _node.RequestSnapshot;
 		public override TimeSpan CatchUpTimeout => _node.CatchUpTimeout ?? base.CatchUpTimeout;
+		public override TimeSpan HeartbeatInterval => _node.HeartbeatInterval ?? base.HeartbeatInterval;
+		public override TimeSpan HeartbeatTimeout => _node.HeartbeatTimeout ?? base.HeartbeatTimeout;
+		public override TimeSpan ConnectTimeout => _node.ConnectTimeout ?? base.ConnectTimeout;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}

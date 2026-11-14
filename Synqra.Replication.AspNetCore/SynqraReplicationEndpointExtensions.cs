@@ -58,6 +58,27 @@ public static class SynqraReplicationEndpointExtensions
 		// gives both the routing tags and O(1) removal on disconnect.
 		var sockets = new ConcurrentDictionary<WebSocket, SocketScope>();
 		var broadcastGate = new SemaphoreSlim(1, 1);
+		// The build and reload demand told to clients that ask; pushed to them, in turn with their other frames, as it changes.
+		var version = (serviceKey is null
+			? app.Services.GetService<ReplicationVersion>()
+			: app.Services.GetKeyedService<ReplicationVersion>(serviceKey) ?? app.Services.GetService<ReplicationVersion>())
+			?? new ReplicationVersion();
+		var versionLogger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Version");
+		version.Changed += (frame, node) =>
+		{
+			foreach (var (peer, peerScope) in sockets)
+			{
+				if (peerScope.VersionNode is Guid asked && (node is null || node == asked) && peer.State == WebSocketState.Open)
+				{
+					_ = peerScope.Outbox.SendAsync(frame, CancellationToken.None).ContinueWith(
+						  t => versionLogger?.LogWarning(t.Exception, "Synqra replication: telling a client the server's version failed; it learns it on its next connect.")
+						, CancellationToken.None
+						, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
+						, TaskScheduler.Default
+						);
+				}
+			}
+		};
 		// Bounded: a long-running host sees every committed event through here, so an unbounded set would grow forever.
 		var knownEvents = new RecentEventIds(capacity: 100_000);
 
@@ -441,6 +462,9 @@ public static class SynqraReplicationEndpointExtensions
 				: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 			var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
 			var pump = outbox.PumpAsync(ctx.RequestAborted);
+			// The pushes end as the host starts stopping, but the socket lived on until the process died under it, through a proxy
+			// possibly never closed: a close frame now, which proxies pass on, sends the client to the host that follows at once.
+			using var closeOnStop = app.Lifetime.ApplicationStopping.Register(() => _ = outbox.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "the server is stopping"));
 			try
 			{
 			using (await outbox.HoldPushesAsync(ctx.RequestAborted))
@@ -632,6 +656,14 @@ public static class SynqraReplicationEndpointExtensions
 					continue;
 				}
 
+				// Only a client that asks is told: a build from before this frame would not know it.
+				if (operation is VersionRequest versionRequest)
+				{
+					socketScope.VersionNode = versionRequest.NodeId;
+					await outbox.SendAsync(version.Frame, ctx.RequestAborted);
+					continue;
+				}
+
 				if (operation is not EventEnvelope eventEnvelope)
 				{
 					throw new NotSupportedException($"Unsupported transport operation: {operation?.GetType()}.");
@@ -799,6 +831,9 @@ public static class SynqraReplicationEndpointExtensions
 
 		/// <summary>Every send to this socket goes through here: pushes are queued, never sent by the broadcaster.</summary>
 		public ReplicationOutbox Outbox { get; }
+
+		/// <summary>The client's node once it asked for the server's version (<see cref="VersionRequest"/>); null until then, and for a build that never asks.</summary>
+		public Guid? VersionNode { get; set; }
 	}
 
 	/// <summary>
