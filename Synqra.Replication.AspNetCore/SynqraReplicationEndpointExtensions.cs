@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Synqra;
 using Synqra.AppendStorage;
 using Synqra.BinarySerializer;
@@ -484,17 +485,36 @@ public static class SynqraReplicationEndpointExtensions
 					}
 				}
 
+				// A backlog read that yields nothing for BacklogReadTimeout aborts the connection: a hung read (a Mongo getMore) held the
+				// socket open in silence, the client never got its CaughtUp and showed "syncing" forever. Sends to a slow client do not count.
+				var readTimeout = (ctx.RequestServices.GetService<IOptions<SynqraReplicationEndpointOptions>>()?.Value ?? new SynqraReplicationEndpointOptions()).BacklogReadTimeout;
+				var idleLimit = readTimeout > TimeSpan.Zero && readTimeout < TimeSpan.FromDays(40) ? readTimeout : Timeout.InfiniteTimeSpan;
+				using var backlogIdle = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+				var replayed = 0L;
+				using var onStall = backlogIdle.Token.Register(() =>
+				{
+					if (!ctx.RequestAborted.IsCancellationRequested)
+					{
+						logger?.LogError("Synqra replication: the backlog read for stream {Stream} yielded nothing for {Timeout} after {Frames} frames; aborting the connection so the client reconnects.", connectionStream, readTimeout, replayed);
+						ctx.Abort(); // the read gets the cancellation too; a read that ignores it no longer holds the client
+					}
+				});
 				// Replay only the streams THIS connection is subscribed to, each strictly after the client's watermark (or the
 				// snapshot's): a stream is a key prefix of the multitenant log, so a scoped connection reads exactly its own
 				// streams. An unscoped host (connectionStream null) sends every stream's events after the watermark.
 				var backlog = connectionStream is null
-					? AfterCursor(storage.GetAllAsync(default, ctx.RequestAborted), clientCursor)
-					: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, ctx.RequestAborted);
+					? AfterCursor(storage.GetAllAsync(default, backlogIdle.Token), clientCursor)
+					: ReadStreams(storage, socketScope.Active.ToArray(), stream => snapshotted.TryGetValue(stream, out var cutAt) ? cutAt : clientCursor, backlogIdle.Token);
+				backlogIdle.CancelAfter(idleLimit);
 				await foreach (var ev in backlog)
 				{
+					backlogIdle.CancelAfter(Timeout.InfiniteTimeSpan); // the read yielded; the send that follows is the client's pace, not the read's
 					knownEvents.TryAdd(ev.EventId);
 					await ReplayFrameAsync(outbox, ev, ev.SequenceId.CapAt(backlogWatermarks.TryGetValue(ev.StreamId, out var w) ? w : default));
+					replayed++;
+					backlogIdle.CancelAfter(idleLimit);
 				}
+				backlogIdle.CancelAfter(Timeout.InfiniteTimeSpan); // the backlog is in
 			} // the pushes held meanwhile follow
 			#endregion
 

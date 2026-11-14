@@ -21,7 +21,22 @@ public interface IEventReplicationService
 	/// </summary>
 	Guid ServerWatermark => default;
 
-	/// <summary>Raised when <see cref="IsOnline"/> or <see cref="IsCaughtUp"/> changes, on the replication's own thread.</summary>
+	/// <summary>
+	/// When the next connect attempt is due while the client waits between attempts, so a UI can show "retrying in N s": null
+	/// while connected and while an attempt is under way. Its changes raise <see cref="StatusChanged"/>.
+	/// </summary>
+	DateTimeOffset? NextAttemptAt => null;
+
+	/// <summary>
+	/// Connects again at once: cuts short the pause before the next attempt, or ends a connect attempt or a connection whose
+	/// catch-up is not in yet and opens a new one, which resumes from the watermark. Safe to call at any time; a no-op while
+	/// online and caught up.
+	/// </summary>
+	void ReconnectNow()
+	{
+	}
+
+	/// <summary>Raised when <see cref="IsOnline"/>, <see cref="IsCaughtUp"/> or <see cref="NextAttemptAt"/> changes, on the replication's own thread.</summary>
 	event Action? StatusChanged
 	{
 		add
