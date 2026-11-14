@@ -141,6 +141,15 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
 	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
 
+	// The command of each own event this run sent and the master has not answered yet: its verdict names it. Under _skipSet.
+	readonly Dictionary<Guid, Guid> _awaitingVerdict = new Dictionary<Guid, Guid>();
+
+	// Own events the master refused, and their undo. The reader alone uses it.
+	readonly RefusedEvents _refused = new RefusedEvents();
+
+	/// <inheritdoc />
+	public event Action<EventVerdict>? EventSettled;
+
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
 		=> SendOperationAsync(new SubscribeRequest { StreamId = streamId }, ct);
@@ -390,6 +399,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							// Acks arrive in the order the events were sent, so the latest one is the cursor.
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
+							Settle(accepted.EventId, null);
 							break;
 						case SnapshotBegin begin:
 							ReceiveSnapshotBegin(begin);
@@ -411,10 +421,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
 							break;
 						case EventRejected rejected:
-							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
+							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect, and its local effect is undone.
 							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
 							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
 							await SaveStateAsync();
+							await UndoAsync(rejected.EventId);
+							Settle(rejected.EventId, rejected.Reason);
 							break;
 						default:
 							EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
@@ -562,7 +574,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						bool held;
 						lock (_skipSet)
 						{
-							held = _heldByMaster.Contains(ev.EventId) || ev is StreamSnapshotEvent; // a snapshot is this client's own record of what the master sent
+							held = _heldByMaster.Contains(ev.EventId) || ev is StreamSnapshotEvent || ev.IsLocalUndo; // a snapshot is this client's own record of what the master sent; an undo takes back what the master refused
 						}
 						if (held)
 						{
@@ -614,6 +626,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						}
 
 						FramesSent++;
+						lock (_skipSet)
+						{
+							_awaitingVerdict[ev.EventId] = ev.CommandId;
+						}
 						_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
 						Passed(ev);
 					}
@@ -842,6 +858,55 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_isCaughtUp = true;
 			EmergencyLog.Default.Stage($"replication: caught up after {ConnectionFrames} frames");
 			StatusChanged?.Invoke();
+		}
+	}
+
+	/// <summary>
+	/// Takes back, in the local log, an own event the master refused: the undo is written after it as a local undo (never sent)
+	/// and folded in by the keeper like a received event. The whole log is read: a refusal is rare, and the undo must see every
+	/// event of the master's that already came for the same state.
+	/// </summary>
+	async Task UndoAsync(Guid refusedId)
+	{
+		var log = new List<Event>();
+		await foreach (var ev in _storage.GetAllAsync(from: default, _cts.Token))
+		{
+			log.Add(ev);
+		}
+		var undo = _refused.Undo(log, refusedId);
+		if (undo.Count > 0 && !_ended)
+		{
+			foreach (var ev in undo)
+			{
+				lock (_skipSet)
+				{
+					if (_skipSet.Add(ev.EventId))
+					{
+						_skipList.AddLast(ev.EventId);
+					}
+				}
+				await _storage.AppendAsync(ev);
+			}
+			EmergencyLog.Default.LogWarning($"EventReplicationService: {undo.Count} local undo event(s) take back refused event {refusedId}.");
+			EventsReceived?.Invoke(); // the owner folds the undo in through the keeper
+		}
+	}
+
+	/// <summary>Tells listeners the master's answer to an own event. A listener's failure is logged, never the reader's end.</summary>
+	void Settle(Guid eventId, string? refusal)
+	{
+		Guid commandId;
+		lock (_skipSet)
+		{
+			_awaitingVerdict.Remove(eventId, out commandId);
+		}
+		try
+		{
+			EventSettled?.Invoke(new EventVerdict(eventId, commandId, refusal));
+		}
+		catch (Exception ex)
+		{
+			EmergencyLog.Default.LogError(ex, $"EventReplicationService: a listener failed on the verdict for event {eventId}; replication goes on.");
 		}
 	}
 
@@ -1141,6 +1206,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		lock (_skipSet)
 		{
 			_heldByMaster.Clear();
+			_awaitingVerdict.Clear();
 		}
 		_lastSentEventId = default;
 		_lastSentSequence = default;
