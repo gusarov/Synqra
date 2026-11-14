@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
@@ -83,6 +84,61 @@ internal class WriteVerdictSyncronizationTests : BaseTest
 		await Assert.That(refusal).Contains("could not store");
 		await Assert.That(refusal).DoesNotContain("the store is down").Because("the failure's own words stay on the server");
 		await WaitUntilAsync(() => !nodeA.StoreContext.GetCollection<SampleTaskModel>().Any(), "the write that was not stored is gone from the client");
+	}
+
+	/// <summary>
+	/// The refused events come from an earlier run's log, so they are read back from the file: a stored event has no stream, and
+	/// the undo takes the connection's (CI 15598/15603: an undo with no stream was refused by the log, every connect, forever).
+	/// </summary>
+	[Test]
+	public async Task A_refused_write_of_an_earlier_run_is_undone_too()
+	{
+		var streamId = Guid.NewGuid();
+		var dyingMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, acknowledgeInbound: false);
+		await dyingMaster.Started;
+		var remembered = new RememberedState();
+		var firstRun = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = dyingMaster.Port };
+		await firstRun.Started;
+		await WaitForOnlineAsync(firstRun);
+		firstRun.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "written in an earlier run" });
+		await Task.Delay(1000); // sent, never answered
+		var stranded = await EventsAsync(firstRun.Events);
+		var logFile = firstRun.Host.Services.GetRequiredService<IConfiguration>()[LogFileKey] ?? throw new InvalidOperationException("The node has no JSON-lines log file.");
+		await firstRun.Host.StopAsync();
+		await ((IAsyncDisposable)firstRun.Host).DisposeAsync();
+
+		var refusingMaster = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IProjection>(new RefusingProjection()), masterHost: true, useRealEndpoint: true);
+		await refusingMaster.Started;
+		var nextRun = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Configuration[LogFileKey] = logFile;
+			builder.Services.AddSingleton<IEventReplicationStateStore>(new RememberedState(remembered.Saved));
+		}) { Port = refusingMaster.Port };
+		await nextRun.Started;
+		var verdicts = Listen(nextRun);
+		await WaitForOnlineAsync(nextRun);
+
+		await WaitUntilAsync(() => stranded.All(ev => verdicts.ContainsKey(ev.EventId)), "every stranded event gets a verdict");
+		await Assert.That(stranded.All(ev => verdicts[ev.EventId].Refusal is { Length: > 0 })).IsTrue();
+		await WaitUntilAsync(() => !nextRun.StoreContext.GetCollection<SampleTaskModel>().Any(), "the refused add is gone from the next run's store");
+		await Assert.That((await EventsAsync(nextRun.Events)).Any(ev => ev.IsLocalUndo)).IsTrue();
+	}
+
+	const string LogFileKey = "Storage:JsonLinesStorage:FileName";
+
+	sealed class RememberedState(EventReplicationState? remembered = null) : IEventReplicationStateStore
+	{
+		public EventReplicationState? Saved { get; private set; } = remembered;
+
+		public Task<EventReplicationState?> LoadAsync(Guid streamId, CancellationToken cancellationToken = default) => Task.FromResult(Saved is null ? null : Copy(Saved));
+
+		public Task SaveAsync(Guid streamId, EventReplicationState state, CancellationToken cancellationToken = default)
+		{
+			Saved = Copy(state);
+			return Task.CompletedTask;
+		}
+
+		EventReplicationState Copy(EventReplicationState state) => new() { MyNodeId = state.MyNodeId, LastEventIdFromMe = state.LastEventIdFromMe, ServerWatermark = state.ServerWatermark };
 	}
 
 	ConcurrentDictionary<Guid, EventVerdict> Listen(SynqraTestNode node)

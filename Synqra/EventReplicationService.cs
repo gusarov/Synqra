@@ -880,6 +880,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			foreach (var ev in undo)
 			{
+				ev.StreamId = StreamOf(ev); // a stored event has no stream: read back from the log, the refused one has none to copy
 				lock (_skipSet)
 				{
 					if (_skipSet.Add(ev.EventId))
