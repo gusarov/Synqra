@@ -162,14 +162,16 @@ internal class ReconnectSyncronizationTests : BaseTest
 			builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(log);
 			builder.Services.Configure<SynqraReplicationEndpointOptions>(o => o.BacklogReadTimeout = TimeSpan.FromSeconds(1));
 		}, masterHost: true, useRealEndpoint: true);
-		await nodeMaster.Started;
+		await nodeMaster.Started; // its own projection read the log at start: the stall begins after it
+		log.Stalls = true;
+		var readsBefore = log.Reads;
 		// The client's own watchdog is off: only the master can end the connection here.
 		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port, CatchUpTimeout = TimeSpan.Zero };
 		await nodeA.Started;
 		try
 		{
 			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
-			await WaitUntilAsync(() => log.Reads >= 2, "the master aborts the hung connection and A's next one reads the backlog again");
+			await WaitUntilAsync(() => log.Reads >= readsBefore + 2, "the master aborts the hung connection and A's next one reads the backlog again");
 			await Assert.That(replication.IsCaughtUp).IsFalse();
 
 			log.Stalls = false;
@@ -181,11 +183,11 @@ internal class ReconnectSyncronizationTests : BaseTest
 		}
 	}
 
-	/// <summary>A master's log whose reads hang while it stalls; it knows its tail without a read, so only the backlog reads it.</summary>
+	/// <summary>A master's log whose reads hang while it stalls; it knows its tail without a read, so once the host is up only a backlog reads it.</summary>
 	sealed class StallingLog : IAppendStorage<Event, (Guid, Guid)>, IEventSequenceTail
 	{
 		int _reads;
-		volatile bool _stalls = true;
+		volatile bool _stalls;
 
 		public bool Stalls
 		{
