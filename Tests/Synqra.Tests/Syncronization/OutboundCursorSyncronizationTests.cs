@@ -174,6 +174,133 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		await Assert.That(await CountEventsAsync(nodeMaster)).IsEqualTo(0).Because("a refused event is not in the master's log");
 	}
 
+	/// <summary>
+	/// The master marked a peer's event seen before its log stored it: a store that failed left the event unacknowledged, and the
+	/// resend was acknowledged as a duplicate, never stored. Now the failed store ends the connection, the resend is stored, and
+	/// the projection that already applied it is not asked again (a real one refuses a repeat: a facet in a filled slot).
+	/// </summary>
+	[Test]
+	public async Task A_resend_after_a_failed_store_is_stored_exactly_once()
+	{
+		var streamId = Guid.NewGuid();
+		var failingOnce = new FailingOnceLog();
+		var onceOnly = new OnceOnlyProjection();
+		var nodeMaster = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(failingOnce);
+			builder.Services.AddSingleton<IProjection>(onceOnly);
+		}, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "the first store fails" });
+		var written = new List<Guid>();
+		await foreach (var ev in nodeA.Events.GetAllAsync())
+		{
+			written.Add(ev.EventId);
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.LastEventIdFromMe == written[^1]), "the master acknowledges every event A wrote");
+		await Assert.That(failingOnce.Failures).IsEqualTo(1).Because("the master's first store failed");
+		var stored = await EventIdCountsAsync(nodeMaster.Events);
+		foreach (var id in written)
+		{
+			await Assert.That(stored.GetValueOrDefault(id)).IsEqualTo(1).Because($"event {id} is stored exactly once");
+		}
+		await Assert.That(onceOnly.Repeats).IsEqualTo(0).Because("an event applied before its store failed is not applied again");
+	}
+
+	/// <summary>
+	/// A guard that judges an event by the state it would change (Quotaly's DecisionAnswerGuard refuses an answer to a decision already
+	/// answered) sees, on a resend after a failed store, the state that event itself applied. Asked again it refuses, the client undoes a
+	/// change the master keeps, and the log never holds it. The resend is stored as it is, without the guards.
+	/// </summary>
+	[Test]
+	public async Task A_resend_after_a_failed_store_is_not_asked_of_the_guards_again()
+	{
+		var streamId = Guid.NewGuid();
+		var failingOnce = new FailingOnceLog();
+		var onceOnly = new OnceOnlyProjection();
+		var guard = new AppliedStateGuard(onceOnly);
+		var nodeMaster = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(failingOnce);
+			builder.Services.AddSingleton<IProjection>(onceOnly);
+			builder.Services.AddSingleton<IInboundEventGuard>(guard);
+		}, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "guarded, the first store fails" });
+		var written = new List<Guid>();
+		await foreach (var ev in nodeA.Events.GetAllAsync())
+		{
+			written.Add(ev.EventId);
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(remembered.Saved?.LastEventIdFromMe == written[^1]), "the master answers every event A wrote");
+		await Assert.That(failingOnce.Failures).IsEqualTo(1).Because("the master's first store failed");
+		var stored = await EventIdCountsAsync(nodeMaster.Events);
+		foreach (var id in written)
+		{
+			await Assert.That(stored.GetValueOrDefault(id)).IsEqualTo(1).Because($"event {id} is stored exactly once, never refused on its resend");
+		}
+		await Assert.That(guard.Refusals).IsEqualTo(0).Because("the resend of an applied event is not asked of the guards again");
+	}
+
+	/// <summary>An event the master holds is acknowledged when it comes again, never stored or applied twice.</summary>
+	[Test]
+	public async Task A_resend_of_a_stored_event_is_acknowledged_not_stored_again()
+	{
+		var streamId = Guid.NewGuid();
+		var onceOnly = new OnceOnlyProjection();
+		var nodeMaster = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IProjection>(onceOnly), masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var remembered = new RecordingStateStore();
+		var nodeA = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "sent twice" });
+		var written = await EventIdsAsync(nodeA.Events);
+		await WaitUntilAsync(async () => (await EventIdsAsync(nodeMaster.Events)).IsSupersetOf(written), "the master holds every event A wrote");
+		var logA = await EndRunAsync(nodeA);
+		var tail = default(Guid);
+		await foreach (var ev in nodeMaster.Events.GetAllAsync())
+		{
+			tail = ev.SequenceId.CompareBigEndian(tail) > 0 ? ev.SequenceId : tail;
+		}
+
+		// A's next run lost the acknowledgement (a cold outbound cursor) but holds the tail: no backlog comes down, and every event goes up again.
+		var offeredAgain = new RecordingStateStore(new EventReplicationState { MyNodeId = remembered.Saved!.MyNodeId, ServerWatermark = tail, LastEventIdFromMe = default });
+		var nodeB = new SynqraTestNode(streamId, builder =>
+		{
+			builder.Configuration[LogFileKey] = logA;
+			builder.Services.AddSingleton<IEventReplicationStateStore>(offeredAgain);
+		}) { Port = nodeMaster.Port };
+		await nodeB.Started;
+		await WaitForOnlineAsync(nodeB);
+		var lastOffered = default(Guid);
+		await foreach (var ev in nodeB.Events.GetAllAsync())
+		{
+			lastOffered = ev.EventId;
+		}
+
+		await WaitUntilAsync(() => Task.FromResult(offeredAgain.Saved?.LastEventIdFromMe == lastOffered), "the master acknowledges the resend");
+		await Assert.That(Replication(nodeB).FramesSent).IsGreaterThan(0).Because("B offered A's events again");
+		var stored = await EventIdCountsAsync(nodeMaster.Events);
+		foreach (var id in written)
+		{
+			await Assert.That(stored.GetValueOrDefault(id)).IsEqualTo(1).Because($"event {id} is stored once, its resend deduplicated");
+		}
+		await Assert.That(onceOnly.Repeats).IsEqualTo(0).Because("a resend of a stored event is not applied again");
+	}
+
 	[Test]
 	public async Task A_client_does_not_echo_what_the_master_sent_it()
 	{
@@ -350,6 +477,132 @@ internal class OutboundCursorSyncronizationTests : BaseTest
 		}
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	/// <summary>A master's in-memory log whose first append fails, as a store whose write did not go through.</summary>
+	sealed class FailingOnceLog : IAppendStorage<Event, (Guid, Guid)>
+	{
+		readonly SortedDictionary<(Guid, Guid), Event> _events = new(Comparer<(Guid, Guid)>.Create((a, b) => a.Item1.CompareBigEndian(b.Item1) is var first && first != 0 ? first : a.Item2.CompareBigEndian(b.Item2)));
+
+		public int Failures { get; private set; }
+
+		public Task AppendAsync(Event item, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				if (Failures == 0)
+				{
+					Failures++;
+					throw new IOException($"The store of event {item.EventId} failed.");
+				}
+				_events.Add((item.StreamId, item.SequenceId), item);
+			}
+			return Task.CompletedTask;
+		}
+
+		public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default)
+		{
+			lock (_events)
+			{
+				return Task.FromResult(_events[key]);
+			}
+		}
+
+		public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			List<Event> after;
+			lock (_events)
+			{
+				after = [.. _events.Where(e => from == default || _events.Comparer.Compare(e.Key, from) > 0).Select(e => e.Value)];
+			}
+			foreach (var ev in after)
+			{
+				await Task.Yield();
+				yield return ev;
+			}
+		}
+
+		public void Dispose()
+		{
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	/// <summary>A projection that refuses an event it applied before, as the Mongo projection refuses a facet for a filled slot.</summary>
+	sealed class OnceOnlyProjection : IProjection
+	{
+		readonly HashSet<Guid> _applied = [];
+
+		public int Repeats { get; private set; }
+
+		public bool HasApplied(Guid eventId)
+		{
+			lock (_applied)
+			{
+				return _applied.Contains(eventId);
+			}
+		}
+
+		Task Apply(Event ev)
+		{
+			lock (_applied)
+			{
+				if (!_applied.Add(ev.EventId))
+				{
+					Repeats++;
+					throw new InvalidOperationException($"{ev.GetType().Name} {ev.EventId} was applied twice.");
+				}
+			}
+			return Task.CompletedTask;
+		}
+
+		// IEventVisitor<EventVisitorContext>
+		public Task BeforeVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task AfterVisitAsync(Event ev, EventVisitorContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ObjectPropertyChangedEvent ev, EventVisitorContext ctx) => Apply(ev);
+		public Task VisitAsync(ObjectDeletedEvent ev, EventVisitorContext ctx) => Apply(ev);
+		public Task VisitAsync(CommandCreatedEvent ev, EventVisitorContext ctx) => Apply(ev);
+		public Task VisitAsync(ComponentAddedEvent ev, EventVisitorContext ctx) => Apply(ev);
+		public Task VisitAsync(ComponentPropertyChangedEvent ev, EventVisitorContext ctx) => Apply(ev);
+		public Task VisitAsync(ComponentDeletedEvent ev, EventVisitorContext ctx) => Apply(ev);
+
+		// ICommandVisitor<CommandHandlerContext>
+		public Task BeforeVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task AfterVisitAsync(Command cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(DeleteObjectCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ChangeObjectPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(AddComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(ChangeComponentPropertyCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(DeleteComponentCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+		public Task VisitAsync(BatchCommand cmd, CommandHandlerContext ctx) => Task.CompletedTask;
+	}
+
+	/// <summary>Refuses an event whose change the projection already holds, as DecisionAnswerGuard refuses a second answer.</summary>
+	sealed class AppliedStateGuard(OnceOnlyProjection projection) : IInboundEventGuard
+	{
+		public int Refusals { get; private set; }
+
+		public ValueTask<string?> RefuseAsync(Event ev, CancellationToken cancellationToken = default)
+		{
+			string? reason = null;
+			if (projection.HasApplied(ev.EventId))
+			{
+				Refusals++;
+				reason = $"the change of event {ev.EventId} is in the state already";
+			}
+			return ValueTask.FromResult(reason);
+		}
+	}
+
+	async Task<Dictionary<Guid, int>> EventIdCountsAsync(IEventLog log)
+	{
+		var counts = new Dictionary<Guid, int>();
+		await foreach (var ev in log.GetAllAsync())
+		{
+			counts[ev.EventId] = counts.GetValueOrDefault(ev.EventId) + 1;
+		}
+		return counts;
 	}
 
 	async Task<HashSet<Guid>> EventIdsAsync(IEventLog log)
