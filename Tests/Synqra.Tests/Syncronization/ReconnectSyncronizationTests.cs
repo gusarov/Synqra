@@ -130,6 +130,58 @@ internal class ReconnectSyncronizationTests : BaseTest
 		}
 	}
 
+	/// <summary>A master that prepares its HELLO reply (seeding, cutting a snapshot) is left alone for its first two seconds.</summary>
+	[Test]
+	public async Task Should_leave_a_master_preparing_its_hello_alone_when_asked_to_reconnect()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true) { HelloDelay = TimeSpan.FromSeconds(3) };
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => nodeMaster.Connections >= 1, "the master accepted A's socket");
+			replication.ReconnectNow();
+			await WaitUntilAsync(() => replication.IsCaughtUp, "A is caught up after the slow HELLO");
+
+			await Assert.That(nodeMaster.Connections).IsEqualTo(1).Because("the HELLO being prepared was not cut");
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
+	/// <summary>A HELLO reply that has not come for two seconds is a connection that looks dead: it is cut and opened again.</summary>
+	[Test]
+	public async Task Should_cut_a_connection_whose_hello_reply_is_two_seconds_late_when_asked_to_reconnect()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true) { HelloDelay = TimeSpan.FromSeconds(30) };
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		try
+		{
+			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
+			await WaitUntilAsync(() => nodeMaster.Connections >= 1, "the master accepted A's socket");
+			await Task.Delay(2_500); // no HELLO reply all this while
+			var asked = Stopwatch.StartNew();
+
+			replication.ReconnectNow();
+			await WaitUntilAsync(() => nodeMaster.Connections >= 2, "A connects again");
+
+			await Assert.That(asked.Elapsed).IsLessThan(TimeSpan.FromSeconds(5)).Because("no pause before the attempt asked for");
+			await Assert.That(replication.IsOnline).IsFalse();
+		}
+		finally
+		{
+			await StopAsync(nodeA, nodeMaster);
+		}
+	}
+
 	/// <summary>A catch-up that keeps receiving frames is not cut: a host asks on every tab return, and a snapshot would be counted as lost.</summary>
 	[Test]
 	public async Task Should_leave_a_catch_up_that_keeps_receiving_alone_when_asked_to_reconnect()
@@ -227,10 +279,12 @@ internal class ReconnectSyncronizationTests : BaseTest
 	{
 		var streamId = Guid.NewGuid();
 		var log = new StallingLog();
+		var logs = new CapturingLoggerProvider();
 		var nodeMaster = new SynqraTestNode(streamId, builder =>
 		{
 			builder.Services.AddSingleton<IAppendStorage<Event, (Guid, Guid)>>(log);
 			builder.Services.Configure<SynqraReplicationEndpointOptions>(o => o.BacklogReadTimeout = TimeSpan.FromSeconds(1));
+			builder.Logging.AddProvider(logs);
 		}, masterHost: true, useRealEndpoint: true);
 		await nodeMaster.Started; // its own projection read the log at start: the stall begins after it
 		log.Stalls = true;
@@ -246,6 +300,9 @@ internal class ReconnectSyncronizationTests : BaseTest
 
 			log.Stalls = false;
 			await WaitUntilAsync(() => replication.IsCaughtUp, "with the read answering again A catches up");
+
+			await Assert.That(logs.Contains("yielded nothing")).IsTrue();
+			await Assert.That(logs.Contains("orphaned")).IsFalse().Because("a read that honours its cancellation ends within the grace and is disposed");
 		}
 		finally
 		{
@@ -279,6 +336,11 @@ internal class ReconnectSyncronizationTests : BaseTest
 
 			log.Stalls = false;
 			await WaitUntilAsync(() => replication.IsCaughtUp, "with the read answering again A catches up");
+			await Assert.That(log.DeafReadsClosed).IsEqualTo(0).Because("a read still pending is never disposed");
+
+			log.Release();
+			await WaitUntilAsync(() => log.DeafReadsClosed == log.DeafReads, "each orphaned enumerator is disposed once its read returns");
+			await Assert.That(log.DeafReads).IsGreaterThanOrEqualTo(2);
 		}
 		finally
 		{
@@ -324,6 +386,15 @@ internal class ReconnectSyncronizationTests : BaseTest
 		/// <summary>Lets every read that ignores its cancellation end.</summary>
 		public void Release() => _released.TrySetResult();
 
+		int _deafReads;
+		int _deafReadsClosed;
+
+		/// <summary>Reads that hung deaf to their cancellation.</summary>
+		public int DeafReads => Volatile.Read(ref _deafReads);
+
+		/// <summary>Of those, the ones whose enumerator was closed: after its release such a read yields an event and waits, so only a dispose closes it.</summary>
+		public int DeafReadsClosed => Volatile.Read(ref _deafReadsClosed);
+
 		public bool Stalls
 		{
 			get => _stalls;
@@ -339,11 +410,24 @@ internal class ReconnectSyncronizationTests : BaseTest
 		public async IAsyncEnumerable<Event> GetAllAsync((Guid, Guid) from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
 			Interlocked.Increment(ref _reads);
-			if (Stalls)
+			if (Stalls && IgnoresCancellation)
 			{
-				await (IgnoresCancellation ? _released.Task : Task.Delay(Timeout.Infinite, cancellationToken));
+				Interlocked.Increment(ref _deafReads);
+				try
+				{
+					await _released.Task;
+					yield return new ObjectDeletedEvent { EventId = Guid.CreateVersion7(), CommandId = Guid.NewGuid(), TargetId = Guid.NewGuid(), TargetTypeId = Guid.NewGuid(), CollectionId = Guid.NewGuid() };
+				}
+				finally
+				{
+					Interlocked.Increment(ref _deafReadsClosed);
+				}
 			}
-			yield break; // the stream holds nothing: the read either hangs or ends
+			else if (Stalls)
+			{
+				await Task.Delay(Timeout.Infinite, cancellationToken);
+			}
+			// the stream holds nothing else: the read hangs, or ends
 		}
 
 		public Task<Guid> LastSequenceAsync(Guid streamId, CancellationToken cancellationToken = default) => Task.FromResult(Guid.Empty);
