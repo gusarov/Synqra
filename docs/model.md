@@ -660,7 +660,9 @@ gap is expected.
   `IEventReplicationStateStore` after the frame's event is in its log), sends it in HELLO, and the backlog is each subscribed
   stream strictly after it (a known id is never appended twice). An inbound event the log already holds (`IEventLookup`:
   a resend after a lost acknowledgement, offered to a process restarted since) is acknowledged, never applied again; one its
-  projection refuses gets `EventRejected`, and the client moves its outbound cursor past it as on an acknowledgement. One broadcaster:
+  projection refuses gets `EventRejected`, and the client moves its outbound cursor past it as on an acknowledgement; any other
+  failure to apply or store it ends the connection unanswered, and the client offers it again. The client raises
+  `IEventReplicationService.EventSettled` for each answer to its own events (stored, or refused with the reason). One broadcaster:
   the push loop fed by the log's committed signal, socket-borne events included (echoed to the sender), so frames reach a
   socket in commit order and a resumed client misses nothing. Ids order by their bytes (`CompareBigEndian`, explicit and
   the same on every target; the Framework's `Guid.CompareTo` is signed per group).
