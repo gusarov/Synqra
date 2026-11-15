@@ -141,6 +141,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	// Ids the master sent this run: it holds them, so the send loop steps over them instead of echoing them back.
 	readonly HashSet<Guid> _heldByMaster = new HashSet<Guid>();
 
+	// The command of each own event this run sent and the master has not answered yet: its verdict names it. Under _skipSet.
+	readonly Dictionary<Guid, Guid> _awaitingVerdict = new Dictionary<Guid, Guid>();
+
+	/// <inheritdoc />
+	public event Action<EventVerdict>? EventSettled;
+
 	/// <inheritdoc />
 	public Task SubscribeAsync(Guid streamId, CancellationToken ct = default)
 		=> SendOperationAsync(new SubscribeRequest { StreamId = streamId }, ct);
@@ -390,6 +396,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							// Acks arrive in the order the events were sent, so the latest one is the cursor.
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
+							Settle(accepted.EventId, null);
 							break;
 						case SnapshotBegin begin:
 							ReceiveSnapshotBegin(begin);
@@ -411,10 +418,12 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							EmergencyLog.Default.Stage($"replication: snapshot of {declined.StreamId} declined ({declined.Reason}); the backlog follows");
 							break;
 						case EventRejected rejected:
-							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect; its local effect stays until the master's events for the same state arrive.
+							// Refused for good: the cursor moves past it like on an ack, so it is not offered on every connect. Its local effect
+							// stays: the client's log holds only events, never a correction of its own; listeners hear the refusal and say so.
 							EmergencyLog.Default.LogWarning($"EventReplicationService: the master refused event {rejected.EventId}: {rejected.Reason}");
 							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
 							await SaveStateAsync();
+							Settle(rejected.EventId, rejected.Reason);
 							break;
 						default:
 							EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
@@ -605,6 +614,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
 							{
 								EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+							}
+							lock (_skipSet)
+							{
+								_awaitingVerdict[ev.EventId] = ev.CommandId; // before the send: the master may answer before the send returns
 							}
 							await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
 						}
@@ -842,6 +855,25 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			_isCaughtUp = true;
 			EmergencyLog.Default.Stage($"replication: caught up after {ConnectionFrames} frames");
 			StatusChanged?.Invoke();
+		}
+	}
+
+	/// <summary>Tells listeners the master's answer to an own event. A listener's failure is logged, never the reader's end.</summary>
+	void Settle(Guid eventId, string? refusal)
+	{
+		Guid commandId;
+		lock (_skipSet)
+		{
+			_awaitingVerdict.Remove(eventId, out commandId);
+		}
+		try
+		{
+			EventSettled?.Invoke(new EventVerdict(eventId, commandId, refusal));
+		}
+		catch (Exception ex)
+		{
+			// Any listener's code may throw; the reader serves every other event, so a listener's failure is logged and stops here.
+			EmergencyLog.Default.LogError(ex, $"EventReplicationService: a listener failed on the verdict for event {eventId}; replication goes on.");
 		}
 	}
 
@@ -1141,6 +1173,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		lock (_skipSet)
 		{
 			_heldByMaster.Clear();
+			_awaitingVerdict.Clear();
 		}
 		_lastSentEventId = default;
 		_lastSentSequence = default;

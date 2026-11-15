@@ -5,16 +5,18 @@ namespace Synqra.Tests.Simulator;
 
 /// <summary>
 /// A projection that refuses every apply, as the Mongo projection does for an event whose state is already there
-/// (a facet re-added to a unique slot). A master whose log already holds an event must never reach it.
+/// (a facet re-added to a unique slot). A master whose log already holds an event must never reach it. Given a failure, each
+/// apply asks it instead: an exception is thrown (a store briefly unreachable), none lets the apply pass.
 /// </summary>
-internal sealed class RefusingProjection : IProjection
+internal sealed class RefusingProjection(Func<Event, Exception?>? failure = null) : IProjection
 {
 	public int Applied { get; private set; }
 
 	Task Refuse(Event ev)
 	{
 		Applied++;
-		throw new InvalidOperationException($"{ev.GetType().Name} {ev.EventId} was applied although the log holds it already.");
+		var thrown = failure is null ? new InvalidOperationException($"{ev.GetType().Name} {ev.EventId} was applied although the log holds it already.") : failure(ev);
+		return thrown is null ? Task.CompletedTask : Task.FromException(thrown);
 	}
 
 	// IEventVisitor<EventVisitorContext>

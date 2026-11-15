@@ -290,6 +290,12 @@ public static class SynqraReplicationEndpointExtensions
 						logger?.LogWarning(refusal, "Synqra replication: event {EventId} on stream {Stream} refused; the sender is told and the connection continues.", ev.EventId, connectionStream);
 						rejected = new EventRejected { EventId = ev.EventId, Reason = refusal.Message };
 					}
+					catch (Exception failure) when (failure is not OperationCanceledException)
+					{
+						// Not a refusal: it may pass (a store briefly unreachable), so it ends the connection unanswered, as a failed store
+						// does, and the sender offers it again. Answered with nothing, a later ack would move the sender's cursor past it.
+						throw new UnstoredEventException(ev, failure);
+					}
 				}
 				return rejected;
 			}
