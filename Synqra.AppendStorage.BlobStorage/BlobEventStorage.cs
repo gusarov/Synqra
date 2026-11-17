@@ -16,9 +16,14 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 	readonly ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>? _tailAppend;
 	readonly IUniqueTagIndex? _tags;
 	readonly GuidExtensions.Generator _stamps = GuidExtensions.CreateGenerator();
+	// A schema set sits under the empty stream, its id in the sequence's last four bytes: every set sorts before every event.
+	const string SetTagPrefix = "000000000000000000000000";
 
 	public BlobEventStorage(IBlobStorage<(Guid Stream, Guid Sequence)> blobStorage, ISbxSerializerFactory serializerFactory, JsonSerializerOptions? jsonMirrorOptions = null)
-		: base(blobStorage, serializerFactory, ev => (ev.StreamId, ev.SequenceId), jsonMirrorOptions)
+		: base(blobStorage, serializerFactory, ev => (ev.StreamId, ev.SequenceId), jsonMirrorOptions, new SchemaSetKeys<(Guid Stream, Guid Sequence)>(
+			  setId => (Guid.Empty, new Guid(0, 0, 0, 0, 0, 0, 0, (byte)(setId >> 24), (byte)(setId >> 16), (byte)(setId >> 8), (byte)setId))
+			, key => key.Stream == Guid.Empty
+			))
 	{
 		_tailAppend = blobStorage as ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>;
 		_tags = _tailAppend as IUniqueTagIndex;
@@ -37,6 +42,7 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 		}
 		else
 		{
+			await RegisterSchemaSetAsync(cancellationToken);
 			var outcome = TailAppendResult.TailMoved;
 			var attempts = 0;
 			while (outcome == TailAppendResult.TailMoved)
@@ -46,13 +52,37 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 					EmergencyLog.Default.Stage($"log: the tail moved under event {item.EventId}, attempt {attempts}");
 				}
 				var tail = await _tailAppend.ReadTailAsync(cancellationToken);
-				_stamps.CreateVersion7OrApprove(tail.Sequence); // the clock follows the store's tail, whichever writer put it there
+				_stamps.CreateVersion7OrApprove(IsSetKey(tail) ? default : tail.Sequence); // the clock follows the store's tail, whichever writer put it there
 				item.SequenceId = _stamps.CreateVersion7();
 				outcome = await _tailAppend.AppendAtTailAsync((item.StreamId, item.SequenceId), Serialize(item), JsonMirrorOf(item), item.EventId.ToString("N"), tail, cancellationToken);
 			}
 			if (outcome == TailAppendResult.Appended)
 			{
 				Attach(item);
+			}
+		}
+	}
+
+	/// <summary>A salvaged event is appended again, to its stream: SBX keeps the stream in the key only.</summary>
+	protected override void RestoreFromKey((Guid Stream, Guid Sequence) key, Event item)
+	{
+		item.StreamId = key.Stream;
+	}
+
+	/// <summary>Over a tail-append store a set lands once, under its unique tag, whichever tab is first; otherwise it is written.</summary>
+	protected override async Task StoreSchemaSetAsync((Guid Stream, Guid Sequence) key, byte[] content, CancellationToken cancellationToken)
+	{
+		if (_tailAppend is null)
+		{
+			await base.StoreSchemaSetAsync(key, content, cancellationToken);
+		}
+		else
+		{
+			var outcome = TailAppendResult.TailMoved;
+			while (outcome == TailAppendResult.TailMoved)
+			{
+				var tail = await _tailAppend.ReadTailAsync(cancellationToken);
+				outcome = await _tailAppend.AppendAtTailAsync(key, content, null, key.Sequence.ToString("N"), tail, cancellationToken);
 			}
 		}
 	}
@@ -67,7 +97,10 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 		{
 			await foreach (var tag in _tags.EnumerateTagsAsync(cancellationToken))
 			{
-				yield return Guid.ParseExact(tag, "N");
+				if (!tag.StartsWith(SetTagPrefix, StringComparison.Ordinal)) // a schema set's tag is its key's sequence, not an event
+				{
+					yield return Guid.ParseExact(tag, "N");
+				}
 			}
 		}
 		else

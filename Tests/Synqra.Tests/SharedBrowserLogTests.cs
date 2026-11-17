@@ -127,7 +127,7 @@ public class SharedBrowserLogTests : TestsStateManagement
 	}
 
 	/// <summary>The IndexedDB contract in memory: one lock stands for IndexedDB's one-readwrite-transaction-at-a-time, across tabs.</summary>
-	public sealed class SharedTailStore : ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>
+	public sealed class SharedTailStore : ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>, IClearableBlobStorage
 	{
 		readonly SortedDictionary<(Guid Stream, Guid Sequence), byte[]> _blobs = new(Comparer<(Guid Stream, Guid Sequence)>.Create((a, b) => a.Stream.CompareBigEndian(b.Stream) is var first && first != 0 ? first : a.Sequence.CompareBigEndian(b.Sequence)));
 		readonly HashSet<string> _tags = [];
@@ -225,6 +225,17 @@ public class SharedBrowserLogTests : TestsStateManagement
 				_blobs.Remove(key);
 			}
 			return ValueTask.CompletedTask;
+		}
+
+		/// <summary>Wipes the log, as a browser's IndexedDB one can be.</summary>
+		public Task ClearAllAsync(CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				_blobs.Clear();
+				_tags.Clear();
+			}
+			return Task.CompletedTask;
 		}
 
 		public void Dispose()

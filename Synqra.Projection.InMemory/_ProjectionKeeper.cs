@@ -64,12 +64,14 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 {
 	private readonly IProjectionFactory _factory;
 	private readonly IProjectionKeeper _keeper;
+	private readonly IServiceProvider? _services;
 	private readonly ConcurrentDictionary<Guid, Entry> _byStream = new();
 
-	public InMemoryProjectionProvider(IProjectionFactory factory, IProjectionKeeper keeper)
+	public InMemoryProjectionProvider(IProjectionFactory factory, IProjectionKeeper keeper, IServiceProvider? services = null)
 	{
 		_factory = factory;
 		_keeper = keeper;
+		_services = services;
 	}
 
 	// One entry per stream: the cached projection, a gate that serializes catch-up (GetAsync is
@@ -98,7 +100,14 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 			// A freshly created projection is cold (Cursor == Guid.Empty): the whole durable log is
 			// historical, so apply it as a replay (suppresses one-shot activator side effects). Once
 			// caught up the first time, later live deltas are not replay.
-			await _keeper.MaintainAsync(entry.Projection, isReplay: !entry.ColdLoaded, cancellationToken: cancellationToken);
+			try
+			{
+				await _keeper.MaintainAsync(entry.Projection, isReplay: !entry.ColdLoaded, cancellationToken: cancellationToken);
+			}
+			catch (UnreadableRecordException unreadable)
+			{
+				await RecoverAsync(entry, streamId, unreadable, cancellationToken);
+			}
 			entry.ColdLoaded = true;
 			return entry.Projection;
 		}
@@ -106,6 +115,32 @@ public sealed class InMemoryProjectionProvider : IProjectionProvider
 		{
 			entry.Gate.Release();
 			EmergencyLog.Default.Stage($"provider {streamId}: gate released");
+		}
+	}
+
+	/// <summary>
+	/// A local log the cold fold cannot read is dropped by its owner (the replication client), and a fresh projection folds what it
+	/// kept; the server fills the rest. A projection already handed out keeps its identity: its log is dropped, and it reports so.
+	/// </summary>
+	async Task RecoverAsync(Entry entry, Guid streamId, UnreadableRecordException unreadable, CancellationToken cancellationToken)
+	{
+		var recovery = _services?.GetService<ILocalLogRecovery>() ?? _services?.GetService<IEventReplicationService>() as ILocalLogRecovery;
+		if (recovery is null)
+		{
+			throw new InvalidOperationException($"The event log of stream {streamId} cannot be read and nothing here can drop and refetch it.", unreadable);
+		}
+		else
+		{
+			await recovery.RecoverLocalLogAsync(unreadable, cancellationToken);
+			if (entry.ColdLoaded)
+			{
+				throw new InvalidOperationException($"The local log of stream {streamId} could not be read and was dropped; the open projection must be loaded again.", unreadable);
+			}
+			else
+			{
+				entry.Projection = _factory.Create(streamId);
+				await _keeper.MaintainAsync(entry.Projection, isReplay: true, cancellationToken: cancellationToken);
+			}
 		}
 	}
 }
