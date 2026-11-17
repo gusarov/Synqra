@@ -106,10 +106,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	int _writes;
 	bool _reportedUnconfirmed = true;
 
-	// The build and reload demand of this run's first ServerVersion (or the configured ClientBuild): a later one that differs asks for a reload.
+	// The reload demand of this run's first ServerVersion: a later one that differs asks for a reload.
 	bool _versionKnown;
-	string? _loadedBuild;
 	Guid _loadedEpoch;
+	// This build's schemas bundle, which the master's must match before any of its frames is applied.
+	readonly Lazy<SchemasBundle?> _schemas;
 
 	/// <inheritdoc />
 	public string? ServerBuild { get; private set; }
@@ -211,6 +212,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		_config = config ?? options.Value;
 		_stateStore = stateStore;
 		_serializerFactory = serializerFactory;
+		_schemas = new Lazy<SchemasBundle?>(() => serializerFactory?.CreateSchemasBundle());
 		_foldsSnapshots = snapshotFolding is not null;
 	}
 
@@ -403,7 +405,29 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
 				EmergencyLog.Default.Stage("replication: online");
 				#endregion
-				while (!_cts.IsCancellationRequested && !Halted) // a frame this build cannot read halts the run: nothing after it is read
+				var reading = true;
+				if (_config.NegotiateSchemas)
+				{
+					// The master's schemas bundle comes first: no frame is applied before this build is known to read its frames.
+					var versionBytes = await ReceiveWatchedAsync(wsConnection);
+					reading = versionBytes is { Length: > 0 };
+					if (reading)
+					{
+						if (ReadFrame(versionBytes!) is ServerVersion serverVersion)
+						{
+							ReceiveServerVersion(serverVersion);
+						}
+						else if (!Halted)
+						{
+							throw new InvalidOperationException("EventReplicationService: the master answered a HELLO that negotiates schemas with another frame than its ServerVersion.");
+						}
+					}
+					else
+					{
+						IsOnline = false;
+					}
+				}
+				while (reading && !_cts.IsCancellationRequested && !Halted) // a frame this build cannot read halts the run: nothing after it is read
 				{
 					var bytes = await ReceiveWatchedAsync(wsConnection);
 					if (bytes == null || bytes.Length == 0)
@@ -547,7 +571,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				{
 					BitConverter.TryWriteBytes(buffer, _networkSerializationService.Magic);
 					_eventReplicationState.ServerWatermark.TryWriteBytes(buffer.AsSpan(8, 16));
-					buffer[24] = (byte)helloKind;
+					buffer[24] = (byte)((byte)helloKind | (_config.NegotiateSchemas ? (byte)ReplicationHelloKind.NegotiatesSchemas : 0)); // the master's bundle first
 					if (isSubscribeTo)
 					{
 						(_config.InitialSubscribeStreamId ?? (StreamKey != default ? StreamKey : throw new InvalidOperationException("HelloKind SubscribeTo requires InitialSubscribeStreamId."))).TryWriteBytes(buffer.AsSpan(25, 16));
@@ -555,7 +579,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 					// Read by the master after the catch-up, so its answer marks the end of it. Sent before the send loop starts: a socket takes one send at a time.
 					await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = _catchUpRequest }, _cts.Token);
-					await wsConnection.SendOperationAsync(_networkSerializationService, new VersionRequest { NodeId = _eventReplicationState.MyNodeId, ClientBuild = _config.ClientBuild }, _cts.Token);
+					if (_config.NegotiateSchemas) // a client that does not negotiate is told no version at all, as a build from before it
+					{
+						await wsConnection.SendOperationAsync(_networkSerializationService, new VersionRequest { NodeId = _eventReplicationState.MyNodeId }, _cts.Token);
+					}
 				}
 				catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 				{
@@ -768,8 +795,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 
 	/// <summary>
-	/// The master's build and reload demand. The run's first one (or the configured <see cref="EventReplicationConfig.ClientBuild"/>)
-	/// is the page's own; a later build that differs, or a reload demand raised since, asks the host to reload.
+	/// The master's build, reload demand and schemas bundle. A bundle that maps a type this build maps at another schema version halts
+	/// the run before any frame is applied: a frame names no versions, so the type would be misread both ways. A type only one side maps
+	/// is no conflict (a master maps its server-only graph): a frame of one this build does not know halts the run where it comes. The
+	/// run's first reload demand is the page's own; a later one asks the host to reload. Another build with agreeing schemas replicates
+	/// on: whether to load it is the host's call.
 	/// </summary>
 	void ReceiveServerVersion(ServerVersion version)
 	{
@@ -777,17 +807,50 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		if (!_versionKnown)
 		{
 			_versionKnown = true;
-			_loadedBuild = _config.ClientBuild ?? version.Build;
 			_loadedEpoch = version.ReloadEpoch;
 		}
-		var newerBuild = version.Build is not null && _loadedBuild is not null && version.Build != _loadedBuild;
+		var conflicts = FindSchemaConflicts(version);
+		if (conflicts is not null && !Halted)
+		{
+			Halted = true;
+			ReloadRequired = true;
+			EmergencyLog.Default.LogError($"EventReplicationService: the master's schemas bundle {version.SchemasBundleId:x8} (build {version.Build}) disagrees with this build's {_schemas.Value?.Id:x8} on {conflicts}; replication stops before applying any of its frames, at watermark {ServerWatermark}, and the page must reload onto the master's build.");
+		}
 		var demanded = version.ReloadEpoch != default && version.ReloadEpoch != _loadedEpoch;
-		if ((newerBuild || demanded) && !ReloadRequired)
+		if (demanded && !ReloadRequired)
 		{
 			ReloadRequired = true;
-			EmergencyLog.Default.LogWarning($"EventReplicationService: the server asks this page to reload (its build {version.Build}, this page's {_loadedBuild}, reload demanded: {demanded}).");
+			EmergencyLog.Default.LogWarning($"EventReplicationService: the server asks this page to reload (its build {version.Build}).");
 		}
 		StatusChanged?.Invoke();
+	}
+
+	/// <summary>
+	/// The map ids this build and the master both map at different schema versions, as "id: ours/theirs" text, or null when they agree
+	/// (the same bundle id, or no conflicting id in the master's whole mapping). A master that names no bundle is taken at its word.
+	/// </summary>
+	string? FindSchemaConflicts(ServerVersion version)
+	{
+		var own = _schemas.Value;
+		string? conflicts = null;
+		if (own is not null && version.SchemasBundleId != 0 && version.SchemasBundleId != own.Id)
+		{
+			if (version.SchemasBundleContent is { } content)
+			{
+				var theirs = new SchemasBundle((uint)version.SchemasBundleId, content); // a content that does not hash to its id is refused
+				var ours = own.Entries.ToDictionary(x => x.MapId, x => x.Version);
+				var differing = theirs.Entries
+					.Where(x => ours.TryGetValue(x.MapId, out var mine) && mine != x.Version)
+					.Select(x => FormattableString.Invariant($"{x.MapId}: {ours[x.MapId]}/{x.Version}"))
+					.ToList();
+				conflicts = differing.Count == 0 ? null : string.Join(", ", differing);
+			}
+			else
+			{
+				conflicts = "a bundle it did not send";
+			}
+		}
+		return conflicts;
 	}
 
 	/// <summary>

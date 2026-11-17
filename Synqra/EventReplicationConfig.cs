@@ -35,6 +35,12 @@ public enum ReplicationHelloKind : byte
 	/// log) that asks for a stream snapshot first. The master answers with <see cref="SnapshotBegin"/> … <see cref="SnapshotEnd"/>
 	/// or <see cref="SnapshotDeclined"/>, then the backlog (plans/snapshot.md).</summary>
 	SubscribeToSnapshot = 4,
+
+	/// <summary>
+	/// Not a kind: a bit set on top of one. The client negotiates schemas, and the master tells it its schemas bundle
+	/// (<see cref="ServerVersion"/>) before any other frame; a master from before it refuses the HELLO.
+	/// </summary>
+	NegotiatesSchemas = 0x80,
 }
 
 public class EventReplicationConfig
@@ -86,10 +92,10 @@ public class EventReplicationConfig
 	public virtual TimeSpan HeartbeatTimeoutWhileWriting { get; set; } = TimeSpan.FromSeconds(45);
 
 	/// <summary>
-	/// This client's build when its host knows it, compared with the master's (<see cref="ServerVersion"/>); null takes the build of
-	/// the first master this run talks to as its own.
+	/// Whether the HELLO negotiates schemas (<see cref="ReplicationHelloKind.NegotiatesSchemas"/>): the master's schemas bundle comes
+	/// first, and a client on another one halts before applying any frame. Off only against a master from before it.
 	/// </summary>
-	public virtual string? ClientBuild { get; set; }
+	public virtual bool NegotiateSchemas { get; set; } = true;
 
 	/// <summary>
 	/// How long a connect attempt may take before it is given up and tried again: a proxy holds the upgrade of a master still

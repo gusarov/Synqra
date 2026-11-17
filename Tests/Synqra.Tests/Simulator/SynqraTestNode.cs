@@ -146,6 +146,9 @@ internal class SynqraTestNode
 	/// <inheritdoc cref="HeartbeatInterval"/>
 	public TimeSpan? HeartbeatTimeout { get; init; }
 
+	/// <summary>Whether a client negotiates schemas in its HELLO; false as a client that reads frames without the bundle check.</summary>
+	public bool NegotiateSchemas { get; init; } = true;
+
 	/// <summary>How long a client's connect attempt may take; null keeps the configured default.</summary>
 	public TimeSpan? ConnectTimeout { get; init; }
 
@@ -505,9 +508,10 @@ internal class SynqraTestNode
 					throw new Exception($"Protocol Negotiation Failed! Received Magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 				}
 				var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
+				var negotiatesSchemas = helloBytes.Length >= 25 && (helloBytes[24] & (byte)ReplicationHelloKind.NegotiatesSchemas) != 0;
 				if (helloBytes.Length >= 25)
 				{
-					HelloKinds.Enqueue((ReplicationHelloKind)helloBytes[24]);
+					HelloKinds.Enqueue((ReplicationHelloKind)(helloBytes[24] & ~(byte)ReplicationHelloKind.NegotiatesSchemas));
 				}
 				if (HelloDelay > TimeSpan.Zero)
 				{
@@ -526,6 +530,13 @@ internal class SynqraTestNode
 				{
 					_sockets.Add(socket);
 					await socket.SendAsync(magicBytes, WebSocketMessageType.Binary, endOfMessage: true, ctx.RequestAborted);
+					if (negotiatesSchemas)
+					{
+						// This master's schemas bundle first, as the real endpoint sends it.
+						var bundle = app.Services.GetRequiredService<ISbxSerializerFactory>().CreateSchemasBundle();
+						var told = networkSerializationService.Serialize<TransportOperation>(new ServerVersion { SchemasBundleId = bundle.Id, SchemasBundleContent = bundle.Content }, new ArraySegment<byte>(new byte[EventReplicationService.DefaultFrameSize]));
+						await socket.SendAsync(told, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
+					}
 					// The HELLO ack, as the real endpoint sends it: the client files received events under its one subscribed stream.
 					var ack = networkSerializationService.Serialize<TransportOperation>(new SubscriptionState { Streams = [StreamId] }, new ArraySegment<byte>(new byte[EventReplicationService.DefaultFrameSize]));
 					await socket.SendAsync(ack, networkSerializationService.IsTextOrBinary ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, ctx.RequestAborted);
@@ -753,6 +764,7 @@ internal class SynqraTestNode
 		public override TimeSpan HeartbeatInterval => _node.HeartbeatInterval ?? base.HeartbeatInterval;
 		public override TimeSpan HeartbeatTimeout => _node.HeartbeatTimeout ?? base.HeartbeatTimeout;
 		public override TimeSpan ConnectTimeout => _node.ConnectTimeout ?? base.ConnectTimeout;
+		public override bool NegotiateSchemas => _node.NegotiateSchemas;
 		// The master binds 127.0.0.1 only: "localhost" tries ::1 first, and on Windows each refused attempt costs about 2 s.
 		public override string? Endpoint => $"ws://127.0.0.1:{_node.Port}/api/synqra/ws?stream={_node.StreamId:D}";
 	}

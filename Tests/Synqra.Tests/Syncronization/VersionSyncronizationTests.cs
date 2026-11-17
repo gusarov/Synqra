@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Synqra.BinarySerializer;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -39,7 +40,7 @@ internal class VersionSyncronizationTests : BaseTest
 	}
 
 	[Test]
-	public async Task Should_ask_an_open_client_to_reload_when_its_master_runs_another_build()
+	public async Task Should_replicate_on_with_a_master_of_another_build_and_the_same_schemas()
 	{
 		var (master, version) = await StartMasterAsync("build-1");
 		var client = await StartClientAsync(master);
@@ -48,14 +49,49 @@ internal class VersionSyncronizationTests : BaseTest
 			var replication = Replication(client);
 			await WaitUntilAsync(() => replication.ServerBuild == "build-1", "the client learns the master's build");
 
-			version.Announce("build-2"); // as a deploy's master would on the client's next connect
+			version.Announce("build-2"); // a deploy that changed no model: its frames read the same
 
-			await WaitUntilAsync(() => replication.ReloadRequired, "the client is asked to reload");
-			await Assert.That(replication.ServerBuild).IsEqualTo("build-2");
+			await WaitUntilAsync(() => replication.ServerBuild == "build-2", "the client learns the new build");
+			await Task.Delay(500);
+			await Assert.That(replication.ReloadRequired).IsFalse().Because("the same schemas bundle: the host decides whether to load the new build");
+			await Assert.That(replication.Halted).IsFalse();
 		}
 		finally
 		{
 			await StopAsync(client, master);
+		}
+	}
+
+	/// <summary>
+	/// A frame names no schema versions, so a client on other schemas than its master's misreads a changed type both know, not only
+	/// an unknown one. The master's bundle comes first, and a client on another one applies none of the master's frames: it halts and
+	/// asks for a reload before the backlog, a snapshot or a push is read.
+	/// </summary>
+	[Test]
+	public async Task Should_apply_no_frame_of_a_master_that_maps_a_type_at_another_schema_version()
+	{
+		var (master, version) = await StartMasterAsync("build-1");
+		var writer = await StartClientAsync(master);
+		var reader = new SynqraTestNode(master.StreamId, builder => builder.Services.AddSbxSerializer(ser => ser.Map(101, 2025.5, typeof(SampleTaskModel)))) { Port = master.Port, RequestSnapshot = false }; // a build where a type both map has another schema
+		try
+		{
+			writer.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "in the backlog" });
+			await WaitUntilAsync(() => !Replication(writer).HasUnconfirmedWrites, "the write is in the master's stream");
+
+			await reader.Started;
+			var replication = Replication(reader);
+			await WaitUntilAsync(() => replication.Halted, "the reader halts at the master's bundle");
+			writer.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "pushed later" });
+			await Task.Delay(2_000); // a reconnect, the backlog or the push would show by now
+
+			await Assert.That(replication.ReloadRequired).IsTrue();
+			await Assert.That(replication.FramesReceived).IsEqualTo(0).Because("no event frame is read before the bundle check passes");
+			await Assert.That(reader.StoreContext.GetCollection<SampleTaskModel>().Count).IsEqualTo(0);
+			await Assert.That(replication.IsOnline).IsFalse().Because("a halted run opens no connection again");
+		}
+		finally
+		{
+			await StopAsync(reader, writer, master);
 		}
 	}
 

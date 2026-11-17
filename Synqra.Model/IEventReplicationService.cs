@@ -19,8 +19,9 @@ public interface IEventReplicationService
 	string? ServerBuild => null;
 
 	/// <summary>
-	/// Whether this page must reload to load the master's build: the master runs another build than the one this run started with, it
-	/// raised a reload demand, or it sent a frame this build cannot read (<see cref="Halted"/>). Its change raises <see cref="StatusChanged"/>.
+	/// Whether this page must reload onto the master's build: the master maps a type this build maps at another schema version, it
+	/// raised a reload demand, or it sent a frame this build cannot read (the first and the last <see cref="Halted"/> the run). Another
+	/// build with agreeing schemas replicates on; whether to load it is the host's call. Its change raises <see cref="StatusChanged"/>.
 	/// </summary>
 	bool ReloadRequired => false;
 

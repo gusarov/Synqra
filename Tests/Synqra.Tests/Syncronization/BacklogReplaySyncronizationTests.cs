@@ -286,7 +286,7 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 		await nodeA.Started;
 		await WaitForOnlineAsync(nodeA);
 		var remembered = new RecordingStateStore();
-		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port, RequestSnapshot = false, UnmappedSbxTypeIds = new HashSet<int> { 100 } };
+		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port, RequestSnapshot = false, UnmappedSbxTypeIds = new HashSet<int> { 100 } }; // a type only the master maps passes the bundle check: its frame halts the run where it comes
 		await nodeC.Started;
 		await WaitForOnlineAsync(nodeC);
 		var replicationC = nodeC.Host.Services.GetRequiredService<EventReplicationService>();
