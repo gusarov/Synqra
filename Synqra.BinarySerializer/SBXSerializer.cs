@@ -369,12 +369,13 @@ public class SbxSerializer : ISbxSerializer, ISbxSchemaVersions
 	// void IBindableModel.Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	// void IBindableModel.Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 
-	public void Map(int typeId, Type type, IModelBinder? binder = null)
+	public void Map(int typeId, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] Type type, IModelBinder? binder = null)
 	{
 		Map(typeId, 0, type, binder);
 	}
 
-	public void Map(int typeId, double schemaVersion, Type type, IModelBinder? binder = null)
+	// The type is created by reflection when a frame names its id: a trimmed or AOT build must keep its constructor and properties.
+	public void Map(int typeId, double schemaVersion, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] Type type, IModelBinder? binder = null)
 	{
 		if (schemaVersion == 0)
 		{
