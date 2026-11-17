@@ -1,3 +1,4 @@
+using Synqra.Tests.SampleModels;
 using Synqra.Tests.SampleModels.Syncronization;
 using Synqra.Tests.Simulator;
 using Synqra.Tests.TestHelpers;
@@ -267,6 +268,56 @@ internal class BacklogReplaySyncronizationTests : BaseTest
 
 		await Assert.That(FramesReceived(nodeD)).IsEqualTo(total - heldByC);
 	}
+
+	/// <summary>
+	/// A page left open across a deploy runs the old build; the new one writes a model the old one has no type id for. Its frame
+	/// killed the reader on every connect, and the page looped on "Connecting" (prod 2026-11-14: KeyNotFoundException 159, an
+	/// interned string read out of place after the unknown type). Skipping the frame would let the client's graph drift from the
+	/// stream, so the run halts at it: nothing after it is applied, the watermark stays before it, no connection is opened again,
+	/// and a reload is asked for. The next run, on a build that knows the type, is sent all of it.
+	/// </summary>
+	[Test]
+	public async Task Should_halt_at_a_frame_of_an_unknown_type_and_send_it_to_the_next_run()
+	{
+		var streamId = Guid.NewGuid();
+		var nodeMaster = new SynqraTestNode(streamId, builder => { }, masterHost: true, useRealEndpoint: true);
+		await nodeMaster.Started;
+		var nodeA = new SynqraTestNode(streamId, builder => { }) { Port = nodeMaster.Port };
+		await nodeA.Started;
+		await WaitForOnlineAsync(nodeA);
+		var remembered = new RecordingStateStore();
+		var nodeC = new SynqraTestNode(streamId, builder => builder.Services.AddSingleton<IEventReplicationStateStore>(remembered)) { Port = nodeMaster.Port, RequestSnapshot = false, UnmappedSbxTypeIds = new HashSet<int> { 100 } };
+		await nodeC.Started;
+		await WaitForOnlineAsync(nodeC);
+		var replicationC = nodeC.Host.Services.GetRequiredService<EventReplicationService>();
+		await WaitUntilAsync(() => Task.FromResult(replicationC.IsCaughtUp), "C is caught up");
+		var reloadsAsked = 0;
+		replicationC.StatusChanged += () => reloadsAsked += replicationC.ReloadRequired && reloadsAsked == 0 ? 1 : 0;
+
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "before" });
+		await WaitUntilAsync(() => Task.FromResult(nodeC.StoreContext.GetCollection<SampleTaskModel>().Count == 1), "C holds the frame before the unknown one");
+		nodeA.StoreContext.GetCollection<SamplePublicModel>().Add(new SamplePublicModel { Name = "of a type C does not know" });
+		nodeA.StoreContext.GetCollection<SampleTaskModel>().Add(new SampleTaskModel { Subject = "after" });
+		await WaitUntilAsync(async () => await CountWhenSettledAsync(nodeMaster) >= 3, "A's writes reach the master");
+
+		await WaitUntilAsync(() => Task.FromResult(replicationC.Halted), "C halts at the unknown frame");
+		var framesAtHalt = replicationC.FramesReceived;
+		await Task.Delay(3_000); // a reconnect, or a frame after the halt, would show by now
+		await Assert.That(replicationC.ReloadRequired).IsTrue();
+		await Assert.That(reloadsAsked).IsEqualTo(1);
+		await Assert.That(replicationC.IsOnline).IsFalse().Because("a halted run opens no connection again");
+		await Assert.That(replicationC.FramesReceived).IsEqualTo(framesAtHalt);
+		await Assert.That(nodeC.StoreContext.GetCollection<SampleTaskModel>().Select(t => t.Subject)).IsEquivalentTo(["before"]).Because("nothing after the unknown frame is applied");
+		var logC = await EndRunAsync(nodeC);
+
+		var nodeD = NextRun(nodeMaster, streamId, logC, remembered.Saved); // C's reload onto a build that knows the type
+		await nodeD.Started;
+		await WaitForOnlineAsync(nodeD);
+		await WaitUntilAsync(() => Task.FromResult(nodeD.StoreContext.GetCollection<SampleTaskModel>().Count == 2 && nodeD.StoreContext.GetCollection<SamplePublicModel>().Count == 1), "D holds the whole stream");
+		await Assert.That(Replication(nodeD).Halted).IsFalse();
+	}
+
+	EventReplicationService Replication(SynqraTestNode node) => node.Host.Services.GetRequiredService<EventReplicationService>();
 
 	/// <summary>The master's event count once two reads half a second apart agree: the writes in flight have landed.</summary>
 	async Task<int> CountWhenSettledAsync(SynqraTestNode master)

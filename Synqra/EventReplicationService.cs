@@ -99,6 +99,30 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	/// <inheritdoc />
 	public long ConnectionFrames { get; private set; }
 
+	// Whether a local write may not have reached the master yet: set by each local write and at each connection's end, cleared
+	// when a send pass that saw every write so far ends. With an unacknowledged send it makes HasUnconfirmedWrites.
+	volatile bool _unsent = true;
+	// Local writes this run: a send pass clears _unsent only when none came while it read the log.
+	int _writes;
+	bool _reportedUnconfirmed = true;
+
+	// The build and reload demand of this run's first ServerVersion (or the configured ClientBuild): a later one that differs asks for a reload.
+	bool _versionKnown;
+	string? _loadedBuild;
+	Guid _loadedEpoch;
+
+	/// <inheritdoc />
+	public string? ServerBuild { get; private set; }
+
+	/// <inheritdoc />
+	public bool ReloadRequired { get; private set; }
+
+	/// <inheritdoc />
+	public bool Halted { get; private set; }
+
+	/// <inheritdoc />
+	public bool HasUnconfirmedWrites => _unsent || _lastSentEventId != _eventReplicationState.LastEventIdFromMe;
+
 	/// <inheritdoc />
 	public Guid ServerWatermark => _eventReplicationState.ServerWatermark;
 
@@ -341,7 +365,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 		// One pass per connection. A reader that fails or a socket that closes ends the pass; the next one resumes from the
 		// persisted cursor and offers again what the master has not acknowledged. The service stops only with the host.
-		for (var failures = 0; !_cts.IsCancellationRequested; )
+		for (var failures = 0; !_cts.IsCancellationRequested && !Halted; )
 		{
 			var (wsConnection, cut) = await ConnectAsync();
 			using var abortOnCut = cut.Token.Register(wsConnection.Abort); // a cut connection ends at once: its reader and sends fail, the pass ends
@@ -379,7 +403,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				IsOnline = true; // the master registers the socket before answering HELLO, so from here on broadcasts include this node
 				EmergencyLog.Default.Stage("replication: online");
 				#endregion
-				while (!_cts.IsCancellationRequested)
+				while (!_cts.IsCancellationRequested && !Halted) // a frame this build cannot read halts the run: nothing after it is read
 				{
 					var bytes = await ReceiveWatchedAsync(wsConnection);
 					if (bytes == null || bytes.Length == 0)
@@ -387,9 +411,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						IsOnline = false;
 						break;
 					}
-					var operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+					var operation = ReadFrame(bytes);
 					switch (operation)
 					{
+						case null:
+							break; // unreadable here: the run has halted, and the loop ends without applying anything after it
 						case SubscriptionState state:
 							// Master's authoritative snapshot of the streams this connection is now
 							// subscribed to. Lets the client detect an unexpected default and drive its
@@ -405,6 +431,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							_eventReplicationState.LastEventIdFromMe = accepted.EventId;
 							await SaveStateAsync();
 							Settle(accepted.EventId, null);
+							NoteWrites();
 							break;
 						case SnapshotBegin begin:
 							ReceiveSnapshotBegin(begin);
@@ -432,6 +459,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 							_eventReplicationState.LastEventIdFromMe = rejected.EventId;
 							await SaveStateAsync();
 							Settle(rejected.EventId, rejected.Reason);
+							NoteWrites();
+							break;
+						case ServerVersion serverVersion:
+							ReceiveServerVersion(serverVersion);
 							break;
 						default:
 							EmergencyLog.Default.LogWarning($"EventReplicationService: ignoring a transport operation this build does not know: {operation?.GetType()}."); // a newer master; the stream goes on
@@ -524,6 +555,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					await wsConnection.SendAsync(new ArraySegment<byte>(buffer, 0, helloSize), WebSocketMessageType.Binary, endOfMessage: true, _cts.Token);
 					// Read by the master after the catch-up, so its answer marks the end of it. Sent before the send loop starts: a socket takes one send at a time.
 					await wsConnection.SendOperationAsync(_networkSerializationService, new CatchUpRequest { RequestId = _catchUpRequest }, _cts.Token);
+					await wsConnection.SendOperationAsync(_networkSerializationService, new VersionRequest { NodeId = _eventReplicationState.MyNodeId, ClientBuild = _config.ClientBuild }, _cts.Token);
 				}
 				catch (Exception ex) when (ex is WebSocketException || ex is OperationCanceledException && cut.IsCancellationRequested && !_cts.IsCancellationRequested)
 				{
@@ -564,6 +596,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					// up to the last sent id, as the keeper does: `from` is not a uniform range bound across backends.
 					// The first read of a run is a full one, walking to the last acknowledged id; once this run knows where that is in
 					// the log, a trigger reads only what follows, as the keeper does (a full read per local write cost seconds, WI 487).
+					var writesAtStart = Volatile.Read(ref _writes); // a write during this pass may come after the read: it keeps _unsent
 					var sent = _lastSentEventId;
 					var sendingStream = StreamKey != default ? StreamKey : _lastSentStream; // a client's log holds the one stream it serves
 					var incremental = _lastSentSequence != default && sendingStream != default;
@@ -642,6 +675,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 
 						FramesSent++;
 						_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+						NoteWrites(); // told before its ack can come, so a host sees it unconfirmed
 						Passed(ev);
 					}
 					if (!reached)
@@ -654,6 +688,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						Wake();
 					}
 					await SaveStateAsync();
+					if (Volatile.Read(ref _writes) == writesAtStart)
+					{
+						_unsent = false; // this pass read the log to its end after every write made so far
+					}
+					NoteWrites();
 					if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
 					{
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> </LOOP>");
@@ -668,6 +707,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Error : LogLevel.Information, ex, $"EventReplicationService: a send failed{CutNote}; reconnecting.");
 			}
 			IsOnline = false;
+			_unsent = true; // a pass cut short may have left writes unsent: the next connection's first pass tells
 			cut.Cancel(); // ends the watchdog
 			wsConnection.Abort();
 			wsConnection.Dispose();
@@ -679,7 +719,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			CloseAttempt(cut);
 			failures = connectedAt.Elapsed > TimeSpan.FromSeconds(30) ? 0 : failures + 1; // a connection that held a while was not the problem
-			if (!_cts.IsCancellationRequested)
+			if (!_cts.IsCancellationRequested && !Halted)
 			{
 				await PauseAsync(CalculateBackoff(failures));
 			}
@@ -708,7 +748,70 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	}
 	*/
 
-	public void Trigger(Command command, IReadOnlyList<Event> events) => Wake();
+	public void Trigger(Command command, IReadOnlyList<Event> events)
+	{
+		Interlocked.Increment(ref _writes);
+		_unsent = true;
+		NoteWrites();
+		Wake();
+	}
+
+	/// <summary>Raises <see cref="StatusChanged"/> when <see cref="HasUnconfirmedWrites"/> changes: a host waits on it before a reload.</summary>
+	void NoteWrites()
+	{
+		var unconfirmed = HasUnconfirmedWrites;
+		if (unconfirmed != _reportedUnconfirmed)
+		{
+			_reportedUnconfirmed = unconfirmed;
+			StatusChanged?.Invoke();
+		}
+	}
+
+	/// <summary>
+	/// The master's build and reload demand. The run's first one (or the configured <see cref="EventReplicationConfig.ClientBuild"/>)
+	/// is the page's own; a later build that differs, or a reload demand raised since, asks the host to reload.
+	/// </summary>
+	void ReceiveServerVersion(ServerVersion version)
+	{
+		ServerBuild = version.Build;
+		if (!_versionKnown)
+		{
+			_versionKnown = true;
+			_loadedBuild = _config.ClientBuild ?? version.Build;
+			_loadedEpoch = version.ReloadEpoch;
+		}
+		var newerBuild = version.Build is not null && _loadedBuild is not null && version.Build != _loadedBuild;
+		var demanded = version.ReloadEpoch != default && version.ReloadEpoch != _loadedEpoch;
+		if ((newerBuild || demanded) && !ReloadRequired)
+		{
+			ReloadRequired = true;
+			EmergencyLog.Default.LogWarning($"EventReplicationService: the server asks this page to reload (its build {version.Build}, this page's {_loadedBuild}, reload demanded: {demanded}).");
+		}
+		StatusChanged?.Invoke();
+	}
+
+	/// <summary>
+	/// A frame as its operation, or null when it names a type this build does not know: only a newer master writes one. Skipping it
+	/// would let this client's graph drift from the stream, so the run halts there: nothing after it is applied, the watermark stays
+	/// before it, the connection ends and is not opened again, and the host reloads onto the master's build, which reads it.
+	/// </summary>
+	TransportOperation? ReadFrame(byte[] bytes)
+	{
+		TransportOperation? operation;
+		try
+		{
+			operation = _networkSerializationService.Deserialize<TransportOperation>(bytes);
+		}
+		catch (SbxUnknownTypeException unknown)
+		{
+			operation = null;
+			Halted = true;
+			ReloadRequired = true;
+			EmergencyLog.Default.LogError(unknown, $"EventReplicationService: a frame of {bytes.Length} bytes names type id {unknown.TypeId}, which this build does not know (a newer server's); replication stops at watermark {ServerWatermark} and the page must reload onto the server's build.");
+			StatusChanged?.Invoke();
+		}
+		return operation;
+	}
 
 	/// <summary>
 	/// The HELLO kind this connection announces: the configured one, or a snapshot request when this client is fully cold (no

@@ -15,6 +15,28 @@ public interface IEventReplicationService
 	/// <summary>Event frames the current connection received, known ones included: during a catch-up, how far it has come.</summary>
 	long ConnectionFrames => 0;
 
+	/// <summary>The build the master last told this client (<see cref="ServerVersion"/>); null before it did, or when it names none.</summary>
+	string? ServerBuild => null;
+
+	/// <summary>
+	/// Whether this page must reload to load the master's build: the master runs another build than the one this run started with, it
+	/// raised a reload demand, or it sent a frame this build cannot read (<see cref="Halted"/>). Its change raises <see cref="StatusChanged"/>.
+	/// </summary>
+	bool ReloadRequired => false;
+
+	/// <summary>
+	/// Whether replication stopped at a frame this build cannot read (a type or schema of a newer master): nothing after it is applied
+	/// and the watermark stays before it, since skipping it would let this client's state drift from the stream. Only a reload onto the
+	/// master's build goes on; local writes stay in the local log and are sent by that run.
+	/// </summary>
+	bool Halted => false;
+
+	/// <summary>
+	/// Whether a local write may not have reached the master yet (unsent, or sent and not acknowledged). While replication runs, a host
+	/// waits for it before a reload. Its changes raise <see cref="StatusChanged"/>.
+	/// </summary>
+	bool HasUnconfirmedWrites => false;
+
 	/// <summary>
 	/// The master's position this client has reached: the resume point of the last frame it took (a v7 sequence, so it also tells
 	/// how far into the stream's history a replay is). Default before the first.
