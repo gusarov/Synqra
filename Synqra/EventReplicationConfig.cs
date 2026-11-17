@@ -35,6 +35,12 @@ public enum ReplicationHelloKind : byte
 	/// log) that asks for a stream snapshot first. The master answers with <see cref="SnapshotBegin"/> … <see cref="SnapshotEnd"/>
 	/// or <see cref="SnapshotDeclined"/>, then the backlog (plans/snapshot.md).</summary>
 	SubscribeToSnapshot = 4,
+
+	/// <summary>
+	/// Not a kind: a bit set on top of one. The client negotiates schemas, and the master tells it its schemas bundle
+	/// (<see cref="ServerVersion"/>) before any other frame; a master from before it refuses the HELLO.
+	/// </summary>
+	NegotiatesSchemas = 0x80,
 }
 
 public class EventReplicationConfig
@@ -68,6 +74,34 @@ public class EventReplicationConfig
 	/// the client takes the connection for dead, closes it and connects again from its watermark. Zero or less turns it off.
 	/// </summary>
 	public virtual TimeSpan CatchUpTimeout { get; set; } = TimeSpan.FromSeconds(20);
+
+	/// <summary>
+	/// How long a caught-up connection may hear nothing before the client asks the master whether it is still there (a
+	/// <see cref="CatchUpRequest"/>, which any frame answers). A master gone without a close (a restart behind a proxy, a sleep, a
+	/// network change) otherwise left the connection online and caught up, and the page stale until a reload. Zero or less turns it off.
+	/// </summary>
+	public virtual TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+	/// <summary>How long that question may go unanswered before the connection is taken for dead and opened again from the watermark.</summary>
+	public virtual TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+	/// <summary>
+	/// The probe's timeout while writes await their ack: the master answers frames in order, and a write it holds behind its global
+	/// gate (a peer's snapshot or seeding) holds the answer too, so the shorter timeout reconnected a live connection.
+	/// </summary>
+	public virtual TimeSpan HeartbeatTimeoutWhileWriting { get; set; } = TimeSpan.FromSeconds(45);
+
+	/// <summary>
+	/// Whether the HELLO negotiates schemas (<see cref="ReplicationHelloKind.NegotiatesSchemas"/>): the master's schemas bundle comes
+	/// first, and a client on another one halts before applying any frame. Off only against a master from before it.
+	/// </summary>
+	public virtual bool NegotiateSchemas { get; set; } = true;
+
+	/// <summary>
+	/// How long a connect attempt may take before it is given up and tried again: a proxy holds the upgrade of a master still
+	/// starting for up to minutes. Zero or less waits as long as the transport does.
+	/// </summary>
+	public virtual TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
 	/// <summary>
 	/// Full WebSocket endpoint URI for the replication master. When set, overrides the default
