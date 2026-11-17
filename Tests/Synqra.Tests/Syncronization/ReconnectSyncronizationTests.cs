@@ -167,7 +167,7 @@ internal class ReconnectSyncronizationTests : BaseTest
 		{
 			var replication = nodeA.Host.Services.GetRequiredService<EventReplicationService>();
 			await WaitUntilAsync(() => nodeMaster.Connections >= 1, "the master accepted A's socket");
-			await Task.Delay(2_500); // no HELLO reply all this while
+			await Task.Delay(4_000); // no HELLO reply all this while: well past the 2 s a slow (AOT) runner may take to start its read
 			var asked = Stopwatch.StartNew();
 
 			replication.ReconnectNow();
