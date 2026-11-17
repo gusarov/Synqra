@@ -944,9 +944,11 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			}
 			catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException || ex is OperationCanceledException && !_cts.IsCancellationRequested)
 			{
+				var timedOut = ex is OperationCanceledException && _cutBy is null && cut.IsCancellationRequested;
 				socket.Dispose();
 				CloseAttempt(cut);
-				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Warning : LogLevel.Information, ex, $"EventReplicationService: connect attempt {attempt} failed{CutNote}: {ex.Message}");
+				var failure = timedOut ? $"no answer within {_config.ConnectTimeout.TotalSeconds:F0} s" : ex.Message;
+				EmergencyLog.Default.Log(_cutBy is null ? LogLevel.Warning : LogLevel.Information, ex, $"EventReplicationService: connect attempt {attempt} failed{CutNote}: {failure}");
 				await PauseAsync(CalculateBackoff(attempt));
 				_cts.Token.ThrowIfCancellationRequested(); // the host's stop ends the service here, as it always did
 			}
@@ -1127,7 +1129,9 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 			watching = wait > TimeSpan.Zero;
 			if (watching)
 			{
-				await Task.WhenAny(Task.Delay(wait < TimeSpan.FromHours(1) ? wait : TimeSpan.FromHours(1), cut.Token), nudge.Task); // the connection's end ends the wait
+				using var nap = CancellationTokenSource.CreateLinkedTokenSource(cut.Token);
+				await Task.WhenAny(Task.Delay(wait < TimeSpan.FromHours(1) ? wait : TimeSpan.FromHours(1), nap.Token), nudge.Task); // the connection's end ends the wait
+				nap.Cancel(); // a nudge ended it early: its timer goes now, not when it would have fired
 			}
 		}
 	}
@@ -1164,7 +1168,10 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 	TimeSpan WatchLiveness(CancellationTokenSource cut)
 	{
 		var interval = _config.HeartbeatInterval;
-		var timeout = _config.HeartbeatTimeout;
+		// Writes awaiting their ack hold the master's answers behind them (a peer's snapshot or seeding holds its global gate): a probe waits longer then.
+		var timeout = _lastSentEventId != _eventReplicationState.LastEventIdFromMe && _config.HeartbeatTimeoutWhileWriting > _config.HeartbeatTimeout
+			? _config.HeartbeatTimeoutWhileWriting
+			: _config.HeartbeatTimeout;
 		var probeSince = Volatile.Read(ref _probeSince);
 		var silence = Silence;
 		TimeSpan wait;
