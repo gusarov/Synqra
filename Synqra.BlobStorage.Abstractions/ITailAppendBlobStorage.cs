@@ -25,7 +25,8 @@ public interface ITailAppendBlobStorage<TKey> : IBlobStorage<TKey>
 
 	/// <summary>
 	/// Writes <paramref name="blob"/> under <paramref name="key"/> if the store's last key is still
-	/// <paramref name="expectedTail"/> (default: the store is empty) and no record carries <paramref name="uniqueTag"/>.
+	/// <paramref name="expectedTail"/> (default: the store is empty) and no record carries <paramref name="uniqueTag"/>. The record
+	/// carries <paramref name="tag"/> as a field when the store keeps tags (<see cref="ITaggedBlobStorage{TKey}"/>).
 	/// </summary>
-	ValueTask<TailAppendResult> AppendAtTailAsync(TKey key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, TKey expectedTail, CancellationToken cancellationToken = default);
+	ValueTask<TailAppendResult> AppendAtTailAsync(TKey key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, TKey expectedTail, uint? tag = null, CancellationToken cancellationToken = default);
 }

@@ -127,9 +127,11 @@ public class SharedBrowserLogTests : TestsStateManagement
 	}
 
 	/// <summary>The IndexedDB contract in memory: one lock stands for IndexedDB's one-readwrite-transaction-at-a-time, across tabs.</summary>
-	public sealed class SharedTailStore : ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>
+	public sealed class SharedTailStore : ITailAppendBlobStorage<(Guid Stream, Guid Sequence)>, IClearableBlobStorage, ITaggedBlobStorage<(Guid Stream, Guid Sequence)>
 	{
 		readonly SortedDictionary<(Guid Stream, Guid Sequence), byte[]> _blobs = new(Comparer<(Guid Stream, Guid Sequence)>.Create((a, b) => a.Stream.CompareBigEndian(b.Stream) is var first && first != 0 ? first : a.Sequence.CompareBigEndian(b.Sequence)));
+		readonly Dictionary<(Guid Stream, Guid Sequence), uint> _recordTags = new(); // a record's `tag` field, as IndexedDB keeps it
+		readonly Dictionary<string, byte[]> _sides = new(); // "{store}#{side}", here "{side}/{key}"
 		readonly HashSet<string> _tags = [];
 
 		/// <summary>Runs once, inside the next append before its checks: another tab's write landing in between.</summary>
@@ -156,7 +158,7 @@ public class SharedBrowserLogTests : TestsStateManagement
 			}
 		}
 
-		public async ValueTask<TailAppendResult> AppendAtTailAsync((Guid Stream, Guid Sequence) key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, (Guid Stream, Guid Sequence) expectedTail, CancellationToken cancellationToken = default)
+		public async ValueTask<TailAppendResult> AppendAtTailAsync((Guid Stream, Guid Sequence) key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, (Guid Stream, Guid Sequence) expectedTail, uint? tag = null, CancellationToken cancellationToken = default)
 		{
 			var interleave = BeforeNextAppend;
 			BeforeNextAppend = null;
@@ -180,6 +182,10 @@ public class SharedBrowserLogTests : TestsStateManagement
 				else
 				{
 					_blobs.Add(key, blob.ToArray());
+					if (tag is { } recordTag)
+					{
+						_recordTags[key] = recordTag;
+					}
 					_tags.Add(uniqueTag);
 					outcome = TailAppendResult.Appended;
 				}
@@ -225,6 +231,80 @@ public class SharedBrowserLogTests : TestsStateManagement
 				_blobs.Remove(key);
 			}
 			return ValueTask.CompletedTask;
+		}
+
+		/// <summary>Wipes the log, as a browser's IndexedDB one can be.</summary>
+		public Task ClearAllAsync(CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				_blobs.Clear();
+				_recordTags.Clear();
+				_sides.Clear();
+				_tags.Clear();
+			}
+			return Task.CompletedTask;
+		}
+
+		public ValueTask WriteBlobAsync((Guid Stream, Guid Sequence) key, ReadOnlyMemory<byte> blob, uint tag, string? json, CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				_blobs.Add(key, blob.ToArray());
+				_recordTags[key] = tag;
+			}
+			return ValueTask.CompletedTask;
+		}
+
+		public ValueTask<TaggedBlob> ReadTaggedBlobAsync((Guid Stream, Guid Sequence) key, CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				return ValueTask.FromResult(new TaggedBlob(_blobs[key], _recordTags.TryGetValue(key, out var bundle) ? bundle : null));
+			}
+		}
+
+		public async IAsyncEnumerable<((Guid Stream, Guid Sequence) Key, TaggedBlob Blob)> EnumerateTaggedBlobsAsync((Guid Stream, Guid Sequence) from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			await foreach (var key in EnumerateKeysAsync(from, cancellationToken))
+			{
+				yield return (key, await ReadTaggedBlobAsync(key, cancellationToken));
+			}
+		}
+
+		public ValueTask<IReadOnlyDictionary<string, byte[]>> ReadSideEntriesAsync(string side, CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				return ValueTask.FromResult<IReadOnlyDictionary<string, byte[]>>(_sides.Where(x => x.Key.StartsWith(side + "/", StringComparison.Ordinal)).ToDictionary(x => x.Key[(side.Length + 1)..], x => x.Value));
+			}
+		}
+
+		public ValueTask StoreSideEntryAsync(string side, string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+		{
+			lock (_blobs)
+			{
+				_sides[side + "/" + key] = content.ToArray(); // IndexedDB put: the same entry again changes nothing
+			}
+			return ValueTask.CompletedTask;
+		}
+
+		/// <summary>Overwrites a side entry, as a damaged or colliding one would read.</summary>
+		public void TamperSideEntry(string side, string key, byte[] content)
+		{
+			lock (_blobs)
+			{
+				_sides[side + "/" + key] = content;
+			}
+		}
+
+		/// <summary>The keys of the side <paramref name="side"/>.</summary>
+		public IReadOnlyCollection<string> ListSideKeys(string side)
+		{
+			lock (_blobs)
+			{
+				return [.. _sides.Keys.Where(x => x.StartsWith(side + "/", StringComparison.Ordinal)).Select(x => x[(side.Length + 1)..])];
+			}
 		}
 
 		public void Dispose()
