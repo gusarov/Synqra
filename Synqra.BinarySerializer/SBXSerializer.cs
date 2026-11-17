@@ -334,16 +334,6 @@ public class SbxSerializer : ISbxSerializer, ISbxSchemaVersions
 		.ToArray()
 		;
 
-	public IReadOnlyCollection<KeyValuePair<int, float>> UsedSchemaVersions => _usedTypeIds is null
-		? throw new InvalidOperationException("This serializer does not track the mappings it writes with; call ForgetUsage first.")
-		: _usedTypeIds.Select(x => new KeyValuePair<int, float>(x, _typeById[x].schemaVersion)).ToArray();
-
-	public void ForgetUsage()
-	{
-		TrackUsage();
-		_usedTypeIds!.Clear();
-	}
-
 	public float? FindSchemaVersion(int mapId) => _typeById.TryGetValue(mapId, out var mapped) ? mapped.schemaVersion : null;
 
 	public void RemapSchemaVersion(int mapId, float schemaVersion)

@@ -6,9 +6,10 @@ using TUnit.Assertions.Extensions;
 namespace Synqra.Tests;
 
 /// <summary>
-/// A browser's local log outlives the build that wrote it. Its records used to carry no schema version, so a new build read every
-/// record at its own latest schema: Quotaly's IconComponent gained two members (2026.500 → 2026.873) and every older record holding
-/// one ran past its end on read, an IndexOutOfRangeException that left the owner's page on "Opening your things…" (2026-11-17).
+/// A browser's local log outlives the build that wrote it. An SBX payload names no schema versions, and a reader configured at
+/// its own latest read every record at that: Quotaly's IconComponent gained two members (2026.500 → 2026.873) and every older
+/// record holding one ran past its end, an IndexOutOfRangeException that left the owner's page on "Opening your things…"
+/// (2026-11-17). Now each record names, as a field beside its pure SBX bytes, the schemas bundle it was written with.
 /// </summary>
 public class LocalLogSchemaTests
 {
@@ -22,8 +23,7 @@ public class LocalLogSchemaTests
 		var previous = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, 2026.500, typeof(TestEvolvedComponent))));
 		await previous.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "🔥" }));
 
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
-		var read = await ReadAllAsync(current);
+		var read = await ReadAllAsync(Current());
 
 		var icon = (TestEvolvedComponent)((ComponentAddedEvent)read.Single()).Data!;
 		await Assert.That(icon.Glyph).IsEqualTo("🔥");
@@ -34,43 +34,39 @@ public class LocalLogSchemaTests
 	[Test]
 	public async Task Should_still_write_and_read_at_the_latest_schema()
 	{
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
 		var iconId = Guid.NewGuid();
-		await current.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "g", IconKey = "build-agent", IconId = iconId }));
+		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "g", IconKey = "build-agent", IconId = iconId }));
 
-		var read = await ReadAllAsync(new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent)))));
+		var icon = (TestEvolvedComponent)((ComponentAddedEvent)(await ReadAllAsync(Current())).Single()).Data!;
 
-		var icon = (TestEvolvedComponent)((ComponentAddedEvent)read.Single()).Data!;
 		await Assert.That(icon.IconKey).IsEqualTo("build-agent");
 		await Assert.That(icon.IconId).IsEqualTo(iconId);
 	}
 
 	/// <summary>
-	/// The records already in the owner's browser: no header, written at the old schema. Their versions are unknown, so a log that
-	/// keeps schema sets refuses them by name, never guesses (the log is then dropped and fetched again).
+	/// The records already in the owner's browser name no bundle: their versions are unknown, so they are refused by name, never
+	/// guessed at (the log is then dropped and fetched again).
 	/// </summary>
 	[Test]
-	public async Task Should_refuse_a_record_written_before_schema_sets_by_name()
+	public async Task Should_refuse_a_record_that_names_no_schemas_bundle_by_name()
 	{
 		var key = await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "🔥" }));
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
 
-		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(current));
+		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(Current()));
 
 		await Assert.That(failure!.Key).IsEqualTo(key.ToString());
 		await Assert.That(failure.Schemas).IsNull();
 		await Assert.That(failure.InnerException).IsTypeOf<InvalidOperationException>();
 	}
 
-	/// <summary>Before the header, the same record read at this build's latest schema ran past its end: the prod failure itself.</summary>
+	/// <summary>Read at this build's latest schema, the same record runs past its end: the prod failure itself.</summary>
 	[Test]
-	public async Task Should_reproduce_the_prod_failure_when_a_pre_header_record_is_read_at_the_latest_schema()
+	public async Task Should_reproduce_the_prod_failure_when_a_pre_bundle_record_is_read_at_the_latest_schema()
 	{
 		await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "🔥" }));
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
 
 		var unreadable = new List<UnreadableRecordException>();
-		await foreach (var _ in current.SalvageAsync(unreadable.Add))
+		await foreach (var _ in Current().SalvageAsync(unreadable.Add))
 		{
 		}
 
@@ -78,76 +74,60 @@ public class LocalLogSchemaTests
 	}
 
 	[Test]
-	public async Task Should_store_a_build_s_schema_set_once_and_add_six_bytes_per_record()
-	{
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
-		var first = IconAdded(new TestEvolvedComponent { Glyph = "a" });
-		await current.AppendAsync(first);
-		await current.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "b" }));
-		await new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent)))).AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "c" }));
-
-		var sets = new List<(Guid Stream, Guid Sequence)>();
-		var records = new List<byte[]>();
-		await foreach (var key in _store.EnumerateKeysAsync())
-		{
-			if (key.Stream == Guid.Empty)
-			{
-				sets.Add(key);
-			}
-			else
-			{
-				records.Add(await _store.ReadBlobAsync(key));
-			}
-		}
-		var bare = new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))).CreateSerializer().SerializeFrame<Event>(first, new byte[1024]); // stamped as stored
-
-		await Assert.That(sets.Count).IsEqualTo(1).Because("one build, one set, whichever storage instance wrote");
-		await Assert.That(records.Count).IsEqualTo(3);
-		await Assert.That(records[0].Length - bare.Count).IsEqualTo(6);
-	}
-
-	[Test]
-	public async Task Should_fail_loudly_on_a_schema_set_that_does_not_match_its_id()
-	{
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
-		await current.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "a" }));
-		(Guid Stream, Guid Sequence) setKey = default;
-		await foreach (var key in _store.EnumerateKeysAsync())
-		{
-			if (key.Stream == Guid.Empty)
-			{
-				setKey = key;
-			}
-		}
-		var tampered = await _store.ReadBlobAsync(setKey);
-		tampered[^1] ^= 0xFF;
-		await _store.DeleteBlobAsync(setKey);
-		await _store.WriteBlobAsync(setKey, tampered);
-
-		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))))));
-
-		await Assert.That(failure!.Schemas).Contains("schema set");
-	}
-
-	[Test]
 	public async Task Should_salvage_every_record_it_can_read()
 	{
-		var current = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
-		await current.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "before" }));
+		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "before" }));
 		await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "unreadable" }));
-		await current.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "after" }));
-		var fresh = new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
+		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "after" }));
 
 		var unreadable = new List<UnreadableRecordException>();
 		var glyphs = new List<string?>();
-		await foreach (var ev in fresh.SalvageAsync(unreadable.Add))
+		var streams = new List<Guid>();
+		await foreach (var ev in Current().SalvageAsync(unreadable.Add))
 		{
 			glyphs.Add(((TestEvolvedComponent)((ComponentAddedEvent)ev).Data!).Glyph);
+			streams.Add(ev.StreamId);
 		}
 
 		await Assert.That(glyphs).IsEquivalentTo(new[] { "before", "after" });
+		await Assert.That(streams.Distinct().Single()).IsEqualTo(_stream).Because("a salvaged event goes back to its stream");
 		await Assert.That(unreadable.Count).IsEqualTo(1);
 	}
+
+	[Test]
+	public async Task Should_store_one_bundle_per_build_and_keep_the_blob_pure_sbx()
+	{
+		var first = IconAdded(new TestEvolvedComponent { Glyph = "a" });
+		var storage = Current();
+		await storage.AppendAsync(first);
+		await storage.AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "b" }));
+		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "c" }));
+
+		var stored = await _store.ReadTaggedBlobAsync((first.StreamId, first.SequenceId));
+		var bare = new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))).CreateSerializer().SerializeFrame<Event>(first, new byte[1024]);
+
+		var bundles = _store.ListSideKeys("schemas");
+		await Assert.That(bundles.Count).IsEqualTo(1).Because("one build, one bundle, whichever storage instance wrote");
+		await Assert.That(_store.Count).IsEqualTo(3).Because("a bundle is a side entry, not a record");
+		await Assert.That(stored.Tag!.Value.ToString("x8")).IsEqualTo(bundles.Single()).Because("a record's tag is its bundle's id");
+		await Assert.That(stored.Blob.SequenceEqual(bare.ToArray())).IsTrue().Because("the bundle id is a field, not bytes in the blob");
+	}
+
+	[Test]
+	public async Task Should_fail_loudly_on_a_schemas_bundle_that_does_not_match_its_id()
+	{
+		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "a" }));
+		var bundleId = _store.ListSideKeys("schemas").Single();
+		var content = (await _store.ReadSideEntriesAsync("schemas"))[bundleId];
+		content[^1] ^= 0xFF;
+		_store.TamperSideEntry("schemas", bundleId, content);
+
+		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(Current()));
+
+		await Assert.That(failure!.Schemas).Contains("schemas bundle");
+	}
+
+	BlobEventStorage Current() => new BlobEventStorage(_store, new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))));
 
 	async Task<List<Event>> ReadAllAsync(BlobEventStorage storage)
 	{
@@ -176,7 +156,7 @@ public class LocalLogSchemaTests
 		};
 	}
 
-	/// <summary>Stores <paramref name="ev"/> as a build before the header did: the bare payload, its component at schema 2026.500.</summary>
+	/// <summary>Stores <paramref name="ev"/> as a build before bundles did: bare SBX, no bundle field, its component at schema 2026.500.</summary>
 	internal async Task<(Guid Stream, Guid Sequence)> PlantLegacyAsync(SharedBrowserLogTests.SharedTailStore store, Guid stream, Event ev)
 	{
 		var legacy = new MappedSerializers(ser => ser.Map(MapId, 2026.500, typeof(TestEvolvedComponent))).CreateSerializer();

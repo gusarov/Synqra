@@ -13,7 +13,7 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	public IndexedDbJsInterop(IJSRuntime jsRuntime)
 	{
 		_moduleTask = new Lazy<Task<IJSObjectReference>>(() => jsRuntime
-			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js")
+			.InvokeAsync<IJSObjectReference>("import", "./_content/Synqra.BlobStorage.IndexedDb/indexedDbJsInterop.js?v=tags1") // versioned: the edge caches an unversioned module for hours, and this build calls functions an older one lacks
 			.AsTask());
 	}
 
@@ -29,10 +29,10 @@ public class IndexedDbJsInterop : IAsyncDisposable
 		await module.InvokeVoidAsync("closeDatabase", databaseName);
 	}
 
-	public async Task AddBlobAsync(string databaseName, string objectStoreName, string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json)
+	public async Task AddBlobAsync(string databaseName, string objectStoreName, string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json, uint? tag = null)
 	{
 		var module = await _moduleTask.Value;
-		await module.InvokeVoidAsync("addBlob", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json);
+		await module.InvokeVoidAsync("addBlob", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json, tag);
 	}
 
 	/// <summary>The store's last key text, or null when it is empty.</summary>
@@ -43,10 +43,31 @@ public class IndexedDbJsInterop : IAsyncDisposable
 	}
 
 	/// <summary>One transaction: writes the record and its tag only while the tag is new and the tail is <paramref name="expectedTailText"/> (null = empty).</summary>
-	public async Task<string> AppendAtTailAsync(string databaseName, string objectStoreName, string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, string? expectedTailText)
+	public async Task<string> AppendAtTailAsync(string databaseName, string objectStoreName, string storeName, string keyText, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, string? expectedTailText, uint? tag = null)
 	{
 		var module = await _moduleTask.Value;
-		return await module.InvokeAsync<string>("appendAtTail", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json, uniqueTag, expectedTailText);
+		return await module.InvokeAsync<string>("appendAtTail", databaseName, objectStoreName, storeName, keyText, blob.ToArray(), json, uniqueTag, expectedTailText, tag);
+	}
+
+	/// <summary>A record packed by getTaggedBlob (flag, tag, blob), or null.</summary>
+	public async Task<byte[]?> GetTaggedBlobAsync(string databaseName, string objectStoreName, string storeName, string keyText)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<byte[]?>("getTaggedBlob", databaseName, objectStoreName, storeName, keyText);
+	}
+
+	/// <summary>One page packed by getTaggedBlobsPage: per record a 4-byte key length, the key's UTF-8, a 4-byte length, the packed record.</summary>
+	public async Task<byte[]> GetTaggedBlobsPageAsync(string databaseName, string objectStoreName, string storeName, string? fromKeyText, bool fromExclusive, int pageSize)
+	{
+		var module = await _moduleTask.Value;
+		return await module.InvokeAsync<byte[]>("getTaggedBlobsPage", databaseName, objectStoreName, storeName, fromKeyText, fromExclusive, pageSize);
+	}
+
+	/// <summary>Stores an entry under the side store name ("{store}#{side}"); the same entry again changes nothing.</summary>
+	public async Task PutSideEntryAsync(string databaseName, string objectStoreName, string sideStoreName, string keyText, ReadOnlyMemory<byte> content)
+	{
+		var module = await _moduleTask.Value;
+		await module.InvokeVoidAsync("putSideEntry", databaseName, objectStoreName, sideStoreName, keyText, content.ToArray());
 	}
 
 	public async Task<byte[]?> GetBlobAsync(string databaseName, string objectStoreName, string storeName, string keyText)

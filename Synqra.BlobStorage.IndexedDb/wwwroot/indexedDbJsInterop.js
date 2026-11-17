@@ -75,7 +75,7 @@ export async function closeDatabase(databaseName) {
         // A database that never finished opening has nothing to close.
     }
 }
-export async function addBlob(databaseName, objectStoreName, storeName, keyText, blob, json) {
+export async function addBlob(databaseName, objectStoreName, storeName, keyText, blob, json, tag) {
     const opened = await initialize(databaseName, objectStoreName);
     const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
     const collection = transaction.objectStore(opened.objectStoreName);
@@ -87,7 +87,9 @@ export async function addBlob(databaseName, objectStoreName, storeName, keyText,
         // Optional human-readable mirror of the same record, alongside `bin` — not a
         // separate store/key. Only present when the caller asked for it (see
         // IJsonMirrorBlobStorage/IndexedDbBlobStorageOptions.PopulateDebugJson).
-        json: json ?? undefined
+        json: json ?? undefined,
+        // The record's opaque tag, given meaning by the layer above; absent on a record written without one.
+        tag: tag ?? undefined
     });
     await completion(transaction); // a failed write (a duplicate key) surfaces instead of vanishing
 }
@@ -109,7 +111,7 @@ export async function getTailKey(databaseName, objectStoreName, storeName) {
 // One readwrite transaction: IndexedDB runs readwrite transactions on a store one at a time, across tabs too, so
 // the check and the write cannot interleave with another writer's. Returns "appended", "duplicate" (the tag is
 // stored already) or "tailMoved" (the store's last key is not expectedTail; null = empty), writing only on "appended".
-export async function appendAtTail(databaseName, objectStoreName, storeName, keyText, blob, json, uniqueTag, expectedTail) {
+export async function appendAtTail(databaseName, objectStoreName, storeName, keyText, blob, json, uniqueTag, expectedTail, tag) {
     const opened = await initialize(databaseName, objectStoreName);
     const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
     const collection = transaction.objectStore(opened.objectStoreName);
@@ -130,7 +132,7 @@ export async function appendAtTail(databaseName, objectStoreName, storeName, key
                     outcome = "tailMoved";
                 }
                 else {
-                    collection.add({ compoundKey: getCompoundKey(storeName, keyText), storeName, keyText, bin: blob, json: json ?? undefined });
+                    collection.add({ compoundKey: getCompoundKey(storeName, keyText), storeName, keyText, bin: blob, json: json ?? undefined, tag: tag ?? undefined });
                     collection.add({ compoundKey: tagKey, storeName: tagStoreName, keyText: uniqueTag, bin: new Uint8Array(0), json: keyText });
                 }
             };
@@ -282,7 +284,94 @@ export async function clearStore(databaseName, objectStoreName, storeName) {
     const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
     const collection = transaction.objectStore(opened.objectStoreName);
     collection.delete(storeRange(storeName));
-    collection.delete(storeRange(`${storeName}${tagSuffix}`)); // its tags too, or a resync could not append the same events again
+    collection.delete(IDBKeyRange.bound(`${storeName}#`, `${storeName}#\uffff`)); // its tags and side entries too, or a resync could not append the same events again
+    await completion(transaction);
+}
+// A record's bytes with its tag: a 1-byte flag (1 = the record has a tag), the 4-byte little-endian tag, then the blob. Null
+// when there is no such record.
+export async function getTaggedBlob(databaseName, objectStoreName, storeName, keyText) {
+    const opened = await initialize(databaseName, objectStoreName);
+    return await new Promise((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const request = transaction.objectStore(opened.objectStoreName).get(getCompoundKey(storeName, keyText));
+        request.onsuccess = function () {
+            resolve(request.result ? packTagged(request.result) : null);
+        };
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
+function packTagged(value) {
+    const bin = value.bin ?? null;
+    const blob = bin instanceof Uint8Array ? bin : bin ? new Uint8Array(bin) : new Uint8Array(0);
+    const packed = new Uint8Array(5 + blob.length);
+    const view = new DataView(packed.buffer);
+    const tagged = typeof value.tag === "number";
+    packed[0] = tagged ? 1 : 0;
+    view.setUint32(1, tagged ? value.tag >>> 0 : 0, true);
+    packed.set(blob, 5);
+    return packed;
+}
+// One page of records in one readonly transaction, as getBlobsPage, each record packed with its tag (see
+// getTaggedBlob): per record a 4-byte key length, the key's UTF-8, a 4-byte length, the packed record.
+export async function getTaggedBlobsPage(databaseName, objectStoreName, storeName, fromKeyText, fromExclusive = false, pageSize = 1024) {
+    const opened = await initialize(databaseName, objectStoreName);
+    return await new Promise((resolve, reject) => {
+        const transaction = opened.db.transaction(opened.objectStoreName, "readonly");
+        const collection = transaction.objectStore(opened.objectStoreName);
+        const prefix = `${storeName}${separator}`;
+        const hasFrom = fromKeyText !== undefined && fromKeyText !== null;
+        const startKey = hasFrom ? getCompoundKey(storeName, fromKeyText) : prefix;
+        const request = collection.openCursor(IDBKeyRange.lowerBound(startKey, !!fromExclusive && hasFrom));
+        const encoder = new TextEncoder();
+        const parts = [];
+        let total = 0;
+        const finish = () => {
+            const packed = new Uint8Array(total);
+            const view = new DataView(packed.buffer);
+            let at = 0;
+            for (const part of parts) {
+                view.setUint32(at, part.key.length, true);
+                packed.set(part.key, at + 4);
+                at += 4 + part.key.length;
+                view.setUint32(at, part.record.length, true);
+                packed.set(part.record, at + 4);
+                at += 4 + part.record.length;
+            }
+            resolve(packed);
+        };
+        request.onsuccess = function (event) {
+            const cursor = event.target.result;
+            if (!cursor) {
+                finish();
+                return;
+            }
+            const compoundKey = String(cursor.primaryKey);
+            if (!compoundKey.startsWith(prefix)) {
+                finish();
+                return;
+            }
+            const key = encoder.encode(compoundKey.substring(prefix.length));
+            const record = packTagged(cursor.value ?? {});
+            parts.push({ key, record });
+            total += 8 + key.length + record.length;
+            if (parts.length >= pageSize) {
+                finish();
+                return;
+            }
+            cursor.continue();
+        };
+        request.onerror = function () {
+            reject(request.error);
+        };
+    });
+}
+// Stores a side entry ("{storeName}#{side}" is the side store name); the same entry stored again (another tab) changes nothing.
+export async function putSideEntry(databaseName, objectStoreName, sideStoreName, keyText, content) {
+    const opened = await initialize(databaseName, objectStoreName);
+    const transaction = opened.db.transaction(opened.objectStoreName, "readwrite");
+    transaction.objectStore(opened.objectStoreName).put({ compoundKey: getCompoundKey(sideStoreName, keyText), storeName: sideStoreName, keyText, bin: content });
     await completion(transaction);
 }
 //# sourceMappingURL=indexedDbJsInterop.js.map
