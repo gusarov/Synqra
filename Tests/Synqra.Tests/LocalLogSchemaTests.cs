@@ -170,6 +170,8 @@ public class LocalLogSchemaTests
 	/// <summary>A build's serializers: the built-in mappings plus <paramref name="map"/>.</summary>
 	internal sealed class MappedSerializers(Action<SbxSerializer> map) : ISbxSerializerFactory
 	{
+		// Read back through Activator only: the published (NativeAOT) run trimmed its constructor and setters otherwise.
+		[System.Diagnostics.CodeAnalysis.DynamicDependency(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.All, typeof(TestEvolvedComponent))]
 		public ISbxSerializer CreateSerializer()
 		{
 			var serializer = new SbxSerializer();
