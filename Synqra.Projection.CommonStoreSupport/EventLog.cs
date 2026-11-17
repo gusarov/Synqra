@@ -11,7 +11,7 @@ namespace Synqra;
 /// <see cref="ServerEventLog"/> keeps a client's proposal (commit order), <see cref="ClientEventLog"/> takes the next
 /// local stamp (arrival order). A stamp from another log is never kept: one log, one clock.
 /// </summary>
-public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup, IEventIdIndex, IClearableAppendStorage, ISalvageableAppendStorage<Event>
+public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWatermarks, IEventLookup, IEventIdIndex, IClearableAppendStorage
 {
 	readonly IAppendStorage<Event, (Guid Stream, Guid Sequence)> _inner;
 	readonly EventSequencer _sequencer;
@@ -194,18 +194,6 @@ public abstract class EventLog : IEventLog, ICommittedEventSource, IEventWaterma
 		=> _inner is IClearableAppendStorage clearable
 			? clearable.ClearAllAsync(cancellationToken)
 			: throw new NotSupportedException($"{_inner.GetType().Name} cannot be cleared: it is a durable store, not a client's local copy.");
-
-	/// <summary>Every event the storage can read; one it cannot goes to <paramref name="unreadable"/>. A storage that reads everything or fails reads as itself.</summary>
-	public async IAsyncEnumerable<Event> SalvageAsync(Action<UnreadableRecordException> unreadable, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-	{
-		var events = _inner is ISalvageableAppendStorage<Event> salvageable
-			? salvageable.SalvageAsync(unreadable, cancellationToken)
-			: _inner.GetAllAsync(default, cancellationToken);
-		await foreach (var ev in events)
-		{
-			yield return ev;
-		}
-	}
 
 	public void Dispose() => _inner.Dispose();
 

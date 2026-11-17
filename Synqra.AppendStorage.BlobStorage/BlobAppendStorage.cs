@@ -15,10 +15,10 @@ namespace Synqra.AppendStorage.BlobStorage;
 /// store that keeps schemas bundles (<see cref="ITaggedBlobStorage{TKey}"/>: IndexedDB), each record carries, as a field
 /// beside its pure SBX bytes, the id of the <see cref="SchemasBundle"/> it was written with; the bundle is stored once, and each
 /// record is read by a deserializer configured for its bundle. A record without the field was written before bundles: its
-/// versions are unknown, so it is refused by name (its log is dropped and fetched again), never guessed at. Any other store keeps
-/// pure SBX read at this build's versions, as before.
+/// versions are unknown, so reading it fails by name (<see cref="SbxDeserializationException"/>), never guessed at; what that
+/// means is the host's to decide. Any other store keeps pure SBX read at this build's versions, as before.
 /// </summary>
-public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableAppendStorage, ISalvageableAppendStorage<T>
+public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableAppendStorage
 	where T : class
 	where TKey : notnull, IComparable<TKey>
 {
@@ -96,7 +96,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		var record = _tagged is not null
 			? await _tagged.ReadTaggedBlobAsync(key, cancellationToken)
 			: new TaggedBlob(await _blobStorage.ReadBlobAsync(key, cancellationToken), null);
-		var item = Deserialize(key, record, await FindReaderAsync(record, salvaging: false, cancellationToken));
+		var item = Deserialize(key, record, await FindReaderAsync(record, cancellationToken));
 		Attach(key, item);
 		return item;
 	}
@@ -120,7 +120,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 			}
 			else
 			{
-				var reader = await FindReaderAsync(record, salvaging: false, cancellationToken);
+				var reader = await FindReaderAsync(record, cancellationToken);
 				var started = Stopwatch.GetTimestamp();
 				var item = Deserialize(key, record, reader);
 				Attach(key, item);
@@ -170,62 +170,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 	}
 
-	/// <summary>
-	/// Every record it can read, in key order, each one it cannot handed to <paramref name="unreadable"/>: for keeping what a log
-	/// holds that its server lacks before the log is dropped, never for folding a projection. A record written before bundles is
-	/// read here at this build's versions.
-	/// </summary>
-	public async IAsyncEnumerable<T> SalvageAsync(Action<UnreadableRecordException> unreadable, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-	{
-		await foreach (var (key, record) in EnumerateRecordsAsync(cancellationToken))
-		{
-			T? item = null;
-			UnreadableRecordException? failure = null;
-			try
-			{
-				item = Deserialize(key, record, await FindReaderAsync(record, salvaging: true, cancellationToken));
-				RestoreFromKey(key, item);
-			}
-			catch (UnreadableRecordException ex)
-			{
-				failure = ex;
-			}
-			if (failure is null)
-			{
-				yield return item!;
-			}
-			else
-			{
-				unreadable(failure);
-			}
-		}
-	}
-
-	async IAsyncEnumerable<(TKey Key, TaggedBlob Record)> EnumerateRecordsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-	{
-		if (_tagged is not null)
-		{
-			await foreach (var record in _tagged.EnumerateTaggedBlobsAsync(default, cancellationToken))
-			{
-				yield return record;
-			}
-		}
-		else if (_blobStorage is IPagedBlobReader<TKey> paged)
-		{
-			await foreach (var (key, blob) in paged.EnumerateBlobsAsync(default, cancellationToken))
-			{
-				yield return (key, new TaggedBlob(blob, null));
-			}
-		}
-		else
-		{
-			await foreach (var key in _blobStorage.EnumerateKeysAsync(default, cancellationToken))
-			{
-				yield return (key, new TaggedBlob(await _blobStorage.ReadBlobAsync(key, cancellationToken), null));
-			}
-		}
-	}
-
 	public Task FlushAsync(CancellationToken cancellationToken = default)
 	{
 		return Task.CompletedTask;
@@ -263,11 +207,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return _blobStorage.DisposeAsync();
 	}
 
-	/// <summary>Puts back on a salvaged item what its record keeps only in its key.</summary>
-	protected virtual void RestoreFromKey(TKey key, T item)
-	{
-	}
-
 	#region Schemas bundles
 
 	// A record's tag is the id of its schemas bundle; the bundles are the store's "schemas" side entries, keyed by id in hex.
@@ -294,7 +233,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 				await ReadSchemasBundlesAsync(cancellationToken);
 				if (!_bundles[bundle.Id].Content.AsSpan().SequenceEqual(bundle.Content))
 				{
-					throw new UnreadableRecordException(bundle.ToString(), bundle.Content.Length, bundle.ToString(), new InvalidOperationException("Two different schemas bundles share one id."));
+					throw new SbxDeserializationException(bundle.ToString(), bundle.ToString(), new InvalidOperationException("Two different schemas bundles share one id."));
 				}
 				_writeBundle = bundle;
 			}
@@ -307,7 +246,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 
 	// The deserializer for the record's bundle, or null with why there is none; a bundle stored after the last read (another
 	// tab's newer build) is read first.
-	async ValueTask<(ISbxSerializer? Reader, string? Missing)> FindReaderAsync(TaggedBlob record, bool salvaging, CancellationToken cancellationToken)
+	async ValueTask<(ISbxSerializer? Reader, string? Missing)> FindReaderAsync(TaggedBlob record, CancellationToken cancellationToken)
 	{
 		(ISbxSerializer? Reader, string? Missing) reader;
 		if (_tagged is null)
@@ -334,9 +273,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 		else
 		{
-			reader = salvaging
-				? (_deserializer, null)
-				: (null, "The record names no schemas bundle: it was written before bundles, its versions are unknown, so the log is dropped and fetched again.");
+			reader = (null, "The record names no schemas bundle: it was written before bundles, so its schema versions are unknown.");
 		}
 		return reader;
 	}
@@ -354,7 +291,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 			}
 			catch (InvalidDataException ex)
 			{
-				throw new UnreadableRecordException(FormattableString.Invariant($"schemas bundle {id:x8}"), content.Length, FormattableString.Invariant($"schemas bundle {id:x8}"), ex);
+				throw new SbxDeserializationException(FormattableString.Invariant($"schemas bundle {id:x8}"), FormattableString.Invariant($"schemas bundle {id:x8}"), ex);
 			}
 		}
 		_bundles = bundles;
@@ -436,7 +373,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 		if (failure is not null)
 		{
-			throw new UnreadableRecordException(key.ToString() ?? "?", record.Blob.Length, DescribeBundle(record), failure);
+			throw new SbxDeserializationException($"{key} ({record.Blob.Length} bytes)", DescribeBundle(record), failure);
 		}
 		return item;
 	}

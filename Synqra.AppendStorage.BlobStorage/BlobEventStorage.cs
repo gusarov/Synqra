@@ -58,12 +58,6 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 		}
 	}
 
-	/// <summary>A salvaged event is appended again, to its stream: SBX keeps the stream in the key only.</summary>
-	protected override void RestoreFromKey((Guid Stream, Guid Sequence) key, Event item)
-	{
-		item.StreamId = key.Stream;
-	}
-
 	/// <summary>
 	/// The EventIds held: over a tail-append store they are its unique tags, read by key alone (one event's tag is its
 	/// EventId); otherwise every event is read.

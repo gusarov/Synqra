@@ -9,7 +9,7 @@ namespace Synqra.Tests;
 /// A browser's local log outlives the build that wrote it. An SBX payload names no schema versions, and a reader configured at
 /// its own latest read every record at that: Quotaly's IconComponent gained two members (2026.500 → 2026.873) and every older
 /// record holding one ran past its end, an IndexOutOfRangeException that left the owner's page on "Opening your things…"
-/// (2026-11-17). Now each record names, as a field beside its pure SBX bytes, the schemas bundle it was written with.
+/// (2026-11-17). Now each record names, as a tag beside its pure SBX bytes, the schemas bundle it was written with.
 /// </summary>
 public class LocalLogSchemaTests
 {
@@ -44,54 +44,34 @@ public class LocalLogSchemaTests
 	}
 
 	/// <summary>
-	/// The records already in the owner's browser name no bundle: their versions are unknown, so they are refused by name, never
-	/// guessed at (the log is then dropped and fetched again).
+	/// The records already in the owner's browser name no bundle: their versions are unknown, so reading one fails by name, never
+	/// guessed at. What that means (a client update, a cache to drop) is the host's to decide.
 	/// </summary>
 	[Test]
-	public async Task Should_refuse_a_record_that_names_no_schemas_bundle_by_name()
+	public async Task Should_fail_by_name_on_a_record_that_names_no_schemas_bundle()
 	{
 		var key = await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "🔥" }));
 
-		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(Current()));
+		var failure = await Assert.ThrowsAsync<SbxDeserializationException>(async () => await ReadAllAsync(Current()));
 
-		await Assert.That(failure!.Key).IsEqualTo(key.ToString());
+		await Assert.That(failure!.Record).StartsWith(key.ToString());
 		await Assert.That(failure.Schemas).IsNull();
 		await Assert.That(failure.InnerException).IsTypeOf<InvalidOperationException>();
 	}
 
-	/// <summary>Read at this build's latest schema, the same record runs past its end: the prod failure itself.</summary>
+	/// <summary>Read at this build's latest schema, a record written at the older one runs past its end: the prod failure itself.</summary>
 	[Test]
-	public async Task Should_reproduce_the_prod_failure_when_a_pre_bundle_record_is_read_at_the_latest_schema()
+	public async Task Should_reproduce_the_prod_failure_when_an_older_record_is_read_at_the_latest_schema()
 	{
-		await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "🔥" }));
+		var older = new MappedSerializers(ser => ser.Map(MapId, 2026.500, typeof(TestEvolvedComponent))).CreateSerializer().SerializeFrame<Event>(IconAdded(new TestEvolvedComponent { Glyph = "🔥" }), new byte[1024]).ToArray();
+		var latest = new MappedSerializers(ser => ser.Map(MapId, typeof(TestEvolvedComponent))).CreateSerializer();
 
-		var unreadable = new List<UnreadableRecordException>();
-		await foreach (var _ in Current().SalvageAsync(unreadable.Add))
+		Assert.Throws<IndexOutOfRangeException>(() =>
 		{
-		}
-
-		await Assert.That(unreadable.Single().InnerException).IsTypeOf<IndexOutOfRangeException>();
-	}
-
-	[Test]
-	public async Task Should_salvage_every_record_it_can_read()
-	{
-		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "before" }));
-		await PlantLegacyAsync(_store, _stream, IconAdded(new TestEvolvedComponent { Glyph = "unreadable" }));
-		await Current().AppendAsync(IconAdded(new TestEvolvedComponent { Glyph = "after" }));
-
-		var unreadable = new List<UnreadableRecordException>();
-		var glyphs = new List<string?>();
-		var streams = new List<Guid>();
-		await foreach (var ev in Current().SalvageAsync(unreadable.Add))
-		{
-			glyphs.Add(((TestEvolvedComponent)((ComponentAddedEvent)ev).Data!).Glyph);
-			streams.Add(ev.StreamId);
-		}
-
-		await Assert.That(glyphs).IsEquivalentTo(new[] { "before", "after" });
-		await Assert.That(streams.Distinct().Single()).IsEqualTo(_stream).Because("a salvaged event goes back to its stream");
-		await Assert.That(unreadable.Count).IsEqualTo(1);
+			var pos = 0;
+			latest.Deserialize<Event>(older, ref pos);
+		});
+		await Task.CompletedTask;
 	}
 
 	[Test]
@@ -122,7 +102,7 @@ public class LocalLogSchemaTests
 		content[^1] ^= 0xFF;
 		_store.TamperSideEntry("schemas", bundleId, content);
 
-		var failure = await Assert.ThrowsAsync<UnreadableRecordException>(async () => await ReadAllAsync(Current()));
+		var failure = await Assert.ThrowsAsync<SbxDeserializationException>(async () => await ReadAllAsync(Current()));
 
 		await Assert.That(failure!.Schemas).Contains("schemas bundle");
 	}

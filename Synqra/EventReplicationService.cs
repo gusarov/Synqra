@@ -17,7 +17,7 @@ namespace Synqra;
 /// <summary>
 /// Client-side service that connect to WS Master
 /// </summary>
-public class EventReplicationService : BackgroundService, IEventReplicationService, ILocalLogRecovery
+public class EventReplicationService : BackgroundService, IEventReplicationService
 {
 	public const int DefaultFrameSize = 8192;
 
@@ -315,10 +315,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 				}
 			}
 		}
-		catch (UnreadableRecordException unreadable)
-		{
-			await RecoverLocalLogAsync(unreadable, _cts.Token); // dropped, what the master has not acknowledged kept
-		}
 		catch (Exception ex)
 		{
 			EmergencyLog.Default.LogWarning(ex, "EventReplicationService: local durable log failed to replay — clearing it and resyncing fresh from the server.");
@@ -333,14 +329,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		await LoadStateAsync(logHoldsEvents); // the cursor of the last run: HELLO asks for the delta, not the stream
 		if (logHoldsEvents)
 		{
-			try
-			{
-				await ResumeAfterStoredSnapshotAsync();
-			}
-			catch (UnreadableRecordException unreadable)
-			{
-				await RecoverLocalLogAsync(unreadable, _cts.Token);
-			}
+			await ResumeAfterStoredSnapshotAsync();
 		}
 		_lastSentEventId = _eventReplicationState.LastEventIdFromMe; // this run offers everything the master has not acknowledged
 
@@ -463,7 +452,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					EmergencyLog.Default.Stage($"replication: frame {FramesReceived} ({envelope.Event.GetType().Name} {envelope.Event.EventId})");
 				}
 				var ev = envelope.Event;
-				var generation = Volatile.Read(ref _logGeneration);
 				var sequence = ev.SequenceId; // the master's stamp, read before the local log stamps its own
 				var resumePoint = sequence != default && sequence.CompareBigEndian(envelope.Watermark) < 0 ? sequence : envelope.Watermark;
 				// Covered by the snapshot the log holds for its stream: a live push of an event committed before the cut can arrive after
@@ -491,8 +479,7 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 						EmergencyLog.Default.LogInformation($"{GetHashCode():X4} <<< {ev}");
 					}
 				}
-				// A log dropped under this frame resumes from the start: the frame does not move the new log's watermark.
-				if (generation == Volatile.Read(ref _logGeneration) && resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
+				if (resumePoint.CompareBigEndian(_eventReplicationState.ServerWatermark) > 0)
 				{
 					_eventReplicationState.ServerWatermark = resumePoint;
 					await SaveStateAsync();
@@ -570,93 +557,80 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 					var pending = incremental
 						? _storage.ReadStreamAsync(sendingStream, _lastSentSequence, _cts.Token)
 						: _storage.GetAllAsync(from: default, _cts.Token);
-					var generation = Volatile.Read(ref _logGeneration);
-					UnreadableRecordException? unreadable = null;
-					try
+					await foreach (var ev in pending)
 					{
-						await foreach (var ev in pending)
+						if (!reached)
 						{
-							if (!reached)
+							reached = ev.EventId == sent;
+							if (reached)
 							{
-								reached = ev.EventId == sent;
-								if (reached)
-								{
-									Passed(ev);
-								}
-								continue;
-							}
-							bool held;
-							lock (_skipSet)
-							{
-								held = _heldByMaster.Contains(ev.EventId) || ev is StreamSnapshotEvent; // a snapshot is this client's own record of what the master sent
-							}
-							if (held)
-							{
-								// The master sent it, so it has it: stepped over, never echoed. With nothing of ours awaiting an ack the
-								// persisted cursor moves too, so the next run does not walk (or send) it again.
-								if (_lastSentEventId == _eventReplicationState.LastEventIdFromMe)
-								{
-									_eventReplicationState.LastEventIdFromMe = ev.EventId;
-								}
-								_lastSentEventId = ev.EventId;
 								Passed(ev);
-								continue;
 							}
-							// Single-stream connection: skip events belonging to any other stream that shares this
-							// local multitenant store (e.g. the primary stream's events when this connection only
-							// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
-							// they are never re-examined, and they are never sent to — and mis-stamped by — the
-							// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
-							if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
-							{
-								_lastSentEventId = ev.EventId;
-								Passed(ev);
-								continue;
-							}
-							lock (_skipSet)
-							{
-								if (_skipSet.Add(ev.EventId))
-								{
-									_skipList.AddLast(ev.EventId);
-								}
-							}
-							// await _connection.InvokeAsync("EventEnvelope", ev);
-
-							var inv = new EventEnvelope() { Event = ev };
-
-							var pool = ArrayPool<byte>.Shared;
-							var bytes = pool.Rent(DefaultFrameSize);
-							try
-							{
-								if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
-								{
-									EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
-								}
-								lock (_skipSet)
-								{
-									_awaitingVerdict[ev.EventId] = ev.CommandId; // before the send: the master may answer before the send returns
-								}
-								await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
-							}
-							finally
-							{
-								pool.Return(bytes);
-							}
-
-							FramesSent++;
-							_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
-							Passed(ev);
+							continue;
 						}
+						bool held;
+						lock (_skipSet)
+						{
+							held = _heldByMaster.Contains(ev.EventId) || ev is StreamSnapshotEvent; // a snapshot is this client's own record of what the master sent
+						}
+						if (held)
+						{
+							// The master sent it, so it has it: stepped over, never echoed. With nothing of ours awaiting an ack the
+							// persisted cursor moves too, so the next run does not walk (or send) it again.
+							if (_lastSentEventId == _eventReplicationState.LastEventIdFromMe)
+							{
+								_eventReplicationState.LastEventIdFromMe = ev.EventId;
+							}
+							_lastSentEventId = ev.EventId;
+							Passed(ev);
+							continue;
+						}
+						// Single-stream connection: skip events belonging to any other stream that shares this
+						// local multitenant store (e.g. the primary stream's events when this connection only
+						// replicates a "/tracking" sub-stream). The outbound cursor still advances past them so
+						// they are never re-examined, and they are never sent to — and mis-stamped by — the
+						// stream-scoped master endpoint. StreamId is set locally even though it is off the wire.
+						if (_config.StreamId is Guid onlyStream && ev.StreamId != onlyStream)
+						{
+							_lastSentEventId = ev.EventId;
+							Passed(ev);
+							continue;
+						}
+						lock (_skipSet)
+						{
+							if (_skipSet.Add(ev.EventId))
+							{
+								_skipList.AddLast(ev.EventId);
+							}
+						}
+						// await _connection.InvokeAsync("EventEnvelope", ev);
+
+						var inv = new EventEnvelope() { Event = ev };
+
+						var pool = ArrayPool<byte>.Shared;
+						var bytes = pool.Rent(DefaultFrameSize);
+						try
+						{
+							if (EmergencyLog.Default.IsEnabled(LogLevel.Information)) // the message is built per call; off, nothing is
+							{
+								EmergencyLog.Default.LogInformation($"{GetHashCode():X4} >>> {ev}");
+							}
+							lock (_skipSet)
+							{
+								_awaitingVerdict[ev.EventId] = ev.CommandId; // before the send: the master may answer before the send returns
+							}
+							await wsConnection.SendOperationAsync(_networkSerializationService, inv, bytes, _cts.Token);
+						}
+						finally
+						{
+							pool.Return(bytes);
+						}
+
+						FramesSent++;
+						_lastSentEventId = ev.EventId; // written, not yet acknowledged: the master's EventAccepted moves the persisted cursor
+						Passed(ev);
 					}
-					catch (UnreadableRecordException ex)
-					{
-						unreadable = ex;
-					}
-					if (unreadable is not null)
-					{
-						await RecoverLocalLogAsync(unreadable, generation, _cts.Token); // the log is dropped and this connection cut: the next one resyncs
-					}
-					else if (!reached)
+					if (!reached)
 					{
 						// The cursor names an event this log does not hold (a log cleared or rebuilt under a kept state): walking for
 						// it would never send again. Start over from the top; what the master already holds is stepped over above.
@@ -1184,73 +1158,6 @@ public class EventReplicationService : BackgroundService, IEventReplicationServi
 		{
 			await _stateStore.SaveAsync(StreamKey, _eventReplicationState, CancellationToken.None); // the cursors of an empty log
 		}
-	}
-
-	// One drop at a time; a reader that failed on a log already dropped since it started reading leaves the new log alone.
-	readonly SemaphoreSlim _recoveryGate = new SemaphoreSlim(1, 1);
-	int _logGeneration;
-
-	/// <inheritdoc />
-	public Task RecoverLocalLogAsync(UnreadableRecordException cause, CancellationToken cancellationToken = default)
-		=> RecoverLocalLogAsync(cause, Volatile.Read(ref _logGeneration), cancellationToken);
-
-	async Task RecoverLocalLogAsync(UnreadableRecordException cause, int generation, CancellationToken cancellationToken)
-	{
-		await _recoveryGate.WaitAsync(cancellationToken);
-		try
-		{
-			if (generation == Volatile.Read(ref _logGeneration))
-			{
-				await DropLocalLogAsync(cause);
-			}
-		}
-		finally
-		{
-			_recoveryGate.Release();
-		}
-	}
-
-	/// <summary>
-	/// The local log is a cache of the stream: one this build cannot read is dropped, never left to brick the page. What follows the
-	/// master's last acknowledgement and can still be read is appended again, so the send loop offers it; the master steps over what
-	/// it holds. The connection is cut, and the next HELLO, from an empty log, replays the stream.
-	/// </summary>
-	async Task DropLocalLogAsync(UnreadableRecordException cause)
-	{
-		var unreadable = new List<UnreadableRecordException>();
-		var readable = new List<Event>();
-		if (_storage is ISalvageableAppendStorage<Event> salvageable)
-		{
-			await foreach (var ev in salvageable.SalvageAsync(unreadable.Add, CancellationToken.None))
-			{
-				readable.Add(ev);
-			}
-		}
-		var acknowledged = _eventReplicationState.LastEventIdFromMe;
-		var after = acknowledged == default ? 0 : readable.FindIndex(x => x.EventId == acknowledged) + 1; // not found: everything, as the send loop does
-		var kept = readable.Skip(after).Where(x => x is not StreamSnapshotEvent).ToList();
-		Interlocked.Increment(ref _logGeneration);
-		await WipeLocalAsync();
-		foreach (var ev in kept)
-		{
-			ev.StreamId = FindStreamOf(ev); // a stored event comes back without its stream
-			ev.SequenceId = default;
-			await _storage.AppendAsync(ev);
-		}
-		EmergencyLog.Default.LogError(cause, $"EventReplicationService: the local log could not be read (record {cause.Key}, {cause.Length} bytes, schemas {cause.Schemas ?? "none"}; {unreadable.Count} unreadable of {unreadable.Count + readable.Count}); dropped it, kept {kept.Count} events the master had not acknowledged, resyncing from the server.");
-		lock (_reconnectGate)
-		{
-			_reconnectAtOnce = true;
-			if (_pause is { } pause)
-			{
-				CancelInBackground(pause);
-			}
-			if (_attempt is { } attempt)
-			{
-				CutConnection(attempt, nameof(RecoverLocalLogAsync));
-			}
-		}
-		Wake();
 	}
 
 	/// <summary>Empties the local log, the dedup and the cursors in memory; the caller decides whether the run goes on.</summary>
