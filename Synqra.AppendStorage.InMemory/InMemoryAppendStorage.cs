@@ -74,7 +74,7 @@ public static class InMemoryAppendStorageExtensions
 			}
 		}
 
-		public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public Task<T> GetAsync(TKey key, CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(_data[key]);
 		}

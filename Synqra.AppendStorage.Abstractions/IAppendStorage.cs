@@ -27,7 +27,7 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 		}
 	}
 
-	Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default);
+	Task<T> GetAsync(TKey key, CancellationToken cancellationToken = default);
 
 	/// <summary>
 	/// Every item in key order. A full <paramref name="from"/> key is a cursor: the read starts strictly after it
