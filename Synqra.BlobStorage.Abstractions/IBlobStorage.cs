@@ -7,6 +7,11 @@ namespace Synqra.BlobStorage;
 public interface IBlobStorage<TKey> : IDisposable, IAsyncDisposable
 	where TKey : notnull, IComparable<TKey>
 {
+	/// <summary>
+	/// Every key in key order. A full <paramref name="from"/> key is a cursor: the read starts strictly after it;
+	/// default reads everything. A composite key with an empty tail starts at the first key under that prefix; only
+	/// some storages (File) stop at the prefix's end, the others run on into later prefixes.
+	/// </summary>
 	IAsyncEnumerable<TKey> EnumerateKeysAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
 
 	ValueTask<byte[]> ReadBlobAsync(TKey key, CancellationToken cancellationToken = default);
