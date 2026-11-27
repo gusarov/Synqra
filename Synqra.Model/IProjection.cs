@@ -11,7 +11,7 @@ public interface IObjectStore
 	/// instance; the default falls back to the production provider for the non-DI construction path.
 	/// </summary>
 	ISynqraIdProvider IdProvider
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 		=> SynqraIdProvider.Default;
 #else
 		{ get; }
@@ -24,7 +24,7 @@ public interface IObjectStore
 	/// <param name="model"></param>
 	/// <returns></returns>
 	Guid GetId<T>(T model) where T : class // this is optional to implement, for potentially higher performance
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 		=> GetId((object)model)
 #endif
 		;
@@ -41,7 +41,7 @@ public interface IObjectStore
 	// [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
 	ISynqraCollection<T> GetCollection<T>(string? collectionName = null) // this is optional to implement, for potentially higher performance
 		where T : class
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 		return (ISynqraCollection<T>)GetCollection(typeof(T));
 	}
@@ -79,7 +79,7 @@ public interface IObjectStore
 	/// (a first-write check therefore degenerates to a no-op via the empty-sentinel rule).
 	/// </summary>
 	Guid GetLastEventId(Guid targetId)
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 		=> Guid.Empty
 #endif
 		;
@@ -90,7 +90,7 @@ public interface IObjectStore
 	/// properties to turn stored endpoint ids into the consumer's own model objects.
 	/// </summary>
 	object? ResolveObject(Guid id)
-#if NET8_0_OR_GREATER
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 		=> null
 #endif
 		;

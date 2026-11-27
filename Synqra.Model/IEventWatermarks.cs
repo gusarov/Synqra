@@ -13,5 +13,9 @@ public interface IEventWatermarks
 	/// The watermark, seeded from the log's tail first when this process has not touched the stream yet: a resume point
 	/// handed out before the first append is then a real position, not an empty one that no client can move to.
 	/// </summary>
-	ValueTask<Guid> ReadWatermarkAsync(Guid streamId, CancellationToken cancellationToken = default) => new(ReadWatermark(streamId));
+	ValueTask<Guid> ReadWatermarkAsync(Guid streamId, CancellationToken cancellationToken = default)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> new(ReadWatermark(streamId))
+#endif
+		;
 }

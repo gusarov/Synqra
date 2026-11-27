@@ -15,7 +15,11 @@ public interface INetworkSerializationService
 	void Reinitialize();
 	ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T inv, ArraySegment<byte> buffer);
 	[Obsolete("Use Serialize with buffer parameter to reduce allocations")]
-	ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T inv) => Serialize(inv, default);
+	ArraySegment<byte> Serialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(T inv)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> Serialize(inv, default)
+#endif
+		;
 	T Deserialize<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties)] T>(ReadOnlySpan<byte> bytes);
 }
 

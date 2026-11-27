@@ -11,7 +11,11 @@ namespace Synqra;
 public interface IEventLog : IAppendStorage<Event, (Guid Stream, Guid Sequence)>
 {
 	/// <summary>One stream's events strictly after <paramref name="after"/> (default: from its start), in log order.</summary>
-	async IAsyncEnumerable<Event> ReadStreamAsync(Guid streamId, Guid after = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+	async
+#endif
+	IAsyncEnumerable<Event> ReadStreamAsync(Guid streamId, Guid after = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 		var inStream = true;
 		await using var events = GetAllAsync((streamId, after), cancellationToken).GetAsyncEnumerator(cancellationToken);
@@ -25,4 +29,7 @@ public interface IEventLog : IAppendStorage<Event, (Guid Stream, Guid Sequence)>
 			}
 		}
 	}
+#else
+		;
+#endif
 }

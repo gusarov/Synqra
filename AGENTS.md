@@ -126,7 +126,8 @@ already set) — it does not affect the main checkout or other worktrees.
 ## Toolchain And Build
 
 - SDK is pinned by `global.json` to `.NET SDK 10.0.100`.
-- The solution is multi-targeted in several places, especially `net8.0`, `net9.0`, and `net10.0`.
+- Only `net10.0` builds today. `net9.0`, `net8.0`, `netstandard2.1` and `netstandard2.0` are delayed, not removed: each project lists them in a `delayed:` comment beside `<TargetFrameworks>` and they return once the library matures. Write code as if they were still built, and keep the dormant `#if` paths.
+- A member body in an interface (method, property, event, iterator) needs runtime support that `netstandard2.0` lacks. Put every such body under `#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER` and leave a bare declaration otherwise; no other condition (`NET8_0_OR_GREATER`) for this.
 - `Directory.Build.props` enables nullable reference types, latest language version, source-generated config binding, and AOT-compatible settings where possible.
 
 Useful commands:

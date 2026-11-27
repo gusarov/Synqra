@@ -14,7 +14,11 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 	// where T : IIdentifiable<TKey>
 {
 	Task AppendAsync(T item, CancellationToken cancellationToken = default);
-	async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+	async
+#endif
+	Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 		foreach (var item in items)
 		{
@@ -26,6 +30,9 @@ public interface IAppendStorage<T, TKey> : IDisposable, IAsyncDisposable
 			await AppendAsync(item, cancellationToken);
 		}
 	}
+#else
+		;
+#endif
 
 	Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default);
 

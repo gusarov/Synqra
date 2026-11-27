@@ -10,22 +10,42 @@ public interface IEventReplicationService
 	/// false while offline and while a catch-up arrives, which every reconnect starts again. A host with no master has nothing to
 	/// wait for. Its changes raise <see cref="StatusChanged"/>.
 	/// </summary>
-	bool IsCaughtUp => true;
+	bool IsCaughtUp
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> true;
+#else
+		{ get; }
+#endif
 
 	/// <summary>Event frames the current connection received, known ones included: during a catch-up, how far it has come.</summary>
-	long ConnectionFrames => 0;
+	long ConnectionFrames
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> 0;
+#else
+		{ get; }
+#endif
 
 	/// <summary>
 	/// The master's position this client has reached: the resume point of the last frame it took (a v7 sequence, so it also tells
 	/// how far into the stream's history a replay is). Default before the first.
 	/// </summary>
-	Guid ServerWatermark => default;
+	Guid ServerWatermark
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> default;
+#else
+		{ get; }
+#endif
 
 	/// <summary>
 	/// When the next connect attempt is due while the client waits between attempts, so a UI can show "retrying in N s": null
 	/// while connected and while an attempt is under way. Its changes raise <see cref="StatusChanged"/>.
 	/// </summary>
-	DateTimeOffset? NextAttemptAt => null;
+	DateTimeOffset? NextAttemptAt
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> null;
+#else
+		{ get; }
+#endif
 
 	/// <summary>
 	/// Connects again at once when the connection looks dead: cuts short the pause before the next attempt, or ends a connect
@@ -35,8 +55,12 @@ public interface IEventReplicationService
 	/// a catch-up is still receiving frames: safe to call at any time, e.g. on every tab return or network change.
 	/// </summary>
 	void ReconnectNow()
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 	}
+#else
+		;
+#endif
 
 	/// <summary>
 	/// Raised when the master answers one of this client's own events: stored, or refused for good with its reason. A refused
@@ -45,6 +69,7 @@ public interface IEventReplicationService
 	/// replication's own thread, which waits for listeners: a listener must not block. A host with no master never raises it.
 	/// </summary>
 	event Action<EventVerdict>? EventSettled
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 		add
 		{
@@ -53,9 +78,13 @@ public interface IEventReplicationService
 		{
 		}
 	}
+#else
+		;
+#endif
 
 	/// <summary>Raised when <see cref="IsOnline"/>, <see cref="IsCaughtUp"/> or <see cref="NextAttemptAt"/> changes, on the replication's own thread.</summary>
 	event Action? StatusChanged
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 	{
 		add
 		{
@@ -64,6 +93,9 @@ public interface IEventReplicationService
 		{
 		}
 	}
+#else
+		;
+#endif
 
 	/// <summary>
 	/// The streams this connection is currently subscribed to, as last confirmed by the master's

@@ -14,7 +14,11 @@ public interface IEventVisitor<in T>
 	Task VisitAsync(ComponentDeletedEvent ev, T ctx);
 
 	/// <summary>A stream snapshot a client keeps in its own log (plans/snapshot.md §5); only a client's projection folds one.</summary>
-	Task VisitAsync(StreamSnapshotEvent ev, T ctx) => Task.CompletedTask;
+	Task VisitAsync(StreamSnapshotEvent ev, T ctx)
+#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+		=> Task.CompletedTask
+#endif
+		;
 
 
 	/*
