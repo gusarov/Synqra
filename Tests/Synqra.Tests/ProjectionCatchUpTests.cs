@@ -301,7 +301,7 @@ public class ProjectionCatchUpTests : TestsStateManagement
 			return Task.CompletedTask;
 		}
 
-		public Task<Event> GetAsync((Guid, Guid) key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public Task<Event> GetAsync((Guid, Guid) key, CancellationToken cancellationToken = default)
 		{
 			lock (_data)
 			{

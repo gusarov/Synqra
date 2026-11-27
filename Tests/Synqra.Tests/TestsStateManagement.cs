@@ -1090,7 +1090,7 @@ public class FakeAppendStorage<T, TKey> : IAppendStorage<T, TKey>
 	/// <summary>Whether an item sorts strictly after the cursor; a fake that knows its keys overrides this.</summary>
 	protected virtual bool IsAfter(T item, TKey from) => true;
 
-	public Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	public Task<T> GetAsync(TKey key, CancellationToken cancellationToken = default)
 	{
 		throw new NotImplementedException();
 	}

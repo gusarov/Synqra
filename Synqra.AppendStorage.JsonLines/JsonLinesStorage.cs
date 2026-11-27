@@ -707,7 +707,7 @@ public static class AppendStorageJsonLinesExtensions
 #endif
 		}
 
-		public async Task<T> GetAsync(TKey key, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		public async Task<T> GetAsync(TKey key, CancellationToken cancellationToken = default)
 		{
 			// in this storage we can only get all items, so we will read all and find the one with matching key
 			var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
