@@ -37,6 +37,7 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 		}
 		else
 		{
+			await RegisterSchemasBundleAsync(cancellationToken);
 			var outcome = TailAppendResult.TailMoved;
 			var attempts = 0;
 			while (outcome == TailAppendResult.TailMoved)
@@ -48,7 +49,7 @@ public class BlobEventStorage : BlobAppendStorage<Event, (Guid Stream, Guid Sequ
 				var tail = await _tailAppend.ReadTailAsync(cancellationToken);
 				_stamps.CreateVersion7OrApprove(tail.Sequence); // the clock follows the store's tail, whichever writer put it there
 				item.SequenceId = _stamps.CreateVersion7();
-				outcome = await _tailAppend.AppendAtTailAsync((item.StreamId, item.SequenceId), Serialize(item), JsonMirrorOf(item), item.EventId.ToString("N"), tail, cancellationToken);
+				outcome = await _tailAppend.AppendAtTailAsync((item.StreamId, item.SequenceId), Serialize(item), JsonMirrorOf(item), item.EventId.ToString("N"), tail, WriteSchemasBundleId, cancellationToken);
 			}
 			if (outcome == TailAppendResult.Appended)
 			{

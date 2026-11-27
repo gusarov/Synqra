@@ -9,6 +9,15 @@ using Synqra.BlobStorage;
 
 namespace Synqra.AppendStorage.BlobStorage;
 
+/// <summary>
+/// SBX records in a blob storage. An SBX payload names no schema versions: a reader decodes it at the versions it is configured
+/// with, and a reader configured at its own latest ran past the end of every record a model had since grown (2026-11-17). Over a
+/// store that keeps schemas bundles (<see cref="ITaggedBlobStorage{TKey}"/>: IndexedDB), each record carries, as a field
+/// beside its pure SBX bytes, the id of the <see cref="SchemasBundle"/> it was written with; the bundle is stored once, and each
+/// record is read by a deserializer configured for its bundle. A record without the field was written before bundles: its
+/// versions are unknown, so reading it fails by name (<see cref="SbxDeserializationException"/>), never guessed at; what that
+/// means is the host's to decide. Any other store keeps pure SBX read at this build's versions, as before.
+/// </summary>
 public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableAppendStorage
 	where T : class
 	where TKey : notnull, IComparable<TKey>
@@ -18,11 +27,19 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 
 	private readonly IBlobStorage<TKey> _blobStorage;
 	private readonly IJsonMirrorBlobStorage<TKey>? _jsonMirrorBlobStorage;
+	private readonly ITaggedBlobStorage<TKey>? _tagged;
+	private readonly ISbxSerializerFactory _serializerFactory;
 	private readonly ISbxSerializer _serializer;
 	private readonly ISbxSerializer _deserializer;
 	private readonly Func<T, TKey> _getKeyFromItem;
 	private readonly JsonSerializerOptions? _jsonMirrorOptions;
 	private readonly ConcurrentDictionary<TKey, WeakReference> _attachedObjectsById = new();
+	private readonly SemaphoreSlim _bundlesGate = new SemaphoreSlim(1, 1);
+	// The bundles read so far, and a deserializer configured for each: SBX is reset per record anyway.
+	private volatile IReadOnlyDictionary<uint, SchemasBundle> _bundles = new Dictionary<uint, SchemasBundle>();
+	private readonly ConcurrentDictionary<uint, ISbxSerializer> _readers = new();
+	private bool _bundlesLoaded;
+	private SchemasBundle? _writeBundle;
 
 	public BlobAppendStorage(
 		  IBlobStorage<TKey> blobStorage
@@ -33,23 +50,32 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	{
 		_blobStorage = blobStorage;
 		_jsonMirrorBlobStorage = blobStorage as IJsonMirrorBlobStorage<TKey>;
+		_serializerFactory = serializerFactory;
 		_serializer = serializerFactory.CreateSerializer();
 		_deserializer = serializerFactory.CreateSerializer();
+		_tagged = _serializer is ISbxSchemaVersions && _deserializer is ISbxSchemaVersions ? blobStorage as ITaggedBlobStorage<TKey> : null;
 		_getKeyFromItem = getKeyFromItem;
 		_jsonMirrorOptions = jsonMirrorOptions;
 	}
 
 	public Task<string> TestAsync(string input) => Task.FromResult(input);
 
-	public virtual Task AppendAsync(T item, CancellationToken cancellationToken = default)
+	public virtual async Task AppendAsync(T item, CancellationToken cancellationToken = default)
 	{
-		if (_blobStorage.SupportsSyncOperations)
+		await RegisterSchemasBundleAsync(cancellationToken);
+		if (_tagged is not null)
 		{
-			WriteSync(item);
-			Attach(item);
-			return Task.CompletedTask;
+			await _tagged.WriteBlobAsync(_getKeyFromItem(item), SerializeRecord(item), _writeBundle!.Id, JsonMirrorOf(item), cancellationToken);
 		}
-		return WriteAsyncCore(item, cancellationToken);
+		else if (_blobStorage.SupportsSyncOperations)
+		{
+			_blobStorage.WriteBlob(_getKeyFromItem(item), SerializeRecord(item));
+		}
+		else
+		{
+			await WriteBlobAsync(_getKeyFromItem(item), SerializeRecord(item), item, cancellationToken);
+		}
+		Attach(item);
 	}
 
 	public virtual async Task AppendBatchAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
@@ -67,22 +93,25 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 			return attached;
 		}
 
-		var blob = await _blobStorage.ReadBlobAsync(key, cancellationToken);
-		var item = Deserialize(blob);
+		var record = _tagged is not null
+			? await _tagged.ReadTaggedBlobAsync(key, cancellationToken)
+			: new TaggedBlob(await _blobStorage.ReadBlobAsync(key, cancellationToken), null);
+		var item = Deserialize(key, record, await FindReaderAsync(record, cancellationToken));
 		Attach(key, item);
 		return item;
 	}
 
 	public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
-		=> _blobStorage is IPagedBlobReader<TKey> paged ? ReadPagedAsync(paged, from, cancellationToken) : ReadByKeyAsync(from, cancellationToken);
+		=> _tagged is not null ? ReadBundledAsync(from, cancellationToken)
+			: _blobStorage is IPagedBlobReader<TKey> paged ? ReadPagedAsync(paged, from, cancellationToken)
+			: ReadByKeyAsync(from, cancellationToken);
 
-	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
-	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
+	async IAsyncEnumerable<T> ReadBundledAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		var read = 0;
 		var deserialized = 0;
 		long deserializing = 0;
-		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
+		await foreach (var (key, record) in _tagged!.EnumerateTaggedBlobsAsync(from, cancellationToken))
 		{
 			read++;
 			if (TryGetAttachedObject(key, out var attached))
@@ -91,8 +120,9 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 			}
 			else
 			{
+				var reader = await FindReaderAsync(record, cancellationToken);
 				var started = Stopwatch.GetTimestamp();
-				var item = Deserialize(blob);
+				var item = Deserialize(key, record, reader);
 				Attach(key, item);
 				deserializing += Stopwatch.GetTimestamp() - started;
 				deserialized++;
@@ -105,6 +135,24 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 	}
 
+	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
+	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
+		{
+			if (TryGetAttachedObject(key, out var attached))
+			{
+				yield return attached;
+			}
+			else
+			{
+				var item = Deserialize(key, new TaggedBlob(blob, null), (_deserializer, null));
+				Attach(key, item);
+				yield return item;
+			}
+		}
+	}
+
 	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		await foreach (var key in _blobStorage.EnumerateKeysAsync(from, cancellationToken))
@@ -112,13 +160,13 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 			if (TryGetAttachedObject(key, out var attached))
 			{
 				yield return attached;
-				continue;
 			}
-
-			var blob = await _blobStorage.ReadBlobAsync(key, cancellationToken);
-			var item = Deserialize(blob);
-			Attach(key, item);
-			yield return item;
+			else
+			{
+				var item = Deserialize(key, new TaggedBlob(await _blobStorage.ReadBlobAsync(key, cancellationToken), null), (_deserializer, null));
+				Attach(key, item);
+				yield return item;
+			}
 		}
 	}
 
@@ -133,10 +181,20 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		{
 			throw new NotSupportedException($"{_blobStorage.GetType().Name} does not support clearing — only implementations of IClearableBlobStorage do.");
 		}
-		await clearable.ClearAllAsync(cancellationToken);
-		// The attached-objects cache would otherwise keep serving these same in-memory
-		// instances back out of GetAllAsync/GetAsync even though the backing store is empty.
-		_attachedObjectsById.Clear();
+		await _bundlesGate.WaitAsync(cancellationToken);
+		try
+		{
+			await clearable.ClearAllAsync(cancellationToken);
+			// The attached-objects cache would otherwise keep serving these same in-memory
+			// instances back out of GetAllAsync/GetAsync even though the backing store is empty.
+			_attachedObjectsById.Clear();
+			_writeBundle = null; // its bundle went with the records: the next write stores it again
+			_bundlesLoaded = false;
+		}
+		finally
+		{
+			_bundlesGate.Release();
+		}
 	}
 
 	public void Dispose()
@@ -149,53 +207,131 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return _blobStorage.DisposeAsync();
 	}
 
-	// A small item is written from the stack; a larger one from a pooled array that grows until the frame fits.
-	private void WriteSync(T item)
+	#region Schemas bundles
+
+	// A record's tag is the id of its schemas bundle; the bundles are the store's "schemas" side entries, keyed by id in hex.
+	private const string SchemasSide = "schemas";
+
+	string FormatBundleKey(uint bundleId) => bundleId.ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
+
+	/// <summary>The bundle id this storage's records are written with, once registered; null over a store that keeps no tags.</summary>
+	protected uint? WriteSchemasBundleId => _writeBundle?.Id;
+
+	/// <summary>
+	/// Stores this build's schemas bundle once, before its first record. A stored bundle of the same id with other content fails
+	/// loudly: a record would otherwise be read at the wrong versions.
+	/// </summary>
+	protected async Task RegisterSchemasBundleAsync(CancellationToken cancellationToken)
 	{
-		var key = _getKeyFromItem(item);
-		Span<byte> stackBuffer = stackalloc byte[StackBufferSize];
-		_serializer.Reset();
-		if (_serializer.TrySerializeFrame(item, stackBuffer, out var bytesWritten))
+		if (_tagged is not null && _writeBundle is null)
 		{
-			_blobStorage.WriteBlob(key, stackBuffer[..bytesWritten]);
-		}
-		else
-		{
-			var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
+			var bundle = new SchemasBundle((ISbxSchemaVersions)_serializer);
+			await _bundlesGate.WaitAsync(cancellationToken);
 			try
 			{
-				_blobStorage.WriteBlob(key, frame.AsSpan());
+				await _tagged.StoreSideEntryAsync(SchemasSide, FormatBundleKey(bundle.Id), bundle.Content, cancellationToken);
+				await ReadSchemasBundlesAsync(cancellationToken);
+				if (!_bundles[bundle.Id].Content.AsSpan().SequenceEqual(bundle.Content))
+				{
+					throw new SbxDeserializationException(bundle.ToString(), bundle.ToString(), new InvalidOperationException("Two different schemas bundles share one id."));
+				}
+				_writeBundle = bundle;
 			}
 			finally
 			{
-				ArrayPool<byte>.Shared.Return(frame.Array!);
+				_bundlesGate.Release();
 			}
 		}
 	}
 
-	private async Task WriteAsyncCore(T item, CancellationToken cancellationToken)
+	// The deserializer for the record's bundle, or null with why there is none; a bundle stored after the last read (another
+	// tab's newer build) is read first.
+	async ValueTask<(ISbxSerializer? Reader, string? Missing)> FindReaderAsync(TaggedBlob record, CancellationToken cancellationToken)
 	{
-		var key = _getKeyFromItem(item);
+		(ISbxSerializer? Reader, string? Missing) reader;
+		if (_tagged is null)
+		{
+			reader = (_deserializer, null);
+		}
+		else if (record.Tag is { } bundleId)
+		{
+			if (!_bundles.ContainsKey(bundleId) || !_bundlesLoaded)
+			{
+				await _bundlesGate.WaitAsync(cancellationToken);
+				try
+				{
+					await ReadSchemasBundlesAsync(cancellationToken);
+				}
+				finally
+				{
+					_bundlesGate.Release();
+				}
+			}
+			reader = _bundles.TryGetValue(bundleId, out var bundle)
+				? (_readers.GetOrAdd(bundleId, _ => ConfigureReader(bundle)), null)
+				: (null, FormattableString.Invariant($"Schemas bundle {bundleId:x8} is not stored here."));
+		}
+		else
+		{
+			reader = (null, "The record names no schemas bundle: it was written before bundles, so its schema versions are unknown.");
+		}
+		return reader;
+	}
+
+	// Called under the gate. A stored bundle that does not match its id is refused by name.
+	async Task ReadSchemasBundlesAsync(CancellationToken cancellationToken)
+	{
+		var bundles = new Dictionary<uint, SchemasBundle>();
+		foreach (var (key, content) in await _tagged!.ReadSideEntriesAsync(SchemasSide, cancellationToken))
+		{
+			var id = uint.Parse(key, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+			try
+			{
+				bundles[id] = new SchemasBundle(id, content);
+			}
+			catch (InvalidDataException ex)
+			{
+				throw new SbxDeserializationException(FormattableString.Invariant($"schemas bundle {id:x8}"), FormattableString.Invariant($"schemas bundle {id:x8}"), ex);
+			}
+		}
+		_bundles = bundles;
+		_bundlesLoaded = true;
+	}
+
+	ISbxSerializer ConfigureReader(SchemasBundle bundle)
+	{
+		var reader = _serializerFactory.CreateSerializer();
+		bundle.Apply((ISbxSchemaVersions)reader);
+		return reader;
+	}
+
+	#endregion
+
+	#region Records
+
+	// The payload from the stack when it fits, else from a pooled array that grows until it does.
+	private byte[] SerializeRecord(T item)
+	{
+		byte[] record;
 		Span<byte> stackBuffer = stackalloc byte[StackBufferSize];
 		_serializer.Reset();
 		if (_serializer.TrySerializeFrame(item, stackBuffer, out var bytesWritten))
 		{
-			byte[] data = stackBuffer[..bytesWritten].ToArray();
-			await WriteBlobAsync(key, data, item, cancellationToken);
+			record = stackBuffer[..bytesWritten].ToArray();
 		}
 		else
 		{
 			var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
 			try
 			{
-				await WriteBlobAsync(key, frame, item, cancellationToken);
+				record = frame.ToArray();
 			}
 			finally
 			{
 				ArrayPool<byte>.Shared.Return(frame.Array!);
 			}
 		}
-		Attach(item);
+		return record;
 	}
 
 	/// <summary>
@@ -203,8 +339,7 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 	/// written. When the underlying blob storage also implements
 	/// <see cref="IJsonMirrorBlobStorage{TKey}"/> (currently only IndexedDb) and wants one,
 	/// a JSON rendering of the same item is written into the SAME record alongside it — not
-	/// a second store/key — purely for human inspection of a store where SBX has no
-	/// schema-evolution story yet.
+	/// a second store/key — purely for human inspection.
 	/// </summary>
 	private async Task WriteBlobAsync(TKey key, ReadOnlyMemory<byte> sbxData, T item, CancellationToken cancellationToken)
 	{
@@ -219,27 +354,39 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		}
 	}
 
-	private T Deserialize(ReadOnlySpan<byte> blob)
+	// A failure names the record and its bundle. Caught by type, never by a filter: a filter in a generic method traps under WASM
+	// AOT (see SbxFrameExtensions).
+	private T Deserialize(TKey key, TaggedBlob record, (ISbxSerializer? Reader, string? Missing) reader)
 	{
-		_deserializer.Reset();
-		int pos = 0;
-		return _deserializer.Deserialize<T>(blob, ref pos);
-	}
-
-	/// <summary>The item's SBX bytes: what <see cref="GetAsync"/> and <see cref="GetAllAsync"/> read back.</summary>
-	protected byte[] Serialize(T item)
-	{
-		_serializer.Reset();
-		var frame = _serializer.SerializeFrame(item, ArrayPool<byte>.Shared.Rent(InitialHeapBufferSize), ArrayPool<byte>.Shared);
+		T item = null!;
+		Exception? failure = null;
 		try
 		{
-			return frame.ToArray();
+			var deserializer = reader.Reader ?? throw new InvalidOperationException(reader.Missing);
+			deserializer.Reset();
+			var pos = 0;
+			item = deserializer.Deserialize<T>(record.Blob, ref pos);
 		}
-		finally
+		catch (Exception ex)
 		{
-			ArrayPool<byte>.Shared.Return(frame.Array!);
+			failure = ex;
 		}
+		if (failure is not null)
+		{
+			throw new SbxDeserializationException($"{key} ({record.Blob.Length} bytes)", DescribeBundle(record), failure);
+		}
+		return item;
 	}
+
+	string? DescribeBundle(TaggedBlob record)
+		=> record.Tag is { } id
+			? (_bundles.TryGetValue(id, out var bundle) ? $"{bundle}: {string.Join(", ", bundle.Entries.Select(x => FormattableString.Invariant($"{x.MapId}@{x.Version}")))}" : FormattableString.Invariant($"schemas bundle {id:x8}, not stored here"))
+			: null;
+
+	#endregion
+
+	/// <summary>The item's SBX bytes: what <see cref="GetAsync"/> and <see cref="GetAllAsync"/> read back. Register the bundle first.</summary>
+	protected byte[] Serialize(T item) => SerializeRecord(item);
 
 	/// <summary>The JSON rendering stored beside the SBX bytes, when the blob storage wants one; otherwise null.</summary>
 	protected string? JsonMirrorOf(T item)
