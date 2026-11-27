@@ -58,6 +58,37 @@ public static class SynqraReplicationEndpointExtensions
 		// gives both the routing tags and O(1) removal on disconnect.
 		var sockets = new ConcurrentDictionary<WebSocket, SocketScope>();
 		var broadcastGate = new SemaphoreSlim(1, 1);
+		// The build and reload demand told to clients that ask; pushed to them, in turn with their other frames, as it changes.
+		var version = (serviceKey is null
+			? app.Services.GetService<ReplicationVersion>()
+			: app.Services.GetKeyedService<ReplicationVersion>(serviceKey) ?? app.Services.GetService<ReplicationVersion>())
+			?? new ReplicationVersion();
+		var versionLogger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Synqra.Replication.Version");
+		// This master's schemas bundle, which every frame it writes and reads follows: a client on another one misreads them.
+		var schemas = new Lazy<SchemasBundle?>(() => app.Services.GetService<ISbxSerializerFactory>()?.CreateSchemasBundle());
+		ServerVersion Stamp(ServerVersion frame) => new ServerVersion
+		{
+			Build = frame.Build,
+			ReloadEpoch = frame.ReloadEpoch,
+			SchemasBundleId = schemas.Value?.Id ?? 0,
+			SchemasBundleContent = schemas.Value?.Content,
+		};
+		version.Changed += (frame, node) =>
+		{
+			foreach (var (peer, peerScope) in sockets)
+			{
+				var told = peerScope.NegotiatesSchemas || peerScope.VersionNode is not null;
+				if (told && (node is null || node == peerScope.VersionNode) && peer.State == WebSocketState.Open)
+				{
+					_ = peerScope.Outbox.SendAsync(Stamp(frame), CancellationToken.None).ContinueWith(
+						  t => versionLogger?.LogWarning(t.Exception, "Synqra replication: telling a client the server's version failed; it learns it on its next connect.")
+						, CancellationToken.None
+						, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
+						, TaskScheduler.Default
+						);
+				}
+			}
+		};
 		// Bounded: a long-running host sees every committed event through here, so an unbounded set would grow forever.
 		var knownEvents = new RecentEventIds(capacity: 100_000);
 		// Peers' events the projection applied but the log failed to store: their resend is stored, not applied twice. Under broadcastGate only.
@@ -447,7 +478,9 @@ public static class SynqraReplicationEndpointExtensions
 				throw new InvalidOperationException($"Protocol negotiation failed: received magic {magic:X16} instead of {networkSerializationService.Magic:X16}.");
 			}
 			var clientCursor = new Guid(helloBytes.AsSpan(8, 16));
-			var helloKind = helloBytes.Length >= 25 ? (ReplicationHelloKind)helloBytes[24] : ReplicationHelloKind.UserDefaultMainStream;
+			// The kind's top bit: the client negotiates schemas, and is told this master's bundle before any other frame.
+			var negotiatesSchemas = helloBytes.Length >= 25 && (helloBytes[24] & (byte)ReplicationHelloKind.NegotiatesSchemas) != 0;
+			var helloKind = helloBytes.Length >= 25 ? (ReplicationHelloKind)(helloBytes[24] & ~(byte)ReplicationHelloKind.NegotiatesSchemas) : ReplicationHelloKind.UserDefaultMainStream;
 			// The streams this connection is currently subscribed to. Seeded from the HELLO kind, then
 			// mutated live by Subscribe/Unsubscribe frames. Only ever touched under broadcastGate, so
 			// the broadcast loop's reads never race a subscription change.
@@ -495,6 +528,9 @@ public static class SynqraReplicationEndpointExtensions
 				: ctx.RequestServices.GetRequiredKeyedService<IEventLog>(serviceKey);
 			var magicBytes = BitConverter.GetBytes(networkSerializationService.Magic);
 			var pump = outbox.PumpAsync(ctx.RequestAborted);
+			// The pushes end as the host starts stopping, but the socket lived on until the process died under it, through a proxy
+			// possibly never closed: a close frame now, which proxies pass on, sends the client to the host that follows at once.
+			using var closeOnStop = app.Lifetime.ApplicationStopping.Register(() => _ = outbox.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "the server is stopping"));
 			try
 			{
 			using (await outbox.HoldPushesAsync(ctx.RequestAborted))
@@ -528,6 +564,12 @@ public static class SynqraReplicationEndpointExtensions
 					}
 
 					await outbox.SendBytesAsync(magicBytes, ctx.RequestAborted);
+					if (negotiatesSchemas)
+					{
+						// First, before the subscription, a snapshot or the backlog: the client checks it can read this master's frames.
+						socketScope.NegotiatesSchemas = true;
+						await outbox.SendAsync(Stamp(version.Frame), ctx.RequestAborted);
+					}
 					// Auto-ack the HELLO with the authoritative active set, so the client can immediately
 					// tell whether the server's default matched what it expected (see SubscriptionState).
 					await outbox.SendAsync(new SubscriptionState { Streams = socketScope.Active.ToList() }, ctx.RequestAborted);
@@ -683,6 +725,14 @@ public static class SynqraReplicationEndpointExtensions
 				if (operation is CatchUpRequest catchUp)
 				{
 					await outbox.SendAsync(new CaughtUp { RequestId = catchUp.RequestId }, ctx.RequestAborted);
+					continue;
+				}
+
+				// Only a client that asks is told: a build from before this frame would not know it.
+				if (operation is VersionRequest versionRequest)
+				{
+					socketScope.VersionNode = versionRequest.NodeId;
+					await outbox.SendAsync(Stamp(version.Frame), ctx.RequestAborted);
 					continue;
 				}
 
@@ -842,6 +892,12 @@ public static class SynqraReplicationEndpointExtensions
 
 		/// <summary>Every send to this socket goes through here: pushes are queued, never sent by the broadcaster.</summary>
 		public ReplicationOutbox Outbox { get; }
+
+		/// <summary>The client's node once it asked for the server's version (<see cref="VersionRequest"/>); null until then, and for a build that never asks.</summary>
+		public Guid? VersionNode { get; set; }
+
+		/// <summary>Whether the client's HELLO negotiated schemas: it was told this master's bundle first, and is told of changes.</summary>
+		public bool NegotiatesSchemas { get; set; }
 	}
 
 	/// <summary>

@@ -14,7 +14,7 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>, IUniqueTagIndex
+internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>, IUniqueTagIndex, ITaggedBlobStorage<TKey>
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
@@ -92,11 +92,11 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 
 	// Every tab of the browser shares this database: the tag check, the tail check and the write run in one IndexedDB
 	// transaction (see appendAtTail), so tabs agree on one order and one copy without talking to each other.
-	public async ValueTask<TailAppendResult> AppendAtTailAsync(TKey key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, TKey expectedTail, CancellationToken cancellationToken = default)
+	public async ValueTask<TailAppendResult> AppendAtTailAsync(TKey key, ReadOnlyMemory<byte> blob, string? json, string uniqueTag, TKey expectedTail, uint? tag = null, CancellationToken cancellationToken = default)
 	{
 		await _initTask.Value;
 		var expectedTailText = Equals(expectedTail, default(TKey)) ? null : _getKeyFromItem(expectedTail);
-		var outcome = await _indexedDbInterop.AppendAtTailAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key), blob, json, uniqueTag, expectedTailText);
+		var outcome = await _indexedDbInterop.AppendAtTailAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key), blob, json, uniqueTag, expectedTailText, tag);
 		return outcome switch
 		{
 			"appended" => TailAppendResult.Appended,
@@ -254,4 +254,72 @@ internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonM
 
 		await _indexedDbInterop.CloseDatabaseAsync(_databaseName);
 	}
+
+	#region Record tags and side entries
+
+	// A record's tag is its own `tag` field; a side's entries live beside the records under "{store}#{side}" ("tag" is the tag index).
+	string SideStore(string side) => side == "tag" ? throw new ArgumentException("The side \"tag\" is the store's unique-tag index.", nameof(side)) : _storeName + "#" + side;
+
+	public async ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, uint tag, string? json, CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		await _indexedDbInterop.AddBlobAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key), blob, json, tag);
+	}
+
+	public async ValueTask<TaggedBlob> ReadTaggedBlobAsync(TKey key, CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		var packed = await _indexedDbInterop.GetTaggedBlobAsync(_databaseName, _options.ObjectStoreName, _storeName, _getKeyFromItem(key)) ?? throw new KeyNotFoundException("Blob is not found for key " + key);
+		return UnpackRecord(packed);
+	}
+
+	public async IAsyncEnumerable<(TKey Key, TaggedBlob Blob)> EnumerateTaggedBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		await foreach (var (keyText, record) in EnumeratePackedAsync(_storeName, from is null || Equals(from, default(TKey)) ? null : _getKeyFromItem(from), cancellationToken))
+		{
+			yield return (_getKeyFromText(keyText), UnpackRecord(record));
+		}
+	}
+
+	public async ValueTask<IReadOnlyDictionary<string, byte[]>> ReadSideEntriesAsync(string side, CancellationToken cancellationToken = default)
+	{
+		var entries = new Dictionary<string, byte[]>();
+		await foreach (var (keyText, record) in EnumeratePackedAsync(SideStore(side), null, cancellationToken))
+		{
+			entries[keyText] = UnpackRecord(record).Blob;
+		}
+		return entries;
+	}
+
+	public async ValueTask StoreSideEntryAsync(string side, string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+	{
+		await _initTask.Value;
+		await _indexedDbInterop.PutSideEntryAsync(_databaseName, _options.ObjectStoreName, SideStore(side), key, content);
+	}
+
+	async IAsyncEnumerable<(string Key, byte[] Record)> EnumeratePackedAsync(string storeName, string? from, [EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		await _initTask.Value;
+		const int pageSize = 512;
+		var currentFrom = from;
+		var more = true;
+		while (more && !cancellationToken.IsCancellationRequested)
+		{
+			var packed = await _indexedDbInterop.GetTaggedBlobsPageAsync(_databaseName, _options.ObjectStoreName, storeName, currentFrom, currentFrom is not null, pageSize);
+			var count = 0;
+			foreach (var (keyText, record) in Unpack(packed))
+			{
+				count++;
+				currentFrom = keyText;
+				yield return (keyText, record);
+			}
+			more = count == pageSize;
+		}
+	}
+
+	// A flag byte (1 = the record has a tag), the tag (4 bytes, little endian), the blob.
+	TaggedBlob UnpackRecord(byte[] packed)
+		=> new TaggedBlob(packed.AsSpan(5).ToArray(), packed[0] == 1 ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(packed.AsSpan(1, 4)) : null);
+
+	#endregion
 }

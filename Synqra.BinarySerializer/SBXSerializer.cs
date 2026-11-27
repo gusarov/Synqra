@@ -64,7 +64,7 @@ public static class SBXSerializerExtensions
 
 }
 
-public class SbxSerializer : ISbxSerializer
+public class SbxSerializer : ISbxSerializer, ISbxSchemaVersions
 {
 	// A schema can carry not only the mappings but also - a day when it was created. This can let automatically expire old schemas. E.g. just a simple rule that no stream can live for more than a year and have to be re-built, leads to a fact that we know, a year old format can be easily dropped if it is not latest.
 
@@ -264,6 +264,8 @@ public class SbxSerializer : ISbxSerializer
 		Map(-88, typeof(StreamSnapshotEvent));
 		Map(-89, typeof(CatchUpRequest));
 		Map(-90, typeof(CaughtUp));
+		Map(-91, typeof(VersionRequest));
+		Map(-92, typeof(ServerVersion));
 	}
 
 	SbxSerializer? _spanshotPrimitives;
@@ -328,6 +330,21 @@ public class SbxSerializer : ISbxSerializer
 	/// <summary>Records from now on every mapping this serializer writes with, for <see cref="UsedMappings"/>.</summary>
 	public void TrackUsage() => _usedTypeIds ??= new HashSet<int>();
 
+	public IReadOnlyCollection<KeyValuePair<int, float>> MappedSchemaVersions => _typeById
+		.Where(x => typeof(IBindableModel).IsAssignableFrom(x.Value.type) || x.Value.Binder is not null)
+		.Select(x => new KeyValuePair<int, float>(x.Key, x.Value.schemaVersion))
+		.ToArray()
+		;
+
+	public float? FindSchemaVersion(int mapId) => _typeById.TryGetValue(mapId, out var mapped) ? mapped.schemaVersion : null;
+
+	public void RemapSchemaVersion(int mapId, float schemaVersion)
+	{
+		var (_, type, binder) = _typeById.TryGetValue(mapId, out var mapped) ? mapped : throw new ArgumentException($"Map id {mapId} is not mapped.", nameof(mapId));
+		_typeById[mapId] = (schemaVersion, type, binder);
+		_idByType[type] = (mapId, schemaVersion, binder);
+	}
+
 	/// <summary>The mappings written with since <see cref="TrackUsage"/>: exactly the mapped types a payload holds.</summary>
 	public IReadOnlyCollection<SbxMapping> UsedMappings => _usedTypeIds is null
 		? throw new InvalidOperationException("This serializer does not track the mappings it writes with; call TrackUsage first.")
@@ -352,12 +369,13 @@ public class SbxSerializer : ISbxSerializer
 	// void IBindableModel.Set(ISbxSerializer serializer, float version, in ReadOnlySpan<byte> buffer, ref int pos)
 	// void IBindableModel.Get(ISbxSerializer serializer, float version, in Span<byte> buffer, ref int pos)
 
-	public void Map(int typeId, Type type, IModelBinder? binder = null)
+	public void Map(int typeId, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] Type type, IModelBinder? binder = null)
 	{
 		Map(typeId, 0, type, binder);
 	}
 
-	public void Map(int typeId, double schemaVersion, Type type, IModelBinder? binder = null)
+	// The type is created by reflection when a frame names its id: a trimmed or AOT build must keep its constructor and properties.
+	public void Map(int typeId, double schemaVersion, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicProperties)] Type type, IModelBinder? binder = null)
 	{
 		if (schemaVersion == 0)
 		{
@@ -906,6 +924,10 @@ public class SbxSerializer : ISbxSerializer
 			type = typeInfo.type;  // duplicate?
 			schemaVersion = typeInfo.schemaVersion;
 		}
+		else if ((int)typeId > 0 || typeId < TypeId.ListTypeTo) // below the primitives are the built-in models: a newer peer's
+		{
+			throw new SbxUnknownTypeException((int)typeId); // read as the requested type, the rest of the frame came out as garbage
+		}
 
 		if (type.IsPrimitive)
 		{
@@ -1428,6 +1450,7 @@ public class SbxSerializer : ISbxSerializer
 			TypeId.DoubleFloating => typeof(double),
 			TypeId.Boolean => typeof(bool),
 			TypeId.Bytes => typeof(byte[]),
+			> 0 or < TypeId.ListTypeTo => throw new SbxUnknownTypeException((int)typeId),
 			_ => throw new Exception($"TypeId {typeId} is not supported for deserialization."),
 		};
 	}
