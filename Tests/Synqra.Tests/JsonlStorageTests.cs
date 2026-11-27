@@ -94,6 +94,23 @@ public class TestsAppendStorageFile : AppendStorageTests
 		var blobStorage = ServiceProvider.GetRequiredKeyedService<FileBlobStorage<string>>(nameof(StorableModel));
 		await Assert.That(blobStorage.GetFileNameFor(key, false)).EndsWith(expectedPath);
 	}
+
+	[Test]
+	public async Task Should_F20_enumerate_blobs_in_key_order_after_from()
+	{
+		var blobStorage = ServiceProvider.GetRequiredKeyedService<FileBlobStorage<string>>(nameof(StorableModel));
+		await blobStorage.WriteBlobAsync("carol", new byte[] { 3 });
+		await blobStorage.WriteBlobAsync("alice", new byte[] { 1 });
+		await blobStorage.WriteBlobAsync("bob", new byte[] { 2 });
+
+		var all = blobStorage.EnumerateBlobsAsync().ToBlockingEnumerable().ToList();
+		var afterAlice = blobStorage.EnumerateBlobsAsync("alice").ToBlockingEnumerable().ToList();
+		var keysAfterAlice = blobStorage.EnumerateKeysAsync("alice").ToBlockingEnumerable().ToList();
+
+		await Assert.That(string.Join(",", all.Select(x => $"{x.Key}={x.Blob[0]}"))).IsEqualTo("alice=1,bob=2,carol=3");
+		await Assert.That(string.Join(",", afterAlice.Select(x => $"{x.Key}={x.Blob[0]}"))).IsEqualTo("bob=2,carol=3"); // from is exclusive
+		await Assert.That(string.Join(",", afterAlice.Select(x => x.Key))).IsEqualTo(string.Join(",", keysAfterAlice)); // the same range as EnumerateKeysAsync
+	}
 }
 
 [NotInParallel]

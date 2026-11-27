@@ -201,6 +201,20 @@ public class SharedBrowserLogTests : TestsStateManagement
 			}
 		}
 
+		public async IAsyncEnumerable<((Guid Stream, Guid Sequence) Key, byte[] Blob)> EnumerateBlobsAsync((Guid Stream, Guid Sequence) from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			List<KeyValuePair<(Guid Stream, Guid Sequence), byte[]>> records;
+			lock (_blobs)
+			{
+				records = [.. _blobs.Where(r => from == default || _blobs.Comparer.Compare(r.Key, from) > 0)];
+			}
+			foreach (var record in records)
+			{
+				await Task.Yield();
+				yield return (record.Key, record.Value);
+			}
+		}
+
 		public ValueTask<byte[]> ReadBlobAsync((Guid Stream, Guid Sequence) key, CancellationToken cancellationToken = default)
 		{
 			lock (_blobs)

@@ -13,6 +13,12 @@ public interface IBlobStorage<TKey> : IDisposable, IAsyncDisposable
 	ValueTask WriteBlobAsync(TKey key, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default);
 	ValueTask DeleteBlobAsync(TKey key, CancellationToken cancellationToken = default);
 
+	/// <summary>
+	/// Every key with its blob, in key order. <paramref name="from"/> reads as it does in <see cref="EnumerateKeysAsync"/>:
+	/// a full key is a cursor (strictly after it), default reads everything.
+	/// </summary>
+	IAsyncEnumerable<(TKey Key, byte[] Blob)> EnumerateBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default);
+
 	bool SupportsSyncOperations
 #if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 		=> false

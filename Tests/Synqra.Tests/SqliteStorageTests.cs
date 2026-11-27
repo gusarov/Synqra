@@ -252,6 +252,28 @@ public class SqliteStorageTests : BaseTest
 	}
 
 	[Test]
+	public async Task Should_enumerate_blobs_in_key_order_after_from()
+	{
+		var id1 = GuidExtensions.CreateVersion7();
+		await Task.Delay(1);
+		var id2 = GuidExtensions.CreateVersion7();
+		await Task.Delay(1);
+		var id3 = GuidExtensions.CreateVersion7();
+
+		using var blobStorage = new SqliteBlobStorage<Guid>(new SqliteBlobStorageOptions { ConnectionString = $"Data Source={Path.Combine(Path.GetDirectoryName(_dbPath)!, "sqlite_blobs.db")}" }, "blobs");
+		await blobStorage.WriteBlobAsync(id3, new byte[] { 3 });
+		await blobStorage.WriteBlobAsync(id1, new byte[] { 1 });
+		await blobStorage.WriteBlobAsync(id2, new byte[] { 2 });
+
+		var all = blobStorage.EnumerateBlobsAsync().ToBlockingEnumerable().ToList();
+		var afterFirst = blobStorage.EnumerateBlobsAsync(id1).ToBlockingEnumerable().ToList();
+
+		await Assert.That(all.Select(x => x.Key).ToList()).IsEquivalentTo([id1, id2, id3]);
+		await Assert.That(string.Join(",", all.Select(x => x.Blob[0]))).IsEqualTo("1,2,3"); // key order, each key with its own blob
+		await Assert.That(string.Join(",", afterFirst.Select(x => x.Blob[0]))).IsEqualTo("2,3"); // from is exclusive
+	}
+
+	[Test]
 	public async Task Should_survive_reopen()
 	{
 		var id = GuidExtensions.CreateVersion7();

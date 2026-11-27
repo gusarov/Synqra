@@ -73,16 +73,13 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		return item;
 	}
 
-	public IAsyncEnumerable<T> GetAllAsync(TKey? from = default, CancellationToken cancellationToken = default)
-		=> _blobStorage is IPagedBlobReader<TKey> paged ? ReadPagedAsync(paged, from, cancellationToken) : ReadByKeyAsync(from, cancellationToken);
-
-	// A page of keys and blobs per round trip: a cold browser log of 14k events opened in minutes when read one blob at a time.
-	async IAsyncEnumerable<T> ReadPagedAsync(IPagedBlobReader<TKey> paged, TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
+	// Keys and blobs come together: a cold browser log of 14k events opened in minutes when read one blob at a time.
+	public async IAsyncEnumerable<T> GetAllAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
 		var read = 0;
 		var deserialized = 0;
 		long deserializing = 0;
-		await foreach (var (key, blob) in paged.EnumerateBlobsAsync(from, cancellationToken))
+		await foreach (var (key, blob) in _blobStorage.EnumerateBlobsAsync(from, cancellationToken))
 		{
 			read++;
 			if (TryGetAttachedObject(key, out var attached))
@@ -102,23 +99,6 @@ public class BlobAppendStorage<T, TKey> : IAppendStorage<T, TKey>, IClearableApp
 		if (EmergencyLog.Default.IsStaging())
 		{
 			EmergencyLog.Default.Stage($"append storage {typeof(T).Name}: {read} read, {deserialized} deserialized in {Stopwatch.GetElapsedTime(0, deserializing).TotalMilliseconds:F0} ms");
-		}
-	}
-
-	async IAsyncEnumerable<T> ReadByKeyAsync(TKey? from, [EnumeratorCancellation] CancellationToken cancellationToken)
-	{
-		await foreach (var key in _blobStorage.EnumerateKeysAsync(from, cancellationToken))
-		{
-			if (TryGetAttachedObject(key, out var attached))
-			{
-				yield return attached;
-				continue;
-			}
-
-			var blob = await _blobStorage.ReadBlobAsync(key, cancellationToken);
-			var item = Deserialize(blob);
-			Attach(key, item);
-			yield return item;
 		}
 	}
 

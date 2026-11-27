@@ -90,42 +90,53 @@ public class FileBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public async IAsyncEnumerable<TKey> EnumerateKeysAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
-		var rootInfo = new DirectoryInfo(_folderPath);
-		if (!rootInfo.Exists)
+		foreach (var (keyHex, _) in EnumerateFilesFrom(from, cancellationToken))
 		{
-			yield break;
-		}
-
-		// A full key is a cursor (strictly after it); a composite key with an empty tail is a prefix (everything under it).
-		string? fromKey = null;
-		var prefix = false;
-		if (from != null && !Equals(from, default(TKey)))
-		{
-			fromKey = _getPathFromKey(from);
-			if (fromKey.Length == 64 && fromKey.TrimEnd('0').Length <= 32)
-			{
-				fromKey = fromKey[..32];
-				prefix = true;
-			}
-		}
-
-		foreach (var fileInfo in EnumerateFilesRecursive(rootInfo))
-		{
-			if (cancellationToken.IsCancellationRequested)
-			{
-				yield break;
-			}
-
-			var keyHex = GetKeyHexFromPath(fileInfo.FullName);
-			var admitted = fromKey is null
-				|| (prefix ? keyHex.StartsWith(fromKey, StringComparison.Ordinal) : string.CompareOrdinal(keyHex, fromKey) > 0);
-			if (admitted)
-			{
-				yield return _getKeyFromPath(keyHex);
-			}
+			yield return _getKeyFromPath(keyHex);
 		}
 
 		await Task.CompletedTask;
+	}
+
+	public async IAsyncEnumerable<(TKey Key, byte[] Blob)> EnumerateBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		foreach (var (keyHex, fileInfo) in EnumerateFilesFrom(from, cancellationToken))
+		{
+			var blob = await System.IO.File.ReadAllBytesAsync(fileInfo.FullName, cancellationToken);
+			yield return (_getKeyFromPath(keyHex), blob);
+		}
+	}
+
+	// The files whose keys follow from, in key order, until cancelled.
+	private IEnumerable<(string KeyHex, FileInfo File)> EnumerateFilesFrom(TKey? from, CancellationToken cancellationToken)
+	{
+		var rootInfo = new DirectoryInfo(_folderPath);
+		if (rootInfo.Exists)
+		{
+			// A full key is a cursor (strictly after it); a composite key with an empty tail is a prefix (everything under it).
+			string? fromKey = null;
+			var prefix = false;
+			if (from != null && !Equals(from, default(TKey)))
+			{
+				fromKey = _getPathFromKey(from);
+				if (fromKey.Length == 64 && fromKey.TrimEnd('0').Length <= 32)
+				{
+					fromKey = fromKey[..32];
+					prefix = true;
+				}
+			}
+
+			foreach (var fileInfo in EnumerateFilesRecursive(rootInfo).TakeWhile(_ => !cancellationToken.IsCancellationRequested))
+			{
+				var keyHex = GetKeyHexFromPath(fileInfo.FullName);
+				var admitted = fromKey is null
+					|| (prefix ? keyHex.StartsWith(fromKey, StringComparison.Ordinal) : string.CompareOrdinal(keyHex, fromKey) > 0);
+				if (admitted)
+				{
+					yield return (keyHex, fileInfo);
+				}
+			}
+		}
 	}
 
 	private IEnumerable<FileInfo> EnumerateFilesRecursive(DirectoryInfo directoryInfo)

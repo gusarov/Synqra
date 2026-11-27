@@ -14,7 +14,11 @@ namespace Synqra.BlobStorage.IndexedDb;
 // this layer), exactly like the durable File/Mongo event stores. Instance-per-stream when pinned:
 // to switch streams on re-login, dispose this (which closes its database) and create the next
 // stream's storage.
-internal class IndexedDbBlobStorage<TKey> : ITailAppendBlobStorage<TKey>, IJsonMirrorBlobStorage<TKey>, IClearableBlobStorage, IPagedBlobReader<TKey>, IUniqueTagIndex
+internal class IndexedDbBlobStorage<TKey> :
+	  ITailAppendBlobStorage<TKey>
+	, IJsonMirrorBlobStorage<TKey>
+	, IClearableBlobStorage
+	, IUniqueTagIndex
 	where TKey : notnull, IComparable<TKey>
 {
 	private readonly IndexedDbJsInterop _indexedDbInterop;
