@@ -31,6 +31,11 @@ public class MongoDbBlobStorage<TKey> : IBlobStorage<TKey>
 		throw new NotImplementedException("MongoDb blob storage is a placeholder and has not been implemented yet.");
 	}
 
+	public IAsyncEnumerable<(TKey Key, byte[] Blob)> EnumerateBlobsAsync(TKey? from = default, CancellationToken cancellationToken = default)
+	{
+		throw new NotImplementedException("MongoDb blob storage is a placeholder and has not been implemented yet.");
+	}
+
 	public void Dispose()
 	{
 	}

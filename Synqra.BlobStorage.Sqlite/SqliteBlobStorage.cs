@@ -76,26 +76,43 @@ public class SqliteBlobStorage<TKey> : IBlobStorage<TKey>
 
 	public async IAsyncEnumerable<TKey> EnumerateKeysAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
 	{
-		using var cmd = _connection.CreateCommand();
-
-		if (from is not null && !Equals(from, default(TKey)))
-		{
-			cmd.CommandText = "SELECT id FROM blobs WHERE store_name = @store_name AND id > @from ORDER BY id";
-			cmd.Parameters.AddWithValue("@from", EncodeKey(from));
-		}
-		else
-		{
-			cmd.CommandText = "SELECT id FROM blobs WHERE store_name = @store_name ORDER BY id";
-		}
-
-		cmd.Parameters.AddWithValue("@store_name", _storeName);
-
+		using var cmd = CreateRangeCommand("id", from);
 		using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
 		while (await reader.ReadAsync(cancellationToken))
 		{
 			var blob = (byte[])reader.GetValue(0);
 			yield return DecodeKey(blob);
 		}
+	}
+
+	public async IAsyncEnumerable<(TKey Key, byte[] Blob)> EnumerateBlobsAsync(TKey? from = default, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		using var cmd = CreateRangeCommand("id, data", from);
+		using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
+		while (await reader.ReadAsync(cancellationToken))
+		{
+			var key = DecodeKey((byte[])reader.GetValue(0));
+			var blob = (byte[])reader.GetValue(1);
+			yield return (key, blob);
+		}
+	}
+
+	// Selects the columns of this store's rows after from (all of them when it is default), in key order.
+	private SqliteCommand CreateRangeCommand(string columns, TKey? from)
+	{
+		var cmd = _connection.CreateCommand();
+		if (from is not null && !Equals(from, default(TKey)))
+		{
+			cmd.CommandText = $"SELECT {columns} FROM blobs WHERE store_name = @store_name AND id > @from ORDER BY id";
+			cmd.Parameters.AddWithValue("@from", EncodeKey(from));
+		}
+		else
+		{
+			cmd.CommandText = $"SELECT {columns} FROM blobs WHERE store_name = @store_name ORDER BY id";
+		}
+
+		cmd.Parameters.AddWithValue("@store_name", _storeName);
+		return cmd;
 	}
 
 	public void WriteBlob(TKey key, ReadOnlySpan<byte> blob)
